@@ -235,8 +235,9 @@ end
 
 local function open_project_file()
   local project_dir_changed = false
-  if project_directory ~= core.project_dir then
-    project_directory = core.project_dir
+  local root_project_dir = core.root_project().path
+  if project_directory ~= root_project_dir then
+    project_directory = root_project_dir
     project_dir_changed = true
   end
 

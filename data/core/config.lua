@@ -159,15 +159,6 @@ config.keep_newline_whitespace = false
 ---@type number
 config.line_limit = 80
 
----Maximum number of project files to keep track of.
----If the number of files in the project exceeds this number,
----Pragtical will not be able to keep track of them.
----They will be not be searched when searching for files or text.
----
----Defaults to 2000.
----@type number
-config.max_project_files = 2000
-
 ---Enables/disables all transitions.
 ---
 ---Defaults to true.

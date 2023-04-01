@@ -27,7 +27,7 @@ function Doc:new(filename, abs_filename, new_file)
   if filename then
     self:set_filename(filename, abs_filename)
     if not new_file then
-      self:load(filename)
+      self:load(abs_filename)
     end
   end
 end
@@ -50,7 +50,7 @@ function Doc:reset_syntax()
   local header = self:get_text(1, 1, self:position_offset(1, 1, 128))
   local path = self.abs_filename
   if not path and self.filename then
-    path = core.project_dir .. "/" .. self.filename
+    path = core.root_project().path .. PATHSEP .. self.filename
   end
   if path then path = common.normalize_path(path) end
   local syn = syntax.get(path, header)
@@ -121,7 +121,7 @@ end
 function Doc:reload()
   if self.filename then
     local sel = { self:get_selection() }
-    self:load(self.filename)
+    self:load(self.abs_filename)
     self:clean()
     self:set_selection(table.unpack(sel))
   end

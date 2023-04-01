@@ -354,6 +354,7 @@ function common.path_suggest(text, root)
         local s, e = file:find(root, nil, true)
         if s == 1 then
           file = file:sub(e + 1)
+          table.insert(res, file)
         end
       elseif clean_dotslash then
         -- remove added dot slash
@@ -373,10 +374,11 @@ end
 
 ---Returns a list of directories that are related to a path.
 ---@param text string The input path.
+---@param root string The path to relate to.
 ---@return string[]
-function common.dir_path_suggest(text)
+function common.dir_path_suggest(text, root)
   local path, name = text:match("^(.-)([^/\\]*)$")
-  local files = system.list_dir(path == "" and "." or path) or {}
+  local files = system.list_dir(path == "" and (root or ".") or path) or {}
   local res = {}
   for _, file in ipairs(files) do
     file = path .. file
@@ -548,7 +550,7 @@ end
 function common.basename(path)
   -- a path should never end by / or \ except if it is '/' (unix root) or
   -- 'X:\' (windows drive)
-  return path:match("[^\\/]+$") or path
+  return path:match("[^" .. PATHSEP .. "]+$") or path
 end
 
 

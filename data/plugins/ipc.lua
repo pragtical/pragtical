@@ -927,9 +927,9 @@ end, {{name = "directory", type = "string"}})
 ipc:register_method("core.change_directory", function(directory)
   if system.get_file_info(directory) then
     if system.raise_window then system.raise_window() end
-    if directory == core.project_dir then return end
+    if directory == core.root_project().path then return end
     core.confirm_close_docs(core.docs, function(dirpath)
-      core.open_folder_project(dirpath)
+      core.open_project(dirpath)
     end, directory)
   end
 end, {{name = "directory", type = "string"}})

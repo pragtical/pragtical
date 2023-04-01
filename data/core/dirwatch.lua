@@ -131,7 +131,13 @@ function dirwatch:check(change_callback, scan_time, wait_time)
       end
       change_callback(path)
     elseif self.reverse_watched[id] then
-      change_callback(self.reverse_watched[id])
+      local path = self.reverse_watched[id]
+      change_callback(path)
+      local info = system.get_file_info(path)
+      if info and info.type == "file" then
+        self:unwatch(path)
+        self:watch(path)
+      end
     end
   end)
   local start_time = system.get_time()
@@ -152,139 +158,5 @@ function dirwatch:check(change_callback, scan_time, wait_time)
   end
   return had_change
 end
-
-
----Prepare `config.ignore_files` into a list of patterns for matching.
-local function compile_ignore_files()
-  local ipatterns = config.ignore_files
-  local compiled = {}
-  -- config.ignore_files could be a simple string...
-  if type(ipatterns) ~= "table" then ipatterns = {ipatterns} end
-  for i, pattern in ipairs(ipatterns) do
-    -- we ignore malformed pattern that raise an error
-    if pcall(string.match, "a", pattern) then
-      table.insert(compiled, {
-        use_path = pattern:match("/[^/$]"), -- contains a slash but not at the end
-        -- An '/' or '/$' at the end means we want to match a directory.
-        match_dir = pattern:match(".+/%$?$"), -- to be used as a boolen value
-        pattern = pattern -- get the actual pattern
-      })
-    end
-  end
-  return compiled
-end
-
-
----Checks whether a file should be watched based on `config.file_size_limit`
----and `config.ignore_files`.
-local function fileinfo_pass_filter(info, ignore_compiled)
-  if info.size >= config.file_size_limit * 1e6 then return false end
-  local basename = common.basename(info.filename)
-  -- replace '\' with '/' for Windows where PATHSEP = '\'
-  local fullname = "/" .. info.filename:gsub("\\", "/")
-  for _, compiled in ipairs(ignore_compiled) do
-    local test = compiled.use_path and fullname or basename
-    if compiled.match_dir then
-      if info.type == "dir" and string.match(test .. "/", compiled.pattern) then
-        return false
-      end
-    else
-      if string.match(test, compiled.pattern) then
-        return false
-      end
-    end
-  end
-  return true
-end
-
-
-local function compare_file(a, b)
-  return system.path_compare(a.filename, a.type, b.filename, b.type)
-end
-
-
----Gets extended path information.
----If the file is filtered by `config.file_size_limit` or `config.ignore_files`,
----this function returns nil.
-local function get_project_file_info(root, file, ignore_compiled)
-  local info = system.get_file_info(root .. PATHSEP .. file)
-  -- info can be not nil but info.type may be nil if is neither a file neither
-  -- a directory, for example for /dev/* entries on linux.
-  if info and info.type then
-    info.filename = file
-    return fileinfo_pass_filter(info, ignore_compiled) and info
-  end
-end
-
-
----A class containing information about a file.
----
----Aside from fields in `system.fileinfo`, it also includes the filename
----relative to a root directory.
----@class core.dirwatch.extended_fileinfo: system.fileinfo
----@field filename string The path to the file relative to a root directory, without starting and trailing slashes.
-
----Gets files recursively within a project directory.
----
----The function accepts a root path, and a sub-path within the root path.
----The root path must be an absolute path without trailing slashes,
----while the sub-path should not contain any slashes. It can be an empty string.
----
----This function also accepts a predicate function that'll be called on each subdirectory
----with the project directory object, the current path, the number of files
----and the time elapsed (in seconds) since the function first ran. </br>
----If the predicate returns true, the function recurses into the directory. </br>
----Otherwise, it moves on to the next subdirectory and repeats the check.
----@param dir table The project directory object.
----@param root string An absolute path to search, without trailing `/`.
----@param path string A sub-path within `root` without a trailing `/`, or an empty string.
----@param t core.dirwatch.extended_fileinfo[] A table to store the output of the function.
----@param entries_count number The number of entries in the table.
----@param recurse_pred fun(dir: table, path: string, entries_count: number, time_elapsed: number): boolean The predicate function.
----@return core.dirwatch.extended_fileinfo[]|nil # Table passed via `t`.
----@return boolean|nil # false if the indexing is interrupted by the predicate function.
----@return number|nil # Number of entries returned.
-function dirwatch.get_directory_files(dir, root, path, t, entries_count, recurse_pred)
-  local t0 = system.get_time()
-  local t_elapsed = system.get_time() - t0
-  local dirs, files = {}, {}
-  local ignore_compiled = compile_ignore_files()
-
-
-  local all = system.list_dir(root .. PATHSEP .. path)
-  if not all then return nil end
-
-  for _, file in ipairs(all or {}) do
-    local info = get_project_file_info(root, (path ~= "" and (path .. PATHSEP) or "") .. file, ignore_compiled)
-    if info then
-      table.insert(info.type == "dir" and dirs or files, info)
-      entries_count = entries_count + 1
-    end
-  end
-
-  local recurse_complete = true
-  table.sort(dirs, compare_file)
-  for _, f in ipairs(dirs) do
-    table.insert(t, f)
-    if recurse_pred(dir, f.filename, entries_count, t_elapsed) then
-      -- when recursing, root will stay the same while path changes
-      local _, complete, n = dirwatch.get_directory_files(dir, root, f.filename, t, entries_count, recurse_pred)
-      recurse_complete = recurse_complete and complete or false
-      if n ~= nil then
-        entries_count = n
-      end
-    else
-      recurse_complete = false
-    end
-  end
-
-  table.sort(files, compare_file)
-  for _, f in ipairs(files) do
-    table.insert(t, f)
-  end
-
-  return t, recurse_complete, entries_count
-end
-
 
 return dirwatch

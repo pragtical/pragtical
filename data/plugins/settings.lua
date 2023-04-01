@@ -195,18 +195,6 @@ settings.add("General",
       end
     },
     {
-      label = "Maximum Project Files",
-      description = "The maximum amount of project files to register.",
-      path = "max_project_files",
-      type = settings.type.NUMBER,
-      default = 2000,
-      min = 1,
-      max = 100000,
-      on_apply = function()
-        core.rescan_project_directories()
-      end
-    },
-    {
       label = "File Size Limit",
       description = "The maximum file size in megabytes allowed for editing.",
       path = "file_size_limit",
@@ -231,7 +219,7 @@ settings.add("General",
         "^desktop%.ini$", "^%.DS_Store$", "^%.directory$",
       },
       on_apply = function()
-        core.rescan_project_directories()
+        -- TODO update treeview or projects ignore files
       end
     },
     {

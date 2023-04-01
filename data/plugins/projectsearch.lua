@@ -299,10 +299,11 @@ function ResultsView:begin_search(path, text, search_type, insensitive, fn)
   core.add_thread(function()
     if not config.plugins.projectsearch.threading.enabled then
       local i = 1
-      for dir_name, file in core.get_project_files() do
-        if file.type == "file" and (not path or (dir_name .. "/" .. file.filename):find(path, 1, true) == 1) then
-          local truncated_path = (dir_name == core.project_dir and "" or (dir_name .. PATHSEP))
-          find_all_matches_in_file(self.results, truncated_path .. file.filename, fn)
+      for k, project in ipairs(core.projects) do
+        for dir_name, file in project:files() do
+          if file.type == "file" and (not path or file.filename:find(path, 1, true) == 1) then
+            find_all_matches_in_file(self.results, file.filename, fn)
+          end
         end
         self.last_file_idx = i
         i = i + 1
@@ -318,8 +319,8 @@ function ResultsView:begin_search(path, text, search_type, insensitive, fn)
         text,
         search_type,
         insensitive,
-        core.project_dir,
-        path or core.project_dir,
+        core.root_project().path,
+        path or core.root_project().path,
         PATHSEP,
         config.ignore_files,
         workers
@@ -460,10 +461,8 @@ function ResultsView:draw()
   -- status
   local ox, oy = self:get_content_offset()
   local x, y = ox + style.padding.x, oy + style.padding.y
-  local files_number = 0
-  if not config.plugins.projectsearch.threading.enabled then
-    files_number = core.project_files_number()
-  else
+  local files_number
+  if config.plugins.projectsearch.threading.enabled then
     files_number = self.total_files
   end
   local per = common.clamp(files_number and self.last_file_idx / files_number or 1, 0, 1)
@@ -538,18 +537,6 @@ local function get_selected_text()
   end
 end
 
-
-local function normalize_path(path)
-  if not path then return nil end
-  path = common.normalize_path(path)
-  for i, project_dir in ipairs(core.project_directories) do
-    if common.path_belongs_to(path, project_dir.name) then
-      return project_dir.item.filename .. PATHSEP .. common.relative_path(project_dir.name, path)
-    end
-  end
-  return path
-end
-
 ---@class plugins.projectsearch
 local projectsearch = {}
 
@@ -606,7 +593,7 @@ end
 
 command.add(nil, {
   ["project-search:find"] = function(path)
-    core.command_view:enter("Find Text In " .. (normalize_path(path) or "Project"), {
+    core.command_view:enter("Find Text In " .. (path or "Project"), {
       text = get_selected_text(),
       select_text = true,
       submit = function(text)
@@ -616,7 +603,7 @@ command.add(nil, {
   end,
 
   ["project-search:find-regex"] = function(path)
-    core.command_view:enter("Find Regex In " .. (normalize_path(path) or "Project"), {
+    core.command_view:enter("Find Regex In " .. (path or "Project"), {
       submit = function(text)
         projectsearch.search_regex(text, path, true)
       end
@@ -624,7 +611,7 @@ command.add(nil, {
   end,
 
   ["project-search:fuzzy-find"] = function(path)
-    core.command_view:enter("Fuzzy Find Text In " .. (normalize_path(path) or "Project"), {
+    core.command_view:enter("Fuzzy Find Text In " .. (path or "Project"), {
       text = get_selected_text(),
       select_text = true,
       submit = function(text)
