@@ -1421,7 +1421,7 @@ local run_threads = coroutine.wrap(function()
             core.threads[k] = nil
           end
         else
-          wait = wait or (1/30)
+          wait = wait or 0.001
           thread.wake = system.get_time() + wait
           minimal_time_to_wake = math.min(minimal_time_to_wake, wait)
         end
