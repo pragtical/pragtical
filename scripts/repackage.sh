@@ -15,12 +15,12 @@ copy_directory_from_repo () {
 
 pragtical_copy_third_party_modules () {
     local build="$1"
-    curl --retry 5 --retry-delay 3 --insecure -L "https://github.com/pragtical/pragtical-colors/archive/master.zip" -o "$build/pragtical-colors.zip" || exit 1
+    curl --retry 5 --retry-delay 3 --insecure -L "https://github.com/pragtical/colors/archive/master.zip" -o "$build/colors.zip" || exit 1
     mkdir -p "$build/third/data/colors" "$build/third/data/plugins"
-    unzip -qq "$build/pragtical-colors.zip" -d "$build"
-    mv "$build/pragtical-colors-master/colors" "$build/third/data"
-    rm -fr "$build/pragtical-colors-master"
-    rm "$build/pragtical-colors.zip"
+    unzip -qq "$build/colors.zip" -d "$build"
+    mv "$build/colors-master/colors" "$build/third/data"
+    rm -fr "$build/colors-master"
+    rm "$build/colors.zip"
 }
 
 pragtical_branch=master
