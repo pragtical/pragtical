@@ -59,7 +59,7 @@ process.WAIT_DEADLINE = -2
 
 ---Default behavior for redirecting streams.
 ---This flag is deprecated and for backwards compatibility with reproc only.
----The behavior of this flag may change in future versions of Lite XL.
+---The behavior of this flag may change in future versions of Pragtical.
 ---@type integer
 process.REDIRECT_DEFAULT = 0
 

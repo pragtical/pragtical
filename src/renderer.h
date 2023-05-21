@@ -11,7 +11,7 @@
 #define UNUSED
 #endif
 
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
 #define RECT_TYPE double
 #else
 #define RECT_TYPE int

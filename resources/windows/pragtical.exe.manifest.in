@@ -2,7 +2,7 @@
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
     type="win32"
-    name="LiteXL.LiteXL.LiteXL"
+    name="Pragtical.Pragtical.Pragtical"
     version="@PROJECT_ASSEMBLY_VERSION@"
   />
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">

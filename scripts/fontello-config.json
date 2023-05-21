@@ -128,7 +128,7 @@
     },
     {
       "uid": "ebf4bfe82c54f9beb94c5221a7bdd975",
-      "css": "lite-xlbg",
+      "css": "pragticalbg",
       "code": 53,
       "src": "custom_icons",
       "selected": true,
@@ -137,12 +137,12 @@
         "width": 1000
       },
       "search": [
-        "lite-xlbg"
+        "pragticalbg"
       ]
     },
     {
       "uid": "cde50fad6c2cd7a805a8d5026939d645",
-      "css": "lite-xl1",
+      "css": "pragtical1",
       "code": 54,
       "src": "custom_icons",
       "selected": true,
@@ -151,12 +151,12 @@
         "width": 1000
       },
       "search": [
-        "lite-xl1"
+        "pragtical1"
       ]
     },
     {
       "uid": "526539ec7fcda0b3e7e7ceaa6ae416e6",
-      "css": "lite-xl2",
+      "css": "pragtical2",
       "code": 55,
       "src": "custom_icons",
       "selected": true,
@@ -165,12 +165,12 @@
         "width": 1000
       },
       "search": [
-        "lite-xl2"
+        "pragtical2"
       ]
     },
     {
       "uid": "cccbe047c5cb17c63c41a1fb1fc022f4",
-      "css": "lite-xl3",
+      "css": "pragtical3",
       "code": 57,
       "src": "custom_icons",
       "selected": true,
@@ -179,12 +179,12 @@
         "width": 1000
       },
       "search": [
-        "lite-xl3"
+        "pragtical3"
       ]
     },
     {
       "uid": "09d781dca1f50fcae90e67df9cc2f8dd",
-      "css": "lite-xl4",
+      "css": "pragtical4",
       "code": 56,
       "src": "custom_icons",
       "selected": true,
@@ -193,7 +193,7 @@
         "width": 1000
       },
       "search": [
-        "lite-xl4"
+        "pragtical4"
       ]
     }
   ]

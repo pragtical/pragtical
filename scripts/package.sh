@@ -2,7 +2,7 @@
 set -e
 
 if [ ! -e "src/api/api.h" ]; then
-  echo "Please run this script from the root directory of Lite XL."; exit 1
+  echo "Please run this script from the root directory of Pragtical."; exit 1
 fi
 
 source scripts/common.sh
@@ -16,7 +16,7 @@ show_help() {
   echo "-b --builddir DIRNAME         Sets the name of the build directory (not path)."
   echo "                              Default: '$(get_default_build_dir)'."
   echo "-d --destdir DIRNAME          Set the name of the package directory (not path)."
-  echo "                              Default: 'lite-xl'."
+  echo "                              Default: 'pragtical'."
   echo "-h --help                     Show this help and exit."
   echo "-p --prefix PREFIX            Install directory prefix. Default: '/'."
   echo "-v --version VERSION          Sets the version on the package name."
@@ -51,7 +51,7 @@ source_package() {
     --exclude /*build*/ \
     --exclude *.git* \
     --exclude lhelper \
-    --exclude lite-xl* \
+    --exclude pragtical* \
     --exclude submodules \
     . ${package_name}
 
@@ -65,7 +65,7 @@ main() {
   local arch="$(get_platform_arch)"
   local platform="$(get_platform_name)"
   local build_dir="$(get_default_build_dir)"
-  local dest_dir=lite-xl
+  local dest_dir=pragtical
   local prefix=/
   local version
   local addons=false
@@ -184,7 +184,7 @@ main() {
 
   # The source package doesn't require a previous build,
   # nor the following install step, so run it now.
-  if [[ $source == true ]]; then source_package "lite-xl$version-src"; fi
+  if [[ $source == true ]]; then source_package "pragtical$version-src"; fi
 
   # No packages request
   if [[ $appimage == false && $binary == false && $dmg == false && $innosetup == false ]]; then
@@ -199,9 +199,9 @@ main() {
   DESTDIR="$(pwd)/${dest_dir}" meson install --skip-subprojects -C "${build_dir}"
 
   local data_dir="$(pwd)/${dest_dir}/data"
-  local exe_file="$(pwd)/${dest_dir}/lite-xl"
+  local exe_file="$(pwd)/${dest_dir}/pragtical"
 
-  local package_name=lite-xl$version-$platform-$arch
+  local package_name=pragtical$version-$platform-$arch
   local bundle=false
   local portable=false
   local stripcmd="strip"
@@ -209,7 +209,7 @@ main() {
   if [[ -d "${data_dir}" ]]; then
     echo "Creating a portable, compressed archive..."
     portable=true
-    exe_file="$(pwd)/${dest_dir}/lite-xl"
+    exe_file="$(pwd)/${dest_dir}/pragtical"
     if [[ $platform == "windows" ]]; then
       exe_file="${exe_file}.exe"
       stripcmd="strip --strip-all"
@@ -232,16 +232,16 @@ main() {
       bundle=true
       # Specify "bundle" on compressed archive only, implicit on images
       if [[ $dmg == false ]]; then package_name+="-bundle"; fi
-      rm -rf "Lite XL.app"; mv "${dest_dir}" "Lite XL.app"
-      dest_dir="Lite XL.app"
-      exe_file="$(pwd)/${dest_dir}/Contents/MacOS/lite-xl"
+      rm -rf "Pragtical.app"; mv "${dest_dir}" "Pragtical.app"
+      dest_dir="Pragtical.app"
+      exe_file="$(pwd)/${dest_dir}/Contents/MacOS/pragtical"
       data_dir="$(pwd)/${dest_dir}/Contents/Resources"
     fi
   fi
 
   if [[ $bundle == false && $portable == false ]]; then
-    data_dir="$(pwd)/${dest_dir}/$prefix/share/lite-xl"
-    exe_file="$(pwd)/${dest_dir}/$prefix/bin/lite-xl"
+    data_dir="$(pwd)/${dest_dir}/$prefix/share/pragtical"
+    exe_file="$(pwd)/${dest_dir}/$prefix/bin/pragtical"
   fi
 
   mkdir -p "${data_dir}"

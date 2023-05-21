@@ -173,10 +173,10 @@ command.add(nil, {
   end,
 
   ["core:open-project-module"] = function()
-    if not system.get_file_info(".lite_project.lua") then
-      core.try(core.write_init_project_module, ".lite_project.lua")
+    if not system.get_file_info(".pragtical_project.lua") then
+      core.try(core.write_init_project_module, ".pragtical_project.lua")
     end
-    local doc = core.open_doc(".lite_project.lua")
+    local doc = core.open_doc(".pragtical_project.lua")
     core.root_view:open_doc(doc)
     doc:save()
   end,

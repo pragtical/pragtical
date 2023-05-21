@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pragtical
+Comment=The practical and pragmatic code editor.
+Exec=pragtical %F
+Icon=pragtical
+Terminal=false
+StartupWMClass=pragtical
+Categories=Development;IDE;
+MimeType=text/plain;inode/directory;

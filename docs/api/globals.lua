@@ -1,6 +1,6 @@
 ---@meta
 
----The command line arguments given to lite.
+---The command line arguments given to pragtical.
 ---@type table<integer, string>
 ARGS = {}
 
@@ -17,14 +17,14 @@ PLATFORM = "Operating System"
 ---@type number
 SCALE = 1.0
 
----Full path of lite executable.
+---Full path of pragtical executable.
 ---@type string
-EXEFILE = "/path/to/lite"
+EXEFILE = "/path/to/pragtical"
 
 ---Path to the users home directory.
 ---@type string
 HOME = "/path/to/user/dir"
 
----This is set to true if lite-xl was compiled with luajit.
+---This is set to true if pragtical was compiled with luajit.
 ---@type boolean
 LUAJIT = false

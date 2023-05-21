@@ -1,4 +1,4 @@
-project('lite-xl',
+project('pragtical',
     ['c'],
     version : '2.1.1',
     license : 'MIT',
@@ -62,25 +62,25 @@ endif
 
 cc = meson.get_compiler('c')
 
-lite_includes = []
-lite_cargs = ['-DSDL_MAIN_HANDLED', '-DPCRE2_STATIC']
+pragtical_includes = []
+pragtical_cargs = ['-DSDL_MAIN_HANDLED', '-DPCRE2_STATIC']
 # On macos we need to use the SDL renderer to support retina displays
 if get_option('renderer') or host_machine.system() == 'darwin'
-    lite_cargs += '-DLITE_USE_SDL_RENDERER'
+    pragtical_cargs += '-DPRAGTICAL_USE_SDL_RENDERER'
 endif
 if get_option('arch_tuple') != ''
     arch_tuple = get_option('arch_tuple')
 else
     arch_tuple = '@0@-@1@'.format(target_machine.cpu_family(), target_machine.system())
 endif
-lite_cargs += '-DLITE_ARCH_TUPLE="@0@"'.format(arch_tuple)
+pragtical_cargs += '-DPRAGTICAL_ARCH_TUPLE="@0@"'.format(arch_tuple)
 
 #===============================================================================
 # Linker Settings
 #===============================================================================
-lite_link_args = []
+pragtical_link_args = []
 if host_machine.system() == 'darwin'
-    lite_link_args += ['-framework', 'CoreServices', '-framework', 'Foundation']
+    pragtical_link_args += ['-framework', 'CoreServices', '-framework', 'Foundation']
 endif
 #===============================================================================
 # Dependencies
@@ -119,7 +119,7 @@ if not get_option('source-only')
         endforeach
     else
         lua_dep = luajit_dep
-        lite_cargs += '-DLUA_JIT'
+        pragtical_cargs += '-DLUA_JIT'
     endif
 
     pcre2_dep = dependency('libpcre2-8', fallback: ['pcre2', 'libpcre2_8'],
@@ -180,33 +180,33 @@ if not get_option('source-only')
         default_options: default_fallback_options + sdl_options
     )
 
-    lite_deps = [lua_dep, sdl_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl]
+    pragtical_deps = [lua_dep, sdl_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl]
 endif
 
 #===============================================================================
 # Check for X11 existance to detect scale factor when video driver is x11
 #===============================================================================
 if cc.find_library('X11', required : false).found()
-    lite_cargs += '-DX11_FOUND'
+    pragtical_cargs += '-DX11_FOUND'
 endif
 
 #===============================================================================
 # Install Configuration
 #===============================================================================
 if get_option('portable') or host_machine.system() == 'windows'
-    lite_bindir = '/'
-    lite_docdir = '/doc'
-    lite_datadir = '/data'
+    pragtical_bindir = '/'
+    pragtical_docdir = '/doc'
+    pragtical_datadir = '/data'
     configure_file(
-        input: 'resources/windows/lite-xl.exe.manifest.in',
-        output: 'lite-xl.exe.manifest',
+        input: 'resources/windows/pragtical.exe.manifest.in',
+        output: 'pragtical.exe.manifest',
         configuration: conf_data
     )
 elif get_option('bundle') and host_machine.system() == 'darwin'
-    lite_cargs += '-DMACOS_USE_BUNDLE'
-    lite_bindir = 'Contents/MacOS'
-    lite_docdir = 'Contents/Resources'
-    lite_datadir = 'Contents/Resources'
+    pragtical_cargs += '-DMACOS_USE_BUNDLE'
+    pragtical_bindir = 'Contents/MacOS'
+    pragtical_docdir = 'Contents/Resources'
+    pragtical_datadir = 'Contents/Resources'
     install_data('resources/icons/icon.icns', install_dir : 'Contents/Resources')
     configure_file(
         input : 'resources/macos/Info.plist.in',
@@ -216,40 +216,41 @@ elif get_option('bundle') and host_machine.system() == 'darwin'
         install_dir : 'Contents'
     )
 else
-    lite_bindir = 'bin'
-    lite_docdir = 'share/doc/lite-xl'
-    lite_datadir = 'share/lite-xl'
+    pragtical_bindir = 'bin'
+    pragtical_docdir = 'share/doc/pragtical'
+    pragtical_datadir = 'share/pragtical'
     if host_machine.system() == 'linux'
-        install_data('resources/icons/lite-xl.svg',
-            install_dir : 'share/icons/hicolor/scalable/apps'
+        install_data('resources/icons/logo.svg',
+            install_dir : 'share/icons/hicolor/scalable/apps',
+            rename : 'pragtical.svg'
         )
-        install_data('resources/linux/org.lite_xl.lite_xl.desktop',
+        install_data('resources/linux/org.pragtical.pragtical.desktop',
             install_dir : 'share/applications'
         )
-        install_data('resources/linux/org.lite_xl.lite_xl.appdata.xml',
+        install_data('resources/linux/org.pragtical.pragtical.appdata.xml',
             install_dir : 'share/metainfo'
         )
     endif
 endif
 
-install_data('licenses/licenses.md', install_dir : lite_docdir)
+install_data('licenses/licenses.md', install_dir : pragtical_docdir)
 
-install_subdir('docs/api' , install_dir : lite_datadir, strip_directory: true)
-install_subdir('data/core' , install_dir : lite_datadir, exclude_files : 'start.lua')
+install_subdir('docs/api' , install_dir : pragtical_datadir, strip_directory: true)
+install_subdir('data/core' , install_dir : pragtical_datadir, exclude_files : 'start.lua')
 
 data_dirs = ['fonts', 'plugins', 'colors']
 if lua_jit_found
     data_dirs += ['compat']
 endif
 foreach data_module : data_dirs
-    install_subdir(join_paths('data', data_module), install_dir : lite_datadir)
+    install_subdir(join_paths('data', data_module), install_dir : pragtical_datadir)
 endforeach
 
 configure_file(
     input : 'data/core/start.lua',
     output : 'start.lua',
     configuration : conf_data,
-    install_dir : join_paths(lite_datadir, 'core'),
+    install_dir : join_paths(pragtical_datadir, 'core'),
 )
 
 if not get_option('source-only')

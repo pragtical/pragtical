@@ -41,7 +41,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.tag.outputs.version }}
-          name: Lite XL ${{ steps.tag.outputs.version }}
+          name: Pragtical ${{ steps.tag.outputs.version }}
           draft: true
           body_path: changelog.md
           generate_release_notes: true
@@ -50,7 +50,7 @@ jobs:
     name: Linux
     needs: release
     runs-on: ubuntu-latest
-    container: ghcr.io/takase1121/lite-xl-build-box:latest
+    container: ghcr.io/takase1121/pragtical-build-box:latest
     env:
       CC: gcc
       CXX: g++
@@ -98,10 +98,10 @@ jobs:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
           files: |
-            lite-xl-${{ env.INSTALL_REF }}-linux-x86_64-portable.tar.gz
-            lite-xl-${{ env.INSTALL_REF }}-addons-linux-x86_64-portable.tar.gz
-            LiteXL-${{ env.INSTALL_REF }}-x86_64.AppImage
-            LiteXL-${{ env.INSTALL_REF }}-addons-x86_64.AppImage
+            pragtical-${{ env.INSTALL_REF }}-linux-x86_64-portable.tar.gz
+            pragtical-${{ env.INSTALL_REF }}-addons-linux-x86_64-portable.tar.gz
+            Pragtical-${{ env.INSTALL_REF }}-x86_64.AppImage
+            Pragtical-${{ env.INSTALL_REF }}-addons-x86_64.AppImage
 
   build_macos:
     name: macOS
@@ -124,8 +124,8 @@ jobs:
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
-          echo "INSTALL_NAME=lite-xl-${{ needs.release.outputs.version }}-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
-          echo "INSTALL_NAME_ADDONS=lite-xl-${{ needs.release.outputs.version }}-addons-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
+          echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
+          echo "INSTALL_NAME_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
           if [[ $(uname -m) != ${{ matrix.arch }} ]]; then echo "ARCH=--cross-arch ${{ matrix.arch }}" >> "$GITHUB_ENV"; fi
       - uses: actions/checkout@v3
       - name: Python Setup
@@ -172,8 +172,8 @@ jobs:
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "INSTALL_BASE=lite-xl-${{ needs.release.outputs.version }}-macos" >> "$GITHUB_ENV"
-          echo "INSTALL_BASE_ADDONS=lite-xl-${{ needs.release.outputs.version }}-addons-macos" >> "$GITHUB_ENV"
+          echo "INSTALL_BASE=pragtical-${{ needs.release.outputs.version }}-macos" >> "$GITHUB_ENV"
+          echo "INSTALL_BASE_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-macos" >> "$GITHUB_ENV"
       - uses: actions/checkout@v2
       - name: Download Artifacts
         uses: actions/download-artifact@v3
@@ -232,12 +232,12 @@ jobs:
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
           if [[ "${MSYSTEM}" == "MINGW64" ]]; then
             echo "BUILD_ARCH=x86_64" >> "$GITHUB_ENV"
-            echo "INSTALL_NAME=lite-xl-${{ needs.release.outputs.version }}-windows-x86_64" >> "$GITHUB_ENV"
-            echo "INSTALL_NAME_ADDONS=lite-xl-${{ needs.release.outputs.version }}-addons-windows-x86_64" >> "$GITHUB_ENV"
+            echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-windows-x86_64" >> "$GITHUB_ENV"
+            echo "INSTALL_NAME_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-windows-x86_64" >> "$GITHUB_ENV"
           else
             echo "BUILD_ARCH=i686" >> "$GITHUB_ENV"
-            echo "INSTALL_NAME=lite-xl-${{ needs.release.outputs.version }}-windows-i686" >> "$GITHUB_ENV"
-            echo "INSTALL_NAME_ADDONS=lite-xl-${{ needs.release.outputs.version }}-addons-windows-i686" >> "$GITHUB_ENV"
+            echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-windows-i686" >> "$GITHUB_ENV"
+            echo "INSTALL_NAME_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-windows-i686" >> "$GITHUB_ENV"
           fi
       - name: Install Dependencies
         run: bash scripts/install-dependencies.sh --debug
@@ -261,5 +261,5 @@ jobs:
           files: |
             ${{ env.INSTALL_NAME }}.zip
             ${{ env.INSTALL_NAME_ADDONS }}.zip
-            LiteXL-${{ env.INSTALL_REF }}-${{ env.BUILD_ARCH }}-setup.exe
-            LiteXL-${{ env.INSTALL_REF }}-addons-${{ env.BUILD_ARCH }}-setup.exe
+            Pragtical-${{ env.INSTALL_REF }}-${{ env.BUILD_ARCH }}-setup.exe
+            Pragtical-${{ env.INSTALL_REF }}-addons-${{ env.BUILD_ARCH }}-setup.exe

@@ -52,25 +52,25 @@ if [ "$option_portable" == on ]; then
   datadir="$rundir/data"
 else
   bindir="$rundir/bin"
-  datadir="$rundir/share/lite-xl"
+  datadir="$rundir/share/pragtical"
 fi
 
 userdir="$(realpath "$rundir")"
 builddir="${pargs[0]}"
 
-build_lite () {
+build_pragtical () {
   echo "running ninja"
   ninja -C "$builddir"
 }
 
-copy_lite_build () {
-  echo "copying lite executable and data"
+copy_pragtical_build () {
+  echo "copying pragtical executable and data"
   rm -fr "$rundir"
   mkdir -p "$bindir" "$datadir"
   if [ ! -z ${run_windows+x} ]; then
-    cp "$builddir/src/lite-xl.exe" "$bindir"
+    cp "$builddir/src/pragtical.exe" "$bindir"
   else
-    cp "$builddir/src/lite-xl" "$bindir"
+    cp "$builddir/src/pragtical" "$bindir"
   fi
   mkdir -p "$datadir/core"
   for module_name in core compat plugins colors fonts; do
@@ -82,16 +82,16 @@ copy_lite_build () {
   cp "$builddir/start.lua" "$datadir/core"
 }
 
-run_lite () {
+run_pragtical () {
   if [ ! -z ${option_global+x} ]; then
-    echo "running \"lite-xl ${pargs[@]:1}\""
-    exec "$bindir/lite-xl" "${pargs[@]:1}"
+    echo "running \"pragtical ${pargs[@]:1}\""
+    exec "$bindir/pragtical" "${pargs[@]:1}"
   else
-    echo "running \"lite-xl ${pargs[@]:1}\" with local HOME"
+    echo "running \"pragtical ${pargs[@]:1}\" with local HOME"
     if [ ! -z ${run_windows+x} ]; then
-      USERPROFILE="$userdir" exec "$bindir/lite-xl" "${pargs[@]:1}"
+      USERPROFILE="$userdir" exec "$bindir/pragtical" "${pargs[@]:1}"
     else
-      HOME="$userdir" exec "$bindir/lite-xl" "${pargs[@]:1}"
+      HOME="$userdir" exec "$bindir/pragtical" "${pargs[@]:1}"
     fi
   fi
 }
@@ -114,8 +114,8 @@ fetch_plugins () {
 }
 
 if [ $option_copy == on ]; then
-  build_lite
-  copy_lite_build
+  build_pragtical
+  copy_pragtical_build
 fi
 fetch_plugins "${plugins[@]}"
-run_lite
+run_pragtical

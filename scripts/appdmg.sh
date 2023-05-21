@@ -2,13 +2,13 @@
 set -ex
 
 if [ ! -e "src/api/api.h" ]; then
-  echo "Please run this script from the root directory of Lite XL."
+  echo "Please run this script from the root directory of Pragtical."
   exit 1
 fi
 
-cat > lite-xl-dmg.json << EOF
+cat > pragtical-dmg.json << EOF
 {
-  "title": "Lite XL",
+  "title": "Pragtical",
   "icon": "$(pwd)/resources/icons/icon.icns",
   "background": "$(pwd)/resources/macos/appdmg.png",
   "window": {
@@ -22,9 +22,9 @@ cat > lite-xl-dmg.json << EOF
     }
   },
   "contents": [
-    { "x": 144, "y": 248, "type": "file", "path": "$(pwd)/Lite XL.app" },
+    { "x": 144, "y": 248, "type": "file", "path": "$(pwd)/Pragtical.app" },
     { "x": 336, "y": 248, "type": "link", "path": "/Applications" }
   ]
 }
 EOF
-~/node_modules/appdmg/bin/appdmg.js lite-xl-dmg.json "$(pwd)/$1.dmg"
+~/node_modules/appdmg/bin/appdmg.js pragtical-dmg.json "$(pwd)/$1.dmg"

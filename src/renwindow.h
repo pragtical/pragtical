@@ -3,7 +3,7 @@
 
 struct RenWindow {
   SDL_Window *window;
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   SDL_Renderer *renderer;
   SDL_Texture *texture;
   RenSurface rensurface;

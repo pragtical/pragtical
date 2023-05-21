@@ -2,7 +2,7 @@
 set -e
 
 if [ ! -e "src/api/api.h" ]; then
-  echo "Please run this script from the root directory of Lite XL."; exit 1
+  echo "Please run this script from the root directory of Pragtical."; exit 1
 fi
 
 source scripts/common.sh
@@ -34,7 +34,7 @@ show_help() {
   echo "Package options:"
   echo
   echo "-d --destdir DIRNAME          Set the name of the package directory (not path)."
-  echo "                              Default: 'lite-xl'."
+  echo "                              Default: 'pragtical'."
   echo "-v --version VERSION          Sets the version on the package name."
   echo "-A --appimage                 Create an AppImage (Linux only)."
   echo "-D --dmg                      Create a DMG disk image (macOS only)."

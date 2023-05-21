@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include "renwindow.h"
 
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
 static void update_surface_scale(RenWindow *ren) {
   int w_pixels, h_pixels;
   int w_points, h_points;
@@ -30,7 +30,7 @@ static void setup_renderer(RenWindow *ren, int w, int h) {
 
 
 void renwin_init_surface(UNUSED RenWindow *ren) {
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   if (ren->rensurface.surface) {
     SDL_FreeSurface(ren->rensurface.surface);
   }
@@ -47,7 +47,7 @@ void renwin_init_surface(UNUSED RenWindow *ren) {
 
 
 static RenRect scaled_rect(const RenRect rect, const RenSurface *rs) {
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   double scale_x = rs->scale_x;
   double scale_y = rs->scale_y;
 #else
@@ -76,7 +76,7 @@ void renwin_set_clip_rect(RenWindow *ren, RenRect rect) {
 
 
 RenSurface renwin_get_surface(RenWindow *ren) {
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   return ren->rensurface;
 #else
   SDL_Surface *surface = SDL_GetWindowSurface(ren->window);
@@ -89,7 +89,7 @@ RenSurface renwin_get_surface(RenWindow *ren) {
 }
 
 void renwin_resize_surface(UNUSED RenWindow *ren) {
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   int new_w, new_h;
   SDL_GL_GetDrawableSize(ren->window, &new_w, &new_h);
   /* Note that (w, h) may differ from (new_w, new_h) on retina displays. */
@@ -106,7 +106,7 @@ void renwin_show_window(RenWindow *ren) {
 }
 
 void renwin_update_rects(RenWindow *ren, RenRect *rects, int count) {
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   const double scale_x = ren->rensurface.scale_x;
   const double scale_y = ren->rensurface.scale_y;
   for (int i = 0; i < count; i++) {
@@ -125,7 +125,7 @@ void renwin_update_rects(RenWindow *ren, RenRect *rects, int count) {
 }
 
 void renwin_free(RenWindow *ren) {
-#ifdef LITE_USE_SDL_RENDERER
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   SDL_DestroyTexture(ren->texture);
   SDL_DestroyRenderer(ren->renderer);
   SDL_FreeSurface(ren->rensurface.surface);

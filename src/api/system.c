@@ -366,7 +366,7 @@ top:
       return 6;
     case SDL_APP_WILLENTERFOREGROUND:
     case SDL_APP_DIDENTERFOREGROUND:
-      #ifdef LITE_USE_SDL_RENDERER
+      #ifdef PRAGTICAL_USE_SDL_RENDERER
         rencache_invalidate();
       #else
         SDL_UpdateWindowSurface(window_renderer.window);
@@ -524,7 +524,7 @@ static float sdl_scale_factor() {
     a separate window with the high dpi flag to retrieve the display
     scale factor and then we destroy it.
   */
-#ifndef LITE_USE_SDL_RENDERER
+#ifndef PRAGTICAL_USE_SDL_RENDERER
   #if _WIN32
     /* on Windows SDL_GetDisplayDPI is reliable so skip second HIDPI window */
     return 1.0;
@@ -542,7 +542,7 @@ static float sdl_scale_factor() {
 #endif
 
   float scale = ren_get_scale_factor(windowHDPI);
-#ifndef LITE_USE_SDL_RENDERER
+#ifndef PRAGTICAL_USE_SDL_RENDERER
   SDL_DestroyWindow(windowHDPI);
 #endif
 
@@ -1068,7 +1068,7 @@ static int f_fuzzy_match(lua_State *L) {
   const char *str = luaL_checklstring(L, 1, &strLen);
   const char *ptn = luaL_checklstring(L, 2, &ptnLen);
   // If true match things *backwards*. This allows for better matching on filenames than the above
-  // function. For example, in the lite project, opening "renderer" has lib/font_render/build.sh
+  // function. For example, in the pragtical project, opening "renderer" has lib/font_render/build.sh
   // as the first result, rather than src/renderer.c. Clearly that's wrong.
   bool files = lua_gettop(L) > 2 && lua_isboolean(L,3) && lua_toboolean(L, 3);
   int score = 0, run = 0, increment = files ? -1 : 1;
@@ -1218,7 +1218,7 @@ static int f_load_native_plugin(lua_State *L) {
 
   const char *basename = strrchr(name, '.');
   basename = !basename ? name : basename + 1;
-  snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_lite_xl_%s", basename);
+  snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_pragtical_%s", basename);
   int (*ext_entrypoint) (lua_State *L, void* (*)(const char*));
   *(void**)(&ext_entrypoint) = SDL_LoadFunction(library, entrypoint_name);
   if (!ext_entrypoint) {

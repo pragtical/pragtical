@@ -13,7 +13,7 @@ local Object = require "core.object"
 ---@alias core.statusview.styledtext table<integer, renderer.font|renderer.color|string>
 ---@alias core.statusview.position '"left"' | '"right"'
 
----A status bar implementation for lite, check core.status_view.
+---A status bar implementation, check core.status_view.
 ---@class core.statusview : core.view
 ---@field super core.view
 ---@field items core.statusview.item[]

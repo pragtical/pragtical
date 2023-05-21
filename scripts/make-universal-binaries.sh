@@ -2,7 +2,7 @@
 set -ex
 
 if [ ! -e "src/api/api.h" ]; then
-  echo "Please run this script from the root directory of Lite XL."
+  echo "Please run this script from the root directory of Pragtical."
   exit 1
 fi
 
@@ -22,12 +22,12 @@ for dmg_path in "$DMGDIR"/*.dmg; do
 	dmg="${dmg%.dmg}"
 	hdiutil attach -mountpoint "/Volumes/$dmg" "$dmg_path"
 	if [[ ! -d "$WORKDIR/dmg" ]]; then
-		ditto "/Volumes/$dmg/Lite XL.app" "Lite XL.app"
+		ditto "/Volumes/$dmg/Pragtical.app" "Pragtical.app"
 	fi
-	cp "/Volumes/$dmg/Lite XL.app/Contents/MacOS/lite-xl" "$WORKDIR/$dmg-lite-xl"
+	cp "/Volumes/$dmg/Pragtical.app/Contents/MacOS/pragtical" "$WORKDIR/$dmg-pragtical"
 	hdiutil detach "/Volumes/$dmg"
 done
 
-lipo -create -output "Lite XL.app/Contents/MacOS/lite-xl" "$WORKDIR/"*-lite-xl
+lipo -create -output "Pragtical.app/Contents/MacOS/pragtical" "$WORKDIR/"*-pragtical
 
 source scripts/appdmg.sh "$2"

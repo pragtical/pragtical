@@ -1,42 +1,42 @@
 /**
- * lite_xl_plugin_api.h
- * API for writing C extension modules loaded by Lite XL.
+ * pragtical_plugin_api.h
+ * API for writing C extension modules loaded by Pragtical.
  * This file is licensed under MIT.
- * 
- * The Lite XL plugin API is quite simple.
+ *
+ * The Pragtical plugin API is quite simple.
  * You would write a lua C extension and replace any references to lua.h, lauxlib.h
- * and lualib.h with lite_xl_plugin_api.h.
- * In your main file (where your entrypoint resides), define LITE_XL_PLUGIN_ENTRYPOINT.
- * If you have multiple entrypoints, define LITE_XL_PLUGIN_ENTRYPOINT in one of them.
- * 
- * After that, you need to create a Lite XL entrypoint, which is formatted as
- * luaopen_lite_xl_xxxxx instead of luaopen_xxxxx.
+ * and lualib.h with pragtical_plugin_api.h.
+ * In your main file (where your entrypoint resides), define PRAGTICAL_PLUGIN_ENTRYPOINT.
+ * If you have multiple entrypoints, define PRAGTICAL_PLUGIN_ENTRYPOINT in one of them.
+ *
+ * After that, you need to create a Pragtical entrypoint, which is formatted as
+ * luaopen_pragtical_xxxxx instead of luaopen_xxxxx.
  * This entrypoint accepts a lua_State and an extra parameter of type void *.
- * In this entrypoint, call lite_xl_plugin_init() with the extra parameter.
- * If you have multiple entrypoints, you must call lite_xl_plugin_init() in
+ * In this entrypoint, call pragtical_plugin_init() with the extra parameter.
+ * If you have multiple entrypoints, you must call pragtical_plugin_init() in
  * each of them.
  * This function is not thread safe, so don't try to do anything stupid.
- * 
+ *
  * An example:
- * 
- * #define LITE_XL_PLUGIN_ENTRYPOINT
- * #include "lite_xl_plugin_api.h"
- * int luaopen_lite_xl_xxxxx(lua_State* L, void* XL) {
- *   lite_xl_plugin_init(XL);
+ *
+ * #define PRAGTICAL_PLUGIN_ENTRYPOINT
+ * #include "pragtical_plugin_api.h"
+ * int luaopen_pragtical_xxxxx(lua_State* L, void* XL) {
+ *   pragtical_plugin_init(XL);
  *   ...
  *   return 1;
  * }
- * 
+ *
  * You can compile the library just like any Lua library without linking to Lua.
  * An example command would be: gcc -shared -o xxxxx.so xxxxx.c
  * You must not link to ANY lua library to avoid symbol collision.
- * 
+ *
  * This file contains stock configuration for a typical installation of Lua 5.4.
  * DO NOT MODIFY ANYTHING. MODIFYING STUFFS IN HERE WILL BREAK
- * COMPATIBILITY WITH LITE XL AND CAUSE UNDEBUGGABLE BUGS.
+ * COMPATIBILITY WITH PRAGTICAL AND CAUSE UNDEBUGGABLE BUGS.
 **/
-#ifndef LITE_XL_PLUGIN_API
-#define LITE_XL_PLUGIN_API
+#ifndef PRAGTICAL_PLUGIN_API
+#define PRAGTICAL_PLUGIN_API
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,8 +60,8 @@
 #define FE_7(what, x, ...) what x,FE_6(what,  __VA_ARGS__)
 #define FE_8(what, x, ...) what x,FE_7(what,  __VA_ARGS__)
 #define FOR_EACH_NARG(...) FOR_EACH_NARG_(__VA_ARGS__, FOR_EACH_RSEQ_N())
-#define FOR_EACH_NARG_(...) FOR_EACH_ARG_N(__VA_ARGS__) 
-#define FOR_EACH_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, N, ...) N 
+#define FOR_EACH_NARG_(...) FOR_EACH_ARG_N(__VA_ARGS__)
+#define FOR_EACH_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, N, ...) N
 #define FOR_EACH_RSEQ_N() 8, 7, 6, 5, 4, 3, 2, 1, 0
 #define FOR_EACH_(N, what, ...) CONCAT(FE_, N)(what, __VA_ARGS__)
 #define FOR_EACH(what, ...) FOR_EACH_(FOR_EACH_NARG(__VA_ARGS__), what, __VA_ARGS__)
@@ -73,20 +73,20 @@
   __##name(__VA_ARGS__)
 
 #define SYMBOL_WRAP_CALL_FB(name, ...) \
-  return __lite_xl_fallback_##name(__VA_ARGS__)
+  return __pragtical_fallback_##name(__VA_ARGS__)
 
-#ifdef LITE_XL_PLUGIN_ENTRYPOINT
+#ifdef PRAGTICAL_PLUGIN_ENTRYPOINT
   #define SYMBOL_DECLARE(ret, name, ...) \
     static ret (*__##name)  (__VA_ARGS__); \
     SYMBOL_WRAP_DECL(ret, name, __VA_ARGS__); \
-    static ret __lite_xl_fallback_##name(FOR_EACH(UNUSED, __VA_ARGS__)) { \
+    static ret __pragtical_fallback_##name(FOR_EACH(UNUSED, __VA_ARGS__)) { \
       fputs("warning: " #name " is a stub", stderr); \
       exit(1); \
     }
   #define SYMBOL_DECLARE_VARARG(ret, name, ...) \
     static ret (*__##name)  (__VA_ARGS__, ...); \
     SYMBOL_WRAP_DECL(ret, name, __VA_ARGS__, ...); \
-    static ret __lite_xl_fallback_##name(FOR_EACH(UNUSED, __VA_ARGS__), ...) { \
+    static ret __pragtical_fallback_##name(FOR_EACH(UNUSED, __VA_ARGS__), ...) { \
       fputs("warning: " #name " is a stub", stderr); \
       exit(1); \
     }
@@ -1728,7 +1728,7 @@ SYMBOL_DECLARE(void, luaL_openlibs, lua_State *L)
 
 
 
-#ifdef LITE_XL_PLUGIN_ENTRYPOINT
+#ifdef PRAGTICAL_PLUGIN_ENTRYPOINT
 
 SYMBOL_WRAP_DECL(lua_State *, lua_newstate, lua_Alloc f, void *ud) {
   return SYMBOL_WRAP_CALL(lua_newstate, f, ud);
@@ -2342,10 +2342,10 @@ SYMBOL_WRAP_DECL(void, luaL_openlibs, lua_State *L) {
 #define IMPORT_SYMBOL(name, ret, ...) \
   __##name = (\
     (*(void **) (&__##name) = symbol(#name)), \
-    __##name == NULL ? ((ret (*) (__VA_ARGS__)) &__lite_xl_fallback_##name) : __##name\
+    __##name == NULL ? ((ret (*) (__VA_ARGS__)) &__pragtical_fallback_##name) : __##name\
   )
 
-void lite_xl_plugin_init(void *XL) {
+void pragtical_plugin_init(void *XL) {
   void* (*symbol)(const char *);
   *(void **) (&symbol) = XL;
   IMPORT_SYMBOL(lua_newstate, lua_State *, lua_Alloc f, void *ud);
@@ -2506,13 +2506,13 @@ void lite_xl_plugin_init(void *XL) {
 #undef IMPORT_SYMBOL
 #undef IMPORT_SYMBOL_OPT
 
-#else /* LITE_XL_PLUGIN_ENTRYPOINT */
+#else /* PRAGTICAL_PLUGIN_ENTRYPOINT */
 
-void lite_xl_plugin_init(void *XL);
+void pragtical_plugin_init(void *XL);
 
-#endif /* LITE_XL_PLUGIN_ENTRYPOINT */
+#endif /* PRAGTICAL_PLUGIN_ENTRYPOINT */
 
-#undef LITE_XL_API
+#undef PRAGTICAL_API
 #undef SYMBOL_WRAP_DECL
 #undef SYMBOL_WRAP_CALL
 #undef SYMBOL_WRAP_CALL_FB
@@ -2537,10 +2537,10 @@ void lite_xl_plugin_init(void *XL);
 #undef FOR_EACH_
 #undef FOR_EACH
 
-#endif /* LITE_XL_PLUGIN_API */
+#endif /* PRAGTICAL_PLUGIN_API */
 
 /******************************************************************************
-* Copyright (C) 1994-2023 Lua.org, PUC-Rio; Lite XL contributors.
+* Copyright (C) 1994-2023 Lua.org, PUC-Rio; Pragtical contributors.
 *
 * Permission is hereby granted, free of charge, to any person obtaining
 * a copy of this software and associated documentation files (the
@@ -2560,4 +2560,4 @@ void lite_xl_plugin_init(void *XL);
 * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
 * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-******************************************************************************/ 
+******************************************************************************/

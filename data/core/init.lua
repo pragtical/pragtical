@@ -120,7 +120,7 @@ local function show_max_files_warning(dir)
     "Filesystem is too slow: project files will not be indexed." or
     "Too many files in project directory: stopped reading at "..
     config.max_project_files.." files. For more information see "..
-    "usage.md at https://github.com/lite-xl/lite-xl."
+    "usage.md at https://github.com/pragtical/pragtical."
   if core.status_view then
     core.status_view:show_message("!", style.accent, message)
   end
@@ -506,11 +506,11 @@ local style = require "core.style"
 -- style.font = renderer.font.load(DATADIR .. "/fonts/FiraSans-Regular.ttf", 14 * SCALE)
 -- style.code_font = renderer.font.load(DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", 14 * SCALE)
 --
--- DATADIR is the location of the installed Lite XL Lua code, default color
+-- DATADIR is the location of the installed Pragtical Lua code, default color
 -- schemes and fonts.
--- USERDIR is the location of the Lite XL configuration directory.
+-- USERDIR is the location of the Pragtical configuration directory.
 --
--- font names used by lite:
+-- font names used by pragtical:
 -- style.font          : user interface
 -- style.big_font      : big text in welcome screen
 -- style.icon_font     : icons
@@ -640,7 +640,7 @@ local function add_config_files_hooks()
   local doc_save = Doc.save
   local user_filename = system.absolute_path(USERDIR .. PATHSEP .. "init.lua")
   function Doc:save(filename, abs_filename)
-    local module_filename = system.absolute_path(".lite_project.lua")
+    local module_filename = system.absolute_path(".pragtical_project.lua")
     doc_save(self, filename, abs_filename)
     if self.abs_filename == user_filename or self.abs_filename == module_filename then
       reload_customizations()
@@ -672,7 +672,7 @@ end
 
 function core.init()
   core.log_items = {}
-  core.log_quiet("Lite XL version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
+  core.log_quiet("Pragtical version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
 
   command = require "core.command"
   keymap = require "core.keymap"
@@ -784,7 +784,7 @@ function core.init()
     if not core.set_project_dir(project_dir_abs, function()
       got_project_error = not core.load_project_module()
     end) then
-      system.show_fatal_error("Lite XL internal error", "cannot set project directory to cwd")
+      system.show_fatal_error("Pragtical internal error", "cannot set project directory to cwd")
       os.exit(1)
     end
   end
@@ -835,7 +835,7 @@ function core.init()
       "Refused Plugins",
       string.format(
         "Some plugins are not loaded due to version mismatch. Expected version %s.\n\n%s.\n\n" ..
-        "Please download a recent version from https://github.com/lite-xl/lite-xl-plugins.",
+        "Please download a recent version from https://github.com/pragtical/pragtical-plugins.",
         MOD_VERSION_STRING, table.concat(msg, ".\n\n")),
       opt, function(item)
         if item.text == "Exit" then os.exit(1) end
@@ -876,7 +876,7 @@ function core.confirm_close_docs(docs, close_fn, ...)
 end
 
 local temp_uid = math.floor(system.get_time() * 1000) % 0xffffffff
-local temp_file_prefix = string.format(".lite_temp_%08x", tonumber(temp_uid))
+local temp_file_prefix = string.format(".pragtical_temp_%08x", tonumber(temp_uid))
 local temp_file_counter = 0
 
 function core.delete_temp_files(dir)
@@ -1066,7 +1066,7 @@ end
 
 
 function core.load_project_module()
-  local filename = ".lite_project.lua"
+  local filename = ".pragtical_project.lua"
   if system.get_file_info(filename) then
     return core.try(function()
       local fn, err = loadfile(filename)
@@ -1505,7 +1505,7 @@ end
 
 
 function core.compose_window_title(title)
-  return (title == "" or title == nil) and "Lite XL" or title .. " - Lite XL"
+  return (title == "" or title == nil) and "Pragtical" or title .. " - Pragtical"
 end
 
 
@@ -1524,7 +1524,7 @@ function core.step()
       core.redraw = true
       break
     elseif type == "displaychanged" and SCALE == DEFAULT_SCALE then
-      -- Change SCALE when lite-xl window is moved to a display
+      -- Change SCALE when pragtical window is moved to a display
       -- with a different resolution than previous one.
       local new_scale = system.get_scale()
       if SCALE ~= new_scale then

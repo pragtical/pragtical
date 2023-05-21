@@ -1,4 +1,4 @@
-lite_sources = [
+pragtical_sources = [
     'api/api.c',
     'api/renderer.c',
     'api/regex.c',
@@ -40,18 +40,18 @@ message('dirmonitor_backend: @0@'.format(dirmonitor_backend))
 if dirmonitor_backend == 'kqueue'
     libkqueue_dep = dependency('libkqueue', required : false)
     if libkqueue_dep.found()
-        lite_deps += libkqueue_dep
+        pragtical_deps += libkqueue_dep
     endif
 endif
 
-lite_sources += [
+pragtical_sources += [
     'api/dirmonitor.c',
     'api/dirmonitor/' + dirmonitor_backend + '.c',
 ]
 
 # luajit compatibility files
 if lua_jit_found
-    lite_sources += [
+    pragtical_sources += [
         'compat/lbitlib.c',
         'compat/lstrlib.c',
         'compat/ltablib.c',
@@ -59,25 +59,25 @@ if lua_jit_found
     ]
 endif
 
-lite_rc = []
+pragtical_rc = []
 if host_machine.system() == 'windows'
     windows = import('windows')
-    lite_rc += windows.compile_resources('../resources/icons/icon.rc')
-    lite_rc += windows.compile_resources('../resources/windows/manifest.rc')
+    pragtical_rc += windows.compile_resources('../resources/icons/icon.rc')
+    pragtical_rc += windows.compile_resources('../resources/windows/manifest.rc')
 elif host_machine.system() == 'darwin'
-    lite_sources += 'bundle_open.m'
+    pragtical_sources += 'bundle_open.m'
 endif
 
-lite_includes += include_directories('.')
+pragtical_includes += include_directories('.')
 
-executable('lite-xl',
-    lite_sources + lite_rc,
-    include_directories: lite_includes,
-    dependencies: lite_deps,
-    c_args: lite_cargs,
-    objc_args: lite_cargs,
-    link_args: lite_link_args,
-    install_dir: lite_bindir,
+executable('pragtical',
+    pragtical_sources + pragtical_rc,
+    include_directories: pragtical_includes,
+    dependencies: pragtical_deps,
+    c_args: pragtical_cargs,
+    objc_args: pragtical_cargs,
+    link_args: pragtical_link_args,
+    install_dir: pragtical_bindir,
     install: true,
     win_subsystem: 'windows',
 )

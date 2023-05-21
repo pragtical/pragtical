@@ -74,13 +74,13 @@ static void init_window_icon(void) {
 }
 
 #ifdef _WIN32
-#define LITE_OS_HOME "USERPROFILE"
-#define LITE_PATHSEP_PATTERN "\\\\"
-#define LITE_NONPATHSEP_PATTERN "[^\\\\]+"
+#define PRAGTICAL_OS_HOME "USERPROFILE"
+#define PRAGTICAL_PATHSEP_PATTERN "\\\\"
+#define PRAGTICAL_NONPATHSEP_PATTERN "[^\\\\]+"
 #else
-#define LITE_OS_HOME "HOME"
-#define LITE_PATHSEP_PATTERN "/"
-#define LITE_NONPATHSEP_PATTERN "[^/]+"
+#define PRAGTICAL_OS_HOME "HOME"
+#define PRAGTICAL_PATHSEP_PATTERN "/"
+#define PRAGTICAL_NONPATHSEP_PATTERN "[^/]+"
 #endif
 
 #ifdef __APPLE__
@@ -90,7 +90,7 @@ void set_macos_bundle_resources(lua_State *L);
 #endif
 #endif
 
-#ifndef LITE_ARCH_TUPLE
+#ifndef PRAGTICAL_ARCH_TUPLE
   // https://learn.microsoft.com/en-us/cpp/preprocessor/predefined-macros?view=msvc-140
   #if defined(__x86_64__) || defined(_M_AMD64) || defined(__MINGW64__)
     #define ARCH_PROCESSOR "x86_64"
@@ -113,16 +113,16 @@ void set_macos_bundle_resources(lua_State *L);
   #endif
 
   #if !defined(ARCH_PROCESSOR) || !defined(ARCH_PLATFORM)
-    #error "Please define -DLITE_ARCH_TUPLE."
+    #error "Please define -DPRAGTICAL_ARCH_TUPLE."
   #endif
 
-  #define LITE_ARCH_TUPLE ARCH_PROCESSOR "-" ARCH_PLATFORM
+  #define PRAGTICAL_ARCH_TUPLE ARCH_PROCESSOR "-" ARCH_PLATFORM
 #endif
 
 #ifdef LUA_JIT
-  #define LITE_LUAJIT "true"
+  #define PRAGTICAL_LUAJIT "true"
 #else
-  #define LITE_LUAJIT "false"
+  #define PRAGTICAL_LUAJIT "false"
 #endif
 
 int main(int argc, char **argv) {
@@ -171,7 +171,7 @@ int main(int argc, char **argv) {
     800, 450,
     SDL_WINDOW_RESIZABLE
     | SDL_WINDOW_HIDDEN
-#if LITE_USE_SDL_RENDERER
+#if PRAGTICAL_USE_SDL_RENDERER
     /* causes pixelated rendering when not using the sdl renderer and scaled */
     | SDL_WINDOW_ALLOW_HIGHDPI
 #endif
@@ -183,7 +183,7 @@ int main(int argc, char **argv) {
 
   init_window_icon();
   if (!window) {
-    fprintf(stderr, "Error creating lite-xl window: %s", SDL_GetError());
+    fprintf(stderr, "Error creating pragtical window: %s", SDL_GetError());
     exit(1);
   }
   ren_init(window);
@@ -205,7 +205,7 @@ init_lua:
   lua_pushstring(L, SDL_GetPlatform());
   lua_setglobal(L, "PLATFORM");
 
-  lua_pushstring(L, LITE_ARCH_TUPLE);
+  lua_pushstring(L, PRAGTICAL_ARCH_TUPLE);
   lua_setglobal(L, "ARCH");
 
   char exename[2048];
@@ -227,7 +227,7 @@ init_lua:
   SDL_EventState(SDL_TEXTINPUT, SDL_ENABLE);
   SDL_EventState(SDL_TEXTEDITING, SDL_ENABLE);
 
-  const char *init_lite_code = \
+  const char *init_code = \
     "local core\n"
     "local os_exit = os.exit\n"
     "os.exit = function(code, close)\n"
@@ -235,12 +235,12 @@ init_lua:
     "end\n"
     "xpcall(function()\n"
     "  local match = require('utf8extra').match\n"
-    "  HOME = os.getenv('" LITE_OS_HOME "')\n"
-    "  LUAJIT = " LITE_LUAJIT "\n"
-    "  local exedir = match(EXEFILE, '^(.*)" LITE_PATHSEP_PATTERN LITE_NONPATHSEP_PATTERN "$')\n"
-    "  local prefix = os.getenv('LITE_PREFIX') or match(exedir, '^(.*)" LITE_PATHSEP_PATTERN "bin$')\n"
-    "  dofile((MACOS_RESOURCES or (prefix and prefix .. '/share/lite-xl' or exedir .. '/data')) .. '/core/start.lua')\n"
-    "  core = require(os.getenv('LITE_XL_RUNTIME') or 'core')\n"
+    "  HOME = os.getenv('" PRAGTICAL_OS_HOME "')\n"
+    "  LUAJIT = " PRAGTICAL_LUAJIT "\n"
+    "  local exedir = match(EXEFILE, '^(.*)" PRAGTICAL_PATHSEP_PATTERN PRAGTICAL_NONPATHSEP_PATTERN "$')\n"
+    "  local prefix = os.getenv('PRAGTICAL_PREFIX') or match(exedir, '^(.*)" PRAGTICAL_PATHSEP_PATTERN "bin$')\n"
+    "  dofile((MACOS_RESOURCES or (prefix and prefix .. '/share/pragtical' or exedir .. '/data')) .. '/core/start.lua')\n"
+    "  core = require(os.getenv('PRAGTICAL_XL_RUNTIME') or 'core')\n"
     "  core.init()\n"
     "  core.run()\n"
     "end, function(err)\n"
@@ -257,7 +257,7 @@ init_lua:
     "    fp:close()\n"
     "    error_path = system.absolute_path(error_path)\n"
     "  end\n"
-    "  system.show_fatal_error('Lite XL internal error',\n"
+    "  system.show_fatal_error('Pragtical internal error',\n"
     "    'An internal error occurred in a critical part of the application.\\n\\n'..\n"
     "    'Error: '..tostring(err)..'\\n\\n'..\n"
     "    'Details can be found in \\\"'..error_path..'\\\"')\n"
@@ -265,7 +265,7 @@ init_lua:
     "end)\n"
     "return core and core.restart_request\n";
 
-  if (luaL_loadstring(L, init_lite_code)) {
+  if (luaL_loadstring(L, init_code)) {
     fprintf(stderr, "internal error when starting the application\n");
     exit(1);
   }
@@ -276,7 +276,7 @@ init_lua:
     goto init_lua;
   }
 
-  // This allows the window to be destroyed before lite-xl is done with
+  // This allows the window to be destroyed before pragtical is done with
   // reaping child processes
   ren_free_window_resources(&window_renderer);
   lua_close(L);

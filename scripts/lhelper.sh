@@ -53,11 +53,11 @@ main() {
     if [[ "$OSTYPE" == "darwin"* ]]; then
       CC=clang CXX=clang++ lhelper create build
     else
-      lhelper create lite-xl build
+      lhelper create pragtical build
     fi
   fi
 
-  # Not using $(lhelper activate lite-xl) to support CI
+  # Not using $(lhelper activate pragtical) to support CI
   source "$(lhelper env-source build)"
 
   # Help MSYS2 to find the SDL2 include and lib directories to avoid errors

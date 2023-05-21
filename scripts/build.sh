@@ -2,7 +2,7 @@
 set -e
 
 if [ ! -e "src/api/api.h" ]; then
-  echo "Please run this script from the root directory of Lite XL."; exit 1
+  echo "Please run this script from the root directory of Pragtical."; exit 1
 fi
 
 source scripts/common.sh
@@ -201,7 +201,7 @@ main() {
 
   if [[ $pgo != "" ]]; then
     cp -r data "${build_dir}/src"
-    "${build_dir}/src/lite-xl"
+    "${build_dir}/src/pragtical"
     meson configure -Db_pgo=use "${build_dir}"
     meson compile -C "${build_dir}"
     rm -fr "${build_dir}/data"

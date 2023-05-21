@@ -13,31 +13,31 @@ addons_download() {
 
   # Download third party color themes
   curl --insecure \
-    -L "https://github.com/lite-xl/lite-xl-colors/archive/master.zip" \
-    -o "${build_dir}/lite-xl-colors.zip"
+    -L "https://github.com/pragtical/colors/archive/master.zip" \
+    -o "${build_dir}/colors.zip"
 
   mkdir -p "${build_dir}/third/data/colors"
-  unzip "${build_dir}/lite-xl-colors.zip" -d "${build_dir}"
-  mv "${build_dir}/lite-xl-colors-master/colors" "${build_dir}/third/data"
-  rm -rf "${build_dir}/lite-xl-colors-master"
+  unzip "${build_dir}/colors.zip" -d "${build_dir}"
+  mv "${build_dir}/colors-master/colors" "${build_dir}/third/data"
+  rm -rf "${build_dir}/colors-master"
 
   # Download widgets library
   curl --insecure \
-    -L "https://github.com/lite-xl/lite-xl-widgets/archive/master.zip" \
-    -o "${build_dir}/lite-xl-widgets.zip"
+    -L "https://github.com/pragtical/widgets/archive/master.zip" \
+    -o "${build_dir}/widgets.zip"
 
-  unzip "${build_dir}/lite-xl-widgets.zip" -d "${build_dir}"
+  unzip "${build_dir}/widgets.zip" -d "${build_dir}"
   mkdir -p "${build_dir}/third/data/libraries"
-  mv "${build_dir}/lite-xl-widgets-master" "${build_dir}/third/data/libraries/widget"
+  mv "${build_dir}/widgets-master" "${build_dir}/third/data/libraries/widget"
 
   # Downlaod thirdparty plugins
   curl --insecure \
-    -L "https://github.com/lite-xl/lite-xl-plugins/archive/master.zip" \
-    -o "${build_dir}/lite-xl-plugins.zip"
+    -L "https://github.com/pragtical/plugins/archive/master.zip" \
+    -o "${build_dir}/plugins.zip"
 
-  unzip "${build_dir}/lite-xl-plugins.zip" -d "${build_dir}"
-  mv "${build_dir}/lite-xl-plugins-master/plugins" "${build_dir}/third/data"
-  rm -rf "${build_dir}/lite-xl-plugins-master"
+  unzip "${build_dir}/plugins.zip" -d "${build_dir}"
+  mv "${build_dir}/plugins-master/plugins" "${build_dir}/third/data"
+  rm -rf "${build_dir}/plugins-master"
 }
 
 # Addons installation: some distributions forbid external downloads

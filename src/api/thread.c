@@ -299,22 +299,22 @@ static void copy_global(const char* global, lua_State* from, lua_State* to)
 }
 
 #ifdef _WIN32
-#define LITE_OS_HOME "USERPROFILE"
-#define LITE_PATHSEP_PATTERN "\\\\"
-#define LITE_NONPATHSEP_PATTERN "[^\\\\]+"
+#define PRAGTICAL_OS_HOME "USERPROFILE"
+#define PRAGTICAL_PATHSEP_PATTERN "\\\\"
+#define PRAGTICAL_NONPATHSEP_PATTERN "[^\\\\]+"
 #else
-#define LITE_OS_HOME "HOME"
-#define LITE_PATHSEP_PATTERN "/"
-#define LITE_NONPATHSEP_PATTERN "[^/]+"
+#define PRAGTICAL_OS_HOME "HOME"
+#define PRAGTICAL_PATHSEP_PATTERN "/"
+#define PRAGTICAL_NONPATHSEP_PATTERN "[^/]+"
 #endif
 
 static void init_start(lua_State* L)
 {
-  /* partial code taken from lite-xl main.c */
+  /* partial code taken from main.c */
   const char *lua_code = \
-    "local exedir = EXEFILE:match('^(.*)" LITE_PATHSEP_PATTERN LITE_NONPATHSEP_PATTERN "$')\n"
-    "local prefix = exedir:match('^(.*)" LITE_PATHSEP_PATTERN "bin$')\n"
-    "dofile((MACOS_RESOURCES or (prefix and prefix .. '/share/lite-xl' or exedir .. '/data')) .. '/core/start.lua')\n";
+    "local exedir = EXEFILE:match('^(.*)" PRAGTICAL_PATHSEP_PATTERN PRAGTICAL_NONPATHSEP_PATTERN "$')\n"
+    "local prefix = exedir:match('^(.*)" PRAGTICAL_PATHSEP_PATTERN "bin$')\n"
+    "dofile((MACOS_RESOURCES or (prefix and prefix .. '/share/pragtical' or exedir .. '/data')) .. '/core/start.lua')\n";
 
   if (luaL_loadstring(L, lua_code)) {
     return;
@@ -368,7 +368,7 @@ static int f_thread_create(lua_State *L)
     push_from_state(L, thread->L, iv);
   }
 
-  /* loading lite-xl api before threadDump and arguments causes issues */
+  /* loading pragtical api before threadDump and arguments causes issues */
   api_load_libs(thread->L);
 
   /* Copy globals from main state to properly set the packages path */

@@ -1,59 +1,91 @@
-# Lite XL
+**Note:** restructuring still in progress
 
-[![CI]](https://github.com/lite-xl/lite-xl/actions/workflows/build.yml)
-[![Discord Badge Image]](https://discord.gg/RWzqC3nx7K)
+# Pragtical
 
-![screenshot-dark]
+The practical and pragmatic code editor.
 
-A lightweight text editor written in Lua, adapted from [lite].
+[![CI]](https://github.com/pragtical/pragtical/actions/workflows/build.yml)
 
-* **[Get Lite XL]** — Download for Windows, Linux and Mac OS.
-* **[Get plugins]** — Add additional functionality, adapted for Lite XL.
-* **[Get color themes]** — Add additional colors themes.
+Pragtical is a code editor which was forked from [Lite XL] (also a fork of [lite])
+written mostly in **Lua** with a focus on been practical rather than minimalist.
+The name of the editor is a mixture of the words `pragmatic` and `practical`,
+two words that properly define our development approach as follows:
 
-Please refer to our [website] for the user and developer documentation,
-including [build] instructions details. A quick build guide is described below.
+* governed through practice or action, rather than theory, speculation or idealism
+* willing to see things as they really are and deal with them sensibly
 
-Lite XL has support for high DPI display on Windows and Linux and,
-since 1.16.7 release, it supports **retina displays** on macOS.
+As a result we belief that new features introduced through pull requests should
+be evaluated taking a practical approach without entering lengthy review
+processes that slowdown progress.
 
-Please note that Lite XL is compatible with lite for most plugins and all color themes.
-We provide a separate lite-xl-plugins repository for Lite XL, because in some cases
-some adaptations may be needed to make them work better with Lite XL.
-The repository with modified plugins is https://github.com/lite-xl/lite-xl-plugins.
+## Goals
 
-The changes and differences between Lite XL and rxi/lite are listed in the
+We differentiate from our ancestors by striving to make Pragtical an editor
+that has amplified set of components to give you and us a better out of the box
+experience while keeping an eye on performance and ease of extensibility. Also,
+we are simplifying the release process by reducing the amount of builds to
+choose from and trying a release often approach.
+
+### Performance
+
+* **JIT** - Pragtical takes a LuaJIT first approach, meaning that our official
+builds use LuaJIT instead of PUC Lua for the performance benefits that come
+with it. Also having a LuaJIT first approach gives us FFI for free which allows
+easy interfacing with native C libraries for easier plugin development. LuaJIT
+has proven to be a mature Lua implementation that will provide a stable
+development ecosystem for the foreseeable future.
+
+* **Threading** - a supported feature inside the core on components where it is
+practical to use, like file searching and replacing, where performance gains are
+evident.
+
+### More Features
+
+* **Widgets** - more tightly integrated as part of the core for easier gui
+development and reusability, also ensuring that plugin developers can with
+more ease develop user interfaces when in need.
+
+* **Settings UI** - if you are not using a terminal editor like n/vim it means
+you are looking for a more point and click approach which is why we include a
+graphical interface to adjust your preferences out of the box. But don't
+worry, configuring the editor through Lua will keep working because it is also
+pragtical 😉
+
+* **Encoding** - while UTF-8 has overtaken as the preferred encoding for text
+documents for its convenience, we can sometimes encounter a document in another
+encoding. Loading and saving documents with different encodings will be
+supported for when the need arrives, a feature that is also commonly found in
+other editors because it is pragtical.
+
+* **IPC** - shared memory functionality is part of the core and IPC plugin
+shipped by default to allow opening files and tab dragging between currently
+opened instances.
+
+## Download
+
+* **[Get Pragtical]** — Download Pre-built releases for Windows, Linux and Mac OS.
+* **[Get Plugins]** — Add additional functionality, adapted for Pragtical.
+* **[Get Color Themes]** — Additional color themes (bundled with all releases
+of Pragtical by default).
+
+The changes and differences between Pragtical and rxi/lite are listed in the
 [changelog].
 
-## Overview
-
-Lite XL is derived from [lite].
-It is a lightweight text editor written mostly in Lua — it aims to provide
-something practical, pretty, *small* and fast easy to modify and extend,
-or to use without doing either.
-
-The aim of Lite XL compared to lite is to be more user friendly,
-improve the quality of font rendering, and reduce CPU usage.
-
-## Customization
-
-Additional functionality can be added through plugins which are available in
-the [plugins repository] or in the [Lite XL plugins repository].
-
-Additional color themes can be found in the [colors repository].
-These color themes are bundled with all releases of Lite XL by default.
+Please refer to our [website] for the user and developer documentation,
+including more detailed [build] instructions. A quick build guide is
+described below.
 
 ## Quick Build Guide
 
-If you compile Lite XL yourself, it is recommended to use the script
+If you compile Pragtical yourself, it is recommended to use the script
 `build-packages.sh`:
 
 ```sh
 bash build-packages.sh -h
 ```
 
-The script will run Meson and create a tar compressed archive with the application or,
-for Windows, a zip file. Lite XL can be easily installed
+The script will run Meson and create a tar compressed archive with the
+application or, for Windows, a zip file. Pragtical can be easily installed
 by unpacking the archive in any directory of your choice.
 
 Otherwise the following is an example of basic commands if you want to customize
@@ -62,7 +94,7 @@ the build:
 ```sh
 meson setup --buildtype=release --prefix <prefix> build
 meson compile -C build
-DESTDIR="$(pwd)/lite-xl" meson install --skip-subprojects -C build
+DESTDIR="$(pwd)/pragtical" meson install --skip-subprojects -C build
 ```
 
 where `<prefix>` might be one of `/`, `/usr` or `/opt`, the default is `/`.
@@ -71,67 +103,20 @@ To build a bundle application on macOS:
 ```sh
 meson setup --buildtype=release --Dbundle=true --prefix / build
 meson compile -C build
-DESTDIR="$(pwd)/Lite XL.app" meson install --skip-subprojects -C build
+DESTDIR="$(pwd)/Pragtical.app" meson install --skip-subprojects -C build
 ```
 
 Please note that the package is relocatable to any prefix and the option prefix
 affects only the place where the application is actually installed.
 
-## Installing Prebuilt
-
-Head over to [releases](https://github.com/lite-xl/lite-xl/releases) and download the version for your operating system.
-
-### Linux
-
-Unzip the file and `cd` into the `lite-xl` directory:
-
-```sh
-tar -xzf <file>
-cd lite-xl
-```
-
-To run lite-xl without installing:
-```sh
-cd bin
-./lite-xl
-```
-
-To install lite-xl copy files over into appropriate directories:
-
-```sh
-mkdir -p $HOME/.local/bin && cp bin/lite-xl $HOME/.local/bin
-cp -r share $HOME/.local
-```
-
-If `$HOME/.local/bin` is not in PATH:
-
-```sh
-echo -e 'export PATH=$PATH:$HOME/.local/bin' >> $HOME/.bashrc
-```
-
-To get the icon to show up in app launcher:
-
-```sh
-xdg-desktop-menu forceupdate
-```
-
-You may need to logout and login again to see icon in app launcher.
-
-To uninstall just run:
-
-```sh
-rm -f $HOME/.local/bin/lite-xl
-rm -rf $HOME/.local/share/icons/hicolor/scalable/apps/lite-xl.svg \
-          $HOME/.local/share/applications/org.lite_xl.lite_xl.desktop \
-          $HOME/.local/share/metainfo/org.lite_xl.lite_xl.appdata.xml \
-          $HOME/.local/share/lite-xl
-```
-
-
 ## Contributing
 
+Feel free to contribute something that would be convenient and "Pragtical" to
+include on the core, you are welcome to open a pull request and contribute.
+
 Any additional functionality that can be added through a plugin should be done
-as a plugin, after which a pull request to the [Lite XL plugins repository] can be made.
+as a plugin, after which a pull request to the [plugins repository]
+can be made.
 
 Pull requests to improve or modify the editor itself are welcome.
 
@@ -140,21 +125,19 @@ Pull requests to improve or modify the editor itself are welcome.
 This project is free software; you can redistribute it and/or modify it under
 the terms of the MIT license. See [LICENSE] for details.
 
-See the [licenses] file for details on licenses used by the required dependencies.
+See the [licenses] directory for details on licenses used by the required dependencies.
 
 
-[CI]:                         https://github.com/lite-xl/lite-xl/actions/workflows/build.yml/badge.svg
-[Discord Badge Image]:        https://img.shields.io/discord/847122429742809208?label=discord&logo=discord
-[screenshot-dark]:            https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
-[lite]:                       https://github.com/rxi/lite
-[website]:                    https://lite-xl.com
-[build]:                      https://lite-xl.com/en/documentation/build
-[Get Lite XL]:                https://github.com/lite-xl/lite-xl/releases/latest
-[Get plugins]:                https://github.com/lite-xl/lite-xl-plugins
-[Get color themes]:           https://github.com/lite-xl/lite-xl-colors
-[changelog]:                  https://github.com/lite-xl/lite-xl/blob/master/changelog.md
-[Lite XL plugins repository]: https://github.com/lite-xl/lite-xl-plugins
-[plugins repository]:         https://github.com/rxi/lite-plugins
-[colors repository]:          https://github.com/lite-xl/lite-xl-colors
-[LICENSE]:                    LICENSE
-[licenses]:                   licenses/licenses.md
+[CI]:                   https://github.com/pragtical/pragtical/actions/workflows/build.yml/badge.svg
+[Lite XL]:              https://github.com/lite-xl/lite-xl
+[screenshot-dark]:      https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
+[lite]:                 https://github.com/rxi/lite
+[website]:              https://pragtical.github.io
+[build]:                https://pragtical.github.io/documentation/build
+[Get Pragtical]:        https://github.com/pragtical/pragtical/releases/latest
+[Get Plugins]:          https://github.com/pragtical/plugins
+[Get Color Themes]:     https://github.com/pragtical/colors
+[plugins repository]:   https://github.com/pragtical/plugins
+[changelog]:            https://github.com/pragtical/pragtical/blob/master/changelog.md
+[LICENSE]:              LICENSE
+[licenses]:             licenses/licenses.md

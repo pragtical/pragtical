@@ -1,4 +1,4 @@
--- this file is used by lite-xl to setup the Lua environment when starting
+-- this file is used by pragtical to setup the Lua environment when starting
 VERSION = "@PROJECT_VERSION@"
 MOD_VERSION_MAJOR = 3
 MOD_VERSION_MINOR = 0
@@ -6,20 +6,20 @@ MOD_VERSION_PATCH = 0
 MOD_VERSION_STRING = string.format("%d.%d.%d", MOD_VERSION_MAJOR, MOD_VERSION_MINOR, MOD_VERSION_PATCH)
 
 DEFAULT_SCALE = system.get_scale()
-SCALE = tonumber(os.getenv("LITE_SCALE")) or DEFAULT_SCALE
+SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
 PATHSEP = package.config:sub(1, 1)
 
 EXEDIR = EXEFILE:match("^(.+)[/\\][^/\\]+$")
 if MACOS_RESOURCES then
   DATADIR = MACOS_RESOURCES
 else
-  local prefix = os.getenv('LITE_PREFIX') or EXEDIR:match("^(.+)[/\\]bin$")
-  DATADIR = prefix and (prefix .. PATHSEP .. 'share' .. PATHSEP .. 'lite-xl') or (EXEDIR .. PATHSEP .. 'data')
+  local prefix = os.getenv('PRAGTICAL_PREFIX') or EXEDIR:match("^(.+)[/\\]bin$")
+  DATADIR = prefix and (prefix .. PATHSEP .. 'share' .. PATHSEP .. 'pragtical') or (EXEDIR .. PATHSEP .. 'data')
 end
 USERDIR = (system.get_file_info(EXEDIR .. PATHSEP .. 'user') and (EXEDIR .. PATHSEP .. 'user'))
-       or os.getenv("LITE_USERDIR")
-       or ((os.getenv("XDG_CONFIG_HOME") and os.getenv("XDG_CONFIG_HOME") .. PATHSEP .. "lite-xl"))
-       or (HOME and (HOME .. PATHSEP .. '.config' .. PATHSEP .. 'lite-xl'))
+       or os.getenv("PRAGTICAL_USERDIR")
+       or ((os.getenv("XDG_CONFIG_HOME") and os.getenv("XDG_CONFIG_HOME") .. PATHSEP .. "pragtical"))
+       or (HOME and (HOME .. PATHSEP .. '.config' .. PATHSEP .. 'pragtical'))
 
 package.path = DATADIR .. '/?.lua;'
 package.path = DATADIR .. '/?/init.lua;' .. package.path

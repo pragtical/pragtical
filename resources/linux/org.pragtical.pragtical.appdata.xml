@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop">
-  <id>org.lite_xl.lite_xl</id>
+  <id>org.pragtical.pragtical</id>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
-  <name>Lite XL</name>
-  <summary>A lightweight text editor written in Lua</summary>
+  <name>Pragtical</name>
+  <summary>The practical and pragmatic code editor</summary>
   <content_rating type="oars-1.0" />
-  <launchable type="desktop-id">org.lite_xl.lite_xl.desktop</launchable>
+  <launchable type="desktop-id">org.pragtical.pragtical.desktop</launchable>
 
   <description>
     <p>
-      Lite XL is a text editor and development tool written mainly in Lua,
+      Pragtical is a text editor and development tool written mainly in Lua,
       on top of a minimalistic C core using the SDL2 graphics library.
     </p>
   </description>
@@ -18,14 +18,14 @@
   <screenshots>
     <screenshot type="default">
       <caption>The editor window</caption>
-      <image>https://lite-xl.com/assets/img/editor.png</image>
+      <image>https://pragtical.github.io/assets/img/editor.png</image>
     </screenshot>
   </screenshots>
 
-  <url type="homepage">https://lite-xl.com</url>
+  <url type="homepage">https://pragtical.github.io</url>
 
   <provides>
-    <binary>lite-xl</binary>
+    <binary>pragtical</binary>
   </provides>
 
   <releases>

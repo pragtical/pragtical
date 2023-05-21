@@ -7,7 +7,7 @@ subprojects/*/
 .vscode
 .cache
 .ccls-cache
-.lite-debug.log
+.pragtical-debug.log
 .run*
 *.diff
 *.exe
@@ -17,8 +17,8 @@ subprojects/*/
 *App*
 compile_commands.json
 error.txt
-lite-xl*
-LiteXL*
+pragtical*
+Pragtical*
 
 !resources/windows/*.diff
 !resources/windows/*.exe.manifest.in

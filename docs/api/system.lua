@@ -264,7 +264,7 @@ function system.get_clipboard() end
 function system.set_clipboard(text) end
 
 ---
----Get the process id of lite-xl itself.
+---Get the process id of pragtical itself.
 ---
 ---@return integer
 function system.get_process_id() end
@@ -314,7 +314,7 @@ function system.fuzzy_match(haystack, needle, file) end
 function system.set_window_opacity(opacity) end
 
 ---
----Loads a lua native module using the default Lua API or lite-xl native plugin API.
+---Loads a lua native module using the default Lua API or pragtical native plugin API.
 ---Note: Never use this function directly.
 ---
 ---@param name string the name of the module

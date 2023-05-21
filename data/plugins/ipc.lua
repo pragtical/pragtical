@@ -1,6 +1,6 @@
 -- mod-version:3
 --
--- Crossplatform file based IPC system for lite-xl.
+-- Crossplatform file based IPC system.
 -- @copyright Jefferson Gonzalez <jgmdev@gmail.com>
 -- @license MIT
 --
@@ -28,7 +28,7 @@ config.plugins.ipc = common.merge({
     name = "Inter-process communication",
     {
       label = "Single Instance",
-      description = "Run a single instance of lite-xl.",
+      description = "Run a single instance of pragtical.",
       path = "single_instance",
       type = "toggle",
       default = true
@@ -147,12 +147,12 @@ local function add_thread(f)
 end
 
 ---Constructor
----@param id? string Defaults to current lite-xl process id.
+---@param id? string Defaults to current pragtical process id.
 function IPC:new(id)
   self.id = id or tostring(system.get_process_id())
   self.user_dir = USERDIR .. "/ipc"
   self.file = self.user_dir .. "/" .. self.id .. ".lua"
-  self.shmem = shmem_found and shmem.open("lite-xl-ipc", 100) or nil
+  self.shmem = shmem_found and shmem.open("pragtical-ipc", 100) or nil
   self.primary = false
   self.running = false
   self.messages = {}
@@ -273,7 +273,7 @@ function IPC:stop()
   end
 end
 
----Get a list of running lite-xl instances.
+---Get a list of running pragtical instances.
 ---@return plugins.ipc.instance[]
 function IPC:get_instances()
   ---@type plugins.ipc.instance[]
@@ -653,7 +653,7 @@ end
 ---@field on_read plugins.ipc.onmessage @Function executed by the message receiver.
 ---@field destinations string | table<integer,string> | nil @Id of the running instances to receive the message, if not set all running instances will receive the message.
 
----Queue a new message to be sent to other lite-xl instances.
+---Queue a new message to be sent to other pragtical instances.
 ---@param name string
 ---@param options? plugins.ipc.sendmessageoptions
 ---@param message_type? plugins.ipc.messagetype
@@ -836,7 +836,7 @@ end
 ---@type plugins.ipc
 local ipc = IPC()
 
----Get the IPC session for the running lite-xl instance.
+---Get the IPC session for the running pragtical instance.
 ---@return plugins.ipc
 function IPC.current()
   return ipc
@@ -887,7 +887,7 @@ end
 local system_show_fatal_error = system.show_fatal_error
 
 system.show_fatal_error = function(title, message)
-  if title == "Lite XL internal error" then
+  if title == "Pragtical internal error" then
     ipc:stop()
   end
   system_show_fatal_error(title, message)

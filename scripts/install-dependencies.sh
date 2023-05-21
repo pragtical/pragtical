@@ -2,12 +2,12 @@
 set -ex
 
 if [ ! -e "src/api/api.h" ]; then
-  echo "Please run this script from the root directory of Lite XL."; exit 1
+  echo "Please run this script from the root directory of Pragtical."; exit 1
 fi
 
 show_help() {
   echo
-  echo "Lite XL dependecies installer. Mainly used for CI but can also work on users systems."
+  echo "Pragtical dependecies installer. Mainly used for CI but can also work on users systems."
   echo "USE IT AT YOUR OWN RISK!"
   echo
   echo "Usage: $0 <OPTIONS>"

@@ -273,7 +273,7 @@ local function open_project_file()
 end
 
 --
--- inject changes to lite-xl
+-- inject changes
 --
 
 -- display amount of files and matching results
