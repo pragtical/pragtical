@@ -25,6 +25,11 @@ package.path = DATADIR .. '/?/init.lua;' .. package.path
 package.path = USERDIR .. '/?.lua;' .. package.path
 package.path = USERDIR .. '/?/init.lua;' .. package.path
 
+-- load compatibility changes when running in luajit
+if LUAJIT then
+  require "compat"
+end
+
 local suffix = PLATFORM == "Mac OS X" and 'lib' or (PLATFORM == "Windows" and 'dll' or 'so')
 package.cpath =
   USERDIR .. '/?.' .. ARCH .. "." .. suffix .. ";" ..
@@ -37,11 +42,15 @@ package.cpath =
   DATADIR .. '/?/init.' .. suffix .. ";"
 
 package.native_plugins = {}
-package.searchers = { package.searchers[1], package.searchers[2], function(modname)
+table.insert(package.searchers, 1, function(modname)
   local path, err = package.searchpath(modname, package.cpath)
   if not path then return err end
-  return system.load_native_plugin, path
-end }
+  if not LUAJIT then
+    return system.load_native_plugin, path
+  else
+    return function() return system.load_native_plugin(modname, path) end
+  end
+end)
 
 table.pack = table.pack or pack or function(...) return {...} end
 table.unpack = table.unpack or unpack
