@@ -238,7 +238,7 @@ install_data('licenses/licenses.md', install_dir : pragtical_docdir)
 install_subdir('docs/api' , install_dir : pragtical_datadir, strip_directory: true)
 install_subdir('data/core' , install_dir : pragtical_datadir, exclude_files : 'start.lua')
 
-data_dirs = ['fonts', 'plugins', 'colors']
+data_dirs = ['fonts', 'plugins', 'colors', 'widget']
 if lua_jit_found
     data_dirs += ['compat']
 endif
