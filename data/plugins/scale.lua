@@ -9,7 +9,7 @@ local CommandView = require "core.commandview"
 
 config.plugins.scale = common.merge({
   -- The method used to apply the scaling: "code", "ui"
-  mode = "code",
+  mode = "ui",
   -- Default scale applied at startup.
   default_scale = "autodetect",
   -- Allow using CTRL + MouseWheel for changing the scale.
@@ -106,7 +106,7 @@ config.plugins.scale.config_spec = {
     description = "The method used to apply the scaling.",
     path = "mode",
     type = "selection",
-    default = "code",
+    default = "ui",
     values = {
       {"Everything", "ui"},
       {"Code Only", "code"}
