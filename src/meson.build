@@ -6,6 +6,7 @@ lite_sources = [
     'api/process.c',
     'api/channel.c',
     'api/thread.c',
+    'api/shmem.c',
     'api/utf8.c',
     'api/encoding.c',
     'renderer.c',

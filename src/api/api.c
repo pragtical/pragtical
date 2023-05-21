@@ -6,6 +6,7 @@ int luaopen_regex(lua_State *L);
 int luaopen_process(lua_State *L);
 int luaopen_thread(lua_State* L);
 int luaopen_dirmonitor(lua_State* L);
+int luaopen_shmem(lua_State* L);
 int luaopen_utf8extra(lua_State* L);
 int luaopen_encoding(lua_State* L);
 
@@ -31,6 +32,7 @@ static const luaL_Reg libs[] = {
   { "dirmonitor", luaopen_dirmonitor },
   { "utf8extra",  luaopen_utf8extra  },
   { "encoding",   luaopen_encoding   },
+  { "shmem",      luaopen_shmem      },
   LUAJIT_COMPATIBILITY
   { NULL, NULL }
 };
