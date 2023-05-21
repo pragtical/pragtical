@@ -7,6 +7,7 @@ lite_sources = [
     'api/channel.c',
     'api/thread.c',
     'api/utf8.c',
+    'api/encoding.c',
     'renderer.c',
     'renwindow.c',
     'rencache.c',
