@@ -45,6 +45,12 @@ void renwin_init_surface(UNUSED RenWindow *ren) {
 #endif
 }
 
+void renwin_init_command_buf(RenWindow *ren) {
+  ren->command_buf = NULL;
+  ren->command_buf_idx = 0;
+  ren->command_buf_size = 0;
+}
+
 
 static RenRect scaled_rect(const RenRect rect, const RenSurface *rs) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
