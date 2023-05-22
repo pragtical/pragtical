@@ -1,0 +1,248 @@
+name: Build Latest
+
+on:
+  push:
+    branches:
+      - 'master'
+
+  workflow_dispatch:
+
+# Needed for: richardsimko/update-tag@v1
+# Ref: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+permissions: write-all
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Fetch Version
+        id: tag
+        run: |
+          if [[ "${{ github.event.inputs.version }}" != "" ]]; then
+            echo ::set-output name=version::latest
+          else
+            echo ::set-output name=version::latest
+          fi
+      - name: Update Tag
+        uses: richardsimko/update-tag@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.version }}
+          name: Pragtical ${{ steps.tag.outputs.version }}
+          draft: true
+          body_path: changelog.md
+          generate_release_notes: true
+
+  build_linux:
+    name: Linux
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      CC: gcc
+      CXX: g++
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set Environment Variables
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
+      - name: Python Setup
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Update Packages
+        run: sudo apt-get update
+      - name: Install Dependencies
+        run: |
+          bash scripts/install-dependencies.sh --debug
+          sudo apt-get install -y ccache
+      - name: Build Portable
+        run: |
+          bash --version
+          bash scripts/build.sh --debug --forcefallback --portable --release
+      - name: Package Portables
+        run: |
+          bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
+      - name: Build AppImages
+        run: |
+          bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release
+      - name: Upload Files
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          draft: true
+          files: |
+            pragtical-${{ env.INSTALL_REF }}-linux-x86_64-portable.tar.gz
+            Pragtical-${{ env.INSTALL_REF }}-x86_64.AppImage
+
+  build_macos:
+    name: macOS
+    needs: release
+    runs-on: macos-11
+    strategy:
+      matrix:
+        arch: [x86_64, arm64]
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - name: System Information
+        run: |
+          system_profiler SPSoftwareDataType
+          bash --version
+          gcc -v
+          xcodebuild -version
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set Environment Variables
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
+          echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
+          if [[ $(uname -m) != ${{ matrix.arch }} ]]; then echo "ARCH=--cross-arch ${{ matrix.arch }}" >> "$GITHUB_ENV"; fi
+      - name: Python Setup
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+      - name: Install Dependencies
+        run: bash scripts/install-dependencies.sh --debug
+      - name: Build
+        run: |
+          bash --version
+          bash scripts/build.sh --bundle --debug --forcefallback --release $ARCH
+      - name: Create DMG Image
+        run: |
+          bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --addons --dmg --release
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: macOS DMG Images
+          path: |
+            ${{ env.INSTALL_NAME }}.dmg
+      - name: Upload Files
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          draft: true
+          files: |
+            ${{ env.INSTALL_NAME }}.dmg
+
+  build_macos_universal:
+    name: macOS (Universal)
+    needs: [release, build_macos]
+    runs-on: macos-11
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: System Information
+        run: |
+          system_profiler SPSoftwareDataType
+          bash --version
+          gcc -v
+          xcodebuild -version
+      - name: Set Environment Variables
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "INSTALL_BASE=pragtical-${{ needs.release.outputs.version }}-macos" >> "$GITHUB_ENV"
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        id: download
+        with:
+          name: macOS DMG Images
+          path: dmgs-original
+      - name: Python Setup
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: Install appdmg
+        run: cd ~; npm i appdmg; cd -
+      - name: Prepare DMG Images
+        run: |
+          mkdir -p dmgs-normal
+          mv -v "${{ steps.download.outputs.download-path }}/$INSTALL_BASE-"{x86_64,arm64}.dmg dmgs-normal
+      - name: Create Universal DMGs
+        run: |
+          bash --version
+          bash scripts/make-universal-binaries.sh dmgs-normal "$INSTALL_BASE-universal"
+      - name: Upload Files
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          draft: true
+          files: |
+            ${{ env.INSTALL_BASE }}-universal.dmg
+
+  build_windows_msys2:
+    name: Windows
+    needs: release
+    runs-on: windows-2019
+    strategy:
+      matrix:
+        msystem: [MINGW32, MINGW64]
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Setup MSYS
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            base-devel
+            git
+            zip
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set Environment Variables
+        run: |
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
+          if [[ "${MSYSTEM}" == "MINGW64" ]]; then
+            echo "BUILD_ARCH=x86_64" >> "$GITHUB_ENV"
+            echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-windows-x86_64" >> "$GITHUB_ENV"
+          else
+            echo "BUILD_ARCH=i686" >> "$GITHUB_ENV"
+            echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-windows-i686" >> "$GITHUB_ENV"
+          fi
+      - name: Install Dependencies
+        run: bash scripts/install-dependencies.sh --debug
+      - name: Build
+        run: |
+          bash --version
+          bash scripts/build.sh -U --debug --forcefallback --release
+      - name: Package
+        run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary --release
+      - name: Build Installer
+        run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
+      - name: Upload Files
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.release.outputs.version }}
+          draft: true
+          files: |
+            ${{ env.INSTALL_NAME }}.zip
+            Pragtical-${{ env.INSTALL_REF }}-${{ env.BUILD_ARCH }}-setup.exe
