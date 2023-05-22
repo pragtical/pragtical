@@ -135,7 +135,7 @@ the terms of the MIT license. See [LICENSE] for details.
 See the [licenses] directory for details on licenses used by the required dependencies.
 
 
-[CI]:                   https://github.com/pragtical/pragtical/actions/workflows/build.yml/badge.svg
+[Build Latest]:         https://github.com/pragtical/pragtical/actions/workflows/latest.yml/badge.svg
 [Lite XL]:              https://github.com/lite-xl/lite-xl
 [screenshot-dark]:      https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
 [lite]:                 https://github.com/rxi/lite
