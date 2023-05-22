@@ -16,14 +16,12 @@ show_help() {
   echo "-b --builddir DIRNAME     Sets the name of the build directory (not path)."
   echo "                          Default: '$(get_default_build_dir)'."
   echo "-v --version VERSION      Sets the version on the package name."
-  echo "-a --addons               Tell the script we are packaging an install with addons."
   echo "   --debug                Debug this script."
   echo
 }
 
 main() {
   local build_dir=$(get_default_build_dir)
-  local addons=false
   local arch
   local arch_file
   local version
@@ -44,10 +42,6 @@ main() {
       -h|--help)
         show_help
         exit 0
-        ;;
-      -a|--addons)
-        addons=true
-        shift
         ;;
       -b|--builddir)
         build_dir="$2"
@@ -73,10 +67,6 @@ main() {
   if [ $initial_arg_count -eq $# ]; then
     show_help
     exit 1
-  fi
-
-  if [[ $addons == true ]]; then
-    version="${version}-addons"
   fi
 
   output="Pragtical${version}-${arch_file}-setup"

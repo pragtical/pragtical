@@ -137,7 +137,7 @@ generate_appimage() {
   DESTDIR="$(realpath Pragtical.AppDir)" meson install --skip-subprojects -C ${BUILD_DIR}
   mv AppRun Pragtical.AppDir/
   # These could be symlinks but it seems they doesn't work with AppimageLauncher
-  cp resources/icons/logo.svg Pragtical.AppDir/
+  cp resources/icons/logo.svg Pragtical.AppDir/pragtical.svg
   cp resources/linux/org.pragtical.pragtical.desktop Pragtical.AppDir/
 
   if [[ $ADDONS == true ]]; then
@@ -175,10 +175,6 @@ generate_appimage() {
   local version=""
   if [ -n "$VERSION" ]; then
     version="-$VERSION"
-  fi
-
-  if [[ $ADDONS == true ]]; then
-    version="${version}-addons"
   fi
 
   ./appimagetool --appimage-extract-and-run Pragtical.AppDir Pragtical${version}-${ARCH}.AppImage

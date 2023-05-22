@@ -170,10 +170,6 @@ main() {
     esac
   done
 
-  if [[ $addons == true ]]; then
-    version="$version-addons"
-  fi
-
   if [[ -n $1 ]]; then show_help; exit 1; fi
 
   if [[ -n "$cross" ]]; then

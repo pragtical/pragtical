@@ -21,15 +21,6 @@ addons_download() {
   mv "${build_dir}/colors-master/colors" "${build_dir}/third/data"
   rm -rf "${build_dir}/colors-master"
 
-  # Download widgets library
-  curl --insecure \
-    -L "https://github.com/pragtical/widgets/archive/master.zip" \
-    -o "${build_dir}/widgets.zip"
-
-  unzip "${build_dir}/widgets.zip" -d "${build_dir}"
-  mkdir -p "${build_dir}/third/data/libraries"
-  mv "${build_dir}/widgets-master" "${build_dir}/third/data/libraries/widget"
-
   # Downlaod thirdparty plugins
   curl --insecure \
     -L "https://github.com/pragtical/plugins/archive/master.zip" \
@@ -46,17 +37,18 @@ addons_install() {
   local build_dir="$1"
   local data_dir="$2"
 
-  for module_name in colors libraries; do
-    cp -r "${build_dir}/third/data/$module_name" "${data_dir}"
-  done
+  # Colors
+  cp -r "${build_dir}/third/data/colors" "${data_dir}"
 
+  # Plugins
   mkdir -p "${data_dir}/plugins"
 
-  for plugin_name in settings open_ext; do
+  for plugin_name in open_ext; do
     cp -r "${build_dir}/third/data/plugins/${plugin_name}.lua" \
       "${data_dir}/plugins/"
   done
 
+  # Language files
   cp "${build_dir}/third/data/plugins/"language_* \
       "${data_dir}/plugins/"
 }

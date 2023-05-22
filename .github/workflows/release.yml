@@ -9,8 +9,12 @@ on:
     inputs:
       version:
         description: Release Version
-        default: v2.1.1
+        default: v3.0.0
         required: true
+
+# Needed for: richardsimko/update-tag@v1
+# Ref: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+permissions: write-all
 
 jobs:
   release:
@@ -50,48 +54,38 @@ jobs:
     name: Linux
     needs: release
     runs-on: ubuntu-latest
-    container: ghcr.io/takase1121/pragtical-build-box:latest
     env:
       CC: gcc
       CXX: g++
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Clone Submodules
+        run: git submodule update --init
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v3
-
-      # disabled because this will break our own Python install
       - name: Python Setup
-        if: false
         uses: actions/setup-python@v4
         with:
           python-version: 3.9
-
-      # disabled because the container has up-to-date packages
       - name: Update Packages
-        if: false
         run: sudo apt-get update
-
-      # disabled as the dependencies are already installed
       - name: Install Dependencies
-        if: false
         run: |
           bash scripts/install-dependencies.sh --debug
           sudo apt-get install -y ccache
-
       - name: Build Portable
         run: |
           bash --version
           bash scripts/build.sh --debug --forcefallback --portable --release
       - name: Package Portables
         run: |
-          bash scripts/package.sh --version ${INSTALL_REF} --debug --binary --release
           bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
       - name: Build AppImages
         run: |
-          bash scripts/appimage.sh --debug --static --version ${INSTALL_REF} --release
-          bash scripts/appimage.sh --debug --nobuild --addons --version ${INSTALL_REF}
+          bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release
       - name: Upload Files
         uses: softprops/action-gh-release@v1
         with:
@@ -99,9 +93,7 @@ jobs:
           draft: true
           files: |
             pragtical-${{ env.INSTALL_REF }}-linux-x86_64-portable.tar.gz
-            pragtical-${{ env.INSTALL_REF }}-addons-linux-x86_64-portable.tar.gz
             Pragtical-${{ env.INSTALL_REF }}-x86_64.AppImage
-            Pragtical-${{ env.INSTALL_REF }}-addons-x86_64.AppImage
 
   build_macos:
     name: macOS
@@ -120,14 +112,16 @@ jobs:
           bash --version
           gcc -v
           xcodebuild -version
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Clone Submodules
+        run: git submodule update --init
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
           echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
-          echo "INSTALL_NAME_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
           if [[ $(uname -m) != ${{ matrix.arch }} ]]; then echo "ARCH=--cross-arch ${{ matrix.arch }}" >> "$GITHUB_ENV"; fi
-      - uses: actions/checkout@v3
       - name: Python Setup
         uses: actions/setup-python@v4
         with:
@@ -140,7 +134,6 @@ jobs:
           bash scripts/build.sh --bundle --debug --forcefallback --release $ARCH
       - name: Create DMG Image
         run: |
-          bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --dmg --release
           bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --addons --dmg --release
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
@@ -148,7 +141,6 @@ jobs:
           name: macOS DMG Images
           path: |
             ${{ env.INSTALL_NAME }}.dmg
-            ${{ env.INSTALL_NAME_ADDONS }}.dmg
       - name: Upload Files
         uses: softprops/action-gh-release@v1
         with:
@@ -156,13 +148,16 @@ jobs:
           draft: true
           files: |
             ${{ env.INSTALL_NAME }}.dmg
-            ${{ env.INSTALL_NAME_ADDONS }}.dmg
 
   build_macos_universal:
     name: macOS (Universal)
     needs: [release, build_macos]
     runs-on: macos-11
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Clone Submodules
+        run: git submodule update --init
       - name: System Information
         run: |
           system_profiler SPSoftwareDataType
@@ -173,8 +168,6 @@ jobs:
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_BASE=pragtical-${{ needs.release.outputs.version }}-macos" >> "$GITHUB_ENV"
-          echo "INSTALL_BASE_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-macos" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v2
       - name: Download Artifacts
         uses: actions/download-artifact@v3
         id: download
@@ -189,14 +182,12 @@ jobs:
         run: cd ~; npm i appdmg; cd -
       - name: Prepare DMG Images
         run: |
-          mkdir -p dmgs-addons dmgs-normal
+          mkdir -p dmgs-normal
           mv -v "${{ steps.download.outputs.download-path }}/$INSTALL_BASE-"{x86_64,arm64}.dmg dmgs-normal
-          mv -v "${{ steps.download.outputs.download-path }}/$INSTALL_BASE_ADDONS-"{x86_64,arm64}.dmg dmgs-addons
       - name: Create Universal DMGs
         run: |
           bash --version
           bash scripts/make-universal-binaries.sh dmgs-normal "$INSTALL_BASE-universal"
-          bash scripts/make-universal-binaries.sh dmgs-addons "$INSTALL_BASE_ADDONS-universal"
       - name: Upload Files
         uses: softprops/action-gh-release@v1
         with:
@@ -204,7 +195,6 @@ jobs:
           draft: true
           files: |
             ${{ env.INSTALL_BASE }}-universal.dmg
-            ${{ env.INSTALL_BASE_ADDONS }}-universal.dmg
 
   build_windows_msys2:
     name: Windows
@@ -217,8 +207,8 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v3
-      - uses: msys2/setup-msys2@v2
+      - name: Setup MSYS
+        uses: msys2/setup-msys2@v2
         with:
           msystem: ${{ matrix.msystem }}
           update: true
@@ -226,6 +216,10 @@ jobs:
             base-devel
             git
             zip
+      - name: Checkout Code
+        uses: actions/checkout@v3
+      - name: Clone Submodules
+        run: git submodule update --init
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -233,11 +227,9 @@ jobs:
           if [[ "${MSYSTEM}" == "MINGW64" ]]; then
             echo "BUILD_ARCH=x86_64" >> "$GITHUB_ENV"
             echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-windows-x86_64" >> "$GITHUB_ENV"
-            echo "INSTALL_NAME_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-windows-x86_64" >> "$GITHUB_ENV"
           else
             echo "BUILD_ARCH=i686" >> "$GITHUB_ENV"
             echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-windows-i686" >> "$GITHUB_ENV"
-            echo "INSTALL_NAME_ADDONS=pragtical-${{ needs.release.outputs.version }}-addons-windows-i686" >> "$GITHUB_ENV"
           fi
       - name: Install Dependencies
         run: bash scripts/install-dependencies.sh --debug
@@ -246,13 +238,9 @@ jobs:
           bash --version
           bash scripts/build.sh -U --debug --forcefallback --release
       - name: Package
-        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary --release
+        run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary --release
       - name: Build Installer
         run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
-      - name: Package With Addons
-        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
-      - name: Build Installer With Addons
-        run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF} --addons
       - name: Upload Files
         uses: softprops/action-gh-release@v1
         with:
@@ -260,6 +248,4 @@ jobs:
           draft: true
           files: |
             ${{ env.INSTALL_NAME }}.zip
-            ${{ env.INSTALL_NAME_ADDONS }}.zip
             Pragtical-${{ env.INSTALL_REF }}-${{ env.BUILD_ARCH }}-setup.exe
-            Pragtical-${{ env.INSTALL_REF }}-addons-${{ env.BUILD_ARCH }}-setup.exe
