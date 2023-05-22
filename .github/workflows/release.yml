@@ -24,8 +24,10 @@ jobs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.tag.outputs.version }}
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v3
+        with:
+          submodules: recursive
       - name: Fetch Version
         id: tag
         run: |
@@ -60,8 +62,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Clone Submodules
-        run: git submodule update --init
+        with:
+          submodules: recursive
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -114,8 +116,8 @@ jobs:
           xcodebuild -version
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Clone Submodules
-        run: git submodule update --init
+        with:
+          submodules: recursive
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -156,8 +158,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Clone Submodules
-        run: git submodule update --init
+        with:
+          submodules: recursive
       - name: System Information
         run: |
           system_profiler SPSoftwareDataType
@@ -218,8 +220,8 @@ jobs:
             zip
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Clone Submodules
-        run: git submodule update --init
+        with:
+          submodules: recursive
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
