@@ -1696,7 +1696,7 @@ end
 
 function Settings:setup_about()
   ---@type widget.label
-  local title = Label(self.about, "Lite XL")
+  local title = Label(self.about, "Pragtical")
   title.font = "big_font"
   ---@type widget.label
   local version = Label(self.about, "version " .. VERSION)
@@ -1720,8 +1720,8 @@ function Settings:setup_about()
 
   ---@type widget.button
   local button = Button(self.about, "Visit Website")
-  button:set_tooltip("Open https://lite-xl.com/")
-  function button:on_click() open_link("https://lite-xl.com/") end
+  button:set_tooltip("Open https://pragtical.github.io/")
+  function button:on_click() open_link("https://pragtical.github.io/") end
 
   ---@type widget.listbox
   local contributors = ListBox(self.about)
@@ -1772,7 +1772,7 @@ local contributors_list = {
   function self.about:update_positions()
     local center = self:get_width() / 2
 
-    title:set_label("Lite XL")
+    title:set_label("Pragtical")
     title:set_position(
       center - (title:get_width() / 2),
       style.padding.y
@@ -1898,7 +1898,7 @@ end
 
 --------------------------------------------------------------------------------
 -- Disable plugins at startup, only works if this file is the first
--- required on user module, or priority tag is obeyed by lite-xl.
+-- required on user module, or priority tag is obeyed by pragtical.
 --------------------------------------------------------------------------------
 -- load custom user settings that include list of disabled plugins
 load_settings()
