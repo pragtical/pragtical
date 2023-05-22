@@ -77,6 +77,13 @@ described below.
 
 ## Quick Build Guide
 
+First, clone this repository and initialize the widget submodule:
+
+```sh
+git clone https://github.com/pragtical/pragtical
+git submodule update --init
+```
+
 If you compile Pragtical yourself, it is recommended to use the script
 `build-packages.sh`:
 
