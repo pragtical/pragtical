@@ -76,13 +76,13 @@ jobs:
       - name: Build Portable
         run: |
           bash --version
-          bash scripts/build.sh --debug --forcefallback --portable --release
+          bash scripts/build.sh --debug --forcefallback --portable
       - name: Package Portables
         run: |
-          bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
+          bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary
       - name: Build AppImages
         run: |
-          bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release
+          bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF}
       - name: Upload Files
         uses: softprops/action-gh-release@v1
         with:
@@ -128,10 +128,10 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh --bundle --debug --forcefallback --release $ARCH
+          bash scripts/build.sh --bundle --debug --forcefallback $ARCH
       - name: Create DMG Image
         run: |
-          bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --addons --dmg --release
+          bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --addons --dmg
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
         with:
@@ -233,9 +233,9 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh -U --debug --forcefallback --release
+          bash scripts/build.sh -U --debug --forcefallback
       - name: Package
-        run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary --release
+        run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary
       - name: Build Installer
         run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
       - name: Upload Files
