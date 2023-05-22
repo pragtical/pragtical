@@ -50,7 +50,6 @@ source_package() {
   rsync -arv \
     --exclude /*build*/ \
     --exclude *.git* \
-    --exclude lhelper \
     --exclude pragtical* \
     --exclude submodules \
     . ${package_name}

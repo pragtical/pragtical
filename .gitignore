@@ -1,6 +1,5 @@
 build*/
 .build*/
-lhelper/
 submodules/
 subprojects/*/
 /appimage*

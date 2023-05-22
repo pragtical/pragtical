@@ -77,8 +77,7 @@ jobs:
         with:
           python-version: 3.9
       - name: Install Dependencies
-             # --lhelper will eliminate a warning with arm64 and libusb
-        run: bash scripts/install-dependencies.sh --debug --lhelper
+        run: bash scripts/install-dependencies.sh --debug
       - name: Build
         run: |
           bash --version
