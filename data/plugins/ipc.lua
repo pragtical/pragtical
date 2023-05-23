@@ -842,6 +842,12 @@ function IPC.current()
   return ipc
 end
 
+---Tell the core to force a full redraw. Should be used when receiving signals
+---that execute draw operations while the window could be unfocused.
+function IPC.force_draw()
+  core.redraw = true
+end
+
 --------------------------------------------------------------------------------
 -- Override system.wait_event to allow ipc monitoring on the background.
 --------------------------------------------------------------------------------
@@ -1056,6 +1062,7 @@ ipc:listen_signal("core.tab_drag_stop", function()
 end)
 
 ipc:listen_signal("core.tab_drag_received", function()
+  IPC.force_draw()
   command.perform("root:close")
 end)
 
