@@ -4,11 +4,11 @@ local style = require "core.style"
 local View = require "core.view"
 
 local icon_colors = {
-  bg = { common.color "#2e2e32ff" },
-  color6 = { common.color "#e1e1e6ff" },
-  color7 = { common.color "#ffa94dff" },
-  color8 = { common.color "#93ddfaff" },
-  color9 = { common.color "#f7c95cff" }
+  bg = { common.color "#21252bff" },
+  color6 = { common.color "#ffffffff" },
+  color7 = { common.color "#3771c8ff" },
+  color8 = { common.color "#87aadeff" },
+  color9 = { common.color "#ABC6EDFF" }
 };
 
 local restore_command = {
