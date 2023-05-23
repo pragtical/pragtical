@@ -1616,8 +1616,13 @@ end)
 function core.run()
   scale = require "plugins.scale"
   local next_step
+  local skip_no_focus = 0
   while true do
     core.frame_start = system.get_time()
+    if core.redraw then
+      -- allow things like project search to keep working even without focus
+      skip_no_focus = system.get_time() + 5
+    end
     local time_to_wake = run_threads()
     local did_redraw = false
     if not next_step or system.get_time() >= next_step then
@@ -1627,7 +1632,7 @@ function core.run()
     if core.restart_request or core.quit_request then break end
 
     if not did_redraw then
-      if system.window_has_focus() then
+      if system.window_has_focus() or skip_no_focus > system.get_time() then
         local now = system.get_time()
         if not next_step then -- compute the time until the next blink
           local t = now - core.blink_start
@@ -1641,6 +1646,9 @@ function core.run()
         end
       else
         system.wait_event()
+        -- allow normal rendering for up to 5 seconds after receiving event
+        -- to let any animations render smoothly
+        skip_no_focus = system.get_time() + 5
         next_step = nil -- perform a step when we're not in focus if get we an event
       end
     else -- if we redrew, then make sure we only draw at most FPS/sec
