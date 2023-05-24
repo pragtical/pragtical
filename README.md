@@ -1,10 +1,10 @@
-**Note:** restructuring still in progress
-
 # Pragtical
 
 The practical and pragmatic code editor.
 
 [![Build Latest]](https://github.com/pragtical/pragtical/actions/workflows/latest.yml)
+
+![screenshot](https://pragtical.github.io/assets/img/editor.png)
 
 Pragtical is a code editor which was forked from [Lite XL] (also a fork of [lite])
 written mostly in **Lua** with a focus on been practical rather than minimalist.
@@ -21,10 +21,10 @@ processes that slowdown progress.
 ## Goals
 
 We differentiate from our ancestors by striving to make Pragtical an editor
-that has amplified set of components to give you and us a better out of the box
-experience while keeping an eye on performance and ease of extensibility. Also,
-we are simplifying the release process by reducing the amount of builds to
-choose from and trying a release often approach.
+that has amplified the set of features, to give you and us a better out of the
+box experience, while keeping an eye on performance and ease of extensibility.
+Also, we are simplifying the release process by reducing the amount of builds
+to choose from and trying a release often approach.
 
 ### Performance
 
