@@ -381,6 +381,16 @@ settings.add("User Interface",
       max = 100
     },
     {
+      label = "Tabs Top Margin",
+      description = "The amount of margin to apply on the top of tabs.",
+      path = "tabs_top_margin",
+      type = settings.type.NUMBER,
+      default = -style.divider_size * SCALE,
+      on_apply = function(value)
+        style.margin.tab.top = tonumber(value)
+      end
+    },
+    {
       label = "Close Button on Tabs",
       description = "Display the close button on tabs.",
       path = "tab_close_button",
