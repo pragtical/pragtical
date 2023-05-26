@@ -7,17 +7,39 @@ syntax.add {
   comment = "//",
   block_comment = { "/*", "*/" },
   patterns = {
+    -- Comments
     { pattern = "//.*",                 type = "comment"  },
     { pattern = { "/%*", "%*/" },       type = "comment"  },
-    { pattern = { '/[^= ]', '/', '\\' },type = "string"   },
+    -- Strings
     { pattern = { '"', '"', '\\' },     type = "string"   },
     { pattern = { "'", "'", '\\' },     type = "string"   },
     { pattern = { "`", "`", '\\' },     type = "string"   },
+    -- Numbers
     { pattern = "0x[%da-fA-F_]+n?",     type = "number"   },
     { pattern = "-?%d+[%d%.eE_n]*",     type = "number"   },
     { pattern = "-?%.?%d+",             type = "number"   },
+    -- Embedded html like that used on React
+    { pattern = { "<%s*>", "<%s*/%s*>" },
+      type = "operator", syntax = ".html"
+    },
+    { regex = "<\\s*/()\\s*()[\\w\\d\\-_]+()\\s*>",
+      type = { "operator", "normal", "function", "operator" }
+    },
+    { regex = "<\\s*()[\\w\\d\\-_]+(?=.*/>)",
+      type = { "operator", "function" }, syntax = ".html"
+    },
+    { regex = { "<\\s*()[\\w\\d\\-_]+()(?=.*>)", "</().*()>" },
+      type = { "operator", "function", "operator" }, syntax = ".html"
+    },
+    { regex = { "^\\s*<\\s*()(?=[\\w\\d\\-_]\\s*.*)()", "</().*()>" },
+      type = { "operator", "function", "operator" }, syntax = ".html"
+    },
+    -- Regex string
+    { pattern = { '/[^= ]', '/[gim]*', '\\' },type = "string"   },
+    -- Operators
     { pattern = "[%+%-=/%*%^%%<>!~|&]", type = "operator" },
-    { pattern = "[%a_][%w_]*%f[(]",     type = "function" },
+    -- Functions
+    { pattern = "[%a_][%w_]*%s*%f[(]",     type = "function" },
     { pattern = "[%a_][%w_]*",          type = "symbol"   },
   },
   symbols = {
@@ -38,6 +60,7 @@ syntax.add {
     ["extends"]    = "keyword",
     ["finally"]    = "keyword",
     ["for"]        = "keyword",
+    ["from"]       = "keyword",
     ["function"]   = "keyword",
     ["get"]        = "keyword",
     ["if"]         = "keyword",
