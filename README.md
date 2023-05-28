@@ -15,8 +15,8 @@ two words that properly define our development approach as follows:
 * willing to see things as they really are and deal with them sensibly
 
 As a result we belief that new features introduced through pull requests should
-be evaluated taking a practical approach without entering lengthy review
-processes that slowdown progress.
+be evaluated taking a practical approach, without going into lenghty idealistic
+discussions that slowdown progress, merging code when logical.
 
 ## Goals
 
