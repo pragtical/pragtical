@@ -229,7 +229,7 @@ local function files_search_threaded(
           count = count + 1
           if
             info and not commons.match_pattern(
-              file, ignore_files
+              directory .. file, ignore_files
             )
           then
             if info.type == "dir" then

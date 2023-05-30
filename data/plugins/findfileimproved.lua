@@ -113,7 +113,7 @@ local function index_files_thread(pathsep, ignore_files)
 
           if
             info and not commons.match_pattern(
-              file, ignore_files
+              directory .. file, ignore_files
             )
           then
             if info.type == "dir" then
