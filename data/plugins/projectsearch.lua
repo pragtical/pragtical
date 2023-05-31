@@ -343,9 +343,7 @@ function ResultsView:begin_search(path, text, search_type, insensitive, fn)
         worker_threads_add_results(self, result_channels)
         count = count + 1
         coroutine.yield()
-        if count % 100 == 0 then
-          core.redraw = true
-        end
+        core.redraw = true
         status = channel_status:first()
       end
       channel_status:clear()
