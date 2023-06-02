@@ -160,7 +160,7 @@ end
 
 
 function CommandView:complete()
-  if #self.suggestions > 0 then
+  if #self.suggestions > 0 and self.suggestions[self.suggestion_idx] then
     self:set_text(self.suggestions[self.suggestion_idx].text)
   end
 end
@@ -204,20 +204,13 @@ function CommandView:enter(label, ...)
 
   self.state = common.merge(default_state, options)
 
-  -- We need to keep the text entered with CommandView:set_text to
-  -- maintain compatibility with deprecated usage, but still allow
-  -- overwriting with options.text
-  local old_text = self:get_text()
-  if old_text ~= "" then
-    core.warn("Using deprecated function CommandView:set_text")
-  end
+  -- Retrieve text added with CommandView:set_text
+  -- and use it if options.text is not given
+  local set_text = self:get_text()
   if options.text or options.select_text then
-    local text = options.text or old_text
+    local text = options.text or set_text
     self:set_text(text, self.state.select_text)
   end
-  -- Replace with a simple
-  -- self:set_text(self.state.text, self.state.select_text)
-  -- once old usage is removed
 
   core.set_active_view(self)
   self:update_suggestions()
@@ -410,7 +403,7 @@ function CommandView:draw()
 end
 
 
-function CommandView:on_mouse_moved(x, y)
+function CommandView:on_mouse_moved(x, y, ...)
   self.mouse_position.x = x
   self.mouse_position.y = y
   if self:is_mouse_on_suggestions() then
@@ -433,11 +426,12 @@ function CommandView:on_mouse_moved(x, y)
     end
     return true
   end
+  CommandView.super.on_mouse_moved(self, x, y, ...)
   return false
 end
 
 
-function CommandView:on_mouse_wheel(y)
+function CommandView:on_mouse_wheel(y, ...)
   if self:is_mouse_on_suggestions() then
     if y < 0 then
       self:move_suggestion_idx(-1)
@@ -446,6 +440,7 @@ function CommandView:on_mouse_wheel(y)
     end
     return true
   end
+  CommandView.super.on_mouse_wheel(self, y, ...)
   return false
 end
 
@@ -457,14 +452,16 @@ function CommandView:on_mouse_pressed(button, x, y, clicks)
     end
     return true
   end
+  CommandView.super.on_mouse_pressed(self, button, x, y, clicks)
   return false
 end
 
 
-function CommandView:on_mouse_released()
+function CommandView:on_mouse_released(...)
   if self:is_mouse_on_suggestions() then
     return true
   end
+  CommandView.super.on_mouse_released(self, ...)
   return false
 end
 
