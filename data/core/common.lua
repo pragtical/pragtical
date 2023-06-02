@@ -1,12 +1,26 @@
 local common = {}
 
 
+---
+---Checks if the byte at offset is a UTF-8 continuation byte.
+---A UTF-8 continuation byte is any byte where the first two bits are 10.
+---
+---@param s string
+---@param offset integer The offset of the string to start searching. Defaults to 1.
+---
+---@return boolean is_cont_character
 function common.is_utf8_cont(s, offset)
   local byte = s:byte(offset or 1)
   return byte >= 0x80 and byte < 0xc0
 end
 
 
+---
+---Returns an iterator that yields a UTF-8 character on each iteration.
+---
+---@param text string
+---
+---@return fun(): string codepoint_iterator
 function common.utf8_chars(text)
   if not LUAJIT then
     return text:gmatch("[\0-\x7f\xc2-\xf4][\x80-\xbf]*")
@@ -16,11 +30,26 @@ function common.utf8_chars(text)
 end
 
 
+---
+---Clamps the number n between lo and hi.
+---
+---@param n number
+---@param lo number
+---@param hi number
+---
+---@return number clamped_number
 function common.clamp(n, lo, hi)
   return math.max(math.min(n, hi), lo)
 end
 
 
+---
+---Returns a table containing the contents of b merged into a.
+---
+---@param a table
+---@param b table
+---
+---@return table merged_table
 function common.merge(a, b)
   a = type(a) == "table" and a or {}
   local t = {}
@@ -36,11 +65,25 @@ function common.merge(a, b)
 end
 
 
+---
+---Returns the value of a number rounded to the nearest integer.
+---
+---@param n number
+---
+---@return number rounded_number
 function common.round(n)
   return n >= 0 and math.floor(n + 0.5) or math.ceil(n - 0.5)
 end
 
 
+---
+---Returns the first index where a subtable in tbl has prop set.
+---If none is found, nil is returned.
+---
+---@param tbl table
+---@param prop any
+---
+---@return number|nil index
 function common.find_index(tbl, prop)
   for i, o in ipairs(tbl) do
     if o[prop] then return i end
@@ -48,6 +91,18 @@ function common.find_index(tbl, prop)
 end
 
 
+---
+---Returns a value between a and b on a linear scale, based on the
+---interpolation point t.
+---
+---If a and b is a table, a table containing the result for all the
+---elements in a and b is returned.
+---
+---@param a number|table
+---@param b number|table
+---@param t number
+---
+---@return number|table interpolated_value
 function common.lerp(a, b, t)
   if type(a) ~= "table" then
     return a + (b - a) * t
@@ -60,11 +115,35 @@ function common.lerp(a, b, t)
 end
 
 
+---
+---Returns the euclidean distance between two points.
+---
+---@param x1 number
+---@param y1 number
+---@param x2 number
+---@param y2 number
+---
+---@return number distance
 function common.distance(x1, y1, x2, y2)
     return math.sqrt(((x2-x1) ^ 2)+((y2-y1) ^ 2))
 end
 
 
+---
+---Parses a CSS color string.
+---
+---Only these formats are supported:
+---* `rgb(r, g, b)`
+---* `rgba(r, g, b, a)`
+---* `#rrggbbaa`
+---* `#rrggbb`
+---
+---@param str string
+---
+---@return number r
+---@return number g
+---@return number b
+---@return number a
 function common.color(str)
   local r, g, b, a = str:match("^#(%x%x)(%x%x)(%x%x)(%x?%x?)$")
   if r then
@@ -85,11 +164,14 @@ function common.color(str)
 end
 
 
+---
 ---Converts an RGB color value to HSV. Conversion formula
 ---adapted from http://en.wikipedia.org/wiki/HSV_color_space.
 ---Assumes r, g, and b are contained in the set [0, 255] and
 ---returns h, s, and v in the set [0, 1].
+---
 ---@param rgba renderer.color
+---
 ---@return table hsva The HSV representation
 function common.rgb_to_hsv(rgba)
   local r, g, b, a = rgba[1], rgba[2], rgba[3], rgba[4]
@@ -117,14 +199,17 @@ function common.rgb_to_hsv(rgba)
 end
 
 
+---
 ---Converts an HSV color value to RGB. Conversion formula
 ---adapted from http://en.wikipedia.org/wiki/HSV_color_space.
 ---Assumes h, s, and v are contained in the set [0, 1] and
 ---returns r, g, and b in the set [0, 255].
+---
 ---@param h number The hue
 ---@param s number The saturation
 ---@param v number The brightness
 ---@param a number The alpha
+---
 ---@return renderer.color rgba The RGB representation
 function common.hsv_to_rgb(h, s, v, a)
   local r, g, b
@@ -149,9 +234,12 @@ function common.hsv_to_rgb(h, s, v, a)
 end
 
 
+---
 ---Combine two colors to create a new color based on their transparency.
+---
 ---@param dst renderer.color
 ---@param src renderer.color
+---
 ---@return renderer.color blended_color
 function common.blend_colors(dst, src)
   local ia = 0xff - src[4]
@@ -163,24 +251,39 @@ function common.blend_colors(dst, src)
 end
 
 
+---
 ---Makes a color brighter by the given percentage.
+---
 ---@param rgba renderer.color
 ---@param percent integer
+---
 ---@return renderer.color
 function common.lighten_color(rgba, percent)
   return common.blend_colors(rgba, {255, 255, 255, 255 * (percent / 100)})
 end
 
 
+---
 ---Makes a color darker by the given percentage.
+---
 ---@param rgba renderer.color
 ---@param percent integer
+---
 ---@return renderer.color
 function common.darken_color(rgba, percent)
   return common.blend_colors(rgba, {0, 0, 0, 255 * (percent / 100)})
 end
 
 
+---
+---Splices a numerically indexed table.
+---
+---This function mutates the original table.
+---
+---@param t any[]
+---@param at number Index at which to start splicing.
+---@param remove number Number of elements to remove.
+---@param insert? any[] A table containing elements to insert after splicing.
 function common.splice(t, at, remove, insert)
   assert(remove >= 0, "bad argument #3 to 'splice' (non-negative value expected)")
   insert = insert or {}
@@ -210,6 +313,17 @@ local function fuzzy_match_items(items, needle, files)
 end
 
 
+---
+---Performs fuzzy matching.
+---
+---@param haystack string|string[]
+---@param needle string
+---@param files boolean If true, the matching process will be performed
+---in reverse, which is better suited for matching file paths.
+---
+---@return number|string[] # If the haystack is a string, a score ranging from 0 to 1 is returned.
+---If the haystack is a table, a table containing the haystack sorted in
+---ascending order of similarity is returned.
 function common.fuzzy_match(haystack, needle, files)
   if type(haystack) == "table" then
     return fuzzy_match_items(haystack, needle, files)
@@ -218,6 +332,18 @@ function common.fuzzy_match(haystack, needle, files)
 end
 
 
+---
+---Performs fuzzy matching and returns recently used strings if needed.
+---
+---If the needle is empty, then a list of recently used strings
+---are added to the result, followed by strings from the haystack.
+---
+---@param haystack string[]
+---@param recents string[]
+---@param needle string
+---
+---@return string[] # A table containing the haystack and recents sorted
+---in ascending order of similarity.
 function common.fuzzy_match_with_recents(haystack, recents, needle)
   if needle == "" then
     local recents_ext = {}
@@ -236,6 +362,14 @@ function common.fuzzy_match_with_recents(haystack, recents, needle)
 end
 
 
+---
+---Returns a list of paths that are relative to the input path.
+---
+---@param text string The input path
+---@param root? string The root directory.
+---This function return a relative path relative to this directory.
+---
+---@return string[]
 function common.path_suggest(text, root)
   if root and root:sub(-1) ~= PATHSEP then
     root = root .. PATHSEP
@@ -289,6 +423,12 @@ function common.path_suggest(text, root)
 end
 
 
+---
+---Returns a list of directories that are related to a path.
+---
+---@param text string The input path
+---
+---@return string[]
 function common.dir_path_suggest(text)
   local path, name = text:match("^(.-)([^/\\]*)$")
   local files = system.list_dir(path == "" and "." or path) or {}
@@ -304,6 +444,13 @@ function common.dir_path_suggest(text)
 end
 
 
+---
+---Filters a list of paths to find those that are related to the input path.
+---
+---@param text string The input path
+---@param dir_list string[] A list of paths to filter
+---
+---@return string[]
 function common.dir_list_suggest(text, dir_list)
   local path, name = text:match("^(.-)([^/\\]*)$")
   local res = {}
@@ -316,6 +463,18 @@ function common.dir_list_suggest(text, dir_list)
 end
 
 
+---
+---Matches a string against a list of patterns.
+---
+---If a match was found, its start and end index is returned.
+---Otherwise, false is returned.
+---
+---@param text string
+---@param pattern string|string[]
+---@param ... any Other options for string.find()
+---
+---@return number|boolean start_index
+---@return number|nil end_index
 function common.match_pattern(text, pattern, ...)
   if type(pattern) == "string" then
     return text:find(pattern, ...)
@@ -328,8 +487,27 @@ function common.match_pattern(text, pattern, ...)
 end
 
 
+---@alias common.textalign
+---| '"left"'   # Align text to the left of the bounding box
+---| '"right"'  # Align text to the right of the bounding box
+---| '"center"' # Center text in the bounding box
+
+---
+---Draws text onto the window.
+---
+---@param font renderer.font
+---@param color renderer.color
+---@param text string
+---@param align common.textalign
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---
+---@return number x_advance The X coordinate after drawing the text.
+---@return number y_advance The Y coordinate after drawing the text.
 function common.draw_text(font, color, text, align, x,y,w,h)
-  local tw, th = font:get_width(text), font:get_height(text)
+  local tw, th = font:get_width(text), font:get_height()
   if align == "center" then
     x = x + (w - tw) / 2
   elseif align == "right" then
@@ -340,6 +518,13 @@ function common.draw_text(font, color, text, align, x,y,w,h)
 end
 
 
+---
+---Runs benchmark on a function and prints its results.
+---
+---@param name string Name of the benchmark
+---@param fn fun(...: any): any
+---
+---@return any # The result returned by the function
 function common.bench(name, fn, ...)
   local start = system.get_time()
   local res = fn(...)
@@ -385,14 +570,29 @@ local function serialize(val, pretty, indent_str, escape, sort, limit, level)
   return tostring(val)
 end
 
--- Serialize `val` into a parsable string.
--- Available options
--- * pretty: enable pretty printing
--- * indent_str: indent to use ("  " by default)
--- * escape: use normal escape characters instead of the ones used by string.format("%q", ...)
--- * sort: sort the keys inside tables
--- * limit: limit how deep to serialize
--- * initial_indent: the initial indentation level
+
+---@class common.serializeoptions
+---@field pretty boolean Enables pretty printing.
+---@field indent_str string The indentation character to use. Defaults to `"  "`.
+---@field escape boolean Uses normal escape characters ("\n") instead of decimal escape sequences ("\10").
+---@field limit number Limits the depth when serializing nested tables. Defaults to `math.huge`.
+---@field sort boolean Sorts the output if it is a sortable table.
+---@field initial_indent number The initial indentation level. Defaults to 0.
+
+---
+---Serialize a value into a Lua string that is loadable with load().
+---
+---Only these basic types are supported:
+---* nil
+---* boolean
+---* number
+---* string
+---* table
+---
+---@param val any
+---@param opts common.serializeoptions
+---
+---@return string serialized_data
 function common.serialize(val, opts)
   opts = opts or {}
   local indent_str = opts.indent_str or "  "
@@ -404,6 +604,15 @@ function common.serialize(val, opts)
 end
 
 
+---
+---Returns the last portion of a path.
+---
+---If this function doesn't have a filename (eg. `"C:/"` or `"/"`),
+---this function may return nil.
+---
+---@param path string
+---
+---@return string
 function common.basename(path)
   -- a path should never end by / or \ except if it is '/' (unix root) or
   -- 'X:\' (windows drive)
@@ -411,12 +620,25 @@ function common.basename(path)
 end
 
 
--- can return nil if there is no directory part in the path
+---
+---Returns the directory name of a path.
+---
+---If the path doesn't have a directory, this function may return nil.
+---
+---@param path string
+---
+---@return string
 function common.dirname(path)
   return path:match("(.+)[\\/][^\\/]+$")
 end
 
 
+---
+---Returns a path where the user's home directory is replaced by `"~"`.
+---
+---@param text string
+---
+---@return string
 function common.home_encode(text)
   if HOME and string.find(text, HOME, 1, true) == 1 then
     local dir_pos = #HOME + 1
@@ -430,6 +652,12 @@ function common.home_encode(text)
 end
 
 
+---
+---Returns a list of paths where the user's home directory are replaced by `"~"`.
+---
+---@param paths string[] A list of paths to encode
+---
+---@return string[]
 function common.home_encode_list(paths)
   local t = {}
   for i = 1, #paths do
@@ -439,6 +667,14 @@ function common.home_encode_list(paths)
 end
 
 
+---
+---Expands the `"~"` prefix in a path into the user's home directory.
+---
+---This function is not guaranteed to return an absolute path.
+---
+---@param text string
+---
+---@return string
 function common.home_expand(text)
   return HOME and text:gsub("^~", HOME) or text
 end
@@ -456,13 +692,19 @@ local function split_on_slash(s, sep_pattern)
 end
 
 
--- The filename argument given to the function is supposed to
--- come from system.absolute_path and as such should be an
--- absolute path without . or .. elements.
--- This function exists because on Windows the drive letter returned
--- by system.absolute_path is sometimes with a lower case and sometimes
--- with an upper case so we normalize to upper case.
+---
+---Normalizes the drive letter in a Windows path to uppercase.
+---
+---@param filename string The input path. This must be an absolute path.
+---
+---@return string?
 function common.normalize_volume(filename)
+  -- The filename argument given to the function is supposed to
+  -- come from system.absolute_path and as such should be an
+  -- absolute path without . or .. elements.
+  -- This function exists because on Windows the drive letter returned
+  -- by system.absolute_path is sometimes with a lower case and sometimes
+  -- with an upper case so we normalize to upper case.
   if not filename then return end
   if PATHSEP == '\\' then
     local drive, rem = filename:match('^([a-zA-Z]:\\)(.-)'..PATHSEP..'?$')
@@ -474,6 +716,16 @@ function common.normalize_volume(filename)
 end
 
 
+---
+---Normalizes a path into the same format across platforms.
+---
+---On Windows, all drive letters are converted to uppercase.
+---UNC paths with drive letters are converted back to ordinary Windows paths.
+---All path separators (`"/"`, `"\\"`) are converted to platform-specific ones.
+---
+---@param filename string
+---
+---@return string?
 function common.normalize_path(filename)
   if not filename then return end
   local volume
@@ -514,16 +766,34 @@ function common.normalize_path(filename)
 end
 
 
+---
+---Checks whether a path is absolute or relative.
+---
+---@param path string
+---
+---@return boolean
 function common.is_absolute_path(path)
   return path:sub(1, 1) == PATHSEP or path:match("^(%a):\\")
 end
 
 
+---
+---Checks whether a path belongs to a parent directory.
+---
+---@param filename string The path to check
+---@param path string The parent path
+---
+---@return boolean
 function common.path_belongs_to(filename, path)
   return string.find(filename, path .. PATHSEP, 1, true) == 1
 end
 
 
+---
+---Checks whether a path is relative to another path.
+---
+---@param ref_dir string The path to check against
+---@param dir string The input path
 function common.relative_path(ref_dir, dir)
   local drive_pattern = "^(%a):\\"
   local drive, ref_drive = dir:match(drive_pattern), ref_dir:match(drive_pattern)
@@ -549,6 +819,14 @@ function common.relative_path(ref_dir, dir)
 end
 
 
+---
+---Creates a directory recursively if necessary.
+---
+---@param path string
+---
+---@return boolean success
+---@return string? error
+---@return string? path The path where an error occured
 function common.mkdirp(path)
   local stat = system.get_file_info(path)
   if stat and stat.type then
@@ -571,6 +849,17 @@ function common.mkdirp(path)
   return true
 end
 
+
+---
+---Removes a path.
+---
+---@param path string
+---@param recursively boolean If true, the function will attempt to
+---remove everything in the specified path.
+---
+---@return boolean success
+---@return string? error
+---@return string? path The path where the error occured
 function common.rm(path, recursively)
   local stat = system.get_file_info(path)
   if not stat or (stat.type ~= "file" and stat.type ~= "dir") then
