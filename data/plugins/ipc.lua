@@ -130,22 +130,6 @@ config.plugins.ipc = common.merge({
 ---@field protected method_definitions table<integer,string>
 local IPC = Object:extend()
 
----@class plugins.ipc.threads
----@field cr thread
----@field wake number
-
----List of threads belonging to all instantiated IPC objects.
----@type plugins.ipc.threads[]
-local threads = {}
-
----Register a new thread to be run on the background.
----@param f function
-local function add_thread(f)
-  local key = #threads + 1
-  threads[key] = { cr = coroutine.create(f), wake = 0 }
-  return key
-end
-
 ---Constructor
 ---@param id? string Defaults to current pragtical process id.
 function IPC:new(id)
@@ -250,9 +234,9 @@ function IPC:start()
 
     local wait_time = 0.25
 
-    self.coroutine_key = add_thread(function()
+    self.coroutine_key = core.add_background_thread(function()
       coroutine.yield(wait_time)
-      while(true) do
+      while(self.running) do
         self:read_messages()
         self:read_replies()
         self:update_status()
@@ -265,7 +249,6 @@ end
 ---Stop and unregister the ipc session and monitoring.
 function IPC:stop()
   self.running = false
-  table.remove(threads, self.coroutine_key)
   if not self.shmem then
     os.remove(self.file)
   else
@@ -849,45 +832,6 @@ function IPC.force_draw()
 end
 
 --------------------------------------------------------------------------------
--- Override system.wait_event to allow ipc monitoring on the background.
---------------------------------------------------------------------------------
-local system_wait_event = system.wait_event
-
-local run_threads = coroutine.wrap(function()
-  while true do
-    for k, thread in pairs(threads) do
-      if thread.wake < system.get_time() then
-        local _, wait = assert(coroutine.resume(thread.cr))
-        if coroutine.status(thread.cr) == "dead" then
-          table.remove(threads, k)
-        elseif wait then
-          thread.wake = system.get_time() + wait
-        end
-      end
-      coroutine.yield()
-    end
-  end
-end)
-
-system.wait_event = function(timeout)
-  run_threads()
-
-  if not timeout then
-    if not system.window_has_focus() then
-      local t = system.get_time()
-      local h = 0.5 / 2
-      local dt = math.ceil(t / h) * h - t
-
-      return system_wait_event(dt + 1 / config.fps)
-    else
-      return system_wait_event()
-    end
-  else
-    return system_wait_event(timeout)
-  end
-end
-
---------------------------------------------------------------------------------
 -- Override system.show_fatal_error to be able and destroy session file on crash.
 --------------------------------------------------------------------------------
 local system_show_fatal_error = system.show_fatal_error
@@ -911,7 +855,8 @@ end
 
 --------------------------------------------------------------------------------
 -- Override system.get_time temporarily as first function called on core.run
--- to allow settings gui to properly load ipc config options.
+-- to allow settings gui to properly load ipc config options as signal
+-- core.open_file and core.change_directory.
 --------------------------------------------------------------------------------
 local system_get_time = system.get_time
 

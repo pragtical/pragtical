@@ -732,6 +732,7 @@ function core.init()
   core.cursor_clipboard_whole_line = {}
   core.window_mode = "normal"
   core.threads = setmetatable({}, { __mode = "k" })
+  core.background_threads = 0
   core.blink_start = system.get_time()
   core.blink_timer = core.blink_start
   core.redraw = true
@@ -1298,13 +1299,25 @@ function core.show_title_bar(show)
   core.title_view.visible = show
 end
 
-
-function core.add_thread(f, weak_ref, ...)
+local function add_thread(f, weak_ref, background, ...)
   local key = weak_ref or #core.threads + 1
   local args = {...}
   local fn = function() return core.try(f, table.unpack(args)) end
-  core.threads[key] = { cr = coroutine.create(fn), wake = 0 }
+  core.threads[key] = {
+    cr = coroutine.create(fn), wake = 0, background = background
+  }
+  if background then
+    core.background_threads = core.background_threads + 1
+  end
   return key
+end
+
+function core.add_thread(f, weak_ref, ...)
+  return add_thread(f, weak_ref, nil, ...)
+end
+
+function core.add_background_thread(f, weak_ref, ...)
+  return add_thread(f, weak_ref, true, ...)
 end
 
 
@@ -1577,6 +1590,9 @@ function core.step()
   return true
 end
 
+---Flag that indicates which coroutines should be ran by run_threads().
+---@type "all" | "background"
+local run_threads_mode = "all"
 
 local run_threads = coroutine.wrap(function()
   while true do
@@ -1585,21 +1601,28 @@ local run_threads = coroutine.wrap(function()
 
     for k, thread in pairs(core.threads) do
       -- run thread
-      if thread.wake < system.get_time() then
-        local _, wait = assert(coroutine.resume(thread.cr))
-        if coroutine.status(thread.cr) == "dead" then
-          if type(k) == "number" then
-            table.remove(core.threads, k)
+      if run_threads_mode == "all" or thread.background then
+        if thread.wake < system.get_time() then
+          local _, wait = assert(coroutine.resume(thread.cr))
+          if coroutine.status(thread.cr) == "dead" then
+            if type(k) == "number" then
+              table.remove(core.threads, k)
+            else
+              core.threads[k] = nil
+            end
+            if thread.background then
+              core.background_threads = core.background_threads - 1
+            end
           else
-            core.threads[k] = nil
+            wait = wait or 0.001
+            thread.wake = system.get_time() + wait
+            minimal_time_to_wake = math.min(minimal_time_to_wake, wait)
           end
         else
-          wait = wait or 0.001
-          thread.wake = system.get_time() + wait
-          minimal_time_to_wake = math.min(minimal_time_to_wake, wait)
+          minimal_time_to_wake =  math.min(
+            minimal_time_to_wake, thread.wake - system.get_time()
+          )
         end
-      else
-        minimal_time_to_wake =  math.min(minimal_time_to_wake, thread.wake - system.get_time())
       end
 
       -- stop running threads if we're about to hit the end of frame
@@ -1619,9 +1642,19 @@ function core.run()
   local skip_no_focus = 0
   while true do
     core.frame_start = system.get_time()
+    local has_focus = system.window_has_focus()
     if core.redraw then
       -- allow things like project search to keep working even without focus
-      skip_no_focus = system.get_time() + 5
+      skip_no_focus = core.frame_start + 5
+    end
+    if
+      not has_focus
+      and skip_no_focus < core.frame_start
+      and core.background_threads > 0
+    then
+      run_threads_mode = "background"
+    else
+      run_threads_mode = "all"
     end
     local time_to_wake = run_threads()
     local did_redraw = false
@@ -1632,8 +1665,8 @@ function core.run()
     if core.restart_request or core.quit_request then break end
 
     if not did_redraw then
-      if system.window_has_focus() or skip_no_focus > system.get_time() then
-        local now = system.get_time()
+      local now = system.get_time()
+      if has_focus or core.background_threads > 0 or skip_no_focus > now then
         if not next_step then -- compute the time until the next blink
           local t = now - core.blink_start
           local h = config.blink_period / 2
