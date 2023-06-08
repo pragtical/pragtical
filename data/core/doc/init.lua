@@ -139,7 +139,7 @@ function Doc:save(filename, abs_filename)
   local fp
   local output = ""
   if not self.convert then
-    fp = assert( io.open(filename, "wb") )
+    fp = assert( io.open(abs_filename, "wb") )
     for _, line in ipairs(self.lines) do
       if self.crlf then line = line:gsub("\n", "\r\n") end
       fp:write(line)
@@ -156,7 +156,7 @@ function Doc:save(filename, abs_filename)
       handle_to_bom = true
     })
     if output then
-      fp = assert( io.open(filename, "wb") )
+      fp = assert( io.open(abs_filename, "wb") )
       fp:write(encoding.get_charset_bom(self.encoding) .. output)
       fp:close()
     else
