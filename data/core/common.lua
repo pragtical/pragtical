@@ -354,7 +354,6 @@ function common.path_suggest(text, root)
         local s, e = file:find(root, nil, true)
         if s == 1 then
           file = file:sub(e + 1)
-          table.insert(res, file)
         end
       elseif clean_dotslash then
         -- remove added dot slash
@@ -378,7 +377,9 @@ end
 ---@return string[]
 function common.dir_path_suggest(text, root)
   local path, name = text:match("^(.-)([^/\\]*)$")
-  local files = system.list_dir(path == "" and (root or ".") or path) or {}
+  path = path == "" and (root or ".") or path
+  path = path:gsub("[/\\]$", "") .. PATHSEP
+  local files = system.list_dir(path) or {}
   local res = {}
   for _, file in ipairs(files) do
     file = path .. file
