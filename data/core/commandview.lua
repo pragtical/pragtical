@@ -367,7 +367,13 @@ local function draw_suggestions_box(self)
     end
     local first = 1 + offset
     local last = math.min(offset + max_suggestions, #self.suggestions)
-    if current < self.suggestions_first or current > self.suggestions_last then
+    if
+      current < self.suggestions_first
+      or
+      current > self.suggestions_last
+      or
+      self.suggestions_last - self.suggestions_first < last - first
+    then
       self.suggestions_first = first
       self.suggestions_last = last
       self.suggestions_offset = offset
