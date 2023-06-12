@@ -1658,40 +1658,53 @@ function core.run()
     else
       run_threads_mode = "all"
     end
-    local time_to_wake = run_threads()
-    local did_redraw = false
-    if not next_step or system.get_time() >= next_step then
-      did_redraw = core.step()
-      next_step = nil
-    end
-    if core.restart_request or core.quit_request then break end
 
-    if not did_redraw then
-      local now = system.get_time()
-      if has_focus or core.background_threads > 0 or skip_no_focus > now then
-        if not next_step then -- compute the time until the next blink
-          local t = now - core.blink_start
-          local h = config.blink_period / 2
-          local dt = math.ceil(t / h) * h - t
-          local cursor_time_to_wake = dt + 1 / config.fps
-          next_step = now + cursor_time_to_wake
-        end
-        if time_to_wake > 0 and system.wait_event(math.min(next_step - now, time_to_wake)) then
-          next_step = nil -- if we've recevied an event, perform a step
-        end
-      else
-        system.wait_event()
-        -- allow normal rendering for up to 5 seconds after receiving event
-        -- to let any animations render smoothly
+    local time_to_wake = run_threads()
+
+    if run_threads_mode == "background" then
+      next_step = nil
+      if system.wait_event(time_to_wake) then
         skip_no_focus = system.get_time() + 5
-        next_step = nil -- perform a step when we're not in focus if get we an event
       end
-    else -- if we redrew, then make sure we only draw at most FPS/sec
-      local now = system.get_time()
-      local elapsed = now - core.frame_start
-      local next_frame = math.max(0, 1 / config.fps - elapsed)
-      next_step = next_step or (now + next_frame)
-      system.sleep(math.min(next_frame, time_to_wake))
+    else
+      local did_redraw = false
+      if not next_step or system.get_time() >= next_step then
+        did_redraw = core.step()
+        next_step = nil
+      end
+      if core.restart_request or core.quit_request then break end
+
+      if not did_redraw then
+        local now = system.get_time()
+        if has_focus or core.background_threads > 0 or skip_no_focus > now then
+          if not next_step then -- compute the time until the next blink
+            local t = now - core.blink_start
+            local h = config.blink_period / 2
+            local dt = math.ceil(t / h) * h - t
+            local cursor_time_to_wake = dt + 1 / config.fps
+            next_step = now + cursor_time_to_wake
+          end
+          if
+            time_to_wake > 0
+            and
+            system.wait_event(math.min(next_step - now, time_to_wake))
+          then
+            next_step = nil -- if we've recevied an event, perform a step
+          end
+        else
+          system.wait_event()
+          -- allow normal rendering for up to 5 seconds after receiving event
+          -- to let any animations render smoothly
+          skip_no_focus = system.get_time() + 5
+          next_step = nil -- perform a step when we're not in focus if get we an event
+        end
+      else -- if we redrew, then make sure we only draw at most FPS/sec
+        local now = system.get_time()
+        local elapsed = now - core.frame_start
+        local next_frame = math.max(0, 1 / config.fps - elapsed)
+        next_step = next_step or (now + next_frame)
+        system.sleep(math.min(next_frame, time_to_wake))
+      end
     end
   end
 end
