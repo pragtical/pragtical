@@ -1009,7 +1009,35 @@ config.plugins.treeview.config_spec = {
     on_apply = function(value)
       view.visible = not value
     end
-  }
+  },
+  {
+    label = "Highlight Focused File",
+    description = "Selects the file you are editing on the treeview.",
+    path = "highlight_focused_file",
+    type = "toggle",
+    default = true
+  },
+  {
+    label = "Expand Directories To Focused File",
+    description = "Automatically expands directories to select focused file.",
+    path = "expand_dirs_to_focused_file",
+    type = "toggle",
+    default = false
+  },
+  {
+    label = "Scroll To Focused File",
+    description = "Automatically scrolls the treeview to focused file.",
+    path = "scroll_to_focused_file",
+    type = "toggle",
+    default = false
+  },
+  {
+    label = "Animate Scroll To Focused File",
+    description = "Smoothly scroll to focused file.",
+    path = "animate_scroll_to_focused_file",
+    type = "toggle",
+    default = true
+   }
 }
 
 -- Return the treeview with toolbar and contextmenu to allow
