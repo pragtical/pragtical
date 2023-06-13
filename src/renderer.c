@@ -153,7 +153,7 @@ static void font_load_glyphset(RenFont* font, int idx) {
     }
     if (pen_x == 0)
       continue;
-    set->surface = check_alloc(SDL_CreateRGBSurface(0, pen_x, font->max_height, font->antialiasing == FONT_ANTIALIASING_SUBPIXEL ? 24 : 8, 0, 0, 0, 0));
+    set->surface = check_alloc(SDL_CreateSurface(pen_x, font->max_height, font->antialiasing == FONT_ANTIALIASING_SUBPIXEL ? SDL_PIXELFORMAT_RGB24 : SDL_PIXELFORMAT_RGB888));
     uint8_t* pixels = set->surface->pixels;
     for (int i = 0; i < MAX_GLYPHSET; ++i) {
       int glyph_index = FT_Get_Char_Index(font->face, i + idx * MAX_GLYPHSET);
@@ -208,7 +208,7 @@ static void font_clear_glyph_cache(RenFont* font) {
     for (int j = 0; j < MAX_LOADABLE_GLYPHSETS; ++j) {
       if (font->sets[i][j]) {
         if (font->sets[i][j]->surface)
-          SDL_FreeSurface(font->sets[i][j]->surface);
+          SDL_DestroySurface(font->sets[i][j]->surface);
         free(font->sets[i][j]);
         font->sets[i][j] = NULL;
       }
@@ -259,8 +259,7 @@ RenFont* ren_font_load(RenWindow *window_renderer, const char* path, float size,
 
 #endif
 
-  const double surface_scale = renwin_get_surface(window_renderer).scale_x;
-  if (FT_Set_Pixel_Sizes(face, 0, (int)(size*surface_scale)))
+  if (FT_Set_Pixel_Sizes(face, 0, (int)size))
     goto failure;
   int len = strlen(path);
   RenFont* font = check_alloc(calloc(1, sizeof(RenFont) + len + 1));
@@ -546,11 +545,10 @@ float ren_font_group_get_size(RenFont **fonts) {
 }
 
 void ren_font_group_set_size(RenWindow *window_renderer, RenFont **fonts, float size) {
-  const int surface_scale = renwin_get_surface(window_renderer).scale_x;
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
     font_clear_glyph_cache(fonts[i]);
     FT_Face face = fonts[i]->face;
-    FT_Set_Pixel_Sizes(face, 0, (int)(size*surface_scale));
+    FT_Set_Pixel_Sizes(face, 0, (int)size);
     fonts[i]->size = size;
     fonts[i]->height = (short)((face->height / (float)face->units_per_EM) * size);
     fonts[i]->baseline = (short)((face->ascender / (float)face->units_per_EM) * size);
@@ -576,18 +574,15 @@ double ren_font_group_get_width(RenWindow *window_renderer, RenFont **fonts, con
       break;
     width += (!font || metric->xadvance) ? metric->xadvance : fonts[0]->space_advance;
   }
-  const double surface_scale = renwin_get_surface(window_renderer).scale_x;
-  return width / surface_scale;
+  return width;
 }
 
 double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t len, float x, float y, RenColor color) {
   SDL_Surface *surface = rs->surface;
   SDL_Rect clip;
-  SDL_GetClipRect(surface, &clip);
+  SDL_GetSurfaceClipRect(surface, &clip);
 
-  const double surface_scale_x = rs->scale_x, surface_scale_y = rs->scale_y;
-  double pen_x = x * surface_scale_x;
-  y *= surface_scale_y;
+  double pen_x = x;
   int bytes_per_pixel = surface->format->BytesPerPixel;
   const char* end = text + len;
   uint8_t* destination_pixels = surface->pixels;
@@ -613,7 +608,7 @@ double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t l
     if (set->surface && color.a > 0 && end_x >= clip.x && start_x < clip_end_x) {
       uint8_t* source_pixels = set->surface->pixels;
       for (int line = metric->y0; line < metric->y1; ++line) {
-        int target_y = line + y - metric->bitmap_top + font->baseline * surface_scale_y;
+        int target_y = line + y - metric->bitmap_top + font->baseline;
         if (target_y < clip.y)
           continue;
         if (target_y >= clip_end_y)
@@ -660,16 +655,16 @@ double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t l
     else if(font != last || text == end) {
       double local_pen_x = text == end ? pen_x + adv : pen_x;
       if (underline)
-        ren_draw_rect(rs, (RenRect){last_pen_x, y / surface_scale_y + last->height - 1, (local_pen_x - last_pen_x) / surface_scale_x, last->underline_thickness * surface_scale_x}, color);
+        ren_draw_rect(rs, (RenRect){last_pen_x, y + last->height - 1, local_pen_x - last_pen_x, last->underline_thickness}, color);
       if (strikethrough)
-        ren_draw_rect(rs, (RenRect){last_pen_x, y / surface_scale_y + (float)last->height / 2, (local_pen_x - last_pen_x) / surface_scale_x, last->underline_thickness * surface_scale_x}, color);
+        ren_draw_rect(rs, (RenRect){last_pen_x, y + (float)last->height / 2, local_pen_x - last_pen_x, last->underline_thickness}, color);
       last = font;
       last_pen_x = pen_x;
     }
 
     pen_x += adv;
   }
-  return pen_x / surface_scale_x;
+  return pen_x;
 }
 
 /******************* Rectangles **********************/
@@ -685,34 +680,29 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color) {
   if (color.a == 0) { return; }
 
   SDL_Surface *surface = rs->surface;
-  const double surface_scale_x = rs->scale_x;
-  const double surface_scale_y = rs->scale_y;
 
-  SDL_Rect dest_rect = { rect.x * surface_scale_x,
-                         rect.y * surface_scale_y,
-                         rect.width * surface_scale_x,
-                         rect.height * surface_scale_y };
+  SDL_Rect dest_rect = { rect.x, rect.y, rect.width, rect.height };
 
   if (color.a == 0xff) {
     uint32_t translated = SDL_MapRGB(surface->format, color.r, color.g, color.b);
-    SDL_FillRect(surface, &dest_rect, translated);
+    SDL_FillSurfaceRect(surface, &dest_rect, translated);
   } else {
     // Seems like SDL doesn't handle clipping as we expect when using
     // scaled blitting, so we "clip" manually.
     SDL_Rect clip;
-    SDL_GetClipRect(surface, &clip);
-    if (!SDL_IntersectRect(&clip, &dest_rect, &dest_rect)) return;
+    SDL_GetSurfaceClipRect(surface, &clip);
+    if (!SDL_GetRectIntersection(&clip, &dest_rect, &dest_rect)) return;
 
     uint32_t *pixel = (uint32_t *)draw_rect_surface->pixels;
     *pixel = SDL_MapRGBA(draw_rect_surface->format, color.r, color.g, color.b, color.a);
-    SDL_BlitScaled(draw_rect_surface, NULL, surface, &dest_rect);
+    SDL_BlitSurfaceScaled(draw_rect_surface, NULL, surface, &dest_rect);
   }
 }
 
 /*************** Window Management ****************/
 void ren_free_window_resources(RenWindow *window_renderer) {
   renwin_free(window_renderer);
-  SDL_FreeSurface(draw_rect_surface);
+  SDL_DestroySurface(draw_rect_surface);
   free(window_renderer->command_buf);
   window_renderer->command_buf = NULL;
   window_renderer->command_buf_size = 0;
@@ -730,8 +720,7 @@ void ren_init(SDL_Window *win) {
   renwin_init_surface(&window_renderer);
   renwin_init_command_buf(&window_renderer);
   renwin_clip_to_surface(&window_renderer);
-  draw_rect_surface = SDL_CreateRGBSurface(0, 1, 1, 32,
-                       0xFF000000, 0x00FF0000, 0x0000FF00, 0x000000FF);
+  draw_rect_surface = SDL_CreateSurface(1, 1, SDL_PIXELFORMAT_RGBA32);
 }
 
 
@@ -757,16 +746,6 @@ void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect) {
 
 void ren_get_size(RenWindow *window_renderer, int *x, int *y) {
   RenSurface rs = renwin_get_surface(window_renderer);
-  *x = rs.surface->w / rs.scale_x;
-  *y = rs.surface->h / rs.scale_y;
-}
-
-
-float ren_get_scale_factor(SDL_Window *win) {
-  int w_pixels, h_pixels;
-  int w_points, h_points;
-  SDL_GL_GetDrawableSize(win, &w_pixels, &h_pixels);
-  SDL_GetWindowSize(win, &w_points, &h_points);
-  float scale = (float) w_pixels / (float) w_points;
-  return roundf(scale * 100) / 100;
+  *x = rs.surface->w;
+  *y = rs.surface->h;
 }
