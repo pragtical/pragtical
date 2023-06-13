@@ -1221,6 +1221,11 @@ static int f_load_native_plugin(lua_State *L) {
   snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_pragtical_%s", basename);
   int (*ext_entrypoint) (lua_State *L, void* (*)(const char*));
   *(void**)(&ext_entrypoint) = SDL_LoadFunction(library, entrypoint_name);
+  /*compatibility with Lite XL entry point name*/
+  if (!ext_entrypoint) {
+    snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_lite_xl_%s", basename);
+    *(void**)(&ext_entrypoint) = SDL_LoadFunction(library, entrypoint_name);
+  }
   if (!ext_entrypoint) {
     snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_%s", basename);
     int (*entrypoint)(lua_State *L);
