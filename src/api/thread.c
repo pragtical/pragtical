@@ -20,13 +20,14 @@
 #include "channel.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 
 typedef struct thread {
   lua_State *L;
   SDL_Thread *ptr;
-  SDL_atomic_t ref;
+  SDL_AtomicInt ref;
   int joined;
 } LuaThread;
 

@@ -1230,12 +1230,9 @@ function core.step()
       -- required to avoid flashing and refresh issues on mobile
       core.redraw = true
       break
-    elseif type == "displaychanged" and SCALE == DEFAULT_SCALE then
-      -- Change SCALE when pragtical window is moved to a display
-      -- with a different resolution than previous one.
-      local new_scale = system.get_scale()
-      if SCALE ~= new_scale then
-        DEFAULT_SCALE = new_scale
+    elseif type == "scalechanged" then
+      local new_scale = a
+      if scale.get() == DEFAULT_SCALE and SCALE ~= new_scale then
         local old_scale_mode = "ui"
         if config.plugins.scale.mode ~= "ui" then
           old_scale_mode = config.plugins.scale.mode
@@ -1244,6 +1241,7 @@ function core.step()
         scale.set(new_scale)
         config.plugins.scale.mode = old_scale_mode
       end
+      DEFAULT_SCALE = new_scale
     else
       local _, res = core.try(core.on_event, type, a, b, c, d)
       did_keymap = res or did_keymap

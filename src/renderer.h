@@ -11,12 +11,6 @@
 #define UNUSED
 #endif
 
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-#define RECT_TYPE double
-#else
-#define RECT_TYPE int
-#endif
-
 #define FONT_FALLBACK_MAX 10
 typedef struct RenFont RenFont;
 typedef enum { FONT_HINTING_NONE, FONT_HINTING_SLIGHT, FONT_HINTING_FULL } ERenFontHinting;
@@ -24,8 +18,8 @@ typedef enum { FONT_ANTIALIASING_NONE, FONT_ANTIALIASING_GRAYSCALE, FONT_ANTIALI
 typedef enum { FONT_STYLE_BOLD = 1, FONT_STYLE_ITALIC = 2, FONT_STYLE_UNDERLINE = 4, FONT_STYLE_SMOOTH = 8, FONT_STYLE_STRIKETHROUGH = 16 } ERenFontStyle;
 typedef enum { FONT_FAMILY, FONT_SUBFAMILY, FONT_ID, FONT_FULLNAME, FONT_VERSION, FONT_PSNAME, FONT_TFAMILY, FONT_TSUBFAMILY, FONT_WWSFAMILY, FONT_WWSSUBFAMILY, FONT_SAMPLETEXT } EFontMetaTag;
 typedef struct { uint8_t b, g, r, a; } RenColor;
-typedef struct { RECT_TYPE x, y, width, height; } RenRect;
-typedef struct { SDL_Surface *surface; double scale_x, scale_y; } RenSurface;
+typedef struct { int x, y, width, height; } RenRect;
+typedef struct { SDL_Surface *surface; } RenSurface;
 typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
 
 struct RenWindow;
@@ -53,7 +47,6 @@ void ren_resize_window(RenWindow *window_renderer);
 void ren_update_rects(RenWindow *window_renderer, RenRect *rects, int count);
 void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect);
 void ren_get_size(RenWindow *window_renderer, int *x, int *y); /* Reports the size in points. */
-float ren_get_scale_factor(SDL_Window *win);
 
 
 #endif

@@ -9,7 +9,6 @@
 
 #ifdef _WIN32
   #include <windows.h>
-  #include "windows/darkmode.h"
 #elif defined(__linux__)
   #include <unistd.h>
 #elif defined(__APPLE__)
@@ -62,15 +61,12 @@ static void init_window_icon(void) {
 #if !defined(_WIN32) && !defined(__APPLE__)
   #include "../resources/icons/icon.inl"
   (void) icon_rgba_len; /* unused */
-  SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(
-    icon_rgba, 64, 64,
-    32, 64 * 4,
-    0x000000ff,
-    0x0000ff00,
-    0x00ff0000,
-    0xff000000);
+  SDL_Surface *surf = SDL_CreateSurfaceFrom(
+    icon_rgba, 64, 64, 32,
+    SDL_PIXELFORMAT_RGBA32
+  );
   SDL_SetWindowIcon(window, surf);
-  SDL_FreeSurface(surf);
+  SDL_DestroySurface(surf);
 #endif
 }
 
@@ -149,7 +145,7 @@ int main(int argc, char **argv) {
     exit(1);
   }
   SDL_EnableScreenSaver();
-  SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
+  SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
   atexit(SDL_Quit);
 
 #ifdef SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR /* Available since 2.0.8 */
@@ -183,23 +179,16 @@ int main(int argc, char **argv) {
   SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 
   window = SDL_CreateWindow(
-    "", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-    800, 450,
+    "", 800, 450,
     SDL_WINDOW_RESIZABLE
     | SDL_WINDOW_HIDDEN
-#if PRAGTICAL_USE_SDL_RENDERER
-    /* causes pixelated rendering when not using the sdl renderer and scaled */
-    | SDL_WINDOW_ALLOW_HIGHDPI
-#endif
+    | SDL_WINDOW_HIGH_PIXEL_DENSITY
   );
 
-#ifdef _WIN32
-   windows_darkmode_set_theme(window, NULL, false);
-#endif
-
-  SDL_DisplayMode dm;
-  SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(window), &dm);
-  SDL_SetWindowSize(window, dm.w * 0.8, dm.h * 0.8);
+  const SDL_DisplayMode* dm;
+  dm = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
+  SDL_SetWindowSize(window, dm->w * 0.8, dm->h * 0.8);
+  SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
   init_window_icon();
   if (!window) {
@@ -248,12 +237,8 @@ init_lua:
     set_macos_bundle_resources(L);
   #endif
 #endif
-  SDL_EventState(SDL_TEXTINPUT, SDL_ENABLE);
-  SDL_EventState(SDL_TEXTEDITING, SDL_ENABLE);
-
-#ifdef _WIN32
-  SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
-#endif
+  SDL_SetEventEnabled(SDL_EVENT_TEXT_INPUT, true);
+  SDL_SetEventEnabled(SDL_EVENT_TEXT_EDITING, true);
 
   const char *init_code = \
     "local core\n"
@@ -312,3 +297,10 @@ init_lua:
 
   return EXIT_SUCCESS;
 }
+
+#ifdef PRAGTICAL_MVSC_WINMAIN
+int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
+{
+  return main(__argc, __argv);
+}
+#endif
