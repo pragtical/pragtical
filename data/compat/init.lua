@@ -267,7 +267,12 @@ if lua_version < "5.3" then
                end)
                return msg
             end
-         end -- is not luajit
+         else -- is not luajit
+            function debug.traceback(co, msg, level)
+               if level == nil and co == nil then co = "" end
+               return debug_traceback(co, msg, level)
+            end
+         end
       end -- debug table available
 
 
