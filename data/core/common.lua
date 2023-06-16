@@ -22,11 +22,7 @@ end
 ---
 ---@return fun(): string codepoint_iterator
 function common.utf8_chars(text)
-  if not LUAJIT then
-    return text:gmatch("[\0-\x7f\xc2-\xf4][\x80-\xbf]*")
-  else
-    return text:gmatch("[\x01-\x7f\xc2-\xf4][\x80-\xbf]*")
-  end
+  return text:gmatch("[%z\x01-\x7f\xc2-\xf4][\x80-\xbf]*")
 end
 
 
