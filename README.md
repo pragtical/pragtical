@@ -14,7 +14,7 @@ two words that properly define our development approach as follows:
 * governed through practice or action, rather than theory, speculation or idealism
 * willing to see things as they really are and deal with them sensibly
 
-As a result we belief that new features introduced through pull requests should
+As a result we believe that new features introduced through pull requests should
 be evaluated taking a practical approach, without going into lenghty idealistic
 discussions that slowdown progress, merging code when logical.
 
