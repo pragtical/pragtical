@@ -12,27 +12,32 @@ static void setup_renderer(RenWindow *ren, int w, int h) {
       ren->window, NULL, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
     );
   }
+  SDL_RendererInfo info;
+  SDL_GetRendererInfo(ren->renderer, &info);
+  ren->format = info.texture_formats[0];
+  if (ren->rensurface.surface) {
+    SDL_DestroySurface(ren->rensurface.surface);
+  }
+  ren->rensurface.surface = SDL_CreateSurface(w, h, ren->format);
+  if (!ren->rensurface.surface) {
+    fprintf(stderr, "Error creating surface: %s", SDL_GetError());
+    exit(1);
+  }
   if (ren->texture) {
     SDL_DestroyTexture(ren->texture);
   }
-  ren->texture = SDL_CreateTexture(ren->renderer, SDL_PIXELFORMAT_BGRA32, SDL_TEXTUREACCESS_STREAMING, w, h);
+  ren->texture = SDL_CreateTexture(ren->renderer,  ren->format, SDL_TEXTUREACCESS_STREAMING, w, h);
 }
 #endif
 
 
 void renwin_init_surface(UNUSED RenWindow *ren) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
-  if (ren->rensurface.surface) {
-    SDL_DestroySurface(ren->rensurface.surface);
-  }
   int w, h;
   SDL_GetWindowSizeInPixels(ren->window, &w, &h);
-  ren->rensurface.surface = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_BGRA32);
-  if (!ren->rensurface.surface) {
-    fprintf(stderr, "Error creating surface: %s", SDL_GetError());
-    exit(1);
-  }
   setup_renderer(ren, w, h);
+#else
+  ren->format = SDL_GetWindowSurface(ren->window)->format->format;
 #endif
 }
 
@@ -92,7 +97,7 @@ void renwin_update_rects(RenWindow *ren, RenRect *rects, int count) {
     int32_t *pixels = (
       (int32_t *) ren->rensurface.surface->pixels
     ) + r->x + ren->rensurface.surface->w * r->y;
-    SDL_UpdateTexture(ren->texture,  r, pixels, ren->rensurface.surface->w * 4);
+    SDL_UpdateTexture(ren->texture,  r, pixels, ren->rensurface.surface->pitch);
   }
   SDL_RenderTexture(ren->renderer, ren->texture, NULL, NULL);
   SDL_RenderPresent(ren->renderer);
