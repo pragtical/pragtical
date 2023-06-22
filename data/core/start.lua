@@ -29,6 +29,7 @@ package.path = USERDIR .. '/?/init.lua;' .. package.path
 -- load compatibility changes when running in luajit
 if LUAJIT then
   require "core.jitsetup"
+  COMPAT_DISABLE_FIX_PATTERN = true
   require "compat"
 end
 

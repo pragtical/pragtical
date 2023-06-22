@@ -701,24 +701,26 @@ if lua_version < "5.3" then
       end
 
 
-      local function fix_pattern(pattern)
-         return (string_gsub(pattern, "%z", "%%z"))
-      end
+      if not COMPAT_DISABLE_FIX_PATTERN then
+         local function fix_pattern(pattern)
+            return (string_gsub(pattern, "%z", "%%z"))
+         end
 
-      function M.string.find(s, pattern, ...)
-         return string_find(s, fix_pattern(pattern), ...)
-      end
+         function M.string.find(s, pattern, ...)
+            return string_find(s, fix_pattern(pattern), ...)
+         end
 
-      function M.string.gmatch(s, pattern)
-         return string_gmatch(s, fix_pattern(pattern))
-      end
+         function M.string.gmatch(s, pattern)
+            return string_gmatch(s, fix_pattern(pattern))
+         end
 
-      function M.string.gsub(s, pattern, ...)
-         return string_gsub(s, fix_pattern(pattern), ...)
-      end
+         function M.string.gsub(s, pattern, ...)
+            return string_gsub(s, fix_pattern(pattern), ...)
+         end
 
-      function M.string.match(s, pattern, ...)
-         return string_match(s, fix_pattern(pattern), ...)
+         function M.string.match(s, pattern, ...)
+            return string_match(s, fix_pattern(pattern), ...)
+         end
       end
 
       if not is_luajit then
