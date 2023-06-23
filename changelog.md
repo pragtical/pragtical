@@ -1,5 +1,591 @@
 # Changes Log
 
+## [3.0.0] - 2023-MM-DD
+
+### New Features
+
+* Add more syntax symbols
+  ([00a0e9ca](https://github.com/pragtical/pragtical/commit/00a0e9cac9f55e7fe5877ecc271bf2114ee88ddf))
+  - Added core functions to lighten or darken colors using pixel blending.
+
+* Support custom symbol types on language plugins
+  ([c348be99](https://github.com/pragtical/pragtical/commit/c348be9966c1b1ab1f97af0ee869b118afbfd2cf))
+
+* Added font metadata support
+  [lite-xl/lite-xl#1028](https://github.com/lite-xl/lite-xl/pull/1028)
+
+* Added encoding support
+  [lite-xl/lite-xl#1161](https://github.com/lite-xl/lite-xl/pull/1161)
+
+* Added shared memory support
+  [lite-xl/lite-xl#1486](https://github.com/lite-xl/lite-xl/pull/1486)
+  * Added IPC plugin with shared memory backend
+    ([87fc7105](https://github.com/pragtical/pragtical/commit/87fc71057ab702cf9c1d64dc1512e1f444ea9624))
+    - force draw on core.tab_drag_received
+      ([e5709850](https://github.com/pragtical/pragtical/commit/e5709850334e4e568ec60ed683ca1648adf40f97))
+
+* Added widgets as a git submodule
+  ([a4681a62](https://github.com/pragtical/pragtical/commit/a4681a62d006852ef1750c245572caf73bba5abb))
+
+* language_lua: doc comments highlighting
+  [lite-xl/lite-xl#1019](https://github.com/lite-xl/lite-xl/pull/1019)
+
+* language_js: support for embedded html syntax (like the one used on ReactJS)
+  ([#4](https://github.com/pragtical/pragtical/pull/4))
+
+* Added support for background threads (co-routines) that keep running even when
+  the window has no focus ([#5](https://github.com/pragtical/pragtical/pull/5))
+  - `core.add_background_thread(...)`
+
+* Merged text overwriting
+  [lite-xl/lite-xl#1495](https://github.com/lite-xl/lite-xl/pull/1495)
+
+### Performance Improvements
+
+* Added LuaJIT support
+  [lite-xl/lite-xl#880](https://github.com/lite-xl/lite-xl/pull/880)
+  - Enable LuaJIT by default
+    ([8d84ab29](https://github.com/pragtical/pragtical/commit/8d84ab29d5932af2c10f03a1a855d2757820f6bb))
+
+* Added multi-threading support
+  [lite-xl/lite-xl#830](https://github.com/lite-xl/lite-xl/pull/830)
+  * Added multi-threaded project search
+    ([f8591176](https://github.com/pragtical/pragtical/commit/f85911761a2b22f2e8b92cfadf92c8d9eb26f182))
+  * Added multi-threaded find files
+    ([f8591176](https://github.com/pragtical/pragtical/commit/f85911761a2b22f2e8b92cfadf92c8d9eb26f182))
+
+* Reduce default coroutine timeout
+  [lite-xl/lite-xl#1468](https://github.com/lite-xl/lite-xl/pull/1468)
+
+* Use less cpu when only running background coroutines
+  ([f230c38f](https://github.com/pragtical/pragtical/commit/f230c38f566c5f1b00d32dcf5541655500966adf))
+
+* Change LuaJIT optimization defaults
+  ([8733c5fb](https://github.com/pragtical/pragtical/commit/8733c5fb87ba4571895aebf85e4d5fe71b0a50f0))
+
+* Disable the compat fix_pattern
+  ([85f7a077](https://github.com/pragtical/pragtical/commit/85f7a077f95191e07d0b9f829b655bb0bfee7914))
+
+### Documentation
+
+*  Merge documentation for config options
+  [lite-xl/lite-xl#1512](https://github.com/lite-xl/lite-xl/pull/1512)
+
+*  Merged documentation for core.common
+  [lite-xl/lite-xl#1510](https://github.com/lite-xl/lite-xl/pull/1510)
+
+### Backward Incompatible Changes
+
+* Language plugins file match pattern will no longer support using the `^`
+  pattern to match the beginning of a file, `/` should be used instead
+
+### UI Enhancements
+
+* Add icons support to autocomplete plugin
+  ([0559cd7a](https://github.com/pragtical/pragtical/commit/0559cd7a0459b67a25402b2e59d9487fcdb7fec2))
+
+* Added initial commandview suggestions mouse support
+  ([276d92a6](https://github.com/pragtical/pragtical/commit/276d92a6d93b1a8745890835e5b2d163699d5358))
+
+* Added improved scaling support from
+  [lite-xl/lite-xl#1347](https://github.com/lite-xl/lite-xl/pull/1347)
+
+* Added settings plugin
+  ([d5327a8d](https://github.com/pragtical/pragtical/commit/d5327a8d58de6672343a344287f0649846f173f0))
+  * added config for tabs top margin
+    ([90150bf6](https://github.com/pragtical/pragtical/commit/90150bf6fdd476413d13e30405a1656317965362))
+
+* Scale the entire UI by default on scale plugin
+  ([a5096b47](https://github.com/pragtical/pragtical/commit/a5096b47763a3ec0b540cd0b58b64be9a6122738))
+
+* Added friendlier search/replace user interface
+  ([518226eb](https://github.com/pragtical/pragtical/commit/518226eb2ce8b7bdd1d53c9521f290f640d42c8f))
+
+* Add missing config spec settings to treeview
+  ([d71175d1](https://github.com/pragtical/pragtical/commit/d71175d1c7f676044ac538eb35fdda47d09d521c))
+
+* Better coroutine handing on no focus
+  ([456b8b25](https://github.com/pragtical/pragtical/commit/456b8b25da4f66485c2cdbb0f0a572d4c023e3b5))
+
+### Fixes
+
+* Fix node resizing on mouse drag
+  ([c2733928](https://github.com/pragtical/pragtical/commit/c2733928d93208b0ff6f233f50c2ef0e972bc13b))
+
+### Other Changes
+
+* Autocomplete plugin improvements
+  ([81b45706](https://github.com/pragtical/pragtical/commit/81b457066befcfd5ee91caa51ddf63affec34681))
+  * Support suggestion symbols scoping
+    - global: all open documents
+    - local: current document
+    - related: all open documents with same syntax
+    - none: language syntax symbols only
+  * Register style.syntax[] entries as icons
+  * Other related fixes
+
+* Attach command buffer to Renderer Window
+  ([#3](https://github.com/pragtical/pragtical/pull/3))
+
+* Unified non-addons and addons releases
+  ([35d01f5f](https://github.com/pragtical/pragtical/commit/35d01f5fc5391bb74141253375762125a7491520))
+
+* Removed lhelper as a build option
+  ([56b3a6c0](https://github.com/pragtical/pragtical/commit/56b3a6c0a4d5552cd71683fb588b3e307404a4a7))
+
+* Single pattern for common.utf8_chars
+  ([9ccfade6](https://github.com/pragtical/pragtical/commit/9ccfade6498de7037c7a878b1f4b316440856877))
+
+* innosetup: installation path to environment task (allows command line access)
+  ([ce995eb2](https://github.com/pragtical/pragtical/commit/ce995eb28211e40fff9fb95e9f8a45b53b6c3ddc))
+
+* LuaJIT compat: allow nil msg on debug.traceback
+  ([ca0791a8](https://github.com/pragtical/pragtical/commit/ca0791a8ec3023892759190b5bcb6275435c0cb1))
+
+* Fix LuaJIT build on MacOS crosscompile
+  ([7d8340c4](https://github.com/pragtical/pragtical/commit/7d8340c4517a96b1d0cf5a2d9289f20454be1ec9))
+
+* Updated MOD_VERSION_MINOR
+  ([4ea0da57](https://github.com/pragtical/pragtical/commit/4ea0da572470e3034074ec8e590c398ab1c6bd82))
+
+* Added workflow to produce setup and portable builds on every commit.
+
+* Rebranding of project name and assets.
+
+### Lite XL Inherited Changes
+
+* Allow command buffer to be expanded ([#1297](https://github.com/lite-xl/lite-xl/pull/1297))
+* do not allow users to create an empty font group ([#1303](https://github.com/lite-xl/lite-xl/pull/1303))
+* Make api_require's nodes const ([#1296](https://github.com/lite-xl/lite-xl/pull/1296))
+* Fix a memory leak ([#1305](https://github.com/lite-xl/lite-xl/pull/1305))
+* Don't set a value twice ([#1306](https://github.com/lite-xl/lite-xl/pull/1306))
+* Don't set a value twice ([#1306](https://github.com/lite-xl/lite-xl/pull/1306))
+* Make dirwatch sorting compatible with what file_bisect expects ([#1300](https://github.com/lite-xl/lite-xl/pull/1300))
+* Handle readlink errors ([#1292](https://github.com/lite-xl/lite-xl/pull/1292))
+* linewrapping: Disable horizontal scrolling when enabled ([#1309](https://github.com/lite-xl/lite-xl/pull/1309))
+* plugin api: added missing luaL_typeerror ([#1313](https://github.com/lite-xl/lite-xl/pull/1313))
+* defer lua error until after cleanup ([#1310](https://github.com/lite-xl/lite-xl/pull/1310))
+* fix: center title and version in emptyview ([#1311](https://github.com/lite-xl/lite-xl/pull/1310))
+* Reorganize resources/ + wasm target ([#1244](https://github.com/lite-xl/lite-xl/pull/1244))
+* replace uses of SDL_Window with RenWindow ([#1319](https://github.com/lite-xl/lite-xl/pull/1319))
+* Create Renderer Only When It Doesn't Exist ([#1315](https://github.com/lite-xl/lite-xl/pull/1315))
+* language_md: add nix code block highlighting ([#1323](https://github.com/lite-xl/lite-xl/pull/1323))
+* Use table.move to implement common.splice ([#1324](https://github.com/lite-xl/lite-xl/pull/1324))
+* Make empty groups in regex.gmatch return their offset ([#1325](https://github.com/lite-xl/lite-xl/pull/1325))
+* remove static libgcc from meson ([#1290](https://github.com/lite-xl/lite-xl/pull/1290))
+* Avoid drawing hidden text in DocView:draw_line_text ([#1298](https://github.com/lite-xl/lite-xl/pull/1298))
+* Added in Config Postload ([#1336](https://github.com/lite-xl/lite-xl/pull/1336))
+* plugin api: allow usage on multiple source files ([#1335](https://github.com/lite-xl/lite-xl/pull/1335))
+* Add "Open with Lite XL" to windows' context menu ([#1333](https://github.com/lite-xl/lite-xl/pull/1333))
+* pass RenWindow by argument ([#1321](https://github.com/lite-xl/lite-xl/pull/1321))
+* ci: fix msys build now requiring ca-certificates ([#1348](https://github.com/lite-xl/lite-xl/pull/1348))
+* Getting rid of annoying forward slash on windows. ([#1345](https://github.com/lite-xl/lite-xl/pull/1345))
+* Abstracted open_doc out to allow for more easy overriding. ([#1344](https://github.com/lite-xl/lite-xl/pull/1344))
+* feat: add option to only draw whitespace if it is within selection ([#1321](https://github.com/lite-xl/lite-xl/pull/1321))
+* Replace globally when replacing from selection ([#1331](https://github.com/lite-xl/lite-xl/pull/1331))
+* Context menu fixes and keyboard navigation ([#1338](https://github.com/lite-xl/lite-xl/pull/1338))
+* fix: exec() error not returned to parent ([#1363](https://github.com/lite-xl/lite-xl/pull/1363))
+* Make mod-version follow semver ([#1036](https://github.com/lite-xl/lite-xl/pull/1036))
+* Improved plugins config table handling ([#1356](https://github.com/lite-xl/lite-xl/pull/1356))
+* Restore in-selection replace as discussed in #1331 ([#1368](https://github.com/lite-xl/lite-xl/pull/1368))
+* NagView: properly rescale on scale change ([#1379](https://github.com/lite-xl/lite-xl/pull/1379))
+* plugins scale: also rescale style.expanded_scrollbar_size ([#1380](https://github.com/lite-xl/lite-xl/pull/1380))
+* Improve DocView:get_visible_line_range precision ([#1382](https://github.com/lite-xl/lite-xl/pull/1382))
+* Allow groups to be used in end delimiter patterns in tokenizer ([#1317](https://github.com/lite-xl/lite-xl/pull/1317))
+* Make mouse scrollwheel hovering tabs scroll the tab bar ([#1314](https://github.com/lite-xl/lite-xl/pull/1314))
+* Correct the inverted tabs scrolling ([02a99b17](https://github.com/lite-xl/lite-xl/commit/02a99b17fe9ef11ea18aeb5cb0799c8999a4d2e9))
+* Make tab scrolling more flexible ([#1384](https://github.com/lite-xl/lite-xl/pull/1384))
+* fix incorrect x_offset if opened docs have different tab sizes ([#1383](https://github.com/lite-xl/lite-xl/pull/1383))
+* Added in ability to specify prefix via env variable. ([#1388](https://github.com/lite-xl/lite-xl/pull/1388))
+* Use correct view for scrolling to find-replace:repeat-find results ([#1400](https://github.com/lite-xl/lite-xl/pull/1400))
+* Add manifest on Windows ([#1405](https://github.com/lite-xl/lite-xl/pull/1405))
+* Split Command struct into different structs for each command type ([#1407](https://github.com/lite-xl/lite-xl/pull/1407))
+* refactor(main): move SetProcessDPIAware to manifests ([#1413](https://github.com/lite-xl/lite-xl/pull/1413))
+* Improve text width calculation precision ([#1408](https://github.com/lite-xl/lite-xl/pull/1408))
+* Use clipping functions provided by SDL ([#1426](https://github.com/lite-xl/lite-xl/pull/1426))
+* Make TreeView follow the current tab ([#1411](https://github.com/lite-xl/lite-xl/pull/1411))
+* Asynchronous process reaping ([#1412](https://github.com/lite-xl/lite-xl/pull/1412))
+* Made coroutines make more sense, and fixed a bug. ([#1381](https://github.com/lite-xl/lite-xl/pull/1381))
+* Disable trimwhitespace and drawwhitespace via their configs ([#1446](https://github.com/lite-xl/lite-xl/pull/1446))
+* Allow tokenizer to pause and resume in the middle of a line ([#1444](https://github.com/lite-xl/lite-xl/pull/1444))
+* Added in explicit touchscreen keyboard support. ([#1389](https://github.com/lite-xl/lite-xl/pull/1389))
+* fix cursors positions when deleting multiple selections ([#1393](https://github.com/lite-xl/lite-xl/pull/1393))
+* add autocompletion to multicursor ([#1394](https://github.com/lite-xl/lite-xl/pull/1394))
+* Added in support for foreground and background events. ([#1395](https://github.com/lite-xl/lite-xl/pull/1395))
+* Fix invalid EXEFILE and EXEDIR on Windows ([#1396](https://github.com/lite-xl/lite-xl/pull/1396))
+* fix(windows-utf8-patch): fix os.getenv() not supporting UTF-8 output ([#1397](https://github.com/lite-xl/lite-xl/pull/1397))
+* Add View dragging ([#1402](https://github.com/lite-xl/lite-xl/pull/1402))
+* fix: fix differing stacktrace on stdout and file ([#1404](https://github.com/lite-xl/lite-xl/pull/1404))
+* fix(CI): bump dependency versions ([#1434](https://github.com/lite-xl/lite-xl/pull/1434))
+* Optimizing MSYS2 CI ([#1435](https://github.com/lite-xl/lite-xl/pull/1435))
+* Update api_require to expose more symbols ([#1437](https://github.com/lite-xl/lite-xl/pull/1437))
+* Make system.path_compare more case-aware ([#1457](https://github.com/lite-xl/lite-xl/pull/1457))
+* feat: add statusview item to show selections ([#1445](https://github.com/lite-xl/lite-xl/pull/1445))
+* Fix for api_require wrong macro && conditions ([#1465](https://github.com/lite-xl/lite-xl/pull/1465))
+* upgrade header files to Lua 5.4 ([#1436](https://github.com/lite-xl/lite-xl/pull/1436))
+* Cross compiling improvements + macOS universal binary ([#1458](https://github.com/lite-xl/lite-xl/pull/1458))
+* Show error message in crash message box ([#1461](https://github.com/lite-xl/lite-xl/pull/1461))
+* refactor(plugin_api): move the header into include/ ([#1440](https://github.com/lite-xl/lite-xl/pull/1440))
+* Merge carets after doc:move-to-{previous,next}-char ([#1462](https://github.com/lite-xl/lite-xl/pull/1462))
+* StatusView compat fix with older Lua runtimes ([8cb84254](https://github.com/lite-xl/lite-xl/commit/8cb842549c955290d950642ae7c1f66f4bd2bd2d))
+* Make system.path_compare more digit-aware ([#1474](https://github.com/lite-xl/lite-xl/pull/1474))
+* fix(process): check for HANDLE_INVALID ([#1475](https://github.com/lite-xl/lite-xl/pull/1475))
+* Added in double-clicking on emptyview and tab bar. ([#1478](https://github.com/lite-xl/lite-xl/pull/1478))
+* Restore horizontal scroll position after scale change ([#494](https://github.com/lite-xl/lite-xl/pull/494))
+* Allowed for overrides of toolbar items ([#1157](https://github.com/lite-xl/lite-xl/pull/1157))
+* detectindent: fix wrong detection reported by Adam ([#1500](https://github.com/lite-xl/lite-xl/pull/1500))
+* Move lineguide below blinking cursor, fixes #1488 ([#1511](https://github.com/lite-xl/lite-xl/pull/1511))
+* Close lua state when exiting on a runtime error ([#1487](https://github.com/lite-xl/lite-xl/pull/1487))
+* Add mouse grab ([#1501](https://github.com/lite-xl/lite-xl/pull/1501))
+* Add top tab margins ([#1479](https://github.com/lite-xl/lite-xl/pull/1479))
+* Increase number of loadable glyphsets ([#1524](https://github.com/lite-xl/lite-xl/pull/1524))
+
+## [2.1.0] - 2022-11-01
+
+### New Features
+* Make distinction between
+  [line and block comments](https://github.com/lite-xl/lite-xl/pull/771),
+  and added all appropriate functionality to the commenting/uncommenting lines.
+
+* [Added in line paste mode](https://github.com/lite-xl/lite-xl/pull/713),
+  if you copy without a selection.
+
+* Many [improvements to treeview](https://github.com/lite-xl/lite-xl/pull/732),
+  including keyboard navigation of treeview, and ability to specify single vs.
+  double-click behavior.
+
+* Added in [soft line wrapping](https://github.com/lite-xl/lite-xl/pull/636)
+  as core plugin, under `linewrapping.lua`, use `F10` to activate.
+
+* Revamped [StatusView](https://github.com/lite-xl/lite-xl/pull/852) API with
+  new features that include:
+
+  * Support for predicates, click actions, tooltips on item hover
+    and custom drawing of added items.
+  * Hide items that are too huge by rendering with clip_rect.
+  * Ability to drag or scroll the left or right if too many items to display.
+  * New status bar commands accessible from the command palette that
+    include: toggling status bar visibility, toggling specific item visibility,
+    enable/disable status messages, etc...
+
+* Added `renderer.font.group` interface to set up
+  [font fallback groups](https://github.com/lite-xl/lite-xl/pull/616) in
+  the font renderer, if a token doesn't have a corresponding glyph.
+
+  **Example:**
+  ```lua
+  local emoji_font = renderer.font.load(USERDIR .. "/fonts/NotoEmoji-Regular.ttf", 15 * SCALE)
+  local nonicons = renderer.font.load(USERDIR .. "/fonts/nonicons.ttf", 15 * SCALE)
+  style.code_font = renderer.font.group({style.code_font, nonicons, emoji_font})
+  ```
+
+* Added in the ability to specify
+  [mouse clicks](https://github.com/lite-xl/lite-xl/pull/589) in the
+  keymap, allowing for easy binds of `ctrl+lclick`, and the like.
+
+  **Example:**
+  ```lua
+  keymap.add { ["ctrl+shift+3lclick"] = "core:open-log" }
+  ```
+
+* Improved ability for plugins to be loaded at a given time, by making the
+  convention of defining a config for the plugin using `common.merge` to merge
+  existing hashes together, rather than overwriting.
+
+* Releases will now include all language plugins and the
+  [settings gui](https://github.com/lite-xl/lite-xl-plugins/pull/65) plugin.
+
+* New [core.warn](https://github.com/lite-xl/lite-xl/pull/1005) was introduced.
+
+* Added [suggestions warping](https://github.com/lite-xl/lite-xl/pull/1003)
+  for `CommandView`.
+
+* Allow regexes in tokenizer to
+  [split tokens with group](https://github.com/lite-xl/lite-xl/pull/999).
+
+* Added [settings gui support](https://github.com/lite-xl/lite-xl/pull/995)
+  to core plugins.
+
+* Support for [stricter predicates](https://github.com/lite-xl/lite-xl/pull/990)
+  by appending a `!`, eg: `"core.docview!"`.
+
+* [UTF8 support in tokenizer](https://github.com/lite-xl/lite-xl/pull/945)
+  and new utf8 counter parts of string functions,
+  eg: `string.ulen`, `string.ulower`, etc...
+
+* Added [utf8 support](https://github.com/lite-xl/lite-xl/pull/986) on doc
+  lower and upper commands.
+
+* Allow syntax patterns to match with the
+  [beginning of the line](https://github.com/lite-xl/lite-xl/pull/860).
+
+  **Example:**
+  ```lua
+  { pattern = "^my_pattern_starting_at_beginning", type="symbol" }
+  ```
+
+* [Add View:on_file_dropped](https://github.com/lite-xl/lite-xl/pull/845).
+
+* Implemented new function to retrieve current process id of lite-xl
+  [system.get_process_id()](https://github.com/lite-xl/lite-xl/pull/833).
+
+* [Allow functions in keymap](https://github.com/lite-xl/lite-xl/pull/948).
+
+* [Add type ahead to CommandView](https://github.com/lite-xl/lite-xl/pull/963).
+
+* Add syntax symbols to
+  [auto-complete](https://github.com/lite-xl/lite-xl/pull/913).
+
+* Add [animation categories](https://github.com/lite-xl/lite-xl/pull/941)
+  to enable finer transitions control.
+
+* Added in a [native plugin](https://github.com/lite-xl/lite-xl/pull/527)
+  interface that allows for C-level interfacing with a statically-linked
+  lite-xl. The implementation of this may change in future.
+
+* Config: added new development option to prevent plugin version checking at
+  startup named [skip_plugins_version](https://github.com/lite-xl/lite-xl/pull/879)
+
+* Added a smoothing and strikethrough option to font loading
+  ([#1087](https://github.com/lite-xl/lite-xl/pull/1087))
+
+* Allow command predicates to manage parameters, allow overwriting commands
+  ([#1098](https://github.com/lite-xl/lite-xl/pull/1098))
+
+* Added in simple directory search to treeview.
+  ([#1110](https://github.com/lite-xl/lite-xl/pull/1110))
+
+* Added in native modules suffixes.
+  ([#1111](https://github.com/lite-xl/lite-xl/pull/1111))
+
+* plugin scale: added option to set default scale
+  ([#1115](https://github.com/lite-xl/lite-xl/pull/1115))
+
+* Added in ability to have init.so as a require for cpath.
+  ([#1126](https://github.com/lite-xl/lite-xl/pull/1126))
+
+* Added system.raise_window() ([#1131](https://github.com/lite-xl/lite-xl/pull/1131))
+
+* Initial horizontal scrollbar support ([#1124](https://github.com/lite-xl/lite-xl/pull/1124))
+
+* IME support ([#991](https://github.com/lite-xl/lite-xl/pull/991))
+
+### Performance Improvements
+
+* [Load space metrics only when creating font](https://github.com/lite-xl/lite-xl/pull/1032)
+
+* [Performance improvement](https://github.com/lite-xl/lite-xl/pull/883)
+  of detect indent plugin.
+
+* Improve performance of
+  [ren_draw_rect](https://github.com/lite-xl/lite-xl/pull/935).
+
+* Improved [tokenizer performance](https://github.com/lite-xl/lite-xl/pull/896).
+
+* drawwhitespace: [Cache whitespace location](https://github.com/lite-xl/lite-xl/pull/1030)
+
+* CommandView: improve performance by
+  [only drawing visible](https://github.com/lite-xl/lite-xl/pull/1047)
+
+### Backward Incompatible Changes
+* [Upgraded Lua to 5.4](https://github.com/lite-xl/lite-xl/pull/781), which
+  should improve performance, and provide useful extra functionality. It should
+  also be more available out of the box with most modern
+  linux/unix-based package managers.
+
+* Bumped plugin mod-version number as various interfaces like: `DocView`,
+  `StatusView` and `CommandView` have changed which should require a revision
+  from plugin developers to make sure their plugins work with this new release.
+
+* Changed interface for key handling; now, all components should return true if
+  they've handled the event.
+
+* For plugin developers, declaring config options by directly assigning
+  to the plugin table (eg: `config.plugins.plugin_name.myvalue = 10`) was
+  deprecated in favor of using `common.merge`.
+
+  **Example:**
+  ```lua
+  config.plugins.autowrap = common.merge({
+    enabled = false,
+    files = { "%.md$", "%.txt$" }
+  }, config.plugins.autowrap)
+  ```
+
+* `DocView:draw_text_line` and related functions been used by plugin developers
+  require a revision, since some of this interfaces were updated to support
+  line wrapping.
+
+* Removed `cp_replace`, and replaced this with a core plugin,
+  [drawwhitespace.lua](https://github.com/lite-xl/lite-xl/pull/908).
+
+### Deprecated Features
+* For plugins the usage of the `--lite-xl` version tag was dropped
+  in favor of `--mod-version`.
+
+* Overriding `StatusView:get_items()` has been deprecated in favor of
+  the new dedicated interface to insert status bar items:
+
+  **New Interface:**
+  ```lua
+  ------@return StatusView.Item
+  function StatusView:add_item(
+    { predicate, name, alignment, get_item, command, position, tooltip, separator }
+  ) end
+  ```
+
+  **Example:**
+  ```lua
+  core.status_view:add_item({
+    predicate = nil,
+    name = "status:memory-usage",
+    alignment = StatusView.Item.RIGHT,
+    get_item = function()
+      return {
+        style.text,
+        string.format(
+          "%.2f MB",
+          (math.floor(collectgarbage("count") / 10.24) / 100)
+        )
+      }
+    end,
+    command = nil,
+    position = 1,
+    tooltip = "lua memory usage",
+    separator = core.status_view.separator2
+  })
+  ```
+
+* [CommandView:enter](https://github.com/lite-xl/lite-xl/pull/1004) now accepts
+  a single options table as a parameter, meaning that the old way of calling
+  this function will now show a deprecation message. Also `CommandView:set_text`
+  and `CommandView:set_hidden_suggestions` has been
+  [deprecated](https://github.com/lite-xl/lite-xl/pull/1014).
+
+  **Example:**
+  ```lua
+  core.command_view:enter("Title", {
+    submit = function() end,
+    suggest = function() return end,
+    cancel = function() end,
+    validate = function() return true end,
+    text = "",
+    select_text = false,
+    show_suggestions = true,
+    typeahead = true,
+    wrap = true
+  })
+  ```
+
+### Other Changes
+* Removed `dmon`, and implemented independent backends for dirmonitoring. Also
+  more cleanly split out dirmonitoring into its own class in lua, from core.init.
+  We should now support FreeBSD; and any other system that uses `kqueue` as
+  their dir monitoring library. We also have a dummy-backend, which reverts
+  transparently to scanning if there is some issue with applying OS-level
+  watches (such as system limits).
+
+* Removed `libagg` and the font renderer; compacted all font rendering into a
+  single renderer.c file which uses `libfreetype` directly. Now allows for ad-hoc
+  bolding, italics, and underlining of fonts.
+
+* Removed `reproc` and replaced this with a simple POSIX/Windows implementation
+  in `process.c`. This allows for greater tweakability (i.e. we can now `break`
+  for debugging purposes), performance (startup time of subprocesses is
+  noticeably shorter), and simplicity (we no longer have to link reproc, or
+  winsock, on windows).
+
+* [Split out `Node` and `EmptyView`](https://github.com/lite-xl/lite-xl/pull/715)
+  into their own lua files, for plugin extensibility reasons.
+
+* Improved fuzzy_matching to probably give you something closer to what you're
+  looking for.
+
+* Improved handling of alternate keyboard layouts.
+
+* Added in a default keymap for `core:restart`, `ctrl+shift+r`.
+
+* Improvements to the [C and C++](https://github.com/lite-xl/lite-xl/pull/875)
+  syntax files.
+
+* Improvements to [markdown](https://github.com/lite-xl/lite-xl/pull/862)
+  syntax file.
+
+* [Improvements to borderless](https://github.com/lite-xl/lite-xl/pull/994)
+  mode on Windows.
+
+* Fixed a bunch of problems relating to
+  [multi-cursor](https://github.com/lite-xl/lite-xl/pull/886).
+
+* NagView: [support vscroll](https://github.com/lite-xl/lite-xl/pull/876) when
+  message is too long.
+
+* Meson improvements which include:
+  * Added in meson wraps for freetype, pcre2, and SDL2 which target public,
+    rather than lite-xl maintained repos.
+  * [Seperate dirmonitor logic](https://github.com/lite-xl/lite-xl/pull/866),
+    add build time detection of features.
+  * Add [fallbacks](https://github.com/lite-xl/lite-xl/pull/798) to all
+    common dependencies.
+  * [Update SDL to 2.0.20](https://github.com/lite-xl/lite-xl/pull/884).
+  * install [docs/api](https://github.com/lite-xl/lite-xl/pull/979) to datadir
+    for lsp support.
+
+* Always check if the beginning of the
+  [text needs to be clipped](https://github.com/lite-xl/lite-xl/pull/871).
+
+* Added [git commit](https://github.com/lite-xl/lite-xl/pull/859)
+  on development builds.
+
+* Update [autocomplete](https://github.com/lite-xl/lite-xl/pull/832)
+  with changes needed for latest LSP plugin.
+
+* Use SDL to manage color format mapping in
+  [ren_draw_rect](https://github.com/lite-xl/lite-xl/pull/829).
+
+* Various code [clean ups](https://github.com/lite-xl/lite-xl/pull/826).
+
+* [Autoreload Nagview](https://github.com/lite-xl/lite-xl/pull/942).
+
+* [Enhancements to scrollbar](https://github.com/lite-xl/lite-xl/pull/916).
+
+* Set the correct working directory for the
+  [AppImage version](https://github.com/lite-xl/lite-xl/pull/937).
+
+* Core: fixes and changes to
+  [temp file](https://github.com/lite-xl/lite-xl/pull/906) functions.
+
+* [Added plugin load-time log](https://github.com/lite-xl/lite-xl/pull/966).
+
+* TreeView improvements for
+  [multi-project](https://github.com/lite-xl/lite-xl/pull/1010).
+
+* Open LogView on user/project
+  [module reload error](https://github.com/lite-xl/lite-xl/pull/1022).
+
+* Check if ["open" pattern is escaped](https://github.com/lite-xl/lite-xl/pull/1034)
+
+* Support [UTF-8 on Windows](https://github.com/lite-xl/lite-xl/pull/1041) (Lua)
+
+* Make system.* functions support
+  [UTF8 filenames on windows](https://github.com/lite-xl/lite-xl/pull/1042)
+
+* [Fix memory leak](https://github.com/lite-xl/lite-xl/pull/1039) and wrong
+  check in font_retrieve
+
+* CommandView: do not change caret size with config.line_height
+  ([#1080](https://github.com/lite-xl/lite-xl/pull/1080))
+
+* Fixed process layer argument quoting; allows for strings with spaces
+  ([#1132](https://github.com/lite-xl/lite-xl/pull/1132))
+
+* Draw lite-xl icon in TitleView ([#1143](https://github.com/lite-xl/lite-xl/pull/1143))
+
+* Add parameter validation to checkcolor and f_font_group
+  ([#1145](https://github.com/lite-xl/lite-xl/pull/1145))
+
+* Many, many, many more changes that are too numerous to list.
+
 ## [2.1.1] - 2022-12-29
 
 ### New Features
@@ -1004,6 +1590,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.0.0]: https://github.com/pragtical/pragtical/releases/tag/v3.0.0
 [2.1.1]: https://github.com/lite-xl/lite-xl/releases/tag/v2.1.1
 [2.1.0]: https://github.com/lite-xl/lite-xl/releases/tag/v2.1.0
 [2.0.5]: https://github.com/lite-xl/lite-xl/releases/tag/v2.0.5
