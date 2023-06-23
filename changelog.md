@@ -77,7 +77,7 @@
 ### Backward Incompatible Changes
 
 * Language plugins file match pattern will no longer support using the `^`
-  pattern to match the beginning of a file, `/` should be used instead
+  pattern to match the beginning of a file, `PATHSEP` should be used instead
 
 ### UI Enhancements
 
@@ -158,7 +158,6 @@
 * do not allow users to create an empty font group ([#1303](https://github.com/lite-xl/lite-xl/pull/1303))
 * Make api_require's nodes const ([#1296](https://github.com/lite-xl/lite-xl/pull/1296))
 * Fix a memory leak ([#1305](https://github.com/lite-xl/lite-xl/pull/1305))
-* Don't set a value twice ([#1306](https://github.com/lite-xl/lite-xl/pull/1306))
 * Don't set a value twice ([#1306](https://github.com/lite-xl/lite-xl/pull/1306))
 * Make dirwatch sorting compatible with what file_bisect expects ([#1300](https://github.com/lite-xl/lite-xl/pull/1300))
 * Handle readlink errors ([#1292](https://github.com/lite-xl/lite-xl/pull/1292))
