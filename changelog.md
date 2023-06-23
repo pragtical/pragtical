@@ -1,6 +1,6 @@
 # Changes Log
 
-## [3.0.0] - 2023-MM-DD
+## [3.0.0] - 2023-06-22
 
 ### New Features
 
@@ -104,7 +104,7 @@
 * Add missing config spec settings to treeview
   ([d71175d1](https://github.com/pragtical/pragtical/commit/d71175d1c7f676044ac538eb35fdda47d09d521c))
 
-* Better coroutine handing on no focus
+* Better coroutine handling on no focus
   ([456b8b25](https://github.com/pragtical/pragtical/commit/456b8b25da4f66485c2cdbb0f0a572d4c023e3b5))
 
 ### Fixes
