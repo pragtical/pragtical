@@ -1,8 +1,8 @@
 [wrap-file]
-directory = SDL-70e43c150ec377d5aad2ca238752b1140abc03f0
-source_url = https://github.com/libsdl-org/SDL/archive/70e43c150ec377d5aad2ca238752b1140abc03f0.zip
-source_filename = SDL-70e43c150ec377d5aad2ca238752b1140abc03f0.zip
-source_hash = c1cf0513eab1318dc2f0030c5dffd9cdb6b24b37c0022f3b0d7da5ef18b3d711
+directory = SDL-d4519aafd3d1f3f54cef62ba09c016e6f913a772
+source_url = https://github.com/libsdl-org/SDL/archive/d4519aafd3d1f3f54cef62ba09c016e6f913a772.zip
+source_filename = SDL-d4519aafd3d1f3f54cef62ba09c016e6f913a772.zip
+source_hash = ece01a436780e438120a08aaeeeda08830eb296ee1cbf194b21bd89a67c7cbf1
 patch_directory = sdl3
 
 [provide]
