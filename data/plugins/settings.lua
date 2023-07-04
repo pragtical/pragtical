@@ -1543,6 +1543,9 @@ function Settings:load_plugin_settings()
           settings.config.enabled_plugins
           and
           settings.config.enabled_plugins[plugin]
+          and
+          --ensure plugin is not disabled on user or project module
+          config.plugins[plugin] ~= false
         )
       then
         enabled = true
@@ -1877,7 +1880,7 @@ function core.run()
   -- load plugins disabled by default and enabled by user
   if settings.config.enabled_plugins then
     for name, _ in pairs(settings.config.enabled_plugins) do
-      if not config.plugins[name] then
+      if config.plugins[name] == nil then
         require("plugins." .. name)
       end
     end
