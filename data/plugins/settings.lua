@@ -628,8 +628,8 @@ settings.add("Development",
       description = "The maximum amount of entries to keep on the log UI.",
       path = "max_log_items",
       type = settings.type.NUMBER,
-      default = 80,
-      min = 50,
+      default = 800,
+      min = 150,
       max = 2000
     },
     {
