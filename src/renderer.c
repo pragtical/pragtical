@@ -4,11 +4,11 @@
 #include <assert.h>
 #include <math.h>
 #include <ft2build.h>
-#include <freetype/ftlcdfil.h>
-#include <freetype/ftoutln.h>
-#include <freetype/ftsnames.h>
-#include <freetype/ttnameid.h>
 #include FT_FREETYPE_H
+#include FT_LCD_FILTER_H
+#include FT_OUTLINE_H
+#include FT_TRUETYPE_IDS_H
+#include FT_SFNT_NAMES_H
 
 #ifdef _WIN32
 #include <windows.h>
