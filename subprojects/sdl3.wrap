@@ -1,0 +1,9 @@
+[wrap-file]
+directory = SDL-70e43c150ec377d5aad2ca238752b1140abc03f0
+source_url = https://github.com/libsdl-org/SDL/archive/70e43c150ec377d5aad2ca238752b1140abc03f0.zip
+source_filename = SDL-70e43c150ec377d5aad2ca238752b1140abc03f0.zip
+source_hash = c1cf0513eab1318dc2f0030c5dffd9cdb6b24b37c0022f3b0d7da5ef18b3d711
+patch_directory = sdl3
+
+[provide]
+sdl3 = sdl3_dep

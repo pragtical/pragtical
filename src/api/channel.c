@@ -19,6 +19,7 @@
 #include "channel.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct channel_value_pair {
@@ -55,9 +56,9 @@ typedef struct channel {
     ChannelValue** last;
   } queue;
 
-  SDL_atomic_t ref;
-  SDL_mutex* mutex;
-  SDL_cond* cond;
+  SDL_AtomicInt ref;
+  SDL_Mutex* mutex;
+  SDL_Condition* cond;
   unsigned int sent;
   unsigned int received;
 
@@ -77,7 +78,7 @@ typedef struct channel_list {
 static ChannelList g_channels = { NULL, &(g_channels).first };
 
 /* Mutex initialized when plugin is loaded */
-SDL_mutex* ChannelsListMutex = NULL;
+SDL_Mutex* ChannelsListMutex = NULL;
 
 /* --------------------------------------------------------
  * Channel private functions
@@ -289,7 +290,7 @@ static int channelPush(Channel* c, ChannelValue* v)
   c->queue.last = &v->next;
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 
   return ++c->sent;
 }
@@ -298,12 +299,12 @@ static const ChannelValue* channelWait(Channel *c)
 {
   SDL_LockMutex(c->mutex);
   while (c->queue.first == NULL)
-    SDL_CondWait(c->cond, c->mutex);
+    SDL_WaitCondition(c->cond, c->mutex);
 
   ++ c->received;
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 
   return c->queue.first;
 }
@@ -316,7 +317,7 @@ static void channelSupply(Channel* c, ChannelValue* v)
 
   id = channelPush(c, v);
   while (!channelGiven(id, c->received))
-    SDL_CondWait(c->cond, c->mutex);
+    SDL_WaitCondition(c->cond, c->mutex);
 }
 
 static void channelClear(Channel* c)
@@ -335,7 +336,7 @@ static void channelClear(Channel* c)
   c->queue.last = &c->queue.first;
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 }
 
 static void channelPop(Channel* c)
@@ -344,7 +345,7 @@ static void channelPop(Channel* c)
 
   if (c->queue.first == NULL) {
     SDL_UnlockMutex(c->mutex);
-    SDL_CondBroadcast(c->cond);
+    SDL_BroadcastCondition(c->cond);
     return;
   }
 
@@ -360,7 +361,7 @@ static void channelPop(Channel* c)
   channelValueFree(previous_first);
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 }
 
 static void removeChannelFromList(Channel* c)
@@ -401,7 +402,7 @@ static void channelFree(Channel* c)
   channelClear(c);
 
   SDL_DestroyMutex(c->mutex);
-  SDL_DestroyCond(c->cond);
+  SDL_DestroyCondition(c->cond);
 
   free(c->name);
   free(c);
@@ -452,7 +453,7 @@ int f_channel_get(lua_State *L)
       error_message = SDL_GetError();
       goto fail;
     }
-    if ((c->cond = SDL_CreateCond()) == NULL) {
+    if ((c->cond = SDL_CreateCondition()) == NULL) {
       error_message = SDL_GetError();
       goto fail;
     }
@@ -481,7 +482,7 @@ fail:
   if (c->mutex)
     SDL_DestroyMutex(c->mutex);
   if (c->cond)
-    SDL_DestroyCond(c->cond);
+    SDL_DestroyCondition(c->cond);
 
   free(c->name);
   free(c);
@@ -642,7 +643,7 @@ int m_channel_wait(lua_State *L)
   else
     channelValuePush(L, v);
 
-  SDL_CondBroadcast(self->cond);
+  SDL_BroadcastCondition(self->cond);
 
   return 1;
 }

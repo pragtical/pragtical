@@ -147,6 +147,7 @@ jobs:
           mingw-w64-${{ matrix.config.arch }}-gcc
           mingw-w64-${{ matrix.config.arch }}-meson
           mingw-w64-${{ matrix.config.arch }}-ninja
+          mingw-w64-${{ matrix.config.arch }}-cmake
           mingw-w64-${{ matrix.config.arch }}-ca-certificates
           mingw-w64-${{ matrix.config.arch }}-ntldd
     - name: Set Environment Variables
@@ -191,6 +192,10 @@ jobs:
           python-version: '3.x'
       - name: Install meson and ninja
         run: pip install meson ninja
+      - name: Install cmake
+        uses: jwlawson/actions-setup-cmake@v1.14
+        with:
+          cmake-version: 'latest'
       - name: Set up environment variables
         run: |
           "INSTALL_NAME=pragtical-$($env:GITHUB_REF -replace ".*/")-windows-msvc-${{ matrix.arch.name }}" >> $env:GITHUB_ENV

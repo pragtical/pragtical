@@ -24,7 +24,7 @@ system = {}
 ---
 ---Window events:
 --- * "quit"
---- * "displaychanged" -> idx
+--- * "scalechanged" -> scale
 --- * "moved" -> x, y
 --- * "resized" -> width, height (in points)
 --- * "exposed"

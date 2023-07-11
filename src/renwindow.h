@@ -6,6 +6,7 @@ struct RenWindow {
   uint8_t *command_buf;
   size_t command_buf_idx;
   size_t command_buf_size;
+  uint32_t format;
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   SDL_Renderer *renderer;
   SDL_Texture *texture;
