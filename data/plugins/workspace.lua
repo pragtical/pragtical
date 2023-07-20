@@ -206,17 +206,19 @@ end
 
 
 local function load_workspace()
-  local workspace = consume_workspace_file(core.project_dir)
-  if workspace then
-    local root = get_unlocked_root(core.root_view.root_node)
-    local active_view = load_node(root, workspace.documents)
-    if active_view then
-      core.set_active_view(active_view)
+  core.add_thread(function()
+    local workspace = consume_workspace_file(core.project_dir)
+    if workspace then
+      local root = get_unlocked_root(core.root_view.root_node)
+      local active_view = load_node(root, workspace.documents)
+      if active_view then
+        core.set_active_view(active_view)
+      end
+      for i, dir_name in ipairs(workspace.directories) do
+        core.add_project_directory(system.absolute_path(dir_name))
+      end
     end
-    for i, dir_name in ipairs(workspace.directories) do
-      core.add_project_directory(system.absolute_path(dir_name))
-    end
-  end
+  end)
 end
 
 
