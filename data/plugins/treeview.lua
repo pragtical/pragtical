@@ -10,7 +10,7 @@ local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
 local CommandView = require "core.commandview"
 local DocView = require "core.docview"
-local Dirwatch = require "core.dirwatch"
+local DirWatch = require "core.dirwatch"
 
 config.plugins.treeview = common.merge({
   -- Default treeview width
@@ -81,7 +81,7 @@ end
 function TreeView:get_cached(project, path)
   local t = self.cache[path]
   if not t then
-    if not self.watches[project] then self.watches[project] = Dirwatch.new() end
+    if not self.watches[project] then self.watches[project] = DirWatch() end
     local truncated = path:sub(#project.path + 2)
     local basename = common.basename(path)
     local info
@@ -559,7 +559,7 @@ core.add_thread(function()
         view.cache[directory] = nil
       end)
     end
-    coroutine.yield(0.01)
+    coroutine.yield(0.1)
   end
 end)
 

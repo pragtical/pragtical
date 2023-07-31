@@ -1,48 +1,44 @@
 local common = require "core.common"
 local config = require "core.config"
-local dirwatch = {}
+local Object = require "core.object"
 
-function dirwatch:__index(idx)
-  local value = rawget(self, idx)
-  if value ~= nil then return value end
-  return dirwatch[idx]
-end
 
----A directory watcher.
+---A wrapper around `dirmonitor` for filesystem monitoring that automatically
+---takes care of the native backend differences and provides some ease of use.
 ---
 ---It can be used to watch changes in files and directories.
----The user repeatedly calls dirwatch:check() with a callback inside a coroutine.
+---The user repeatedly calls DirWatch:check() with a callback inside a coroutine.
 ---If a file or directory had changed, the callback is called with the corresponding file.
 ---@class core.dirwatch
----@field scanned { [string]: number } Stores the last modified time of paths.
----@field watched { [string]: boolean|number } Stores the paths that are being watched, and their unique fd.
----@field reverse_watched { [number]: string } Stores the paths mapped by their unique fd.
+---@overload fun():core.dirwatch
+---@field scanned table<string,number> Stores the last modified time of paths.
+---@field watched table<string,boolean|number> Stores the paths that are being watched, and their unique fd.
+---@field reverse_watched table<number,string> Stores the paths mapped by their unique fd.
 ---@field monitor dirmonitor The dirmonitor instance associated with this watcher.
 ---@field single_watch_top string The first file that is being watched.
 ---@field single_watch_count number Number of files that are being watched.
+local DirWatch = Object:extend()
 
----Creates a directory monitor.
----@return core.dirwatch
-function dirwatch.new()
-  local t = {
-    scanned = {},
-    watched = {},
-    reverse_watched = {},
-    monitor = dirmonitor.new(),
-    single_watch_top = nil,
-    single_watch_count = 0
-  }
-  setmetatable(t, dirwatch)
-  return t
+
+---Constructor.
+function DirWatch:new()
+  self.scanned = {}
+  self.watched = {}
+  self.reverse_watched = {}
+  self.monitor = dirmonitor.new()
+  self.single_watch_top = nil
+  self.single_watch_count = 0
 end
 
 
----Schedules a path for scanning.
----If a path points to a file, it is watched directly.
----Otherwise, the contents of the path are watched (non-recursively).
+---Similar to `DirWatch:watch` but not using the native `dirmonitor` backends
+---and instead relying on continuous file timestamps monitoring which is slower,
+---should not be used unless necessary.
+---
+---Adding a directory using this function will not report child changes.
 ---@param path string
 ---@param  unwatch? boolean If true, remove this directory from the watch list.
-function dirwatch:scan(path, unwatch)
+function DirWatch:scan(path, unwatch)
   if unwatch == false then return self:unwatch(path) end
   self.scanned[path] = system.get_file_info(path).modified
 end
@@ -58,7 +54,7 @@ end
 ---system resource exhaustion.
 ---@param path string The path to watch. This should be an absolute path.
 ---@param unwatch? boolean If true, the path is removed from the watch list.
-function dirwatch:watch(path, unwatch)
+function DirWatch:watch(path, unwatch)
   if unwatch == false then return self:unwatch(path) end
   local info = system.get_file_info(path)
   if not info then return end
@@ -94,25 +90,27 @@ function dirwatch:watch(path, unwatch)
   end
 end
 
----Removes a path from the watch list.
----@param directory string The path to remove. This should be an absolute path.
-function dirwatch:unwatch(directory)
-  if self.watched[directory] then
+
+---Removes a path from the watch or scan list.
+---@param path string The path to remove. This should be an absolute path.
+function DirWatch:unwatch(path)
+  if self.watched[path] then
     if self.monitor:mode() == "multiple" then
-      self.monitor:unwatch(self.watched[directory])
-      self.reverse_watched[directory] = nil
+      self.monitor:unwatch(self.watched[path])
+      self.reverse_watched[path] = nil
     else
       self.single_watch_count = self.single_watch_count - 1
       if self.single_watch_count == 0 then
         self.single_watch_top = nil
-        self.monitor:unwatch(directory)
+        self.monitor:unwatch(path)
       end
     end
-    self.watched[directory] = nil
-  elseif self.scanned[directory] then
-    self.scanned[directory] = nil
+    self.watched[path] = nil
+  elseif self.scanned[path] then
+    self.scanned[path] = nil
   end
 end
+
 
 ---Checks each watched paths for changes.
 ---This function must be called in a coroutine, e.g. inside a thread created with `core.add_thread()`.
@@ -120,7 +118,7 @@ end
 ---@param scan_time? number Maximum amount of time, in seconds, before the function yields execution.
 ---@param wait_time? number The duration to yield execution (in seconds).
 ---@return boolean # If true, a path had changed.
-function dirwatch:check(change_callback, scan_time, wait_time)
+function DirWatch:check(change_callback, scan_time, wait_time)
   local had_change = false
   self.monitor:check(function(id)
     had_change = true
@@ -133,11 +131,14 @@ function dirwatch:check(change_callback, scan_time, wait_time)
     elseif self.reverse_watched[id] then
       local path = self.reverse_watched[id]
       change_callback(path)
-      local info = system.get_file_info(path)
-      if info and info.type == "file" then
-        self:unwatch(path)
-        self:watch(path)
-      end
+      -- This causes indefinite changes reporting on inotify backend when the
+      -- first item added to watch is a file instead of a directory, maybe other
+      -- backends could need this? On inotify doesn't seems to be needed...
+      -- local info = system.get_file_info(path)
+      -- if info and info.type == "file" then
+      --   self:unwatch(path)
+      --   self:watch(path)
+      -- end
     end
   end)
   local start_time = system.get_time()
@@ -159,4 +160,5 @@ function dirwatch:check(change_callback, scan_time, wait_time)
   return had_change
 end
 
-return dirwatch
+
+return DirWatch
