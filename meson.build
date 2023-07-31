@@ -12,13 +12,22 @@ project('pragtical',
 version = meson.project_version()
 
 #===============================================================================
+# System dependency settings
+#===============================================================================
+use_system_lua = get_option('use_system_lua')
+
+#===============================================================================
 # If jit enabled search for luajit first to properly set project version
 #===============================================================================
 lua_jit_found = false
 if get_option('jit')
-    luajit_dep = dependency('luajit', required : false,
-        default_options: ['default_library=static']
-    )
+    if not use_system_lua
+        luajit_dep = subproject('luajit').get_variable('luajit_dep')
+    else
+        luajit_dep = dependency('luajit', required : false,
+            default_options: ['default_library=static']
+        )
+    endif
 
     if luajit_dep.found()
         lua_jit_found = true
@@ -91,7 +100,15 @@ if not get_option('source-only')
 
     default_fallback_options = ['warning_level=0', 'werror=false']
 
-    if not lua_jit_found
+    if not use_system_lua and not lua_jit_found
+        lua_dep = subproject('lua',
+        default_options: default_fallback_options + [
+                'default_library=static',
+                'line_editing=false',
+                'interpreter=false'
+            ]
+        ).get_variable('lua_dep')
+    elif not lua_jit_found
         # Lua has no official .pc file
         # so distros come up with their own names
         lua_names = [
