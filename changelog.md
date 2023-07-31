@@ -41,6 +41,9 @@
 
 * Updated all meson wraps to latest versions
 
+* comment typo in data/core/init.lua
+  ([#1549](https://github.com/lite-xl/lite-xl/pull/1549))
+
 ### Lite XL Inherited Changes
 
 * Fix #1538 log scrolls automatically (the real PR)
