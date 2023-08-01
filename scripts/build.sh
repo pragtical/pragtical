@@ -40,7 +40,7 @@ main() {
   local platform="$(get_platform_name)"
   local arch="$(get_platform_arch)"
   local build_dir="$(get_default_build_dir)"
-  local build_type="debug"
+  local build_type="debugoptimized"
   local prefix=/
   local force_fallback
   local bundle

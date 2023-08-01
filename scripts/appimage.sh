@@ -13,7 +13,7 @@ BUILD_DIR="$(get_default_build_dir)"
 RUN_BUILD=true
 STATIC_BUILD=false
 ADDONS=false
-BUILD_TYPE="debug"
+BUILD_TYPE="debugoptimized"
 
 show_help(){
   echo
