@@ -346,7 +346,14 @@ function core.init()
     else
       -- on macOS we can get an argument like "-psn_0_52353" that we just ignore.
       if not ARGS[i]:match("^-psn") then
-        local file_abs = system.absolute_path(".") .. PATHSEP .. common.normalize_path(arg_filename)
+        local filename = common.normalize_path(arg_filename)
+        local abs_filename = system.absolute_path(filename or "")
+        local file_abs
+        if filename == abs_filename then
+          file_abs = abs_filename
+        else
+          file_abs = system.absolute_path(".") .. PATHSEP .. filename
+        end
         if file_abs then
           table.insert(files, file_abs)
           project_dir = file_abs:match("^(.+)[/\\].+$")
