@@ -1132,7 +1132,8 @@ static void* api_require(const char* symbol) {
     P(tolstring), P(topointer), P(tothread), P(touserdata), P(type),
     P(typename), P(xmove), S(luaopen_base), S(luaopen_debug), S(luaopen_io),
     S(luaopen_math), S(luaopen_os), S(luaopen_package), S(luaopen_string),
-    S(luaopen_table), S(api_load_libs),
+    S(luaopen_table), S(api_load_libs), P(newuserdatauv), P(getiuservalue),
+    P(setiuservalue),
     #endif
     #if LUA_VERSION_NUM == 502 || LUA_VERSION_NUM == 503 || LUA_VERSION_NUM == 504
     U(buffinitsize), U(checkversion_), U(execresult), U(fileresult),
@@ -1158,8 +1159,7 @@ static void* api_require(const char* symbol) {
     P(insert), P(remove), P(replace),
     #endif
     #if LUA_VERSION_NUM == 504
-    U(addgsub), U(typeerror), P(closeslot), P(getiuservalue),
-    P(newuserdatauv), P(resetthread), P(setcstacklimit), P(setiuservalue),
+    U(addgsub), U(typeerror), P(closeslot), P(resetthread), P(setcstacklimit),
     P(setwarnf), P(toclose), P(warning),
     #endif
     #if LUA_VERSION_NUM == 502

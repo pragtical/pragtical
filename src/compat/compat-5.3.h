@@ -343,6 +343,21 @@ COMPAT53_API void luaL_requiref (lua_State *L, const char *modname,
 #endif /* Lua 5.1 and Lua 5.2 */
 
 
+/* declarations for Lua 5.1, 5.2 and 5.3 */
+#if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM < 504
+
+#define lua_newuserdatauv COMPAT53_CONCAT(COMPAT53_PREFIX, _newuserdatauv)
+COMPAT53_API void *lua_newuserdatauv( lua_State* L, size_t sz, int nuvalue);
+
+#define lua_getiuservalue COMPAT53_CONCAT(COMPAT53_PREFIX, _getiuservalue)
+COMPAT53_API int lua_getiuservalue( lua_State* L, int idx, int n);
+
+#define lua_setiuservalue COMPAT53_CONCAT(COMPAT53_PREFIX, _setiuservalue)
+COMPAT53_API int lua_setiuservalue( lua_State* L, int idx, int n);
+
+#endif /* Lua 5.1, 5.2 and 5.3 */
+
+
 
 /* LuaJIT missing implementations */
 #if LUA_JIT

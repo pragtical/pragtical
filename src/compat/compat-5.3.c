@@ -965,6 +965,72 @@ COMPAT53_API void luaL_requiref (lua_State *L, const char *modname,
 #endif /* Lua 5.1 and 5.2 */
 
 
+
+/* definitions for Lua 5.1, 5.2 and 5.3 */
+#if defined( LUA_VERSION_NUM ) && LUA_VERSION_NUM <= 503
+
+/*
+ * Implementations for newuserdatauv, getiuservalue and seriuservalue taken
+ * from: https://github.com/LuaLanes/lanes
+ */
+
+COMPAT53_API void* lua_newuserdatauv(lua_State* L, size_t sz, int nuvalue)
+{
+  if(nuvalue > 1)
+    luaL_error(
+      L,
+      "lua_newuserdatauv running in compat mode, condition failed: %s:%d '%s'",
+      __FILE__, __LINE__, "nuvalue > 1"
+    );
+
+  return lua_newuserdata(L, sz);
+}
+
+COMPAT53_API int lua_getiuservalue(lua_State* L, int idx, int n)
+{
+  if(n > 1)
+  {
+    lua_pushnil(L);
+    return LUA_TNONE;
+  }
+  lua_getuservalue(L, idx);
+
+#if LUA_VERSION_NUM == 501
+  /* default environment is not a nil (see lua_getfenv) */
+  lua_getglobal(L, "package");
+  if (lua_rawequal(L, -2, -1) || lua_rawequal(L, -2, LUA_GLOBALSINDEX))
+  {
+    lua_pop(L, 2);
+    lua_pushnil(L);
+
+    return LUA_TNONE;
+  }
+  lua_pop(L, 1);	/* remove package */
+#endif
+
+  return lua_type(L, -1);
+}
+
+COMPAT53_API int lua_setiuservalue(lua_State* L, int idx, int n)
+{
+  if(n > 1
+#if LUA_VERSION_NUM == 501
+    || lua_type(L, -1) != LUA_TTABLE
+#endif
+  )
+  {
+      lua_pop(L, 1);
+      return 0;
+  }
+
+  (void) lua_setuservalue(L, idx);
+  return 1; // I guess anything non-0 is ok
+}
+
+#endif /* Lua 5.1, 5.2 and 5.3 */
+
+
+
 /* LuaJIT missing implementations */
 #if LUA_JIT
 COMPAT53_API void lua_setlevel (lua_State *from, lua_State *to) {}
