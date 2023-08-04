@@ -5,21 +5,13 @@ set -e
 addons_download() {
   local build_dir="$1"
 
-  if [[ -d "${build_dir}/third/data/colors" ]]; then
+  if [[ -d "${build_dir}/third/data/plugins" ]]; then
     echo "Warning: found previous addons installation, skipping."
-    echo "  addons path: ${build_dir}/third/data/colors"
+    echo "  addons path: ${build_dir}/third/data/plugins"
     return 0
   fi
 
-  # Download third party color themes
-  curl --insecure \
-    -L "https://github.com/pragtical/colors/archive/master.zip" \
-    -o "${build_dir}/colors.zip"
-
-  mkdir -p "${build_dir}/third/data/colors"
-  unzip "${build_dir}/colors.zip" -d "${build_dir}"
-  mv "${build_dir}/colors-master/colors" "${build_dir}/third/data"
-  rm -rf "${build_dir}/colors-master"
+  mkdir -p "${build_dir}/third/data/plugins"
 
   # Downlaod thirdparty plugins
   curl --insecure \
@@ -37,9 +29,6 @@ addons_install() {
   local build_dir="$1"
   local data_dir="$2"
 
-  # Colors
-  cp -r "${build_dir}/third/data/colors" "${data_dir}"
-
   # Plugins
   mkdir -p "${data_dir}/plugins"
 
@@ -47,10 +36,6 @@ addons_install() {
     cp -r "${build_dir}/third/data/plugins/${plugin_name}.lua" \
       "${data_dir}/plugins/"
   done
-
-  # Language files
-  cp "${build_dir}/third/data/plugins/"language_* \
-      "${data_dir}/plugins/"
 }
 
 get_platform_name() {
