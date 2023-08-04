@@ -2,6 +2,7 @@ build*/
 .build*/
 submodules/
 subprojects/*/
+!subprojects/packagefiles
 /appimage*
 .vscode
 .cache

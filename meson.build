@@ -91,6 +91,7 @@ pragtical_link_args = []
 if host_machine.system() == 'darwin'
     pragtical_link_args += ['-framework', 'CoreServices', '-framework', 'Foundation']
 endif
+
 #===============================================================================
 # Dependencies
 #===============================================================================
@@ -262,6 +263,19 @@ endif
 foreach data_module : data_dirs
     install_subdir(join_paths('data', data_module), install_dir : pragtical_datadir)
 endforeach
+
+# Pull in widgets if neccesary
+fs = import('fs')
+if not fs.exists('data/widget/init.lua')
+    widget_path = subproject('widget').get_variable('widget_path')
+    install_subdir(
+        widget_path,
+        strip_directory : true,
+        install_dir : join_paths(pragtical_datadir, 'widget'),
+        exclude_files : ['meson.build', '.meson-subproject-wrap-hash.txt'],
+        exclude_directories : ['.git']
+    )
+endif
 
 configure_file(
     input : 'data/core/start.lua',

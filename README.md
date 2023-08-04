@@ -77,11 +77,21 @@ described below.
 
 ## Quick Build Guide
 
-First, clone this repository and initialize the widget submodule:
+First, clone this repository
 
 ```sh
 git clone https://github.com/pragtical/pragtical
-git submodule update --init
+```
+
+Optionally initialize the git submodules to get `widget` directly from git
+(if this step is omitted the `widget` **meson subproject** will be used instead
+which will retrieve the latest using git):
+
+```sh
+  git submodule update --init
+
+  # You may also want to update the submodules to latest commit
+  git submodule update --remote --merge
 ```
 
 If you compile Pragtical yourself, it is recommended to use the script
@@ -141,7 +151,7 @@ See the [licenses] directory for details on licenses used by the required depend
 [lite]:                 https://github.com/rxi/lite
 [website]:              https://pragtical.github.io
 [build]:                https://pragtical.github.io/documentation/build
-[Get Pragtical]:        https://github.com/pragtical/pragtical/releases/latest
+[Get Pragtical]:        https://github.com/pragtical/pragtical/releases
 [Get Plugins]:          https://github.com/pragtical/plugins
 [Get Color Themes]:     https://github.com/pragtical/colors
 [plugins repository]:   https://github.com/pragtical/plugins
