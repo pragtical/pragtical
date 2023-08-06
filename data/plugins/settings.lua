@@ -227,7 +227,9 @@ settings.add("General",
         "^desktop%.ini$", "^%.DS_Store$", "^%.directory$",
       },
       on_apply = function()
-        -- TODO recompile projects ignore files
+        for _, project in ipairs(core.projects) do
+          project:compile_ignore_files()
+        end
         core.add_thread(function()
           if treeview then
             treeview.cache = {}
