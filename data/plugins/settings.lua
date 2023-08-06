@@ -8,6 +8,14 @@ local style = require "core.style"
 local View = require "core.view"
 local DocView = require "core.docview"
 
+-- Load treeview if enabled
+local treeview
+core.add_thread(function()
+  if config.plugins.treeview ~= false then
+    treeview = require "plugins.treeview"
+  end
+end)
+
 -- check if widget is installed before proceeding
 local widget_found, Widget = pcall(require, "widget")
 if not widget_found then
@@ -219,7 +227,12 @@ settings.add("General",
         "^desktop%.ini$", "^%.DS_Store$", "^%.directory$",
       },
       on_apply = function()
-        -- TODO update treeview or projects ignore files
+        -- TODO recompile projects ignore files
+        core.add_thread(function()
+          if treeview then
+            treeview.cache = {}
+          end
+        end)
       end
     },
     {

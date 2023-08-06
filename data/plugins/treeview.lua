@@ -19,8 +19,8 @@ config.plugins.treeview = common.merge({
   expand_dirs_to_focused_file = false,
   scroll_to_focused_file = false,
   animate_scroll_to_focused_file = true,
-  show_hidden = false,
-  show_ignored = true
+  show_hidden = true,
+  show_ignored = false
 }, config.plugins.treeview)
 
 local tooltip_offset = style.font:get_height()
@@ -1030,6 +1030,28 @@ config.plugins.treeview.config_spec = {
     default = false,
     on_apply = function(value)
       view.visible = not value
+    end
+  },
+  {
+    label = "Show Hidden",
+    description = "Show hidden files and directories.",
+    path = "show_hidden",
+    type = "toggle",
+    default = true,
+    on_apply = function(value)
+      view.show_hidden = value
+      view.cache = {}
+    end
+  },
+  {
+    label = "Show Ignored",
+    description = "Show ignored files and directories.",
+    path = "show_ignored",
+    type = "toggle",
+    default = false,
+    on_apply = function(value)
+      view.show_ignored = value
+      view.cache = {}
     end
   },
   {
