@@ -18,17 +18,17 @@
   <screenshots>
     <screenshot type="default">
       <caption>The editor window</caption>
-      <image>https://pragtical.github.io/assets/img/editor.png</image>
+      <image>https://pragtical.dev/assets/img/editor.png</image>
     </screenshot>
   </screenshots>
 
-  <url type="homepage">https://pragtical.github.io</url>
+  <url type="homepage">https://pragtical.dev</url>
 
   <provides>
     <binary>pragtical</binary>
   </provides>
 
   <releases>
-    <release version="3.1.0" date="2023-07-31" />
+    <release version="3.1.1" date="2023-08-06" />
   </releases>
 </component>

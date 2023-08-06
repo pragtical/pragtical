@@ -1,5 +1,58 @@
 # Changes Log
 
+## [3.1.1] - 2023-08-06
+
+### New Features
+
+* Merged Windows dark title bar theme support from
+  [lite-xl/lite-xl#514](https://github.com/lite-xl/lite-xl/pull/514)
+  with some changes to make it less invasive
+  ([7ca48a83](https://github.com/pragtical/pragtical/commit/7ca48a8342496fe153edaada2f0f04002d52fb78))
+
+### Build System
+
+* CI Latest Builds: switched from debug to debugoptimized
+  ([cf880c5a](https://github.com/pragtical/pragtical/commit/cf880c5ad6a99523a1ff1ac1259e2b5f0dccbb1a))
+
+* Added widget as a meson subproject
+  ([bdddc4c6](https://github.com/pragtical/pragtical/commit/bdddc4c6385bf6a2be9e3684e0bdfc6cb807dd99))
+
+* Added colors and languages as meson subproject
+  ([111ca76f](https://github.com/pragtical/pragtical/commit/111ca76f925bafdd88f15f874caf8c84037fcf02))
+
+### Documentation
+
+* Fixed common.relative_path() doc comments
+  ([f44f10fa](https://github.com/pragtical/pragtical/commit/f44f10fa3aa08573b0e0d9866c97f84a9559717d))
+
+### UI Enhancements
+
+* Added GUI for treeview show hidden/ignored
+  ([64eee3d3](https://github.com/pragtical/pragtical/commit/64eee3d38d766aa28ecc5c60b01bb6cb85cdffb0))
+
+### Fixes
+
+* Do not append cwd to absolute files on startup
+  ([853e6b76](https://github.com/pragtical/pragtical/commit/853e6b7600b06c2560c67f94832921762650d8aa))
+
+### Other Changes
+
+* Added compat for lua 5.4 userdata (uv) functions
+  ([e048a9c8](https://github.com/pragtical/pragtical/commit/e048a9c839ce8c0646d4ee6e435149c63a176a2b))
+
+* Refactored core.project into a core.object
+  ([a5df5be8](https://github.com/pragtical/pragtical/commit/a5df5be84ff31af8125fdf4bd1ce4fab2162e280))
+  - Added doc comments
+  - Exposed compile_ignore_files() as a method
+
+* Recompile ignore patterns when changed from gui
+  ([c3edcafc](https://github.com/pragtical/pragtical/commit/c3edcafc595db7787c98e2260502b5d40a231121))
+
+### Lite XL Inherited Changes
+
+* Normalize stroke before adding keybind ([#1334](https://github.com/lite-xl/lite-xl/pull/1334))
+* Make DocView aware of scrollbars sizes ([#1177](https://github.com/lite-xl/lite-xl/pull/1177))
+
 ## [3.1.0] - 2023-07-31
 
 ### New Features
@@ -1316,6 +1369,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.1.1]: https://github.com/pragtical/pragtical/releases/tag/v3.1.1
 [3.1.0]: https://github.com/pragtical/pragtical/releases/tag/v3.1.0
 [3.0.0]: https://github.com/pragtical/pragtical/releases/tag/v3.0.0
 [2.1.1]: https://github.com/lite-xl/lite-xl/releases/tag/v2.1.1
