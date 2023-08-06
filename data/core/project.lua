@@ -1,17 +1,31 @@
-local Project = {}
-function Project.__index(self, k) return Project[k] end
-
-local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
+local Object = require "core.object"
 
--- inspect config.ignore_files patterns and prepare ready to use entries.
-local function compile_ignore_files()
+---Core projects class.
+---@class core.project : core.object
+---@overload fun(path:string):core.project
+---@field path string
+---@field name string
+---@field compiled table
+local Project = Object:extend()
+
+
+---Constructor
+function Project:new(path)
+  self.path = path
+  self.name = common.basename(path)
+  self:compile_ignore_files()
+end
+
+
+---Inspect config.ignore_files patterns and prepare ready to use entries.
+function Project:compile_ignore_files()
   local ipatterns = config.ignore_files
   local compiled = {}
   -- config.ignore_files could be a simple string...
   if type(ipatterns) ~= "table" then ipatterns = {ipatterns} end
-  for i, pattern in ipairs(ipatterns) do
+  for _, pattern in ipairs(ipatterns) do
     -- we ignore malformed pattern that raise an error
     if pcall(string.match, "a", pattern) then
       table.insert(compiled, {
@@ -22,22 +36,19 @@ local function compile_ignore_files()
       })
     end
   end
-  return compiled
+  self.compiled = compiled
 end
 
 
-function Project.new(path)
-  return setmetatable({ path = path, name = common.basename(path), compiled = compile_ignore_files() }, Project)
-end
-
-
--- The function below works like system.absolute_path except it
--- doesn't fail if the file does not exist. We consider that the
--- current dir is core.project_dir so relative filename are considered
--- to be in core.project_dir.
--- Please note that .. or . in the filename are not taken into account.
--- This function should get only filenames normalized using
--- common.normalize_path function.
+---The method works like system.absolute_path except it doesn't fail if the
+---file does not exist. We consider that the current dir is core.project_dir
+---so relative filename are considered to be in core.project_dir.
+---
+---Please note that .. or . in the filename are not taken into account.
+---This function should get only filenames normalized using
+---common.normalize_path function.
+---@param filename string
+---@return string|nil
 function Project:absolute_path(filename)
   if common.is_absolute_path(filename) then
     return common.normalize_path(filename)
@@ -50,14 +61,17 @@ function Project:absolute_path(filename)
 end
 
 
+---Same as common.normalize_path() with the addition of making the filename
+---relative when it belongs to the project.
+---@param filename string|nil
+---@return string|nil
 function Project:normalize_path(filename)
   filename = common.normalize_path(filename)
-  if common.path_belongs_to(filename, self.path) then
-    filename = common.relative_path(self.path, filename)
+  if common.path_belongs_to(filename or "", self.path) then
+    filename = common.relative_path(self.path, filename or "")
   end
   return filename
 end
-
 
 
 local function fileinfo_pass_filter(info, ignore_compiled)
@@ -80,24 +94,26 @@ local function fileinfo_pass_filter(info, ignore_compiled)
   return true
 end
 
-
--- compute a file's info entry completed with "filename" to be used
--- in project scan or falsy if it shouldn't appear in the list.
+---Compute a file's info entry completed with "filename" to be used
+---in project scan or false if it shouldn't appear in the list.
+---@param path string
+---@return system.fileinfo|false
 function Project:get_file_info(path)
   local info = system.get_file_info(path)
   -- info can be not nil but info.type may be nil if is neither a file neither
   -- a directory, for example for /dev/* entries on linux.
   if info and info.type then
     info.filename = path
-    return fileinfo_pass_filter(info, self.compiled) and info
+    return fileinfo_pass_filter(info, self.compiled) and info or false
   end
+  return false
 end
 
 
 local function find_files_rec(project, path)
   local all = system.list_dir(path) or {}
   for _, file in ipairs(all) do
-    local file = path .. PATHSEP .. file
+    file = path .. PATHSEP .. file
     local info = project:get_file_info(file)
     if info then
       info.filename = file
@@ -110,16 +126,13 @@ local function find_files_rec(project, path)
   end
 end
 
-
-
-
-
+---Returns iterator of all project files.
+---@return fun():core.project,string
 function Project:files()
   return coroutine.wrap(function()
     find_files_rec(self, self.path)
   end)
 end
-
 
 
 return Project
