@@ -702,10 +702,10 @@ function common.path_belongs_to(filename, path)
 end
 
 
----Checks whether a path is relative to another path.
+---Makes a path relative to the given reference directory when possible.
 ---@param ref_dir string The path to check against.
 ---@param dir string The input path.
----@return boolean
+---@return string
 function common.relative_path(ref_dir, dir)
   local drive_pattern = "^(%a):\\"
   local drive, ref_drive = dir:match(drive_pattern), ref_dir:match(drive_pattern)
