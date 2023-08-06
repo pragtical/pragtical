@@ -14,6 +14,7 @@
   #include <windows.h>
   #include <fileapi.h>
   #include "../utfconv.h"
+  #include "../windows/darkmode.h"
 
   // Windows does not define the S_ISREG and S_ISDIR macros in stat.h, so we do.
   // We have to define _CRT_INTERNAL_NONSTDC_NAMES 1 before #including sys/stat.h
@@ -184,6 +185,16 @@ top:
     case SDL_QUIT:
       lua_pushstring(L, "quit");
       return 1;
+
+#ifdef _WIN32
+    case SDL_SYSWMEVENT:
+      if (e.syswm.msg->msg.win.msg == WM_SETTINGCHANGE) {
+        if (e.syswm.msg->msg.win.lParam) {
+          windows_darkmode_set_theme(NULL, e.syswm.msg->msg.win.hwnd, true);
+        }
+      }
+      return 0;
+ #endif
 
     case SDL_WINDOWEVENT:
       if (e.window.event == SDL_WINDOWEVENT_RESIZED) {

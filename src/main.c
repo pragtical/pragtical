@@ -9,6 +9,7 @@
 
 #ifdef _WIN32
   #include <windows.h>
+  #include "windows/darkmode.h"
 #elif defined(__linux__)
   #include <unistd.h>
 #elif defined(__APPLE__)
@@ -177,6 +178,10 @@ int main(int argc, char **argv) {
 #endif
   );
 
+#ifdef _WIN32
+   windows_darkmode_set_theme(window, NULL, false);
+#endif
+
   SDL_DisplayMode dm;
   SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(window), &dm);
   SDL_SetWindowSize(window, dm.w * 0.8, dm.h * 0.8);
@@ -226,6 +231,10 @@ init_lua:
 #endif
   SDL_EventState(SDL_TEXTINPUT, SDL_ENABLE);
   SDL_EventState(SDL_TEXTEDITING, SDL_ENABLE);
+
+#ifdef _WIN32
+  SDL_EventState(SDL_SYSWMEVENT, SDL_ENABLE);
+#endif
 
   const char *init_code = \
     "local core\n"
