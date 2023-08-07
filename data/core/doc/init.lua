@@ -742,5 +742,25 @@ function Doc:on_close()
   core.log_quiet("Closed doc \"%s\"", self:get_name())
 end
 
+---Get the lua pattern used to match symbols on a document.
+---@return string
+function Doc:get_symbol_pattern()
+  return (self.syntax and self.syntax.symbol_pattern)
+    and self.syntax.symbol_pattern or config.symbol_pattern
+end
+
+---Get a string of characters not belonging to a word.
+---
+---Note: when setting `symbol` param to true the string of characters will be
+---retrieved from the document current syntax `symbol_non_word_chars` property
+---if available, otherwise will fallback to `config.non_word_chars`.
+---@param symbol boolean Indicates if non word characters are for a symbol
+---@return string
+function Doc:get_non_word_chars(symbol)
+  local non_word_chars = symbol and "symbol_non_word_chars" or "non_word_chars"
+  return (self.syntax and self.syntax[non_word_chars])
+    and self.syntax[non_word_chars] or config.non_word_chars
+end
+
 
 return Doc
