@@ -219,9 +219,9 @@ function LineWrapping.draw_guide(docview)
 end
 
 function LineWrapping.update_docview_breaks(docview)
-  local x,y,w,h = docview.v_scrollbar:get_thumb_rect()
+  local scrollbar_width = docview.v_scrollbar.expanded_size or style.expanded_scrollbar_size
   local width = (type(config.plugins.linewrapping.width_override) == "function" and config.plugins.linewrapping.width_override(docview))
-    or config.plugins.linewrapping.width_override or (docview.size.x - docview:get_gutter_width() - w)
+    or config.plugins.linewrapping.width_override or (docview.size.x - docview:get_gutter_width() - scrollbar_width)
   if (not docview.wrapped_settings or docview.wrapped_settings.width == nil or width ~= docview.wrapped_settings.width) then
     docview.scroll.to.x = 0
     LineWrapping.reconstruct_breaks(docview, docview:get_font(), width)
