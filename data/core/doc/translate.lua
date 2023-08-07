@@ -1,5 +1,4 @@
 local common = require "core.common"
-local config = require "core.config"
 
 -- functions for translating a Doc position to another position these functions
 -- can be passed to Doc:move_to|select_to|delete_to()
@@ -7,8 +6,8 @@ local config = require "core.config"
 local translate = {}
 
 
-local function is_non_word(char)
-  return config.non_word_chars:find(char, nil, true)
+local function is_non_word(doc, char)
+  return doc:get_non_word_chars():find(char, nil, true)
 end
 
 
@@ -33,7 +32,7 @@ function translate.previous_word_start(doc, line, col)
   while line > 1 or col > 1 do
     local l, c = doc:position_offset(line, col, -1)
     local char = doc:get_char(l, c)
-    if prev and prev ~= char or not is_non_word(char) then
+    if prev and prev ~= char or not is_non_word(doc, char) then
       break
     end
     prev, line, col = char, l, c
@@ -47,7 +46,7 @@ function translate.next_word_end(doc, line, col)
   local end_line, end_col = translate.end_of_doc(doc, line, col)
   while line < end_line or col < end_col do
     local char = doc:get_char(line, col)
-    if prev and prev ~= char or not is_non_word(char) then
+    if prev and prev ~= char or not is_non_word(doc, char) then
       break
     end
     line, col = doc:position_offset(line, col, 1)
@@ -61,7 +60,7 @@ function translate.start_of_word(doc, line, col)
   while true do
     local line2, col2 = doc:position_offset(line, col, -1)
     local char = doc:get_char(line2, col2)
-    if is_non_word(char)
+    if is_non_word(doc, char)
     or line == line2 and col == col2 then
       break
     end
@@ -75,7 +74,7 @@ function translate.end_of_word(doc, line, col)
   while true do
     local line2, col2 = doc:position_offset(line, col, 1)
     local char = doc:get_char(line, col)
-    if is_non_word(char)
+    if is_non_word(doc, char)
     or line == line2 and col == col2 then
       break
     end

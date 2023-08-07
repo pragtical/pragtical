@@ -5,6 +5,8 @@ syntax.add {
   name = "CSS",
   files = { "%.css$" },
   block_comment = { "/*", "*/" },
+  symbol_pattern = "[%a_%-#%.][%w_%-]*",
+  symbol_non_word_chars = " \t\n/\\()\"':,;<>~!@$%^&*|+=[]{}`?",
   patterns = {
     { pattern = "\\.",                type = "normal"   },
     { pattern = "//.*",               type = "comment"  },

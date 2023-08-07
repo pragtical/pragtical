@@ -5,7 +5,6 @@ local config = require "core.config"
 local command = require "core.command"
 local style = require "core.style"
 local keymap = require "core.keymap"
-local translate = require "core.doc.translate"
 local RootView = require "core.rootview"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
@@ -204,8 +203,9 @@ core.add_thread(function()
     if doc.disable_symbols then return s end
     local i = 1
     local symbols_count = 0
+    local symbol_pattern = doc:get_symbol_pattern()
     while i <= #doc.lines do
-      for sym in doc.lines[i]:gmatch(config.symbol_pattern) do
+      for sym in doc.lines[i]:gmatch(symbol_pattern) do
         if not s[sym] and not syntax_symbols[sym] then
           symbols_count = symbols_count + 1
           if symbols_count > max_symbols then
@@ -371,10 +371,29 @@ local function update_suggestions()
   suggestions_idx = 1
 end
 
+---Same as translate.start_of_word but uses `symbol_non_word_chars` instead.
+---@param doc core.doc
+---@param line integer
+---@param col integer
+---@return integer line
+---@return integer col
+local function translate_start_of_word(doc, line, col)
+  while true do
+    local line2, col2 = doc:position_offset(line, col, -1)
+    local char = doc:get_char(line2, col2)
+    if doc:get_non_word_chars(true):find(char, nil, true)
+    or line == line2 and col == col2 then
+      break
+    end
+    line, col = line2, col2
+  end
+  return line, col
+end
+
 local function get_partial_symbol()
   local doc = core.active_view.doc
   local line2, col2 = doc:get_selection()
-  local line1, col1 = doc:position_offset(line2, col2, translate.start_of_word)
+  local line1, col1 = doc:position_offset(line2, col2, translate_start_of_word)
   return doc:get_text(line1, col1, line2, col2)
 end
 
