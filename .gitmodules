@@ -1,3 +1,4 @@
 [submodule "data/widget"]
 	path = data/widget
 	url = https://github.com/pragtical/widget
+	branch = master
