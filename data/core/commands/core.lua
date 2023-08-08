@@ -100,42 +100,50 @@ command.add(nil, {
 
   ["core:open-file"] = function()
     local view = core.active_view
-    local text
+    local text, root_dir, filename = "", core.root_project().path, ""
     if view.doc and view.doc.abs_filename then
-      local dirname, filename = view.doc.abs_filename:match("(.*)[/\\](.+)$")
-      if dirname then
-        dirname = core.normalize_to_project_dir(dirname)
-        text = dirname == core.root_project().path and "" or common.home_encode(dirname) .. PATHSEP
+      local dirname = common.dirname(view.doc.abs_filename)
+      if dirname and common.path_belongs_to(dirname, root_dir) then
+        local dirname = core.normalize_to_project_dir(dirname)
+        text = dirname == root_dir and "" or common.home_encode(dirname) .. PATHSEP
+      elseif dirname then
+        root_dir = dirname
       end
     end
     core.command_view:enter("Open File", {
       text = text,
       submit = function(text)
-        local filename = system.absolute_path(common.home_expand(text))
         core.root_view:open_doc(core.open_doc(filename))
       end,
-      suggest = function (text)
-          return common.home_encode_list(common.path_suggest(common.home_expand(text)))
-        end,
+      suggest = function(text)
+        return common.home_encode_list(
+          common.path_suggest(common.home_expand(text), root_dir)
+        )
+      end,
       validate = function(text)
-          local filename = common.home_expand(text)
-          local path_stat, err = system.get_file_info(filename)
-          if err then
-            if err:find("No such file", 1, true) then
-              -- check if the containing directory exists
-              local dirname = common.dirname(filename)
-              local dir_stat = dirname and system.get_file_info(dirname)
-              if not dirname or (dir_stat and dir_stat.type == 'dir') then
-                return true
-              end
+        filename = root_dir == core.root_project().path and
+          core.root_project():absolute_path(
+            common.home_expand(text)
+          ) or system.absolute_path(
+            common.home_expand(root_dir .. PATHSEP .. text)
+          )
+        local path_stat, err = system.get_file_info(filename)
+        if err then
+          if err:find("No such file", 1, true) then
+            -- check if the containing directory exists
+            local dirname = common.dirname(filename)
+            local dir_stat = dirname and system.get_file_info(dirname)
+            if not dirname or (dir_stat and dir_stat.type == 'dir') then
+              return true
             end
-            core.error("Cannot open file %s: %s", text, err)
-          elseif path_stat.type == 'dir' then
-            core.error("Cannot open %s, is a folder", text)
-          else
-            return true
           end
-        end,
+          core.error("Cannot open file %s: %s", text, err)
+        elseif path_stat.type == 'dir' then
+          core.error("Cannot open %s, is a folder", text)
+        else
+          return true
+        end
+      end,
     })
   end,
 
