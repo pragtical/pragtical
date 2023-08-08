@@ -67,6 +67,7 @@ function EmptyView:new()
   self.background_color = style.background
   self.border.width = 0
   self.scrollable = true
+  self.first_draw = true
 
   self.title = "Pragtical"
   self.version = "version " .. VERSION
@@ -161,8 +162,8 @@ local function draw_text(self, x, y, calc_only)
     renderer.draw_text(icon_huge_font, "5", x, y, style.background2)
     renderer.draw_text(icon_huge_font, "6", x, y, style.text)
     renderer.draw_text(icon_huge_font, "7", x, y, style.caret)
-    renderer.draw_text(icon_huge_font, "8", x, y, style.dim)
-    x = renderer.draw_text(icon_huge_font, "9", x, y, common.lighten_color(style.dim, 25))
+    renderer.draw_text(icon_huge_font, "8", x, y, common.lighten_color(style.dim, 25))
+    x = renderer.draw_text(icon_huge_font, "9", x, y, common.lighten_color(style.dim, 45))
   else
     x, y = 0, 0
     x = style.big_font:get_width(self.title)
@@ -174,7 +175,10 @@ local function draw_text(self, x, y, calc_only)
 end
 
 function EmptyView:draw()
-  if not self:is_visible() then return false end
+  if not self:is_visible() or self.first_draw then
+    self.first_draw = false
+    return false
+  end
   EmptyView.super.draw(self)
   local _, oy = self:get_content_offset()
   draw_text(self, self.text_x, self.text_y + oy)
@@ -185,9 +189,10 @@ function EmptyView:update()
   if not EmptyView.super.update(self) then return false end
 
   self.background_color = style.background
-  self.recent_projects:update_position()
 
   if self.prev_size.x ~=  self.size.x or self.prev_size.y ~= self.size.y then
+    self.recent_projects:update_position()
+
     -- calculate all buttons width
     local buttons_w = 0
     for _, button in ipairs(buttons) do
