@@ -1,6 +1,14 @@
 local _G, _VERSION = _G, _VERSION
 local lua_version = _VERSION:sub(-3)
 
+-- detect LuaJIT (including LUAJIT_ENABLE_LUA52COMPAT compilation flag)
+local is_luajit, is_luajit52 = false, false
+if lua_version == "5.1" then
+   is_luajit = (string.dump(function() end) or ""):sub(1, 3) == "\027LJ"
+   is_luajit52 = is_luajit and
+      #setmetatable({}, { __len = function() return 1 end }) == 1
+end
+
 
 local M = _G
 
@@ -106,19 +114,55 @@ if lua_version < "5.3" then
       M.math.mininteger = minint
 
       function M.math.tointeger(n)
-         if type(n) == "number" and n <= maxint and n >= minint and n % 1 == 0 then
+         local n_type = type(n)
+         if is_luajit then
+            if n_type == "cdata" and tostring(n):match("U?LL$") then
+               return n
+            elseif n_type == "number" then
+               if tostring(n):match("%-") then
+                  return load("return " .. string.format("0x%xLL", n))()
+               else
+                  return load("return " .. string.format("0x%xULL", n))()
+               end
+            elseif n_type == "string" then
+               if
+                  string.match(n, "^0[xX][0-9a-fA-F]+$")
+                  or
+                  string.match(n, "^%-?[0-9]+$")
+                  or
+                  string.match(n, "^0[bB][0-1]+$")
+               then
+                  if n:match("%-") then
+                     return load("return " .. n .. "LL")()
+                  else
+                     return load("return " .. n .. "ULL")()
+                  end
+               elseif string.match(n, "^%d+%.%d+[eE][%+%-]%d+$") then
+                  local n_cdata_type = "ULL"
+                  if n:match("%-") then n_cdata_type = "LL" end
+                  return load("return "
+                     .. string.format("0x%x%s", tonumber(n), n_cdata_type)
+                  )()
+               end
+            end
+         elseif
+            n_type == "number" and n <= maxint and n >= minint and n % 1 == 0
+         then
             return n
          end
          return nil
       end
 
       function M.math.type(n)
-         if type(n) == "number" then
+         local n_type = type(n)
+         if n_type == "number" then
             if n <= maxint and n >= minint and n % 1 == 0 then
                return "integer"
             else
                return "float"
             end
+         elseif is_luajit and n_type == "cdata" and tostring(n):match("U?LL$") then
+            return "integer"
          else
             return nil
          end
@@ -138,8 +182,19 @@ if lua_version < "5.3" then
       end
 
       function M.math.ult(m, n)
-         m = checkinteger(m, "1", "math.ult")
-         n = checkinteger(n, "2", "math.ult")
+         if is_luajit then
+            local m_int = M.math.tointeger(m)
+            local n_int = M.math.tointeger(n)
+            if not m_int or not n_int then
+               error("bad arguments supplied, numbers expected", 0)
+            else
+               m = m_int
+               n = n_int
+            end
+         else
+            m = checkinteger(m, "1", "math.ult")
+            n = checkinteger(n, "2", "math.ult")
+         end
          if m >= 0 and n < 0 then
             return true
          elseif m < 0 and n >= 0 then
@@ -404,11 +459,6 @@ if lua_version < "5.3" then
 
    -- bring Lua 5.1 (and LuaJIT) up to speed with Lua 5.2
    if lua_version == "5.1" then
-      -- detect LuaJIT (including LUAJIT_ENABLE_LUA52COMPAT compilation flag)
-      local is_luajit = (string.dump(function() end) or ""):sub(1, 3) == "\027LJ"
-      local is_luajit52 = is_luajit and
-        #setmetatable({}, { __len = function() return 1 end }) == 1
-
       -- cache globals in upvalues
       local load, loadfile, loadstring, setfenv, xpcall =
             load, loadfile, loadstring, setfenv, xpcall
