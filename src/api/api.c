@@ -11,16 +11,16 @@ int luaopen_utf8extra(lua_State* L);
 int luaopen_encoding(lua_State* L);
 
 #ifdef LUA_JIT
-int luaopen_bit32(lua_State *L);
-int luaopen_compat53_string(lua_State *L);
-int luaopen_compat53_table(lua_State *L);
-int luaopen_compat53_utf8(lua_State *L);
-#define LUAJIT_COMPATIBILITY { "bit32", luaopen_bit32 }, \
-  { "compat53.string", luaopen_compat53_string }, \
-  { "compat53.table", luaopen_compat53_table }, \
-  { "compat53.utf8", luaopen_compat53_utf8 },
+  int luaopen_compat53_string(lua_State *L);
+  int luaopen_compat53_table(lua_State *L);
+  int luaopen_compat53_utf8(lua_State *L);
+  #define LUAJIT_COMPATIBILITY \
+    { "compat53.string", luaopen_compat53_string }, \
+    { "compat53.table", luaopen_compat53_table }, \
+    { "compat53.utf8", luaopen_compat53_utf8 },
 #else
-#define LUAJIT_COMPATIBILITY
+  int luaopen_bit(lua_State *L);
+  #define LUAJIT_COMPATIBILITY { "bit", luaopen_bit },
 #endif
 
 static const luaL_Reg libs[] = {

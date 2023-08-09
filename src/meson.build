@@ -57,6 +57,8 @@ if lua_jit_found
         'compat/ltablib.c',
         'compat/lutf8lib.c'
     ]
+else
+    pragtical_sources += 'compat/ljbitlib.c'
 endif
 
 pragtical_rc = []
