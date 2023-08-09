@@ -31,6 +31,8 @@ if LUAJIT then
   require "core.jitsetup"
   COMPAT_DISABLE_FIX_PATTERN = true
   require "compat"
+else
+  require "core.bit"
 end
 
 local suffix = PLATFORM == "Windows" and 'dll' or 'so'
