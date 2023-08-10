@@ -98,6 +98,7 @@ endif
 if not get_option('source-only')
     libm = cc.find_library('m', required : false)
     libdl = cc.find_library('dl', required : false)
+    librt = cc.find_library('rt', required : false)
 
     default_fallback_options = ['warning_level=0', 'werror=false']
 
@@ -198,7 +199,7 @@ if not get_option('source-only')
         default_options: default_fallback_options + sdl_options
     )
 
-    pragtical_deps = [lua_dep, sdl_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl]
+    pragtical_deps = [lua_dep, sdl_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 #===============================================================================
