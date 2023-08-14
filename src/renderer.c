@@ -1111,7 +1111,11 @@ RenWindow* ren_init(SDL_Window *win) {
   renwin_init_surface(window_renderer);
   renwin_init_command_buf(window_renderer);
   renwin_clip_to_surface(window_renderer);
+#ifdef PRAGTICAL_USE_SDL_RENDERER
   draw_rect_surface = SDL_CreateSurface(1, 1, window_renderer->format);
+#else
+  draw_rect_surface = SDL_CreateSurface(1, 1, SDL_PIXELFORMAT_RGBA32);
+#endif
 
   return window_renderer;
 }
