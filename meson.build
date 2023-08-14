@@ -20,7 +20,7 @@ use_system_lua = get_option('use_system_lua')
 # If jit enabled search for luajit first to properly set project version
 #===============================================================================
 lua_jit_found = false
-if get_option('jit')
+if get_option('jit') and meson.get_compiler('c').get_id() != 'msvc'
     if not use_system_lua
         luajit_dep = subproject('luajit').get_variable('luajit_dep')
     else
@@ -106,7 +106,7 @@ if not get_option('source-only')
         lua_dep = subproject('lua',
         default_options: default_fallback_options + [
                 'default_library=static',
-                'line_editing=false',
+                'line_editing=disabled',
                 'interpreter=false'
             ]
         ).get_variable('lua_dep')
@@ -287,7 +287,9 @@ endif
 # Pull extra languages
 if get_option('extra_languages')
     unix_shell = find_program('sh', required: false).found()
-    if host_machine.system() == 'windows' and not unix_shell
+    is_msvc = meson.get_compiler('c').get_id() == 'msvc'
+    if (host_machine.system() == 'windows' and not unix_shell) or is_msvc
+        unix_shell = false
         shell_command = find_program('cmd', required: false)
     endif
 
