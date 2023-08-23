@@ -1267,7 +1267,8 @@ function core.run()
   while true do
     core.frame_start = system.get_time()
     local has_focus = system.window_has_focus()
-    if core.redraw then
+    local forced_draw = core.redraw
+    if forced_draw then
       -- allow things like project search to keep working even without focus
       skip_no_focus = core.frame_start + 5
     end
@@ -1282,6 +1283,12 @@ function core.run()
     end
 
     local time_to_wake = run_threads()
+
+    -- respect coroutines redraw requests while on focus
+    if has_focus and not forced_draw and core.redraw then
+      skip_no_focus = core.frame_start + 5
+      next_step = nil
+    end
 
     if run_threads_mode == "background" then
       next_step = nil
