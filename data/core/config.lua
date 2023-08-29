@@ -121,7 +121,7 @@ config.always_show_tabs = true
 ---@alias config.highlightlinetype
 ---| true # Always highlight the current line.
 ---| false # Never highlight the current line.
----| "no_selection" Highlight the current line if no text is selected.
+---| "no_selection" # Highlight the current line if no text is selected.
 
 ---Highlights the current line.
 ---
@@ -212,12 +212,8 @@ config.draw_whitespace = false
 
 ---Disables system-drawn window borders.
 ---
----Note that on some Wayland platforms that doesn't have server-side
----decorations, window borders may still be drawn if Pragtical is compiled
----with libdecor support.
----
----In that case, this option can be safely disabled.
----Otherwise, no window decoration will be shown.
+---When set to true, Pragtical draws its own window decorations,
+---which can be useful for certain setups.
 ---
 ---Defaults to false.
 ---@type boolean
