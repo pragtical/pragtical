@@ -166,6 +166,7 @@ end
 ---Event handler for when the selection is confirmed.
 ---@param item core.contextmenu.item
 function ContextMenu:on_selected(item)
+  if item == DIVIDER then return end
   if type(item.command) == "string" then
     command.perform(item.command)
   else
@@ -218,13 +219,16 @@ function ContextMenu:on_mouse_pressed(button, px, py, clicks)
   local caught = false
 
   if self.show_context_menu then
+    local selected
     if button == "left" then
-      local selected = self:get_item_selected()
+      selected = self:get_item_selected()
       if selected then
         self:on_selected(selected)
       end
     end
-    self:hide()
+    if not selected or selected ~= DIVIDER then
+      self:hide()
+    end
     caught = true
   else
     if button == "right" then
