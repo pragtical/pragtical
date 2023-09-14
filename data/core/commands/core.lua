@@ -126,10 +126,12 @@ command.add(nil, {
             common.home_expand(text)
           ) or system.absolute_path(
             common.home_expand(root_dir .. PATHSEP .. text)
-          )
+          ) or system.absolute_path(
+            common.home_expand(text)
+          ) or filename
         local path_stat, err = system.get_file_info(filename)
         if err then
-          if err:find("No such file", 1, true) then
+          if filename ~= "" and err:find("No such file", 1, true) then
             -- check if the containing directory exists
             local dirname = common.dirname(filename)
             local dir_stat = dirname and system.get_file_info(dirname)
