@@ -469,7 +469,7 @@ function core.init()
       "Refused Plugins",
       string.format(
         "Some plugins are not loaded due to version mismatch. Expected version %s.\n\n%s.\n\n" ..
-        "Please download a recent version from https://github.com/pragtical/pragtical-plugins.",
+        "Please download a recent version from https://github.com/pragtical/plugins.",
         MOD_VERSION_STRING, table.concat(msg, ".\n\n")),
       opt, function(item)
         if item.text == "Exit" then os.exit(1) end
