@@ -1407,9 +1407,11 @@ function Settings:load_color_settings()
   listbox:add_column("Theme")
   listbox:add_column("Colors")
 
+  local current_theme = settings.config.theme or "default"
+
   for idx, details in ipairs(colors) do
     local name = details.name
-    if settings.config.theme and settings.config.theme == name then
+    if current_theme == name then
       listbox:set_selected(idx)
     end
     listbox:add_row({
