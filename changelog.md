@@ -1,5 +1,126 @@
 # Changes Log
 
+## [3.1.2] - 2023-09-24
+
+### New Features
+
+* Syntax files symbol_pattern, non_word_chars props
+  ([#12](https://github.com/pragtical/pragtical/pull/12))
+
+* New Welcome Screen - Converted emptyview to widget with additions
+  ([e08f1b18](https://github.com/pragtical/pragtical/commit/e08f1b18b28e26351a27dd9a5aeeb2bcc4c2d48f))
+
+### Fixes
+
+* Fixes #10 by using the scrollbar expanded size
+  ([#11](https://github.com/pragtical/pragtical/pull/11))
+
+* Fix core:open-file to not be dependant on chdir
+  ([47bfcb07](https://github.com/pragtical/pragtical/commit/47bfcb07bb1db489f97d2fa4a6c0432905eb87c0))
+
+* Respect coroutines redraw requests while on focus
+  ([f450b612](https://github.com/pragtical/pragtical/commit/f450b6124e53b83c5bf41d6261e79ecac555d0ce))
+
+* Do not process clicks on contextmenu divider
+  ([#22](https://github.com/pragtical/pragtical/pull/22))
+
+* Fixed issue with open file command
+  ([d8906c21](https://github.com/pragtical/pragtical/commit/d8906c2111b056438c142622c16c338fef61a70d))
+
+* MacOS: allow combining cmd+ctrl and replace alt with option
+  ([0674f1f5](https://github.com/pragtical/pragtical/commit/0674f1f5a5ebc0866b7e826eeacaadc355325e69))
+
+### Enhancements
+
+* Improvements to language_css
+  ([f2a0790d](https://github.com/pragtical/pragtical/commit/f2a0790d2c6b0ace73b66b31a5ea59ac60e7c3c4))
+
+* Better compat math.{tointeger|type|ult} for luajit
+  ([80bce6c0](https://github.com/pragtical/pragtical/commit/80bce6c0b1275050a779eac85e79dc472e309d91))
+
+* Added Mike Pall bitops library to non jit lua for consistency
+  ([5efc02a8](https://github.com/pragtical/pragtical/commit/5efc02a84350c544a6475255e04e5110eff083b7))
+
+* Use native bit operators on Lua >= 5.3
+  ([10cecbec](https://github.com/pragtical/pragtical/commit/10cecbec61015d1b3a01837f082b205d00da87b5))
+
+* Highlight CUDA source code the same as C++
+  ([#15](https://github.com/pragtical/pragtical/pull/15))
+
+### UI Enhancements
+
+* statusview: separate item for doc position percent
+  [lite-xl/lite-xl#1579](https://github.com/lite-xl/lite-xl/pull/1579)
+
+* Highlight default theme on settings ui, fixes #23
+  ([cd7181df](https://github.com/pragtical/pragtical/commit/cd7181dfa5f0d2d2a95081cf3096460b271beec6))
+
+* treeview: do not show hidden files by default
+  ([ecda0a0a](https://github.com/pragtical/pragtical/commit/ecda0a0ab7ff1c4f4795bb7af745ab728b5a6798))
+
+### Colors
+
+* Added new Yaru dark and light theme
+  ([5fa3cc13](https://github.com/pragtical/colors/commit/5fa3cc13fdf33f4ae7dc0d79c2b377f21761ec3c))
+
+* Improvements to tokyo-night
+  ([551c351d](https://github.com/pragtical/colors/commit/551c351d8c57818bcd350a4dae9d10e7c9506384))
+
+* Added solarized_dark theme
+  ([b9791efa](https://github.com/pragtical/colors/commit/b9791efad6d7c726b2485cb4126681067c2e3a1c))
+
+* Improvements to Monokai themes
+  ([79264c47](https://github.com/pragtical/colors/commit/79264c47449aa5d7f86c2f03558d2205931644eb))
+
+### Build System
+
+* Switch to an older ubuntu builder, fixes #13
+  ([#16](https://github.com/pragtical/pragtical/pull/16))
+
+* Fixes for msvc ci run
+  ([39caabc0](https://github.com/pragtical/pragtical/commit/39caabc0ac7775141c8cfaff0e53b12abe66d4d8))
+
+* Applied msvc fixes from [lite-xl/lite-xl#1572](https://github.com/lite-xl/lite-xl/pull/1577)
+
+* Rename latest builds to rolling
+  ([51754f33](https://github.com/pragtical/pragtical/commit/51754f3375d2cb3d0daae04e6014fa75fa8d45cd))
+
+### Widgets
+
+* Widget: delay RootView require
+* ListBox: rendering fixes
+* Skip ctrl+wheel by default, better tooltip remove
+* Fix floating ListBox rows offset
+* ListBox: horizontal scroll support
+* SelectBox: hide list when clicking outside
+* Better handle ctrl modkey state
+* Make widgets inherit name from parent ([#2](https://github.com/pragtical/widget/pull/2))
+* Give selectbox container same name as the selectbox ([#1](https://github.com/pragtical/widget/pull/1))
+
+### Lite XL Inherited Changes
+
+* Normalize strokes in fixed order
+  ([#1572](https://github.com/lite-xl/lite-xl/pull/1572))
+
+* fix(core): defer core:open-log until everything is loaded
+  ([#1585](https://github.com/lite-xl/lite-xl/pull/1585))
+
+* Fix scrollbar misinterpreting percent
+  ([#1587](https://github.com/lite-xl/lite-xl/pull/1587))
+
+* Fix returned percent when clicking the Scrollbar track
+  ([e07ea0fe](https://github.com/pragtical/pragtical/commit/e07ea0fe11b6dc02a9ed1edd4d2333db0846340a))
+
+* Adds super as a modkey. ([#1590](https://github.com/lite-xl/lite-xl/pull/1590))
+
+* Add NaN guard to View:update_scrollbar
+  ([aa0d6f6c](https://github.com/pragtical/pragtical/commit/aa0d6f6c71d4f02bbdbc09ef7f5984f50a21c87c))
+
+* Fixed C++14 digit separators ([#1593](https://github.com/lite-xl/lite-xl/pull/1593))
+
+* Fix Scrollbar.{expanded,contracted}_size documentation
+  ([70245ba0](https://github.com/pragtical/pragtical/commit/70245ba0862761237e6aabbc7f7a1f259402a4ee))
+
 ## [3.1.1] - 2023-08-06
 
 ### New Features
@@ -1369,6 +1490,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.1.2]: https://github.com/pragtical/pragtical/releases/tag/v3.1.2
 [3.1.1]: https://github.com/pragtical/pragtical/releases/tag/v3.1.1
 [3.1.0]: https://github.com/pragtical/pragtical/releases/tag/v3.1.0
 [3.0.0]: https://github.com/pragtical/pragtical/releases/tag/v3.0.0

@@ -9,7 +9,7 @@ on:
     inputs:
       version:
         description: Release Version
-        default: v3.1.1
+        default: v3.1.2
         required: true
 
 # Needed for: richardsimko/update-tag@v1
