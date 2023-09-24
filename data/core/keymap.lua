@@ -149,7 +149,10 @@ function keymap.add(map, overwrite)
   remove_duplicates(map)
   for stroke, commands in pairs(map) do
     if macos then
-      stroke = stroke:gsub("%f[%a]ctrl%f[%A]", "cmd")
+      if not stroke:match("%f[%a]cmd%f[%A]") then
+        stroke = stroke:gsub("%f[%a]ctrl%f[%A]", "cmd")
+      end
+      stroke = stroke:gsub("%f[%a]alt%f[%A]", "option")
     end
     stroke = normalize_stroke(stroke)
     if overwrite then
