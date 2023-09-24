@@ -19,7 +19,7 @@ config.plugins.treeview = common.merge({
   expand_dirs_to_focused_file = false,
   scroll_to_focused_file = false,
   animate_scroll_to_focused_file = true,
-  show_hidden = true,
+  show_hidden = false,
   show_ignored = false
 }, config.plugins.treeview)
 
@@ -1037,7 +1037,7 @@ config.plugins.treeview.config_spec = {
     description = "Show hidden files and directories.",
     path = "show_hidden",
     type = "toggle",
-    default = true,
+    default = false,
     on_apply = function(value)
       view.show_hidden = value
       view.cache = {}
