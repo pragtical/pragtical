@@ -1,7 +1,7 @@
 -- this file is used by pragtical to setup the Lua environment when starting
 VERSION = "@PROJECT_VERSION@"
 MOD_VERSION_MAJOR = 3
-MOD_VERSION_MINOR = 1
+MOD_VERSION_MINOR = 2
 MOD_VERSION_PATCH = 0
 MOD_VERSION_STRING = string.format("%d.%d.%d", MOD_VERSION_MAJOR, MOD_VERSION_MINOR, MOD_VERSION_PATCH)
 
