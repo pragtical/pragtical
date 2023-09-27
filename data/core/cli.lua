@@ -45,6 +45,7 @@ local core = "core"
 ---Function called when the command is invoked by the user
 ---@field execute? fun(flags:core.cli.flag[], arguments:string[])
 
+---Provides the CLI parser functionality.
 ---@class core.cli
 ---Application name
 ---@field app_name string
@@ -78,6 +79,7 @@ function cli.register(command, overwrite)
 end
 
 ---Removes an existing command from the cli parser.
+---@param command string
 function cli.unregister(command)
   if cli.commands[command] then
     cli.commands[command] = nil
@@ -401,6 +403,32 @@ function cli.parse(args)
   execute_command(cmd, flags_list, arguments_list)
 end
 
+-- Register default command
+cli.set_default {
+  flags = {
+    {
+      name = "help",
+      short_name = "h",
+      description = "Display help text"
+    },
+    {
+      name = "version",
+      short_name = "v",
+      description = "Display application version"
+    }
+  },
+  execute = function(flags, arguments)
+    for _, flag in ipairs(flags) do
+      if flag.name == "help" then
+        cli.print_help()
+      elseif flag.name == "version" then
+        print(cli.app_version)
+        os.exit()
+      end
+    end
+  end
+}
+
 -- Register help command
 cli.register {
   command = "help",
@@ -473,32 +501,6 @@ cli.register {
         local text = cli.colorize(cmdname, "green")
           .. "  " .. (command_data.description or "")
         print(text)
-      end
-    end
-  end
-}
-
--- Register default command
-cli.set_default {
-  flags = {
-    {
-      name = "help",
-      short_name = "h",
-      description = "Display help text"
-    },
-    {
-      name = "version",
-      short_name = "v",
-      description = "Display application version"
-    }
-  },
-  execute = function(flags, arguments)
-    for _, flag in ipairs(flags) do
-      if flag.name == "help" then
-        cli.print_help()
-      elseif flag.name == "version" then
-        print(cli.app_version)
-        os.exit()
       end
     end
   end
