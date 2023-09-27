@@ -493,6 +493,7 @@ cli.register {
   command = "list",
   description = "Display a list of available commands.",
   usage = "",
+  max_arguments = 0,
   execute = function()
     print(cli.colorize("Available commands:", "yellow"))
     print ""
