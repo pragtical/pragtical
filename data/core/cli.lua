@@ -169,6 +169,13 @@ local function print_command_help(command)
         ) .. "  " .. (flag.description or "")
       print(text)
     end
+    if command.command == "default" then
+      print(
+        cli.colorize("  --", "green")
+        .. "  Always treat argument as command even if a file/dir"
+      )
+      print "      exists with the same name, eg: pragtical -- help"
+    end
   end
 
   if command.subcommands then
@@ -284,6 +291,7 @@ function cli.parse(args)
 
   local cmd = cli.commands.default
   local in_subcommand = false
+  local explicit_command = false
 
   ---@type core.cli.flag[]
   local flags_list = {}
@@ -361,13 +369,21 @@ function cli.parse(args)
         print(cli.colorize("Invalid flag '" .. argument .. "' given", "red"))
         os.exit(1)
       end
+    -- Toggle explicit command treatment
+    elseif argument == "--" then
+      explicit_command = not explicit_command
     -- parse subcommands and arguments
     else
       local command_found = false
       local commands = in_subcommand and cmd.subcommands or cli.commands
+      local argument_skip = false
       if commands and (cmd.command == "default" or in_subcommand) then
         for _, command in pairs(commands) do
           if argument == command.command and cmd.command ~= command.command then
+            if not explicit_command and system.absolute_path(command.command) then
+              argument_skip = true
+              break
+            end
             if
               (#flags_list > 0 or #arguments_list > 0)
               and
@@ -383,7 +399,7 @@ function cli.parse(args)
         end
       end
 
-      if not command_found then
+      if not command_found and not argument_skip then
         if cmd.subcommands then
           for _, command in pairs(cmd.subcommands) do
             if command.command == argument and cmd.command ~= command.command then
