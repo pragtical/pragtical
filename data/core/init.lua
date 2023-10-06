@@ -3,6 +3,7 @@ require "core.regex"
 local common = require "core.common"
 local config = require "core.config"
 local style = require "colors.default"
+local cli
 local scale
 local command
 local keymap
@@ -303,6 +304,7 @@ function core.init()
   core.log_items = {}
   core.log_quiet("Pragtical version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
 
+  cli = require "core.cli"
   command = require "core.command"
   keymap = require "core.keymap"
   dirwatch = require "core.dirwatch"
@@ -430,6 +432,9 @@ function core.init()
 
   -- Load core and user plugins giving preference to user ones with same name.
   local plugins_success, plugins_refuse_list = core.load_plugins()
+
+  -- Parse commandline arguments
+  cli.parse(ARGS)
 
   do
     local pdir, pname = project_dir_abs:match("(.*)[/\\\\](.*)")
