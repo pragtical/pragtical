@@ -7,16 +7,17 @@ The practical and pragmatic code editor.
 ![screenshot](https://pragtical.github.io/assets/img/editor.png)
 
 Pragtical is a code editor which was forked from [Lite XL] (also a fork of [lite])
-written mostly in **Lua** with a focus on been practical rather than minimalist.
+written mostly in **Lua** with a focus on being practical rather than minimalist.
+
 The name of the editor is a mixture of the words `pragmatic` and `practical`,
 two words that properly define our development approach as follows:
 
-* governed through practice or action, rather than theory, speculation or idealism
-* willing to see things as they really are and deal with them sensibly
+* Government through practice and action rather than theory and speculation.
+* Willingness to see the context of actual use cases and not only idealistic ideals. 
 
-As a result we believe that new features introduced through pull requests should
-be evaluated taking a practical approach, without going into lenghty idealistic
-discussions that slowdown progress, merging code when logical.
+As a result [we believe](https://github.com/pragtical/pragtical/issues/6#issuecomment-1581650875) that new features introduced through pull requests should
+be evaluated by taking a practical approach, without going into lengthy idealistic
+discussions that slow down progress, merging code when logical.
 
 ## Goals
 
