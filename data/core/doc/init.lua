@@ -580,6 +580,7 @@ function Doc:text_input(text, idx)
     end
 
     if self.overwrite
+    and (line1 == line2 and col1 == col2)
     and col1 < #self.lines[line1]
     and text:ulen() == 1 then
       self:remove(line1, col1, translate.next_char(self, line1, col1))
