@@ -30,7 +30,7 @@ jobs:
             echo ::set-output name=version::rolling
           fi
       - name: Update Tag
-        uses: richardsimko/update-tag@v1
+        uses: richardsimko/update-tag@v1.0.7
         with:
           tag_name: ${{ steps.tag.outputs.version }}
         env:
