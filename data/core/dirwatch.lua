@@ -120,6 +120,7 @@ end
 ---@return boolean # If true, a path had changed.
 function DirWatch:check(change_callback, scan_time, wait_time)
   local had_change = false
+  local last_error
   self.monitor:check(function(id)
     had_change = true
     if self.monitor:mode() == "single" then
@@ -140,7 +141,10 @@ function DirWatch:check(change_callback, scan_time, wait_time)
       --   self:watch(path)
       -- end
     end
+  end, function(err)
+    last_error = err
   end)
+  if last_error ~= nil then error(last_error) end
   local start_time = system.get_time()
   for directory, old_modified in pairs(self.scanned) do
     if old_modified then
