@@ -215,7 +215,7 @@ if not get_option('source-only')
 endif
 
 #===============================================================================
-# Check for X11 existance to detect scale factor when video driver is x11
+# Check for X11 existence to detect scale factor when video driver is x11
 #===============================================================================
 if cc.find_library('X11', required : false).found()
     pragtical_cargs += '-DX11_FOUND'
@@ -277,70 +277,32 @@ foreach data_module : data_dirs
     install_subdir(join_paths('data', data_module), install_dir : pragtical_datadir)
 endforeach
 
-# Pull in widgets if neccesary
+# Pull in widgets if necessary
 fs = import('fs')
 if not fs.exists('data/widget/init.lua')
-    widget_path = subproject('widget').get_variable('widget_path')
-    install_subdir(
-        widget_path,
-        strip_directory : true,
-        install_dir : join_paths(pragtical_datadir, 'widget'),
-        exclude_files : ['meson.build', '.meson-subproject-wrap-hash.txt'],
-        exclude_directories : ['.git']
-    )
+    subproject('widget', default_options: ['data_dir='+pragtical_datadir])
 endif
 
 # Pull extra colors
 if get_option('extra_colors')
-    colors_path = subproject('colors').get_variable('colors_path')
-    install_subdir(join_paths(colors_path, 'colors'), install_dir : pragtical_datadir)
+    subproject('colors', default_options: ['data_dir='+pragtical_datadir])
 endif
 
 # Pull extra languages
 if get_option('extra_languages')
-    unix_shell = find_program('sh', required: false).found()
-    is_msvc = meson.get_compiler('c').get_id() == 'msvc'
-    if (host_machine.system() == 'windows' and not unix_shell) or is_msvc
-        unix_shell = false
-        shell_command = find_program('cmd', required: false)
+    subproject('plugins', default_options: ['data_dir='+pragtical_datadir])
+endif
+
+# Include the plugin manager
+if get_option('ppm')
+    ppm_prefer_static = ''
+    if get_option('wrap_mode') == 'forcefallback'
+        ppm_prefer_static = 'prefer_static=true'
     endif
-
-    if unix_shell or shell_command.found()
-        plugins_path = subproject('plugins').get_variable('plugins_path')
-
-        if unix_shell
-            list_command = run_command(
-                'sh', '-c', 'ls ' + plugins_path + '/plugins/language_*',
-                check: true
-            )
-        else
-            list_command = run_command(
-                'cmd', '/C', 'dir /b/s ' + plugins_path + '\\plugins\\language_*',
-                check: true
-            )
-        endif
-
-        sources = list_command.stdout().strip().split('\n')
-
-        # We need to do this because meson sandbox rules will not allow
-        # us to call install_data() from a subproject file :(
-        fs = import('fs')
-        if fs.is_dir('extra_languages')
-            if unix_shell
-                run_command('rm', '-rf', 'extra_languages', check: true)
-            else
-                run_command('rd', '/s', '/q', 'extra_languages', check: true)
-            endif
-        endif
-        run_command('mkdir', 'extra_languages', check: true)
-        foreach source : sources
-            run_command('cp', source,  'extra_languages', check: true)
-        endforeach
-        install_subdir('extra_languages',
-            strip_directory : true,
-            install_dir : join_paths(pragtical_datadir, 'plugins')
-        )
-    endif
+    subproject(
+        'ppm',
+        default_options: ['data_dir='+pragtical_datadir, ppm_prefer_static]
+    )
 endif
 
 configure_file(

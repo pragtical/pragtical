@@ -7,4 +7,5 @@ option('arch_tuple', type : 'string', value : '', description: 'Specify a custom
 option('use_system_lua', type : 'boolean', value : false, description: 'Prefer System Lua over the meson wrap')
 option('extra_colors', type : 'boolean', value : true, description: 'Include additional colors')
 option('extra_languages', type : 'boolean', value : true, description: 'Include additional language plugins')
+option('ppm', type : 'boolean', value : true, description: 'Include the plugin manager')
 option('jit', type : 'boolean', value : true, description: 'Use luajit')
