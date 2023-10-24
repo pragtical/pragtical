@@ -37,16 +37,16 @@ main() {
   fi
 
   if [[ "$OSTYPE" == "linux"* ]]; then
-    sudo apt-get install -qq libfuse2 ninja-build wayland-protocols libsdl2-dev libfreetype6 lua5.3
+    sudo apt-get install -qq libfuse2 ninja-build wayland-protocols libsdl2-dev libfreetype6 libmbedtls-dev lua5.3
     pip3 install meson
   elif [[ "$OSTYPE" == "darwin"* ]]; then
-    brew install bash ninja sdl2 lua
+    brew install bash ninja sdl2 lua mbedtls mbedtls@2
     pip3 install meson
     cd ~; npm install appdmg; cd -
     ~/node_modules/appdmg/bin/appdmg.js --version
   elif [[ "$OSTYPE" == "msys" ]]; then
     pacman --noconfirm -S \
-      ${MINGW_PACKAGE_PREFIX}-{ca-certificates,gcc,meson,ninja,ntldd,pkg-config,mesa,freetype,pcre2,SDL2,lua} unzip
+      ${MINGW_PACKAGE_PREFIX}-{ca-certificates,gcc,meson,ninja,ntldd,pkg-config,mesa,freetype,pcre2,SDL2,mbedtls,lua} unzip
   fi
 }
 
