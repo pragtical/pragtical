@@ -147,6 +147,7 @@ jobs:
           mingw-w64-${{ matrix.config.arch }}-gcc
           mingw-w64-${{ matrix.config.arch }}-meson
           mingw-w64-${{ matrix.config.arch }}-ninja
+          mingw-w64-${{ matrix.config.arch }}-cmake
           mingw-w64-${{ matrix.config.arch }}-ca-certificates
           mingw-w64-${{ matrix.config.arch }}-ntldd
     - name: Set Environment Variables
