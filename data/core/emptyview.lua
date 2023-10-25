@@ -108,6 +108,7 @@ function EmptyView:new()
     open_link("https://pragtical.dev/docs/intro")
   end
 
+  self.force_update = false
   self.plugin_manager_loaded = false
   core.add_thread(function()
     self.plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
@@ -118,6 +119,7 @@ function EmptyView:new()
       self.plugins.on_click = function(_, pressed)
         command.perform("plugin-manager:show")
       end
+      self.force_update = true
     end
   end)
 
@@ -204,7 +206,12 @@ function EmptyView:update()
 
   self.background_color = style.background
 
-  if self.prev_size.x ~=  self.size.x or self.prev_size.y ~= self.size.y then
+  if
+    self.force_update
+    or
+    self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y
+  then
+    self.force_update = false
     self.recent_projects:update_position()
 
     -- calculate all buttons width
