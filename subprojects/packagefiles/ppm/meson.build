@@ -100,21 +100,35 @@ else
         build_shared = 'OFF'
     endif
 
+    inc_dirs = []
+    link_args = []
+    extra_deps = []
+    
+    if host_machine.system() == 'darwin'
+        link_args += ['-framework', 'Security', '-framework', 'Foundation']
+        extra_deps += cc.find_library('iconv')
+    endif
+
     # zlib
     zlib_options = cmake.subproject_options()
     zlib_options.add_cmake_defines({
         'CMAKE_BUILD_TYPE': build_type,
         'BUILD_SHARED_LIBS': 'OFF',
+        'CMAKE_OSX_DEPLOYMENT_TARGET': '10.11'
     })
     zlib_options.set_install(false)
 
-    zlib_dep = cmake.subproject('zlib', options: zlib_options).dependency('zlibstatic')
+    zlib = cmake.subproject('zlib', options: zlib_options)
+    zlib_dep = zlib.dependency('zlibstatic')
+
+    inc_dirs += zlib.include_directories('zlibstatic')
 
     # mbedtls
     mbedtls_options = cmake.subproject_options()
     mbedtls_options.add_cmake_defines({
         'CMAKE_BUILD_TYPE': build_type,
         'BUILD_SHARED_LIBS': 'OFF',
+        'CMAKE_OSX_DEPLOYMENT_TARGET': '10.11',
         'ENABLE_TESTING': 'OFF',
         'ENABLE_PROGRAMS': 'OFF',
         'CMAKE_C_FLAGS': '-DMBEDTLS_MD4_C=1 -w',
@@ -125,12 +139,15 @@ else
     mbedtls_dep = mbedtls.dependency('mbedtls')
     mbedx509_dep = mbedtls.dependency('mbedx509')
     mbedcrypto_dep = mbedtls.dependency('mbedcrypto')
+    
+    inc_dirs += mbedtls.include_directories('mbedtls')
 
     # libzip
     libzip_options = cmake.subproject_options()
     libzip_options.add_cmake_defines({
         'CMAKE_BUILD_TYPE': build_type,
         'BUILD_SHARED_LIBS': 'OFF',
+        'CMAKE_OSX_DEPLOYMENT_TARGET': '10.11',
         'BUILD_TOOLS': 'OFF',
         'BUILD_EXAMPLES': 'OFF',
         'BUILD_DOC': 'OFF',
@@ -146,13 +163,17 @@ else
     })
     libzip_options.set_install(false)
 
-    libzip_dep = cmake.subproject('libzip', options: libzip_options).dependency('zip')
+    libzip = cmake.subproject('libzip', options: libzip_options)
+    libzip_dep = libzip.dependency('zip')
+
+    inc_dirs += libzip.include_directories('zip')
 
     # libgit2
     libgit2_options = cmake.subproject_options()
     libgit2_options.add_cmake_defines({
         'CMAKE_BUILD_TYPE': build_type,
         'BUILD_SHARED_LIBS': 'OFF',
+        'CMAKE_OSX_DEPLOYMENT_TARGET': '10.11',
         'BUILD_TESTS': 'OFF',
         'BUILD_CLI': 'OFF',
         'REGEX_BACKEND': 'builtin',
@@ -166,19 +187,22 @@ else
     libgit2_options.set_install(false)
 
     libgit2 = cmake.subproject('libgit2', options: libgit2_options)
-    libgit2_dep = libgit2.dependency('libgit2')
-    libgit2_ntlmclient_dep = libgit2.dependency('ntlmclient')
-    libtgit2_libgit2package_dep = libgit2.dependency('libgit2package')
+    libgit2_deps = []
+    libgit2_deps += libgit2.dependency('libgit2')
+    libgit2_deps += libgit2.dependency('libgit2package')
+    
+    libgit2_deps += libgit2.dependency('ntlmclient')
 
     executable(
         'ppm',
         files('src/ppm.c') + ppm_lua_c,
+        link_args: link_args,
+        include_directories: inc_dirs,
         dependencies: [
             zlib_dep, libzip_dep,
             mbedtls_dep, mbedx509_dep, mbedcrypto_dep,
-            libgit2_ntlmclient_dep, libtgit2_libgit2package_dep, libgit2_dep,
             lua_dep, microtar_dep
-        ],
+        ] + libgit2_deps + extra_deps,
         c_args: ['-DPPM_STATIC'],
         install: true,
         install_dir: join_paths(get_option('data_dir'), 'plugins/plugin_manager')
@@ -189,3 +213,4 @@ install_subdir(
     'plugins/plugin_manager',
     install_dir: join_paths(get_option('data_dir'), 'plugins')
 )
+
