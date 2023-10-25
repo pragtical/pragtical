@@ -301,7 +301,11 @@ if get_option('ppm')
     endif
     subproject(
         'ppm',
-        default_options: ['data_dir='+pragtical_datadir, ppm_prefer_static]
+        default_options: [
+            'data_dir='+pragtical_datadir,
+            'arch_tuple='+arch_tuple,
+            ppm_prefer_static
+        ]
     )
 endif
 

@@ -1,8 +1,0 @@
-[wrap-git]
-url = https://github.com/rxi/microtar.git
-revision = head
-depth = 1
-patch_directory = microtar
-
-[provide]
-microtar = microtar_dep

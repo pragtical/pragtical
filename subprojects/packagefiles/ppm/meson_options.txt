@@ -1,1 +1,2 @@
 option('data_dir', type : 'string', value : '/', description: 'Data directory of installation')
+option('arch_tuple', type : 'string', value : '', description: 'Specify a custom architecture tuple')
