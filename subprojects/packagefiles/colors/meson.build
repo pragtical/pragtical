@@ -1,4 +1,3 @@
-project('colors', version: 'GIT', license : 'MIT')
+project('colors', version: 'GIT', license: 'MIT')
 
-# Expose colors subproject path so it can be installed from main project
-colors_path = meson.current_source_dir()
+install_subdir('colors', install_dir: get_option('data_dir'))

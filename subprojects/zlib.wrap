@@ -1,0 +1,4 @@
+[wrap-git]
+url = https://github.com/madler/zlib.git
+revision = head
+depth = 1
