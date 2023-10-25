@@ -103,7 +103,7 @@ else
     inc_dirs = []
     link_args = []
     extra_deps = []
-    
+
     if host_machine.system() == 'darwin'
         link_args += ['-framework', 'Security', '-framework', 'Foundation']
         extra_deps += cc.find_library('iconv')
@@ -139,7 +139,7 @@ else
     mbedtls_dep = mbedtls.dependency('mbedtls')
     mbedx509_dep = mbedtls.dependency('mbedx509')
     mbedcrypto_dep = mbedtls.dependency('mbedcrypto')
-    
+
     inc_dirs += mbedtls.include_directories('mbedtls')
 
     # libzip
@@ -190,8 +190,10 @@ else
     libgit2_deps = []
     libgit2_deps += libgit2.dependency('libgit2')
     libgit2_deps += libgit2.dependency('libgit2package')
-    
-    libgit2_deps += libgit2.dependency('ntlmclient')
+    if host_machine.system() != 'windows'
+        libgit2_deps += libgit2.dependency('ntlmclient')
+    endif
+
 
     executable(
         'ppm',
@@ -213,4 +215,3 @@ install_subdir(
     'plugins/plugin_manager',
     install_dir: join_paths(get_option('data_dir'), 'plugins')
 )
-
