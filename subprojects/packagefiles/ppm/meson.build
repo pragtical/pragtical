@@ -36,7 +36,7 @@ else
 
     env.set('BIN', bin)
 
-    build_command = [bash_exe, 'build.sh', '-DPPM_STATIC']
+    build_command = [bash_exe, 'build.sh', '-DPPM_STATIC', '-static']
 
     message('Building ppm binary')
     build = run_command(build_command, check: false, env: env)
