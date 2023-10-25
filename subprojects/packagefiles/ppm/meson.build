@@ -39,7 +39,7 @@ else
     clean_command = [bash_exe, 'build.sh', 'clean']
     run_command(clean_command, check: false)
 
-    build_command = [bash_exe, 'build.sh', '-DPPM_STATIC', '-static']
+    build_command = [bash_exe, 'build.sh', '-DPPM_STATIC']
 
     message('Building ppm binary')
     build = run_command(build_command, check: false, env: env)
