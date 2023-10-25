@@ -56,6 +56,11 @@ else
         install_dir: join_paths(get_option('data_dir'), 'plugins/plugin_manager')
     )
 
+    install_data(
+        'libraries/json.lua',
+        install_dir: join_paths(get_option('data_dir'), 'libraries')
+    )
+
     install_subdir(
         'plugins/plugin_manager',
         install_dir: join_paths(get_option('data_dir'), 'plugins')
