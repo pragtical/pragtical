@@ -39,7 +39,14 @@ else
     build_command = [bash_exe, 'build.sh', '-DPPM_STATIC']
 
     message('Building ppm binary')
-    run_command(build_command, check: true, env: env)
+    build = run_command(build_command, check: false, env: env)
+
+    if build.stdout() != ''
+        message('Build output: @0@'.format(build.stdout()))
+    endif
+    if build.stderr() != ''
+        message('Build Errors: @0@'.format(build.stderr()))
+    endif
 
     install_data(
         bin,
