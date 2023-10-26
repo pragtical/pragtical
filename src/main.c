@@ -129,6 +129,19 @@ void set_macos_bundle_resources(lua_State *L);
 int main(int argc, char **argv) {
 #ifndef _WIN32
   signal(SIGPIPE, SIG_IGN);
+#else
+  /* Allow console output on windows with some drawbacks
+   * See: https://stackoverflow.com/q/73987850
+   *      https://stackoverflow.com/q/17111308
+  */
+  if (
+    !getenv("SHELL") && (getenv("ComSpec") || getenv("COMSPEC"))
+    &&
+    AttachConsole(ATTACH_PARENT_PROCESS)
+  ) {
+    freopen("CONOUT$", "w", stdout);
+    freopen("CONOUT$", "w", stderr);
+  }
 #endif
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
