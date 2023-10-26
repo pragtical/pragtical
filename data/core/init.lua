@@ -300,6 +300,17 @@ local function add_config_files_hooks()
 end
 
 
+local function position_window(session)
+  if session.window_mode == "normal" then
+    if session.window then
+      system.set_window_size(table.unpack(session.window))
+    end
+  elseif session.window_mode == "maximized" then
+    system.set_window_mode("maximized")
+  end
+end
+
+
 function core.init()
   core.log_items = {}
   core.log_quiet("Pragtical version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
@@ -324,16 +335,13 @@ function core.init()
     EXEDIR  = common.normalize_volume(EXEDIR)
   end
 
-  do
-    local session = load_session()
-    if session.window_mode == "normal" then
-      system.set_window_size(table.unpack(session.window))
-    elseif session.window_mode == "maximized" then
-      system.set_window_mode("maximized")
-    end
-    core.recent_projects = session.recents or {}
-    core.previous_find = session.previous_find or {}
-    core.previous_replace = session.previous_replace or {}
+  local session = load_session()
+  core.recent_projects = session.recents or {}
+  core.previous_find = session.previous_find or {}
+  core.previous_replace = session.previous_replace or {}
+  if PLATFORM ~= "Windows" then
+    position_window(session)
+    session = nil
   end
 
   local project_dir = core.recent_projects[1] or "."
@@ -435,6 +443,16 @@ function core.init()
 
   -- Parse commandline arguments
   cli.parse(ARGS)
+
+  -- Maximizing the window makes it lose the hidden attribute on windows
+  -- so we delay this to keep window hidden until args parsed
+  if PLATFORM == "Windows" then
+    core.add_thread(function()
+      position_window(session)
+      session = nil
+    end)
+  end
+
 
   do
     local pdir, pname = project_dir_abs:match("(.*)[/\\\\](.*)")
