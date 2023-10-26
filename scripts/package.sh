@@ -216,6 +216,14 @@ main() {
         | awk '{print $3}' \
         | sed 's#\\#/#g' \
         | xargs -I '{}' cp -v '{}' "$(pwd)/${dest_dir}/"
+      # Copy ppm dependencies too
+      if [[ -d "${data_dir}/plugins/plugin_manager" ]]; then
+        ntldd -R "${data_dir}/plugins/plugin_manager"/ppm.* \
+          | grep mingw \
+          | awk '{print $3}' \
+          | sed 's#\\#/#g' \
+          | xargs -I '{}' cp -v '{}' "${data_dir}/plugins/plugin_manager/"
+      fi
     else
       # Windows archive is always portable
       package_name+="-portable"
