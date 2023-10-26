@@ -1,4 +1,5 @@
 local core = require "core"
+local config = require "core.config"
 local command = require "core.command"
 local common = require "core.common"
 local style = require "core.style"
@@ -107,6 +108,21 @@ function EmptyView:new()
     open_link("https://pragtical.dev/docs/intro")
   end
 
+  self.force_update = false
+  self.plugin_manager_loaded = false
+  core.add_thread(function()
+    self.plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
+    if self.plugin_manager_loaded then
+      self.plugins = Button(self, "Plugins")
+      self.plugins:set_icon("B")
+      self.plugins:set_tooltip("Open the plugin manager")
+      self.plugins.on_click = function(_, pressed)
+        command.perform("plugin-manager:show")
+      end
+      self.force_update = true
+    end
+  end)
+
   self.recent_projects = ListBox(self)
   self.recent_projects:add_column("Recent Projects")
   self.recent_projects:hide()
@@ -190,7 +206,12 @@ function EmptyView:update()
 
   self.background_color = style.background
 
-  if self.prev_size.x ~=  self.size.x or self.prev_size.y ~= self.size.y then
+  if
+    self.force_update
+    or
+    self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y
+  then
+    self.force_update = false
     self.recent_projects:update_position()
 
     -- calculate all buttons width
@@ -252,15 +273,31 @@ function EmptyView:update()
 
     -- reposition web buttons and recent projects
     local web_buttons_y = ty + th + style.padding.y * 2
-    local web_buttons_w = self.website:get_width()
-      + self.docs:get_width() + style.padding.x
 
-    self.website:set_position(
-      self.size.x / 2 - web_buttons_w / 2, web_buttons_y
-    )
-    self.docs:set_position(
-      self.website:get_right() + style.padding.x, web_buttons_y
-    )
+    if not self.plugin_manager_loaded then
+      local web_buttons_w = self.website:get_width()
+        + self.docs:get_width() + style.padding.x
+
+      self.website:set_position(
+        self.size.x / 2 - web_buttons_w / 2, web_buttons_y
+      )
+      self.docs:set_position(
+        self.website:get_right() + style.padding.x, web_buttons_y
+      )
+    else
+      local web_buttons_w = self.website:get_width()
+        + self.docs:get_width() + self.plugins:get_width() + style.padding.x * 2
+
+      self.website:set_position(
+        self.size.x / 2 - web_buttons_w / 2, web_buttons_y
+      )
+      self.docs:set_position(
+        self.website:get_right() + style.padding.x, web_buttons_y
+      )
+      self.plugins:set_position(
+        self.docs:get_right() + style.padding.x, web_buttons_y
+      )
+    end
 
     if #self.recent_projects.rows > 0 then
       if items_h < self:get_height() then

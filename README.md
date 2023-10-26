@@ -13,7 +13,7 @@ The name of the editor is a mixture of the words `pragmatic` and `practical`,
 two words that properly define our development approach as follows:
 
 * Government through practice and action rather than theory and speculation.
-* Willingness to see the context of actual use cases and not only idealistic ideals. 
+* Willingness to see the context of actual use cases and not only idealistic ideals.
 
 As a result [we believe](https://github.com/pragtical/pragtical/issues/6#issuecomment-1581650875) that new features introduced through pull requests should
 be evaluated by taking a practical approach, without going into lengthy idealistic
@@ -112,7 +112,7 @@ the build:
 ```sh
 meson setup --buildtype=release --prefix <prefix> build
 meson compile -C build
-DESTDIR="$(pwd)/pragtical" meson install --skip-subprojects -C build
+DESTDIR="$(pwd)/pragtical" meson install -C build
 ```
 
 where `<prefix>` might be one of `/`, `/usr` or `/opt`, the default is `/`.
@@ -121,7 +121,7 @@ To build a bundle application on macOS:
 ```sh
 meson setup --buildtype=release --Dbundle=true --prefix / build
 meson compile -C build
-DESTDIR="$(pwd)/Pragtical.app" meson install --skip-subprojects -C build
+DESTDIR="$(pwd)/Pragtical.app" meson install -C build
 ```
 
 Please note that the package is relocatable to any prefix and the option prefix
