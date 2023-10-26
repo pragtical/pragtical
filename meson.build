@@ -295,18 +295,11 @@ endif
 
 # Include the plugin manager
 if get_option('ppm')
-    ppm_prefer_static = ''
+    default_ppm_options = ['data_dir='+pragtical_datadir, 'arch_tuple='+arch_tuple]
     if get_option('wrap_mode') == 'forcefallback'
-        ppm_prefer_static = 'prefer_static=true'
+        default_ppm_options += 'prefer_static=true'
     endif
-    subproject(
-        'ppm',
-        default_options: [
-            'data_dir='+pragtical_datadir,
-            'arch_tuple='+arch_tuple,
-            ppm_prefer_static
-        ]
-    )
+    subproject('ppm', default_options: default_ppm_options)
 endif
 
 configure_file(
