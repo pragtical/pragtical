@@ -1896,7 +1896,7 @@ static int Lutf8_normalize_nfc(lua_State *L) {
   lua_pushboolean(L, 1); /* String was in normal form already, so 2nd return value is 'true' */
   return 2;
 
-build_string:
+build_string: ;
   /* We will need to build a new string, this one is not NFC */
   luaL_Buffer buff;
   luaL_buffinit(L, &buff);
