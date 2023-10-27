@@ -82,6 +82,7 @@ function Highlighter:soft_reset()
 end
 
 function Highlighter:invalidate(idx)
+  if self.lines_cleaned[idx] then self.lines_cleaned[idx] = nil end
   self.first_invalid_line = math.min(self.first_invalid_line, idx)
   set_max_wanted_lines(self, math.min(self.max_wanted_line, #self.doc.lines))
 end
