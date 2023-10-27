@@ -28,9 +28,10 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
-
 #include <assert.h>
 #include <string.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 #include "../unidata.h"
 
@@ -639,6 +640,48 @@ process_combining_marks:
     free(vector);
 }
 
+/* Grapheme cluster support */
+
+static int hangul_type (utfint ch) {
+  /* The first Hangul codepoint is U+1100 */
+  if (ch < 0x1100) {
+    return 0;
+  }
+  size_t begin = 0, end = table_size(hangul_table);
+
+  while (begin < end) {
+    size_t mid = (begin + end) / 2;
+    if (hangul_table[mid].last < ch)
+      begin = mid + 1;
+    else if (hangul_table[mid].first > ch)
+      end = mid;
+    else
+      return hangul_table[mid].type;
+  }
+
+  return 0;
+}
+
+static int indic_conjunct_type (utfint ch) {
+  /* The first Indic conjunct codepoint is U+0300 */
+  if (ch < 0x300) {
+    return 0;
+  }
+  size_t begin = 0, end = table_size(indic_table);
+
+  while (begin < end) {
+    size_t mid = (begin + end) / 2;
+    if (indic_table[mid].last < ch)
+      begin = mid + 1;
+    else if (indic_table[mid].first > ch)
+      end = mid;
+    else
+      return indic_table[mid].type;
+  }
+
+  return 0;
+}
+
 #define define_category(cls, name) static int utf8_is##name (utfint ch)\
 { return find_in_range(name##_table, table_size(name##_table), ch); }
 #define define_converter(name) static utfint utf8_to##name (utfint ch) \
@@ -814,7 +857,7 @@ static int Lutf8_codepoint (lua_State *L) {
   luaL_checkstack(L, n, "string slice too long");
   n = 0;  /* count the number of returns */
   se = s + pose;  /* string end */
-  for (s += posi - 1; s < se;) {
+  for (n = 0, s += posi - 1; s < se;) {
     utfint code = 0;
     s = utf8_safe_decode(L, s, &code);
     if (!lax && utf8_invalid(code))
@@ -1866,6 +1909,165 @@ build_string:
   return 2;
 }
 
+static int iterate_grapheme_indices(lua_State *L) {
+  const char *s = luaL_checkstring(L, lua_upvalueindex(1));
+  lua_Integer pos = luaL_checkinteger(L, lua_upvalueindex(2));
+  lua_Integer end = luaL_checkinteger(L, lua_upvalueindex(3));
+
+  if (pos > end) {
+    lua_pushnil(L);
+    return 1;
+  }
+  const char *e = s + end;
+
+  utfint ch, next_ch;
+  const char *p = utf8_safe_decode(L, s + pos - 1, &ch);
+
+  while (1) {
+    const char *next_p = utf8_safe_decode(L, p, &next_ch);
+    int bind = 0;
+
+    if (ch == '\r') {
+      if (next_ch == '\n') {
+        /* CR binds to following LF */
+        bind = 1;
+      } else {
+        break;
+      }
+    } else if (ch == '\n' || next_ch == '\r' || next_ch == '\n') {
+      /* CR/LF do not bind to any other codepoint or in any other way */
+      break;
+    } else if (find_in_range(cntrl_table, table_size(cntrl_table), ch) && !find_in_range(prepend_table, table_size(prepend_table), ch) && ch != 0x200D) {
+      /* Control characters do not bind to anything */
+      break;
+    } else if (next_ch == 0x200D) {
+      /* U+200D is ZERO WIDTH JOINER, it always binds to preceding char */
+      if (next_p < e && find_in_range(pictographic_table, table_size(pictographic_table), ch)) {
+        /* After an Extended_Pictographic codepoint and ZWJ, we bind to a following Extended_Pictographic */
+        utfint nextnext_ch;
+        const char *probe_ep = utf8_safe_decode(L, next_p, &nextnext_ch);
+        if (find_in_range(pictographic_table, table_size(pictographic_table), nextnext_ch)) {
+          p = probe_ep;
+          ch = nextnext_ch;
+          continue;
+        }
+      }
+      bind = 1;
+    } else if (find_in_range(cntrl_table, table_size(cntrl_table), next_ch) && !find_in_range(prepend_table, table_size(prepend_table), next_ch)) {
+      /* Control characters do not bind to anything */
+      break;
+    } else {
+      if (indic_conjunct_type(ch) == INDIC_CONSONANT) {
+        utfint probed_ch = next_ch;
+        const char *probe = next_p;
+        int indic_type = indic_conjunct_type(probed_ch);
+        int saw_linker = 0;
+        while (indic_type) {
+          /* Consume any number of Extend or Linker codepoints, followed by a single Consonant
+           * The sequence must contain at least one Linker, however! */
+          if (indic_type == INDIC_LINKER) {
+            saw_linker = 1;
+          } else if (indic_type == INDIC_CONSONANT) {
+            if (!saw_linker)
+              break;
+            p = probe;
+            ch = probed_ch;
+            goto next_iteration;
+          }
+          if (probe >= e)
+            break;
+          probe = utf8_safe_decode(L, probe, &probed_ch);
+          indic_type = indic_conjunct_type(probed_ch);
+        }
+      }
+
+      if (find_in_range(compose_table, table_size(compose_table), next_ch) || (next_ch >= 0x1F3FB && next_ch <= 0x1F3FF)) {
+        /* The 2nd codepoint has property Grapheme_Extend, or is an Emoji_Modifier codepoint */
+        if (next_p < e && find_in_range(pictographic_table, table_size(pictographic_table), ch)) {
+          /* Consume any number of 'extend' codepoints, one ZWJ, and following Extended_Pictographic codepoint */
+          utfint probed_ch;
+          const char *probe = next_p;
+          while (probe < e) {
+            probe = utf8_safe_decode(L, probe, &probed_ch);
+            if (probed_ch == 0x200D) {
+              if (probe < e) {
+                probe = utf8_safe_decode(L, probe, &probed_ch);
+                if (find_in_range(pictographic_table, table_size(pictographic_table), probed_ch)) {
+                  next_p = probe;
+                  next_ch = probed_ch;
+                }
+              }
+              break;
+            } else if (find_in_range(compose_table, table_size(compose_table), probed_ch) || (probed_ch >= 0x1F3FB && probed_ch <= 0x1F3FF)) {
+              next_p = probe;
+              next_ch = probed_ch;
+            } else {
+              break;
+            }
+          }
+        }
+        bind = 1;
+      } else if (find_in_range(spacing_mark_table, table_size(spacing_mark_table), next_ch)) {
+        /* The 2nd codepoint is in general category Spacing_Mark */
+        bind = 1;
+      } else if (find_in_range(prepend_table, table_size(prepend_table), ch)) {
+        /* The 1st codepoint has property Prepend_Concatenation_Mark, or is a type of
+         * Indic Syllable which binds to the following codepoint */
+        bind = 1;
+      } else if (ch >= 0x1F1E6 && ch <= 0x1F1FF && next_ch >= 0x1F1E6 && next_ch <= 0x1F1FF) {
+        /* Regional Indicator (flag) emoji bind together; but only in twos */
+        p = next_p;
+        ch = 0xFFFE; /* Set 'ch' to bogus value so we will not re-enter this branch on next iteration */
+        continue;
+      } else {
+        /* Korean Hangul codepoints have their own special rules about when they
+         * are considered a single grapheme cluster */
+        int hangul1 = hangul_type(ch);
+        if (hangul1) {
+          int hangul2 = hangul_type(next_ch);
+          if (hangul2) {
+            if (hangul1 == HANGUL_L) {
+              bind = (hangul2 != HANGUL_T);
+            } else if (hangul1 == HANGUL_LV || hangul1 == HANGUL_V) {
+              bind = (hangul2 == HANGUL_V || hangul2 == HANGUL_T);
+            } else if (hangul1 == HANGUL_LVT || hangul1 == HANGUL_T) {
+              bind = (hangul2 == HANGUL_T);
+            }
+          }
+        }
+      }
+    }
+
+    if (!bind)
+      break;
+    p = next_p;
+    ch = next_ch;
+next_iteration: ;
+  }
+
+  lua_pushinteger(L, (p - s) + 1);
+  lua_replace(L, lua_upvalueindex(2));
+
+  lua_pushinteger(L, pos);
+  lua_pushinteger(L, p - s);
+  return 2;
+}
+
+static int Lutf8_grapheme_indices(lua_State *L) {
+  size_t len;
+  const char *s = luaL_checklstring(L, 1, &len);
+  lua_Integer start = byte_relat(luaL_optinteger(L, 2, 1), len);
+  lua_Integer end = byte_relat(luaL_optinteger(L, 3, len), len);
+  luaL_argcheck(L, start >= 1, 2, "out of range");
+  luaL_argcheck(L, end <= (lua_Integer)len, 3, "out of range");
+
+  lua_settop(L, 1);
+  lua_pushinteger(L, start);
+  lua_pushinteger(L, end);
+  lua_pushcclosure(L, iterate_grapheme_indices, 3);
+  return 1;
+}
+
 /* lua module import interface */
 
 #if LUA_VERSION_NUM >= 502
@@ -1907,6 +2109,7 @@ int luaopen_utf8extra (lua_State *L) {
     ENTRY(clean),
     ENTRY(isnfc),
     ENTRY(normalize_nfc),
+    ENTRY(grapheme_indices),
 #undef  ENTRY
     { NULL, NULL }
   };
