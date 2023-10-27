@@ -72,7 +72,10 @@ function Doc:load(filename)
   if not self.encoding then
     local errmsg
     self.encoding, errmsg = encoding.detect(filename);
-    if not self.encoding then core.error("%s", errmsg) error(errmsg) end
+    if not self.encoding then
+      core.error("%s", errmsg)
+      self.encoding = "UTF-8"
+    end
   end
   self.convert = false
   if self.encoding ~= "UTF-8" and self.encoding ~= "ASCII" then
