@@ -190,5 +190,50 @@ function utf8extra.fold(s) end
 ---@return integer result
 function utf8extra.ncasecmp(a, b) end
 
+---Check whether s is a valid UTF-8 string or not.
+---@param s string
+---@return boolean
+function utf8extra.isvalid(s) end
+
+---Replace any invalid UTF-8 byte sequences in s with the replacement string.
+---if no replacement string is provided, the default is "�" (REPLACEMENT CHARACTER U+FFFD).
+---Note that any number of consecutive invalid bytes will be replaced by a
+---single copy of the replacement string. the 2nd return value is true if the
+---original string was already valid (meaning no replacements were made).
+---@param s string
+---@param replacement_string? string
+---@return string cleaned_string
+---@return boolean was_valid
+function utf8extra.clean(s, replacement_string) end
+
+---Return the byte offset within s of the first invalid UTF-8 byte sequence.
+---(1 is the first byte of the string.) if s is a valid UTF-8 string, return
+---nil. the optional numeric argument init specifies where to start the search;
+---its default value is 1 and can be negative.
+---@param s string
+---@param init? integer
+---@return integer offset
+function utf8extra.invalidoffset(s, init) end
+
+---Check whether s is in Normal Form C or not. "Normal Form C" means that
+---whenever possible, combining marks are combined with a preceding codepoint.
+---For example, instead of U+0041 (LATIN CAPITAL LETTER A) U+00B4 (ACUTE ACCENT),
+---an NFC string will use U+00C1 (LATIN CAPITAL LETTER A WITH ACUTE). Also,
+---some deprecated codepoints are converted to the recommended replacements.
+---since the same sequence of characters can be represented in more than one
+---way in Unicode, it is better to ensure strings are in Normal Form before
+---comparing them. an error may be raised if s is not a valid UTF-8 string.
+---@param s string
+---@return boolean
+function utf8extra.isnfc(s) end
+
+---Convert s to Normal Form C. the 2nd return value is true if the original
+---string was already in NFC (meaning no modifications were made). an error
+---will be raised if s is not a valid UTF-8 string.
+---@param s string
+---@return string normal_string
+---@return boolean was_n
+function utf8extra.normalize_nfc(s) end
+
 
 return utf8extra

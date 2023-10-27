@@ -26,6 +26,11 @@ string.uwidthindex = utf8.widthindex
 string.utitle = utf8.title
 string.ufold = utf8.fold
 string.uncasecmp = utf8.ncasecmp
+string.uisvalid = utf8.isvalid
+string.uclean = utf8.clean
+string.uinvalidoffset = utf8.invalidoffset
+string.uisnfc = utf8.isnfc
+string.unormalize_nfc = utf8.normalize_nfc
 
 string.uoffset = utf8.offset
 string.ucodepoint = utf8.codepoint

@@ -75,13 +75,13 @@ function string.usub(s, i, j) end
 ---@return string
 function string.uupper(s) end
 
----Equivalent to utf8.escape()
+---Equivalent to utf8extra.escape()
 ---@param s  string
 ---@return string utf8_string
 function string.uescape(s) end
 
 
----Equivalent to utf8.charpos()
+---Equivalent to utf8extra.charpos()
 ---@param s  string
 ---@param charpos? integer
 ---@param index? integer
@@ -89,7 +89,7 @@ function string.uescape(s) end
 ---@return integer codepoint
 function string.ucharpos(s, charpos, index) end
 
----Equivalent to utf8.next()
+---Equivalent to utf8extra.next()
 ---@param s  string
 ---@param charpos? integer
 ---@param index? integer
@@ -97,28 +97,28 @@ function string.ucharpos(s, charpos, index) end
 ---@return integer codepoint
 function string.unext(s, charpos, index) end
 
----Equivalent to utf8.insert()
+---Equivalent to utf8extra.insert()
 ---@param s string
 ---@param idx? integer
 ---@param substring string
 ---@return string new_string
 function string.uinsert(s, idx, substring) end
 
----Equivalent to utf8.remove()
+---Equivalent to utf8extra.remove()
 ---@param s string
 ---@param start? integer
 ---@param stop? integer
 ---@return string new_string
 function string.uremove(s, start, stop) end
 
----Equivalent to utf8.width()
+---Equivalent to utf8extra.width()
 ---@param s string
 ---@param ambi_is_double? boolean
 ---@param default_width? integer
 ---@return integer width
 function string.uwidth(s, ambi_is_double, default_width) end
 
----Equivalent to utf8.widthindex()
+---Equivalent to utf8extra.widthindex()
 ---@param s string
 ---@param location integer
 ---@param ambi_is_double? boolean
@@ -128,21 +128,50 @@ function string.uwidth(s, ambi_is_double, default_width) end
 ---@return integer width
 function string.uwidthindex(s, location, ambi_is_double, default_width) end
 
----Equivalent to utf8.title()
+---Equivalent to utf8extra.title()
 ---@param s string
 ---@return string new_string
 function string.utitle(s) end
 
----Equivalent to utf8.fold()
+---Equivalent to utf8extra.fold()
 ---@param s string
 ---@return string new_string
 function string.ufold(s) end
 
----Equivalent to utf8.ncasecmp()
+---Equivalent to utf8extra.ncasecmp()
 ---@param a string
 ---@param b string
 ---@return integer result
 function string.uncasecmp(a, b) end
+
+---Equivalent to utf8extra.isvalid()
+---@param s string
+---@return boolean
+function string.uisvalid(s) end
+
+---Equivalent to utf8extra.clean()
+---@param s string
+---@param replacement_string? string
+---@return string cleaned_string
+---@return boolean was_valid
+function string.uclean(s, replacement_string) end
+
+---Equivalent to utf8extra.invalidoffset()
+---@param s string
+---@param init? integer
+---@return integer offset
+function string.uinvalidoffset(s, init) end
+
+---Equivalent to utf8extra.isnfc()
+---@param s string
+---@return boolean
+function string.uisnfc(s) end
+
+---Equivalent to utf8extra.normalize_nfc()
+---@param s string
+---@return string normal_string
+---@return boolean was_n
+function string.unormalize_nfc(s) end
 
 ---Equivalent to utf8.offset()
 ---@param s string
