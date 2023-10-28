@@ -10,7 +10,6 @@ local common = require "core.common"
 local command = require "core.command"
 local Object = require "core.object"
 local RootView = require "core.rootview"
-local shmem_found, shmem = pcall(require, "shmem")
 local settings_found, settings = pcall(require, "plugins.settings")
 
 ---The maximum amount of seconds a message will be broadcasted.
@@ -136,7 +135,7 @@ function IPC:new(id)
   self.id = id or tostring(system.get_process_id())
   self.user_dir = USERDIR .. "/ipc"
   self.file = self.user_dir .. "/" .. self.id .. ".lua"
-  self.shmem = shmem_found and shmem.open("pragtical-ipc", 100) or nil
+  self.shmem = package.loaded["shmem"] and shmem.open("pragtical-ipc", 100) or nil
   self.primary = false
   self.running = false
   self.messages = {}
