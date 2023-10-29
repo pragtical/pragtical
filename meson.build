@@ -96,6 +96,7 @@ endif
 # Dependencies
 #===============================================================================
 if not get_option('source-only')
+    libharfbuzz = cc.find_library('harfbuzz', required : true)
     libm = cc.find_library('m', required : false)
     libdl = cc.find_library('dl', required : false)
     librt = cc.find_library('rt', required : false)
@@ -211,7 +212,7 @@ if not get_option('source-only')
         sdlmain_dep = dependency('', required: false)
     endif
 
-    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt, libharfbuzz]
 endif
 
 #===============================================================================
