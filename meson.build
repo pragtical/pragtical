@@ -96,7 +96,6 @@ endif
 # Dependencies
 #===============================================================================
 if not get_option('source-only')
-    libharfbuzz = cc.find_library('harfbuzz', required : true)
     libm = cc.find_library('m', required : false)
     libdl = cc.find_library('dl', required : false)
     librt = cc.find_library('rt', required : false)
@@ -201,6 +200,7 @@ if not get_option('source-only')
     sdl_dep = dependency('sdl2', fallback: ['sdl2', 'sdl2_dep'],
         default_options: default_fallback_options + sdl_options
     )
+    harfbuzz_dep = dependency('harfbuzz', fallback: ['harfbuzz'])
 
     if host_machine.system() == 'windows'
         if sdl_dep.type_name() == 'internal'
@@ -212,7 +212,7 @@ if not get_option('source-only')
         sdlmain_dep = dependency('', required: false)
     endif
 
-    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt, libharfbuzz]
+    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, harfbuzz_dep, libm, libdl, librt]
 endif
 
 #===============================================================================
