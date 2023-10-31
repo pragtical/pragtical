@@ -1187,10 +1187,11 @@ static void* api_require(const char* symbol) {
     U(checkversion_), U(execresult), U(fileresult), U(getsubtable),
     U(len), U(loadbufferx), U(loadfilex), U(prepbuffsize), U(requiref),
     U(setfuncs), U(setmetatable), U(testudata), U(tolstring), U(traceback),
-    P(absindex), P(arith), P(compare), P(copy), P(len), P(rawgetp), P(rawsetp),
-    P(tointegerx), P(tonumberx), P(upvalueid), P(upvaluejoin), P(version),
-    P(geti), P(isinteger), P(isyieldable), P(rotate), P(seti),
-    P(stringtonumber), P(getuservalue), P(setuservalue), U(typeerror),
+    P(absindex), P(arith), P(compare), P(copy), P(getglobal), P(len),
+    P(rawgetp), P(rawsetp), P(setglobal), P(tointegerx), P(tonumberx),
+    P(upvalueid), P(upvaluejoin), P(version), P(geti), P(isinteger),
+    P(isyieldable), P(rotate), P(seti), P(stringtonumber), P(getuservalue),
+    P(setuservalue), U(typeerror),
     #endif
   };
   for (size_t i = 0; i < sizeof(nodes) / sizeof(lua_function_node); ++i) {

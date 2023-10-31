@@ -1034,6 +1034,14 @@ COMPAT53_API int lua_setiuservalue(lua_State* L, int idx, int n)
 /* LuaJIT missing implementations */
 #if LUA_JIT
 COMPAT53_API void lua_setlevel (lua_State *from, lua_State *to) {}
+
+COMPAT53_API void lua_setglobal (lua_State *L, const char* s) {
+  lua_setfield(L, LUA_GLOBALSINDEX, s);
+}
+
+COMPAT53_API void lua_getglobal (lua_State *L, const char* s) {
+  lua_getfield(L, LUA_GLOBALSINDEX, s);
+}
 #endif
 
 

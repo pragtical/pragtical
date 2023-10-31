@@ -347,13 +347,13 @@ COMPAT53_API void luaL_requiref (lua_State *L, const char *modname,
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM < 504
 
 #define lua_newuserdatauv COMPAT53_CONCAT(COMPAT53_PREFIX, _newuserdatauv)
-COMPAT53_API void *lua_newuserdatauv( lua_State* L, size_t sz, int nuvalue);
+COMPAT53_API void *lua_newuserdatauv (lua_State* L, size_t sz, int nuvalue);
 
 #define lua_getiuservalue COMPAT53_CONCAT(COMPAT53_PREFIX, _getiuservalue)
-COMPAT53_API int lua_getiuservalue( lua_State* L, int idx, int n);
+COMPAT53_API int lua_getiuservalue (lua_State* L, int idx, int n);
 
 #define lua_setiuservalue COMPAT53_CONCAT(COMPAT53_PREFIX, _setiuservalue)
-COMPAT53_API int lua_setiuservalue( lua_State* L, int idx, int n);
+COMPAT53_API int lua_setiuservalue (lua_State* L, int idx, int n);
 
 #endif /* Lua 5.1, 5.2 and 5.3 */
 
@@ -362,6 +362,14 @@ COMPAT53_API int lua_setiuservalue( lua_State* L, int idx, int n);
 /* LuaJIT missing implementations */
 #if LUA_JIT
 #define lua_setlevel COMPAT53_CONCAT(COMPAT53_PREFIX, _setlevel)
+
+#undef lua_setglobal /* On luajit this is a macro so we undefine it */
+#define lua_setglobal COMPAT53_CONCAT(COMPAT53_PREFIX, _setglobal)
+COMPAT53_API void lua_setglobal (lua_State *L, const char *s);
+
+#undef lua_getglobal /* On luajit this is a macro so we undefine it */
+#define lua_getglobal COMPAT53_CONCAT(COMPAT53_PREFIX, _getglobal)
+COMPAT53_API void lua_getglobal (lua_State* L, const char* s);
 #endif
 
 
