@@ -23,7 +23,7 @@
 #include <hb-ft.h>
 
 #define MAX_UNICODE 0x100000
-#define GLYPHSET_SIZE 256
+#define GLYPHSET_SIZE 64
 #define MAX_LOADABLE_GLYPHSETS (MAX_UNICODE / GLYPHSET_SIZE)
 #define SUBPIXEL_BITMAPS_CACHED 3
 
@@ -163,7 +163,7 @@ static void font_load_glyphset(RenFont* font, unsigned int idx) {
       }
     }
   }
-} 
+}
 
 static GlyphSet* font_get_glyphset(RenFont* font, unsigned int codepoint, int subpixel_idx) {
   int idx = (codepoint / GLYPHSET_SIZE) % MAX_LOADABLE_GLYPHSETS;
@@ -247,9 +247,6 @@ RenFont* ren_font_load(RenWindow *window_renderer, const char* path, float size,
 
   strcpy(font->path, path);
   font->face = face;
-  font->font = hb_ft_font_create(face, NULL);
-  if (font->font == 0)
-    goto failure;
   font->size = size;
   font->height = (short)((face->height / (float)face->units_per_EM) * font->size);
   font->baseline = (short)((face->ascender / (float)face->units_per_EM) * font->size);
@@ -265,6 +262,9 @@ RenFont* ren_font_load(RenWindow *window_renderer, const char* path, float size,
   if (FT_Load_Char(face, ' ', font_set_load_options(font)))
     goto failure;
 
+  font->font = hb_ft_font_create_referenced(face);
+  if (font->font == 0)
+    goto failure;
   font->space_advance = face->glyph->advance.x / 64.0f;
   font->tab_advance = font->space_advance * 2;
   return font;
