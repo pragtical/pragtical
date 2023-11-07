@@ -90,11 +90,15 @@
       fputs("warning: " #name " is a stub", stderr); \
       exit(1); \
     }
+  #define CONSTANT_DECLARE(type, name, val) \
+    type name = val;
 #else
   #define SYMBOL_DECLARE(ret, name, ...) \
     SYMBOL_WRAP_DECL(ret, name, __VA_ARGS__);
   #define SYMBOL_DECLARE_VARARG(ret, name, ...) \
     SYMBOL_WRAP_DECL(ret, name, __VA_ARGS__, ...);
+  #define CONSTANT_DECLARE(type, name, val) \
+    extern type name;
 #endif
 
 
@@ -916,7 +920,15 @@
 ** (-LUAI_MAXSTACK is the minimum valid index; we keep some free empty
 ** space after that to help overflow detection)
 */
-#define LUA_REGISTRYINDEX       (-LUAI_MAXSTACK - 1000)
+/* The Lua 5.4 way */
+/* #define LUA_REGISTRYINDEX       (-LUAI_MAXSTACK - 1000) */
+/* #define lua_upvalueindex(i)     (LUA_REGISTRYINDEX - (i)) */
+/* Compatibility with LuaJIT */
+/* #define LUA_REGISTRYINDEX       (-10000) */
+/* #define LUA_ENVIRONINDEX	(-10001) */
+/* #define LUA_GLOBALSINDEX	(-10002) */
+/* #define lua_upvalueindex(i)	(LUA_GLOBALSINDEX-(i)) */
+CONSTANT_DECLARE(int, LUA_REGISTRYINDEX, -10000);
 #define lua_upvalueindex(i)     (LUA_REGISTRYINDEX - (i))
 
 
@@ -1570,19 +1582,11 @@ struct luaL_Buffer {
   } init;
 };
 
-
-#define luaL_bufflen(bf)        ((bf)->n)
-#define luaL_buffaddr(bf)       ((bf)->b)
-
-
-#define luaL_addchar(B,c) \
-  ((void)((B)->n < (B)->size || luaL_prepbuffsize((B), 1)), \
-   ((B)->b[(B)->n++] = (c)))
-
-#define luaL_addsize(B,s)       ((B)->n += (s))
-
-#define luaL_buffsub(B,s)       ((B)->n -= (s))
-
+SYMBOL_DECLARE(size_t, luaL_bufflen, luaL_Buffer *B)
+SYMBOL_DECLARE(char *, luaL_buffaddr, luaL_Buffer *B)
+SYMBOL_DECLARE(void, luaL_addchar, luaL_Buffer *B, char c)
+SYMBOL_DECLARE(void, luaL_addsize, luaL_Buffer *B, size_t s)
+SYMBOL_DECLARE(void, luaL_buffsub, luaL_Buffer *B, size_t s)
 SYMBOL_DECLARE(void, luaL_buffinit, lua_State *L, luaL_Buffer *B)
 SYMBOL_DECLARE(char *, luaL_prepbuffsize, luaL_Buffer *B, size_t sz)
 SYMBOL_DECLARE(void, luaL_addlstring, luaL_Buffer *B, const char *s, size_t l)
@@ -1591,8 +1595,7 @@ SYMBOL_DECLARE(void, luaL_addvalue, luaL_Buffer *B)
 SYMBOL_DECLARE(void, luaL_pushresult, luaL_Buffer *B)
 SYMBOL_DECLARE(void, luaL_pushresultsize, luaL_Buffer *B, size_t sz)
 SYMBOL_DECLARE(char *, luaL_buffinitsize, lua_State *L, luaL_Buffer *B, size_t sz)
-
-#define luaL_prepbuffer(B)      luaL_prepbuffsize(B, LUAL_BUFFERSIZE)
+SYMBOL_DECLARE(void, luaL_prepbuffer, luaL_Buffer *B)
 
 /* }====================================================== */
 
@@ -2264,7 +2267,21 @@ SYMBOL_WRAP_DECL(void, luaL_requiref, lua_State *L, const char *modname, lua_CFu
 
 
 
-
+SYMBOL_WRAP_DECL(size_t, luaL_bufflen, luaL_Buffer *B) {
+  return SYMBOL_WRAP_CALL(luaL_bufflen, B);
+}
+SYMBOL_WRAP_DECL(char *, luaL_buffaddr, luaL_Buffer *B) {
+  return SYMBOL_WRAP_CALL(luaL_buffaddr, B);
+}
+SYMBOL_WRAP_DECL(void, luaL_addchar, luaL_Buffer *B, char c) {
+  SYMBOL_WRAP_CALL(luaL_addchar, B, c);
+}
+SYMBOL_WRAP_DECL(void, luaL_addsize, luaL_Buffer *B, size_t s) {
+  SYMBOL_WRAP_CALL(luaL_addsize, B, s);
+}
+SYMBOL_WRAP_DECL(void, luaL_buffsub, luaL_Buffer *B, size_t s) {
+  SYMBOL_WRAP_CALL(luaL_buffsub, B, s);
+}
 SYMBOL_WRAP_DECL(void, luaL_buffinit, lua_State *L, luaL_Buffer *B) {
   SYMBOL_WRAP_CALL(luaL_buffinit, L, B);
 }
@@ -2288,6 +2305,9 @@ SYMBOL_WRAP_DECL(void, luaL_pushresultsize, luaL_Buffer *B, size_t sz) {
 }
 SYMBOL_WRAP_DECL(char *, luaL_buffinitsize, lua_State *L, luaL_Buffer *B, size_t sz) {
   return SYMBOL_WRAP_CALL(luaL_buffinitsize, L, B, sz);
+}
+SYMBOL_WRAP_DECL(void, luaL_prepbuffer, luaL_Buffer *B) {
+  SYMBOL_WRAP_CALL(luaL_prepbuffer, B);
 }
 
 SYMBOL_WRAP_DECL(int, luaopen_base, lua_State *L) {
@@ -2345,9 +2365,13 @@ SYMBOL_WRAP_DECL(void, luaL_openlibs, lua_State *L) {
     __##name == NULL ? ((ret (*) (__VA_ARGS__)) &__pragtical_fallback_##name) : __##name\
   )
 
+#define IMPORT_CONSTANT(name, type) \
+  name = (type)((long) symbol(#name))
+
 void pragtical_plugin_init(void *XL) {
   void* (*symbol)(const char *);
   *(void **) (&symbol) = XL;
+  IMPORT_CONSTANT(LUA_REGISTRYINDEX, int);
   IMPORT_SYMBOL(lua_newstate, lua_State *, lua_Alloc f, void *ud);
   IMPORT_SYMBOL(lua_close, void, lua_State *L);
   IMPORT_SYMBOL(lua_newthread, lua_State *, lua_State *L);
@@ -2482,6 +2506,11 @@ void pragtical_plugin_init(void *XL) {
   IMPORT_SYMBOL(luaL_getsubtable, int, lua_State *L, int idx, const char *fname);
   IMPORT_SYMBOL(luaL_traceback, void, lua_State *L, lua_State *L1, const char *msg, int level);
   IMPORT_SYMBOL(luaL_requiref, void, lua_State *L, const char *modname, lua_CFunction openf, int glb);
+  IMPORT_SYMBOL(luaL_bufflen, size_t, luaL_Buffer *B);
+  IMPORT_SYMBOL(luaL_buffaddr, char *, luaL_Buffer *B);
+  IMPORT_SYMBOL(luaL_addchar, void, luaL_Buffer *B, char c);
+  IMPORT_SYMBOL(luaL_addsize, void, luaL_Buffer *B, size_t s);
+  IMPORT_SYMBOL(luaL_buffsub, void, luaL_Buffer *B, size_t s);
   IMPORT_SYMBOL(luaL_buffinit, void, lua_State *L, luaL_Buffer *B);
   IMPORT_SYMBOL(luaL_prepbuffsize, char *, luaL_Buffer *B, size_t sz);
   IMPORT_SYMBOL(luaL_addlstring, void, luaL_Buffer *B, const char *s, size_t l);
@@ -2490,6 +2519,7 @@ void pragtical_plugin_init(void *XL) {
   IMPORT_SYMBOL(luaL_pushresult, void, luaL_Buffer *B);
   IMPORT_SYMBOL(luaL_pushresultsize, void, luaL_Buffer *B, size_t sz);
   IMPORT_SYMBOL(luaL_buffinitsize, char *, lua_State *L, luaL_Buffer *B, size_t sz);
+  IMPORT_SYMBOL(luaL_prepbuffer, void, luaL_Buffer *B);
   IMPORT_SYMBOL(luaopen_base, int, lua_State *L);
   IMPORT_SYMBOL(luaopen_coroutine, int, lua_State *L);
   IMPORT_SYMBOL(luaopen_table, int, lua_State *L);
@@ -2504,7 +2534,7 @@ void pragtical_plugin_init(void *XL) {
 }
 
 #undef IMPORT_SYMBOL
-#undef IMPORT_SYMBOL_OPT
+#undef IMPORT_CONSTANT
 
 #else /* PRAGTICAL_PLUGIN_ENTRYPOINT */
 
@@ -2518,6 +2548,7 @@ void pragtical_plugin_init(void *XL);
 #undef SYMBOL_WRAP_CALL_FB
 #undef SYMBOL_DECLARE
 #undef SYMBOL_DECLARE_VARARG
+#undef CONSTANT_DECLARE
 #undef UNUSED
 #undef CONCAT
 #undef CONCAT1

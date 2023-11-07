@@ -236,30 +236,47 @@ COMPAT53_API void luaL_addvalue (luaL_Buffer_53 *B);
 #define luaL_pushresult COMPAT53_CONCAT(COMPAT53_PREFIX, _pushresult_53)
 COMPAT53_API void luaL_pushresult (luaL_Buffer_53 *B);
 
+#undef lua_setglobal
+#define lua_setglobal COMPAT53_CONCAT(COMPAT53_PREFIX, _setglobal)
+COMPAT53_API void lua_setglobal (lua_State *L, const char *s);
+
+#undef lua_getglobal
+#define lua_getglobal COMPAT53_CONCAT(COMPAT53_PREFIX, _getglobal)
+COMPAT53_API void lua_getglobal (lua_State* L, const char* s);
+
 #undef luaL_buffinitsize
-#define luaL_buffinitsize(L, B, s) \
-  (luaL_buffinit((L), (B)), luaL_prepbuffsize((B), (s)))
+#define luaL_buffinitsize COMPAT53_CONCAT(COMPAT53_PREFIX, _buffinitsize)
+COMPAT53_API char* luaL_buffinitsize (lua_State *L, luaL_Buffer_53 *B, size_t s);
 
 #undef luaL_prepbuffer
-#define luaL_prepbuffer(B) \
-  luaL_prepbuffsize((B), LUAL_BUFFERSIZE)
+#define luaL_prepbuffer COMPAT53_CONCAT(COMPAT53_PREFIX, _prepbuffer)
+COMPAT53_API char* luaL_prepbuffer (luaL_Buffer_53 *B);
+
+#define luaL_bufflen COMPAT53_CONCAT(COMPAT53_PREFIX, _bufflen)
+COMPAT53_API size_t luaL_bufflen (luaL_Buffer_53 *B);
+
+#define luaL_buffaddr COMPAT53_CONCAT(COMPAT53_PREFIX, _buffaddr)
+COMPAT53_API char* luaL_buffaddr (luaL_Buffer_53 *B);
 
 #undef luaL_addchar
-#define luaL_addchar(B, c) \
-  ((void)((B)->nelems < (B)->capacity || luaL_prepbuffsize((B), 1)), \
-   ((B)->ptr[(B)->nelems++] = (c)))
+#define luaL_addchar COMPAT53_CONCAT(COMPAT53_PREFIX, _addchar)
+COMPAT53_API void luaL_addchar (luaL_Buffer_53 *B, char c);
 
 #undef luaL_addsize
-#define luaL_addsize(B, s) \
-  ((B)->nelems += (s))
+#define luaL_addsize COMPAT53_CONCAT(COMPAT53_PREFIX, _addsize)
+COMPAT53_API void luaL_addsize (luaL_Buffer_53 *B, size_t s);
+
+#undef luaL_buffsub
+#define luaL_buffsub COMPAT53_CONCAT(COMPAT53_PREFIX, _buffsub)
+COMPAT53_API void luaL_buffsub (luaL_Buffer_53 *B, size_t s);
 
 #undef luaL_addstring
-#define luaL_addstring(B, s) \
-  luaL_addlstring((B), (s), strlen((s)))
+#define luaL_addstring COMPAT53_CONCAT(COMPAT53_PREFIX, _addstring)
+COMPAT53_API void luaL_addstring (luaL_Buffer_53 *B, const char* s);
 
 #undef luaL_pushresultsize
-#define luaL_pushresultsize(B, s) \
-  (luaL_addsize((B), (s)), luaL_pushresult((B)))
+#define luaL_pushresultsize COMPAT53_CONCAT(COMPAT53_PREFIX, _pushresultsize)
+COMPAT53_API void luaL_pushresultsize (luaL_Buffer_53 *B, size_t s);
 
 #if defined(LUA_COMPAT_APIINTCASTS)
 #define lua_pushunsigned(L, n) \
@@ -343,6 +360,48 @@ COMPAT53_API void luaL_requiref (lua_State *L, const char *modname,
 #endif /* Lua 5.1 and Lua 5.2 */
 
 
+/* declarations for Lua 5.2, 5.3 and 5.4 */
+#if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502 && LUA_VERSION_NUM <= 504
+
+#ifdef luaL_prepbuffer
+  #undef luaL_prepbuffer
+#endif
+#define luaL_prepbuffer COMPAT53_CONCAT(COMPAT53_PREFIX, _prepbuffer)
+COMPAT53_API char* luaL_prepbuffer (luaL_Buffer *B);
+
+#ifdef luaL_bufflen
+  #undef luaL_bufflen
+#endif
+#define luaL_bufflen COMPAT53_CONCAT(COMPAT53_PREFIX, _bufflen)
+COMPAT53_API size_t luaL_bufflen (luaL_Buffer *B);
+
+#ifdef luaL_buffaddr
+  #undef luaL_buffaddr
+#endif
+#define luaL_buffaddr COMPAT53_CONCAT(COMPAT53_PREFIX, _buffaddr)
+COMPAT53_API char* luaL_buffaddr (luaL_Buffer *B);
+
+#ifdef luaL_addchar
+  #undef luaL_addchar
+#endif
+#define luaL_addchar COMPAT53_CONCAT(COMPAT53_PREFIX, _addchar)
+COMPAT53_API void luaL_addchar (luaL_Buffer *B, char c);
+
+#ifdef luaL_addsize
+  #undef luaL_addsize
+#endif
+#define luaL_addsize COMPAT53_CONCAT(COMPAT53_PREFIX, _addsize)
+COMPAT53_API void luaL_addsize (luaL_Buffer *B, size_t s);
+
+#ifdef luaL_buffsub
+  #undef luaL_buffsub
+#endif
+#define luaL_buffsub COMPAT53_CONCAT(COMPAT53_PREFIX, _buffsub)
+COMPAT53_API void luaL_buffsub (luaL_Buffer *B, size_t s);
+
+#endif /* Lua 5.2, 5.3 and 5.4 */
+
+
 /* declarations for Lua 5.1, 5.2 and 5.3 */
 #if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM < 504
 
@@ -362,14 +421,6 @@ COMPAT53_API int lua_setiuservalue (lua_State* L, int idx, int n);
 /* LuaJIT missing implementations */
 #if LUA_JIT
 #define lua_setlevel COMPAT53_CONCAT(COMPAT53_PREFIX, _setlevel)
-
-#undef lua_setglobal /* On luajit this is a macro so we undefine it */
-#define lua_setglobal COMPAT53_CONCAT(COMPAT53_PREFIX, _setglobal)
-COMPAT53_API void lua_setglobal (lua_State *L, const char *s);
-
-#undef lua_getglobal /* On luajit this is a macro so we undefine it */
-#define lua_getglobal COMPAT53_CONCAT(COMPAT53_PREFIX, _getglobal)
-COMPAT53_API void lua_getglobal (lua_State* L, const char* s);
 #endif
 
 

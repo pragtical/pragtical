@@ -739,10 +739,57 @@ COMPAT53_API void luaL_addvalue (luaL_Buffer_53 *B) {
 }
 
 
-void luaL_pushresult (luaL_Buffer_53 *B) {
+COMPAT53_API void luaL_pushresult (luaL_Buffer_53 *B) {
   lua_pushlstring(B->L2, B->ptr, B->nelems);
   if (B->ptr != B->b.buffer)
     lua_replace(B->L2, -2); /* remove userdata buffer */
+}
+
+COMPAT53_API void lua_setglobal (lua_State *L, const char* s) {
+  lua_setfield(L, LUA_GLOBALSINDEX, s);
+}
+
+COMPAT53_API void lua_getglobal (lua_State *L, const char* s) {
+  lua_getfield(L, LUA_GLOBALSINDEX, s);
+}
+
+COMPAT53_API char* luaL_buffinitsize (lua_State *L, luaL_Buffer_53 *B, size_t s) {
+  luaL_buffinit(L, B);
+  return luaL_prepbuffsize(B, s);
+}
+
+COMPAT53_API char* luaL_prepbuffer (luaL_Buffer_53 *B) {
+  return luaL_prepbuffsize(B, LUAL_BUFFERSIZE);
+}
+
+COMPAT53_API size_t luaL_bufflen (luaL_Buffer_53 *B) {
+  return B->nelems;
+}
+
+COMPAT53_API char* luaL_buffaddr (luaL_Buffer_53 *B) {
+  return B->ptr;
+}
+
+COMPAT53_API void luaL_addchar (luaL_Buffer_53 *B, char c) {
+  if(B->nelems >= B->capacity) luaL_prepbuffsize(B, 1);
+  B->ptr[B->nelems++] = c;
+}
+
+COMPAT53_API void luaL_addsize (luaL_Buffer_53 *B, size_t s) {
+  B->nelems += s;
+}
+
+COMPAT53_API void luaL_buffsub (luaL_Buffer_53 *B, size_t s) {
+  B->nelems -= s;
+}
+
+COMPAT53_API void luaL_addstring (luaL_Buffer_53 *B, const char* s) {
+  luaL_addlstring(B, s, strlen(s));
+}
+
+COMPAT53_API void luaL_pushresultsize (luaL_Buffer_53 *B, size_t s) {
+  luaL_addsize(B, s);
+  luaL_pushresult(B);
 }
 
 
@@ -966,6 +1013,38 @@ COMPAT53_API void luaL_requiref (lua_State *L, const char *modname,
 
 
 
+/* declarations for Lua 5.2, 5.3 and 5.4 */
+#if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM >= 502 && LUA_VERSION_NUM <= 504
+
+COMPAT53_API char* luaL_prepbuffer (luaL_Buffer *B) {
+  return luaL_prepbuffsize(B, LUAL_BUFFERSIZE);
+}
+
+COMPAT53_API size_t luaL_bufflen (luaL_Buffer *B) {
+  return B->n;
+}
+
+COMPAT53_API char* luaL_buffaddr (luaL_Buffer *B) {
+  return B->b;
+}
+
+COMPAT53_API void luaL_addchar (luaL_Buffer *B, char c) {
+  ((void)((B)->n < (B)->size || luaL_prepbuffsize((B), 1)), \
+   ((B)->b[(B)->n++] = (c)));
+}
+
+COMPAT53_API void luaL_addsize (luaL_Buffer *B, size_t s) {
+  B->n += s;
+}
+
+COMPAT53_API void luaL_buffsub (luaL_Buffer *B, size_t s) {
+  B->n -= s;
+}
+
+#endif /* Lua 5.2, 5.3 and 5.4 */
+
+
+
 /* definitions for Lua 5.1, 5.2 and 5.3 */
 #if defined( LUA_VERSION_NUM ) && LUA_VERSION_NUM <= 503
 
@@ -1034,14 +1113,6 @@ COMPAT53_API int lua_setiuservalue(lua_State* L, int idx, int n)
 /* LuaJIT missing implementations */
 #if LUA_JIT
 COMPAT53_API void lua_setlevel (lua_State *from, lua_State *to) {}
-
-COMPAT53_API void lua_setglobal (lua_State *L, const char* s) {
-  lua_setfield(L, LUA_GLOBALSINDEX, s);
-}
-
-COMPAT53_API void lua_getglobal (lua_State *L, const char* s) {
-  lua_getfield(L, LUA_GLOBALSINDEX, s);
-}
 #endif
 
 

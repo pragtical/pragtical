@@ -1144,7 +1144,7 @@ static void* api_require(const char* symbol) {
     P(typename), P(xmove), S(luaopen_base), S(luaopen_debug), S(luaopen_io),
     S(luaopen_math), S(luaopen_os), S(luaopen_package), S(luaopen_string),
     S(luaopen_table), S(api_load_libs), P(newuserdatauv), P(getiuservalue),
-    P(setiuservalue),
+    P(setiuservalue), S(LUA_REGISTRYINDEX),
     #endif
     #if LUA_VERSION_NUM == 502 || LUA_VERSION_NUM == 503 || LUA_VERSION_NUM == 504
     U(buffinitsize), U(checkversion_), U(execresult), U(fileresult),
@@ -1155,6 +1155,8 @@ static void* api_require(const char* symbol) {
     P(rawgetp), P(rawlen), P(rawsetp), P(setglobal), P(tointegerx),
     P(tonumberx), P(upvalueid), P(upvaluejoin), P(version), P(yieldk),
     S(luaopen_coroutine),
+    /* From macros to functions */
+    U(bufflen), U(buffaddr), U(addchar), U(addsize), U(buffsub), U(prepbuffer),
     #endif
     #if LUA_VERSION_NUM == 501 || LUA_VERSION_NUM == 502 || LUA_VERSION_NUM == 503
     P(newuserdata),
@@ -1191,7 +1193,8 @@ static void* api_require(const char* symbol) {
     P(rawgetp), P(rawsetp), P(setglobal), P(tointegerx), P(tonumberx),
     P(upvalueid), P(upvaluejoin), P(version), P(geti), P(isinteger),
     P(isyieldable), P(rotate), P(seti), P(stringtonumber), P(getuservalue),
-    P(setuservalue), U(typeerror),
+    P(setuservalue), U(typeerror), U(buffinitsize), U(bufflen), U(buffaddr),
+    U(addchar), U(addsize), U(buffsub), U(addstring), U(pushresultsize),
     #endif
   };
   for (size_t i = 0; i < sizeof(nodes) / sizeof(lua_function_node); ++i) {
