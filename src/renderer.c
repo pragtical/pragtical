@@ -23,7 +23,7 @@
 #include <hb-ft.h>
 
 #define MAX_UNICODE 0x100000
-#define GLYPHSET_SIZE 8
+#define GLYPHSET_SIZE 16
 #define MAX_LOADABLE_GLYPHSETS (MAX_UNICODE / GLYPHSET_SIZE)
 #define SUBPIXEL_BITMAPS_CACHED 3
 
@@ -176,14 +176,18 @@ static RenFont* font_group_get_glyph(GlyphSet** set, GlyphMetric** metric, RenFo
   if (!metric) {
     return NULL;
   }
+  bool is_tab = false;
+  if (fb_codepoint == '\t') { is_tab = true; fb_codepoint = '\0'; }
   if (bitmap_index < 0)
     bitmap_index += SUBPIXEL_BITMAPS_CACHED;
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
     unsigned cp = i == 0 ? codepoint : FT_Get_Char_Index(fonts[i]->face, fb_codepoint);
     *set = font_get_glyphset(fonts[i], cp, bitmap_index);
     *metric = &(*set)->metrics[cp % GLYPHSET_SIZE];
-    if ((*metric)->loaded || fb_codepoint == 0)
+    if ((*metric)->loaded || fb_codepoint == 0) {
+      if (is_tab) (*metric)->xadvance = fonts[i]->tab_advance;
       return fonts[i];
+    }
   }
   if (*metric && !(*metric)->loaded && fb_codepoint > 0xFF && fb_codepoint != 0x25A1)
     return font_group_get_glyph(set, metric, fonts, 0x25A1, 0x25A1, bitmap_index);
@@ -512,7 +516,7 @@ void ren_font_group_set_tab_size(RenFont **fonts, int n) {
 }
 
 int ren_font_group_get_tab_size(RenFont **fonts) {
-  if (fonts[0]->space_advance) 
+  if (fonts[0]->space_advance)
     return fonts[0]->tab_advance / fonts[0]->space_advance;
   return fonts[0]->tab_advance;
 }
