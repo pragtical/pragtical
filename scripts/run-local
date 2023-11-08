@@ -87,9 +87,9 @@ copy_pragtical_build () {
   fi
   if [ -d "subprojects/ppm" ]; then
     cp -a "subprojects/ppm/plugins/plugin_manager" "$datadir/plugins"
-    if [ -d "$builddir/subprojects/ppm" ]; then
+    if [ -d "$builddir/subprojects/ppm" ] && ls "$builddir"/subprojects/ppm/ppm.*; then
       cp -a "$builddir"/subprojects/ppm/ppm.* "$datadir/plugins/plugin_manager/"
-    else
+    elif ls subprojects/ppm/ppm.*; then
       cp subprojects/ppm/ppm.* "$datadir/plugins/plugin_manager/"
     fi
     mkdir "$datadir/libraries"
