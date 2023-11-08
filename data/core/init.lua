@@ -805,6 +805,12 @@ local function map_new_syntax_colors(clear_new)
     -- keywords like: static, const, constexpr
     ["storageclass"]          = { alt = "keyword"   },
     ["storageclass.lifetime"] = {                   },
+    -- tags in HTML and JSX
+    ["tag"]                   = { alt = "function"  },
+    -- tag delimeters <>
+    ["tag.delimiter"]         = { alt = "operator"  },
+    -- tag attributes eg: id="id-attr"
+    ["tag.attribute"]         = { alt = "keyword"   },
     -- additions on diff or patch
     ["text.diff.add"]         = { alt = style.good  },
     -- deletions on diff or patch
