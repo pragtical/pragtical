@@ -287,6 +287,7 @@ init_lua:
     "    'Details can be found in \\\"'..error_path..'\\\"')\n"
     "  os.exit(1)\n"
     "end)\n"
+    "if LUAJIT then getmetatable(process).__gc() end\n"
     "return core and core.restart_request\n";
 
   if (luaL_loadstring(L, init_code)) {
