@@ -73,6 +73,22 @@ elif host_machine.system() == 'darwin'
     pragtical_sources += 'bundle_open.m'
 endif
 
+pragtical_runpath = ''
+if host_machine.system() == 'darwin'
+    # @executable_path: always the directory relative to executable
+    # @loader_path: directory relative to executable or invoked shared library
+    pragtical_runpath += '@executable_path'
+    pragtical_runpath += ':@executable_path/lib'
+    pragtical_runpath += ':@executable_path/../Contents/Resources/lib'
+else
+    # $ORIGIN: directory containing the executable or shared library
+    # $LIB: directory containing the dynamic linker (usually /lib or /lib64)
+    pragtical_runpath += '$ORIGIN'
+    pragtical_runpath += ':$ORIGIN/lib'
+    pragtical_runpath += ':$ORIGIN/../share/pragtical/lib'
+    pragtical_runpath += ':$ORIGIN/../$LIB'
+endif
+
 pragtical_includes += include_directories('.')
 
 executable('pragtical',
@@ -84,5 +100,7 @@ executable('pragtical',
     link_args: pragtical_link_args,
     install_dir: pragtical_bindir,
     install: true,
+    build_rpath: pragtical_runpath,
+    install_rpath: pragtical_runpath,
     win_subsystem: 'windows',
 )
