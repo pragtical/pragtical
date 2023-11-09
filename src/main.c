@@ -208,6 +208,10 @@ int main(int argc, char **argv) {
   }
   ren_init(window);
 
+  /* Set a minimum size to prevent too small to see issues on unmaximize.
+  ** Needs to be set after renderer to work: libsdl-org/SDL/issues/1408 */
+  SDL_SetWindowMinimumSize(window, 480, 360);
+
   lua_State *L;
 init_lua:
   L = luaL_newstate();
