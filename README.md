@@ -15,7 +15,7 @@ two words that properly define our development approach as follows:
 * Government through practice and action rather than theory and speculation.
 * Willingness to see the context of actual use cases and not only idealistic ideals.
 
-As a result [we believe](https://github.com/pragtical/pragtical/issues/6#issuecomment-1581650875) that new features introduced through pull requests should
+As a result [we believe] that new features introduced through pull requests should
 be evaluated by taking a practical approach, without going into lengthy idealistic
 discussions that slow down progress, merging code when logical.
 
@@ -78,54 +78,37 @@ described below.
 
 ## Quick Build Guide
 
-First, clone this repository
+1. Clone this repository
 
 ```sh
 git clone https://github.com/pragtical/pragtical
 ```
 
-Optionally initialize the git submodules to get `widget` directly from git
-(if this step is omitted the `widget` **meson subproject** will be used instead
-which will retrieve the latest using git):
+2. Setup and compile the project
 
 ```sh
-  git submodule update --init
-
-  # You may also want to update the submodules to latest commit
-  git submodule update --remote --merge
-```
-
-If you compile Pragtical yourself, it is recommended to use the script
-`build-packages.sh`:
-
-```sh
-bash build-packages.sh -h
-```
-
-The script will run Meson and create a tar compressed archive with the
-application or, for Windows, a zip file. Pragtical can be easily installed
-by unpacking the archive in any directory of your choice.
-
-Otherwise the following is an example of basic commands if you want to customize
-the build:
-
-```sh
-meson setup --buildtype=release --prefix <prefix> build
+meson setup --wrap-mode=forcefallback -Dportable=true build
 meson compile -C build
-DESTDIR="$(pwd)/pragtical" meson install -C build
 ```
 
-where `<prefix>` might be one of `/`, `/usr` or `/opt`, the default is `/`.
-To build a bundle application on macOS:
+> **Note**
+> We set `--wrap-mode` to forcefallback to download and build all the dependencies
+> which will take longer. If you have all dependencies installed on your system
+> you can skip this flag. Also notice we set the `portable` flag to true, this
+> way the install process will generate a directory structure that is easily
+> relocatable.
+
+3. Install and profit!
 
 ```sh
-meson setup --buildtype=release --Dbundle=true --prefix / build
-meson compile -C build
-DESTDIR="$(pwd)/Pragtical.app" meson install -C build
+meson install -C build --destdir ../pragtical
 ```
 
-Please note that the package is relocatable to any prefix and the option prefix
-affects only the place where the application is actually installed.
+You will now see a new directory called `pragtical` that will contain the
+executable and all the necessary files to run the editor. Feel free to move or
+rename this directory however you wish.
+
+For more detailed instructions visit: https://pragtical.dev/docs/setup/building
 
 ## Contributing
 
@@ -146,16 +129,17 @@ the terms of the MIT license. See [LICENSE] for details.
 See the [licenses] directory for details on licenses used by the required dependencies.
 
 
-[Build Rolling]:         https://github.com/pragtical/pragtical/actions/workflows/rolling.yml/badge.svg
-[Lite XL]:              https://github.com/lite-xl/lite-xl
-[screenshot-dark]:      https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
-[lite]:                 https://github.com/rxi/lite
-[website]:              https://pragtical.github.io
-[build]:                https://pragtical.github.io/documentation/build
-[Get Pragtical]:        https://github.com/pragtical/pragtical/releases
-[Get Plugins]:          https://github.com/pragtical/plugins
-[Get Color Themes]:     https://github.com/pragtical/colors
-[plugins repository]:   https://github.com/pragtical/plugins
-[changelog]:            https://github.com/pragtical/pragtical/blob/master/changelog.md
-[LICENSE]:              LICENSE
-[licenses]:             licenses/licenses.md
+[Build Rolling]:      https://github.com/pragtical/pragtical/actions/workflows/rolling.yml/badge.svg
+[Lite XL]:            https://github.com/lite-xl/lite-xl
+[screenshot-dark]:    https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
+[lite]:               https://github.com/rxi/lite
+[website]:            https://pragtical.github.io
+[build]:              https://pragtical.github.io/documentation/build
+[Get Pragtical]:      https://github.com/pragtical/pragtical/releases
+[Get Plugins]:        https://github.com/pragtical/plugins
+[Get Color Themes]:   https://github.com/pragtical/colors
+[plugins repository]: https://github.com/pragtical/plugins
+[changelog]:          https://github.com/pragtical/pragtical/blob/master/changelog.md
+[LICENSE]:            LICENSE
+[licenses]:           licenses/licenses.md
+[we believe]:         https://github.com/pragtical/pragtical/issues/6#issuecomment-1581650875
