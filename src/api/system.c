@@ -232,10 +232,10 @@ top:
     case SDL_EVENT_DROP_FILE:
       SDL_GetMouseState(&mx, &my);
       lua_pushstring(L, "filedropped");
-      lua_pushstring(L, e.drop.file);
+      lua_pushstring(L, e.drop.data);
       lua_pushnumber(L, mx * scale);
       lua_pushnumber(L, my * scale);
-      SDL_free(e.drop.file);
+      SDL_free(e.drop.data);
       return 4;
 
     case SDL_EVENT_KEY_DOWN:
@@ -276,16 +276,6 @@ top:
       lua_pushinteger(L, e.edit.start);
       lua_pushinteger(L, e.edit.length);
       return 4;
-
-#if SDL_VERSION_ATLEAST(2, 0, 22)
-    case SDL_EVENT_TEXT_EDITING_EXT:
-      lua_pushstring(L, "textediting");
-      lua_pushstring(L, e.editExt.text);
-      lua_pushinteger(L, e.editExt.start);
-      lua_pushinteger(L, e.editExt.length);
-      SDL_free(e.editExt.text);
-      return 4;
-#endif
 
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
       if (e.button.button == 1) { SDL_CaptureMouse(1); }
@@ -533,9 +523,7 @@ static int f_set_text_input_rect(lua_State *L) {
 }
 
 static int f_clear_ime(lua_State *L) {
-#if SDL_VERSION_ATLEAST(2, 0, 22)
   SDL_ClearComposition();
-#endif
   return 0;
 }
 

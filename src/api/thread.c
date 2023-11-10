@@ -514,10 +514,8 @@ static int mm_thread_gc(lua_State *L)
     L, 1, API_TYPE_THREAD
   ))->thread;
 
-#if SDL_VERSION_ATLEAST(2, 0, 2)
   if (!self->joined)
     SDL_DetachThread(self->ptr);
-#endif
 
   /* this can take place before or after the thread callback ends
    * which is why ref counting is needed */
