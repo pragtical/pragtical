@@ -1,0 +1,15 @@
+c_sources += files(
+    'SDL_windowsclipboard.c',
+    'SDL_windowsevents.c',
+    'SDL_windowsframebuffer.c',
+    'SDL_windowskeyboard.c',
+    'SDL_windowsmessagebox.c',
+    'SDL_windowsmodes.c',
+    'SDL_windowsmouse.c',
+    'SDL_windowsopengl.c',
+    'SDL_windowsopengles.c',
+    'SDL_windowsshape.c',
+    'SDL_windowsvideo.c',
+    'SDL_windowsvulkan.c',
+    'SDL_windowswindow.c',
+)

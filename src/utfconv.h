@@ -1,16 +1,11 @@
 #ifndef MBSEC_H
 #define MBSEC_H
 
-#ifdef __GNUC__
-#define UNUSED __attribute__((__unused__))
-#else
-#define UNUSED
-#endif
-
 #ifdef _WIN32
 
 #include <stdlib.h>
 #include <windows.h>
+#include "papi.h"
 
 #define UTFCONV_ERROR_INVALID_CONVERSION "Input contains invalid byte sequences."
 

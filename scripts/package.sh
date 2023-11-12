@@ -191,7 +191,7 @@ main() {
 
   rm -rf "${dest_dir}"
 
-  DESTDIR="$(pwd)/${dest_dir}" meson install --skip-subprojects="freetype2,pcre2" -C "${build_dir}"
+  DESTDIR="$(pwd)/${dest_dir}" meson install -C "${build_dir}"
 
   local data_dir="$(pwd)/${dest_dir}/data"
   local exe_file="$(pwd)/${dest_dir}/pragtical"
@@ -253,15 +253,6 @@ main() {
     addons_download "${build_dir}"
     addons_install "${build_dir}" "${data_dir}"
   fi
-
-  # TODO: use --skip-subprojects when 0.58.0 will be available on supported
-  # distributions to avoid subprojects' include and lib directories to be copied.
-  # Install Meson with PIP to get the latest version is not always possible.
-  pushd "${dest_dir}"
-  find . -type d -name 'include' -prune -exec rm -rf {} \;
-  find . -type d -name 'lib' -prune -exec rm -rf {} \;
-  find . -type d -empty -delete
-  popd
 
   if [[ $release == true ]]; then
     $stripcmd "${exe_file}"

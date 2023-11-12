@@ -134,7 +134,7 @@ generate_appimage() {
 
   echo "Creating Pragtical.AppDir..."
 
-  DESTDIR="$(realpath Pragtical.AppDir)" meson install --skip-subprojects="freetype2,pcre2" -C ${BUILD_DIR}
+  DESTDIR="$(realpath Pragtical.AppDir)" meson install -C ${BUILD_DIR}
   mv AppRun Pragtical.AppDir/
   # These could be symlinks but it seems they doesn't work with AppimageLauncher
   cp resources/icons/logo.svg Pragtical.AppDir/pragtical.svg

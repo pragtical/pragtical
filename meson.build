@@ -2,10 +2,12 @@ project('pragtical',
     ['c'],
     version : '3.2.0',
     license : 'MIT',
-    meson_version : '>= 0.56',
+    meson_version : '>= 0.60',
     default_options : [
         'c_std=gnu11',
-        'wrap_mode=nofallback'
+        'wrap_mode=nofallback',
+        'prefix=/',
+        'pkgconfig.relocatable=true'
     ]
 )
 
@@ -75,7 +77,7 @@ endif
 cc = meson.get_compiler('c')
 
 pragtical_includes = []
-pragtical_cargs = ['-DSDL_MAIN_HANDLED', '-DPCRE2_STATIC']
+pragtical_cargs = ['-DPCRE2_STATIC']
 # On macos we need to use the SDL renderer to support retina displays
 if get_option('renderer') or host_machine.system() == 'darwin'
     pragtical_cargs += '-DPRAGTICAL_USE_SDL_RENDERER'
@@ -165,7 +167,6 @@ if not get_option('source-only')
     sdl_options += 'use_atomic=enabled'
     sdl_options += 'use_threads=enabled'
     sdl_options += 'use_timers=enabled'
-    sdl_options += 'with_main=true'
     # investigate if this is truly needed
     # Do not remove before https://github.com/libsdl-org/SDL/issues/5413 is released
     sdl_options += 'use_events=enabled'
@@ -213,7 +214,7 @@ if not get_option('source-only')
         sdlmain_dep = dependency('', required: false)
     endif
 
-    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 #===============================================================================
@@ -226,8 +227,22 @@ endif
 #===============================================================================
 # Install Configuration
 #===============================================================================
+python_exe = find_program('python3', 'python', required: false)
+
+# Script to handle headers and libraries installed by subprojects
+if python_exe.found()
+    meson.add_install_script(
+        python_exe,
+        meson.project_source_root() / 'scripts/meson_install.py'
+    )
+else
+    warning('Python not found, can not execute meson_install.py')
+endif
+
 if get_option('portable') or host_machine.system() == 'windows'
     pragtical_bindir = '/'
+    pragtical_libdir = '/'
+    pragtical_includedir = '/include'
     pragtical_docdir = '/doc'
     pragtical_datadir = '/data'
     configure_file(
@@ -238,6 +253,8 @@ if get_option('portable') or host_machine.system() == 'windows'
 elif get_option('bundle') and host_machine.system() == 'darwin'
     pragtical_cargs += '-DMACOS_USE_BUNDLE'
     pragtical_bindir = 'Contents/MacOS'
+    pragtical_libdir = 'Contents/Frameworks'
+    pragtical_includedir = 'Contents/Resources/include'
     pragtical_docdir = 'Contents/Resources'
     pragtical_datadir = 'Contents/Resources'
     install_data('resources/icons/icon.icns', install_dir : 'Contents/Resources')
@@ -250,6 +267,8 @@ elif get_option('bundle') and host_machine.system() == 'darwin'
     )
 else
     pragtical_bindir = 'bin'
+    pragtical_libdir = 'lib'
+    pragtical_includedir = 'include'
     pragtical_docdir = 'share/doc/pragtical'
     pragtical_datadir = 'share/pragtical'
     if host_machine.system() == 'linux'
@@ -264,6 +283,20 @@ else
             install_dir : 'share/metainfo'
         )
     endif
+endif
+
+if sdl_dep.type_name() == 'internal'
+    install_subdir(
+        'subprojects/SDL2-2.28.5/include',
+        install_dir: pragtical_includedir / 'pragtical/third_party/SDL2',
+        strip_directory: true,
+        exclude_files: [
+            'meson.build',
+            'SDL_config.h.in',
+            'SDL_config.h.cmake',
+            'SDL_revision.h.cmake'
+        ]
+    )
 endif
 
 install_data('licenses/licenses.md', install_dir : pragtical_docdir)

@@ -69,8 +69,10 @@ copy_pragtical_build () {
   mkdir -p "$bindir" "$datadir"
   if [ ! -z ${run_windows+x} ]; then
     cp "$builddir/src/pragtical.exe" "$bindir"
+    cp "$builddir/src/libpragtical.dll" "$bindir"
   else
     cp "$builddir/src/pragtical" "$bindir"
+    cp "$builddir/src/libpragtical.so" "$bindir"
   fi
   mkdir -p "$datadir/core"
   for module_name in core compat plugins colors fonts widget; do

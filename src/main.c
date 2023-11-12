@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <SDL.h>
 #include "api/api.h"
-#include "rencache.h"
 #include "renderer.h"
+#include "rencache.h"
 
 #include <signal.h>
 
@@ -129,7 +129,7 @@ void set_macos_bundle_resources(lua_State *L);
 int main(int argc, char **argv) {
 #ifndef _WIN32
   signal(SIGPIPE, SIG_IGN);
-#else
+#elif PRAGTICAL_CONSOLE_REDIRECT
   /* Allow console output on windows with some drawbacks
    * See: https://stackoverflow.com/q/73987850
    *      https://stackoverflow.com/q/17111308

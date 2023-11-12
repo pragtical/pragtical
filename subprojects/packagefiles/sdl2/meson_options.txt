@@ -1,0 +1,240 @@
+option(
+    'test',
+    type : 'boolean',
+    value : true,
+    description : 'build tests'
+)
+
+option(
+    'run_test',
+    type : 'boolean',
+    value : false,
+    description : 'run tests. running the tests requires a video output, audio processor, etc. do not use on headless machines'
+)
+
+option(
+    'assertions',
+    type : 'combo',
+    value : 'auto',
+    choices : ['auto', 'disabled', 'release', 'enabled', 'paranoid'],
+    description: 'Enable internal sanity checks'
+)
+
+option(
+    'system_iconv',
+    type : 'feature',
+    description: 'Use iconv() from system-installed libraries'
+)
+
+option(
+    'use_threads',
+    type : 'feature',
+    description : 'Enable threads support'
+)
+
+option(
+    'use_atomic',
+    type : 'feature',
+    description : 'Enable the Atomic subsystem'
+)
+
+option(
+    'use_audio',
+    type : 'feature',
+    description : 'Enable the Audio subsystem'
+)
+
+option(
+    'use_audio_alsa',
+    type : 'feature',
+    description : 'Enable the ALSA audio driver'
+)
+
+option(
+    'use_audio_pulseaudio',
+    type : 'feature',
+    description : 'Enable the PulseAudio audio driver'
+)
+
+option(
+    'use_audio_jack',
+    type : 'feature',
+    description : 'Enable the JACK audio driver'
+)
+
+option(
+    'use_audio_pipewire',
+    type : 'feature',
+    description : 'Enable the PipeWire audio driver'
+)
+
+option(
+    'use_cpuinfo',
+    type : 'feature',
+    description : 'Enable the CPU Info subsystem'
+)
+
+option(
+    'use_events',
+    type : 'feature',
+    description : 'Enable the Events subsystem'
+)
+
+option(
+    'use_file',
+    type : 'feature',
+    description : 'Enable the File subsystem'
+)
+
+option(
+    'use_joystick',
+    type : 'feature',
+    description : 'Enable the Joystick subsystem'
+)
+
+option(
+    'use_joystick_dinput',
+    type : 'feature',
+    description : 'Enable the DirectInput joystick driver'
+)
+
+option(
+    'use_joystick_xinput',
+    type : 'feature',
+    description : 'Enable the XInput joystick driver'
+)
+
+option(
+    'use_joystick_wgi',
+    type : 'feature',
+    description : 'Enable the Windows.Gaming.Input joystick driver'
+)
+
+option(
+    'use_joystick_virtual',
+    type : 'feature',
+    description : 'Enable the virtual joystick driver'
+)
+
+option(
+    'use_haptic',
+    type : 'feature',
+    description : 'Enable the Haptic subsystem'
+)
+
+option(
+    'use_hidapi',
+    type : 'feature',
+    description : 'Enable the HIDAPI subsystem'
+)
+
+option(
+    'use_sensor',
+    type : 'feature',
+    description : 'Enable the Sensor subsystem'
+)
+
+option(
+    'use_loadso',
+    type : 'feature',
+    description : 'Enable the Shared Object Loading subsystem'
+)
+
+option(
+    'use_locale',
+    type : 'feature',
+    description : 'Enable the Locale subsystem'
+)
+
+option(
+    'use_render',
+    type : 'feature',
+    description : 'Enable the Renderer subsystem'
+)
+
+option(
+    'use_timers',
+    type : 'feature',
+    description : 'Enable the Timers subsystem'
+)
+
+option(
+    'use_video',
+    type : 'feature',
+    description : 'Enable the Video subsystem'
+)
+
+option(
+    'use_video_x11',
+    type : 'feature',
+    description : 'Enable the X11 video driver'
+)
+
+option(
+    'use_video_wayland',
+    type : 'feature',
+    description : 'Enable the Wayland video driver'
+)
+
+option(
+    'use_video_wayland_libdecor',
+    type : 'feature',
+    description : 'Use libdecor to provide client-side decorations on Wayland'
+)
+
+option(
+    'use_video_opengl',
+    type : 'feature',
+    description : 'Enable OpenGL support'
+)
+
+option(
+    'use_video_openglesv2',
+    type : 'feature',
+    description : 'Enable OpenGL ES 2.0+ support'
+)
+
+option(
+    'use_video_vulkan',
+    type : 'feature',
+    description : 'Enable Vulkan support'
+)
+
+option(
+    'use_video_offscreen',
+    type : 'feature',
+    value : 'disabled',
+    description : 'Enable offscreen rendering support'
+)
+
+option(
+    'use_power',
+    type : 'feature',
+    description : 'Enable the Power subsystem'
+)
+
+option(
+    'use_filesystem',
+    type : 'feature',
+    description : 'Enable the Filesystem subsystem'
+)
+
+option(
+    'use_dummies',
+    type : 'boolean',
+    description : 'Build dummy fallbacks of various subsystems'
+)
+
+option(
+    'prefer_dlopen',
+    type : 'boolean',
+    description : 'If possible, dlopen dependencies at runtime instead of linking (linux only)'
+)
+
+option(
+    'with_main',
+    type : 'boolean',
+    value : false,
+    deprecated: true,
+    description : 'automatically link against sdl2main (deprecated, link to dependency sdl2_main instead)'
+)
