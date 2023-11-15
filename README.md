@@ -2,6 +2,8 @@
 
 The practical and pragmatic code editor.
 
+[website] | [documentation] | [download]
+
 [![Build Rolling]](https://github.com/pragtical/pragtical/actions/workflows/rolling.yml)
 
 ![screenshot](https://pragtical.github.io/assets/img/editor.png)
@@ -91,7 +93,7 @@ meson setup --wrap-mode=forcefallback -Dportable=true build
 meson compile -C build
 ```
 
-> **Note**
+> [!NOTE]
 > We set `--wrap-mode` to forcefallback to download and build all the dependencies
 > which will take longer. If you have all dependencies installed on your system
 > you can skip this flag. Also notice we set the `portable` flag to true, this
@@ -133,7 +135,9 @@ See the [licenses] directory for details on licenses used by the required depend
 [Lite XL]:            https://github.com/lite-xl/lite-xl
 [screenshot-dark]:    https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
 [lite]:               https://github.com/rxi/lite
-[website]:            https://pragtical.github.io
+[website]:            https://pragtical.dev
+[documentation]:      https://pragtical.dev/docs/intro
+[download]:           https://github.com/pragtical/pragtical/releases
 [build]:              https://pragtical.github.io/documentation/build
 [Get Pragtical]:      https://github.com/pragtical/pragtical/releases
 [Get Plugins]:        https://github.com/pragtical/plugins
