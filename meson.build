@@ -217,7 +217,7 @@ endif
 #===============================================================================
 # Check for X11 existence to detect scale factor when video driver is x11
 #===============================================================================
-if cc.find_library('X11', required : false).found()
+if host_machine.system() != 'darwin' and cc.find_library('X11', required : false).found()
     pragtical_cargs += '-DX11_FOUND'
 endif
 
