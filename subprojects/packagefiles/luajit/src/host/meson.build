@@ -26,7 +26,9 @@ checkdefs = [
 ]
 
 if host_machine.cpu_family() == 'x86'
-    checkdefs += ['__SSE2__', '1', ['-D', 'SSE']]
+    checkdefs += [
+        ['__SSE2__', '1', ['-D', 'SSE']]
+    ]
 endif
 
 foreach def: checkdefs
