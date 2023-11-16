@@ -20,9 +20,12 @@ use_system_lua = get_option('use_system_lua')
 # If jit enabled search for luajit first to properly set project version
 #===============================================================================
 lua_jit_found = false
-if get_option('jit') and meson.get_compiler('c').get_id() != 'msvc'
+if get_option('jit')
     if not use_system_lua
-        luajit_dep = subproject('luajit').get_variable('luajit_dep')
+        luajit_dep = subproject(
+            'luajit',
+            default_options: ['default_library=static']
+        ).get_variable('luajit_dep')
     else
         luajit_dep = dependency('luajit', required : false,
             default_options: ['default_library=static']
