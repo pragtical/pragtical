@@ -96,10 +96,11 @@ pragtical_deps_inc = []
 foreach dep : pragtical_deps
     if dep.type_name() == 'internal' and compiler_id != 'msvc'
         pragtical_deps_whole += dep.as_link_whole()
+        pragtical_deps_inc += dep.partial_dependency(includes: true)
     else
         pragtical_deps_whole += dep
+        pragtical_deps_inc += dep
     endif
-    pragtical_deps_inc += dep.partial_dependency(includes: true)
 endforeach
 
 pragtical_lib = shared_library('libpragtical',

@@ -161,4 +161,24 @@ if DESTDIR and DESTDIR != "":
       MESON_INSTALL_DESTDIR_PREFIX + "/pragtical.com"
     )
 
+  # Adjust rpath for macOS
+  if platform.system() == "Darwin":
+    if os.path.exists(MESON_INSTALL_DESTDIR_PREFIX + '/Contents/MacOS'):
+      os.system(
+        "install_name_tool "
+        + '"-change" '
+        + '"/Contents/Frameworks/libpragtical.dylib" '
+        + '"@executable_path/../Frameworks/libpragtical.dylib" '
+        + '"' + MESON_INSTALL_DESTDIR_PREFIX + '/Contents/MacOS/pragtical"'
+      )
+
+    elif os.path.exists(MESON_INSTALL_DESTDIR_PREFIX + '/pragtical'):
+      os.system(
+        "install_name_tool "
+        + '"-change" '
+        + '"/libpragtical.dylib" '
+        + '"@executable_path/libpragtical.dylib" '
+        + '"' + MESON_INSTALL_DESTDIR_PREFIX + '/pragtical"'
+      )
+
   print("====================================================")
