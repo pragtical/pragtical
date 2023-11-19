@@ -1779,6 +1779,7 @@ static int Lutf8_clean(lua_State *L) {
   /* Default replacement string is REPLACEMENT CHARACTER U+FFFD */
   size_t repl_len;
   const char *r = luaL_optlstring(L, 2, "\xEF\xBF\xBD", &repl_len);
+  int continuous = !lua_toboolean(L, 3);
 
   if (lua_gettop(L) > 1) {
     /* Check if replacement string is valid UTF-8 or not */
@@ -1811,6 +1812,7 @@ static int Lutf8_clean(lua_State *L) {
     while (s == invalid) {
       s++;
       invalid = utf8_invalid_offset(s, e);
+      if (!continuous) break;
     }
     if (invalid == NULL) {
       luaL_addlstring(&buff, s, e - s);

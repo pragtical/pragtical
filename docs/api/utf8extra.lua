@@ -198,13 +198,15 @@ function utf8extra.isvalid(s) end
 ---Replace any invalid UTF-8 byte sequences in s with the replacement string.
 ---if no replacement string is provided, the default is "�" (REPLACEMENT CHARACTER U+FFFD).
 ---Note that any number of consecutive invalid bytes will be replaced by a
----single copy of the replacement string. the 2nd return value is true if the
----original string was already valid (meaning no replacements were made).
+---single copy of the replacement string unless the non_consecutive param is
+---set to true. the 2nd return value is true if the original string was already
+---valid (meaning no replacements were made).
 ---@param s string
 ---@param replacement_string? string
+---@param non_consecutive? boolean
 ---@return string cleaned_string
 ---@return boolean was_valid
-function utf8extra.clean(s, replacement_string) end
+function utf8extra.clean(s, replacement_string, non_consecutive) end
 
 ---Return the byte offset within s of the first invalid UTF-8 byte sequence.
 ---(1 is the first byte of the string.) if s is a valid UTF-8 string, return
