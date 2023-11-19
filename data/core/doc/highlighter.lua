@@ -14,10 +14,6 @@ function Highlighter:new(doc)
   self:reset()
 end
 
-function Highlighter:get_doc_line(idx)
-  return self.lines_cleaned[idx] or self.doc.lines[idx]
-end
-
 -- init incremental syntax highlighting
 function Highlighter:start()
   if self.running then return end
@@ -29,11 +25,11 @@ function Highlighter:start()
       for i = self.first_invalid_line, max do
         local state = (i > 1) and self.lines[i - 1].state
         local line = self.lines[i]
-        if line and line.resume and (line.init_state ~= state or line.text ~= self:get_doc_line(i)) then
+        if line and line.resume and (line.init_state ~= state or line.text ~= self.doc:get_line(i)) then
           -- Reset the progress if no longer valid
           line.resume = nil
         end
-        if not (line and line.init_state == state and line.text == self:get_doc_line(i) and not line.resume) then
+        if not (line and line.init_state == state and line.text == self.doc:get_line(i) and not line.resume) then
           retokenized_from = retokenized_from or i
           self.lines[i] = self:tokenize_line(i, state, line and line.resume)
           if self.lines[i].resume then
@@ -69,7 +65,6 @@ end
 
 function Highlighter:reset()
   self.lines = {}
-  self.lines_cleaned = {}
   self:soft_reset()
 end
 
@@ -82,7 +77,6 @@ function Highlighter:soft_reset()
 end
 
 function Highlighter:invalidate(idx)
-  if self.lines_cleaned[idx] then self.lines_cleaned[idx] = nil end
   self.first_invalid_line = math.min(self.first_invalid_line, idx)
   set_max_wanted_lines(self, math.min(self.max_wanted_line, #self.doc.lines))
 end
@@ -107,10 +101,9 @@ end
 
 
 function Highlighter:tokenize_line(idx, state, resume)
-  local res, was_valid = {}, false
+  local res = {}
   res.init_state = state
-  res.text, was_valid = self.doc.lines[idx]:uclean()
-  if not was_valid then self.lines_cleaned[idx] = res.text end
+  res.text = self.doc:get_line(idx)
   res.tokens, res.state, res.resume = tokenizer.tokenize(self.doc.syntax, res.text, state, resume)
   return res
 end
@@ -118,7 +111,7 @@ end
 
 function Highlighter:get_line(idx)
   local line = self.lines[idx]
-  if not line or line.text ~= self:get_doc_line(idx) then
+  if not line or line.text ~= self.doc:get_line(idx) then
     local prev = self.lines[idx - 1]
     line = self:tokenize_line(idx, prev and prev.state)
     self.lines[idx] = line
