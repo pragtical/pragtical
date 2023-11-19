@@ -230,7 +230,11 @@ void shmem_container_entry_remove(
 {
   if (container->entry_handles_loaded > 0) {
     for (size_t pos=0; pos < container->entry_handles_loaded; pos++) {
-      if (strcmp(container->entry_handles[pos]->name, name) == 0) {
+      if (
+        container->entry_handles[pos]
+        &&
+        strcmp(container->entry_handles[pos]->name, name) == 0
+      ) {
         shmem_close(container->entry_handles[pos], unregister);
         container->entry_handles[pos] = NULL;
 
@@ -265,7 +269,11 @@ shmem_object* shmem_container_entry_get(
       object = container->entry_handles[position];
     } else {
       for (size_t i=0; i<container->entry_handles_loaded; i++) {
-        if (strcmp(container->entry_handles[i]->name, name) == 0) {
+        if (
+          container->entry_handles[i]
+          &&
+          strcmp(container->entry_handles[i]->name, name) == 0
+        ) {
           object = container->entry_handles[i];
           assigned_position = i;
           break;
@@ -277,11 +285,13 @@ shmem_object* shmem_container_entry_get(
   if (!object) {
     assigned_position = container->entry_handles_loaded;
     object = shmem_open(name, size);
-    container->entry_handles[assigned_position] = object;
-    container->entry_handles_loaded++;
+    if (object) {
+      container->entry_handles[assigned_position] = object;
+      container->entry_handles_loaded++;
+    }
   }
 
-  if (object->size != size)
+  if (object && object->size != size)
     container->entry_handles[assigned_position] = shmem_resize(&object, size);
 
   return object;
