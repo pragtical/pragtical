@@ -336,7 +336,7 @@ local function update_suggestions()
     elseif scope == "related" then
       for _, d in ipairs(core.docs) do
         if doc.syntax == d.syntax then
-          if cache[d].symbols then
+          if cache[d] and cache[d].symbols then
             for name in pairs(cache[d].symbols) do
               if not assigned_sym[name] then
                 table.insert(items, setmetatable(
