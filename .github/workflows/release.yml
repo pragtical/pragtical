@@ -9,11 +9,10 @@ on:
     inputs:
       version:
         description: Release Version
-        default: v3.1.2
+        default: v3.1.3
         required: true
 
-# Needed for: richardsimko/update-tag@v1
-# Ref: https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions#permissions
+
 permissions: write-all
 
 jobs:
@@ -26,13 +25,14 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-      - name: Fetch Version
+        with: { fetch-depth: 0 }
+      - name: Set Tag
         id: tag
         run: |
           if [[ "${{ github.event.inputs.version }}" != "" ]]; then
-            echo ::set-output name=version::${{ github.event.inputs.version }}
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
           else
-            echo ::set-output name=version::${GITHUB_REF/refs\/tags\//}
+            echo "version=${GITHUB_REF/refs\/tags\//}" >> "$GITHUB_OUTPUT"
           fi
       - name: Update Tag
         uses: richardsimko/update-tag@v1
@@ -47,8 +47,16 @@ jobs:
           tag_name: ${{ steps.tag.outputs.version }}
           name: Pragtical ${{ steps.tag.outputs.version }}
           draft: true
-          body_path: changelog.md
           generate_release_notes: true
+          body: >
+            ### Notes
+
+
+            * When installing on MacOS from the `.dmg` file (since Pragtical is
+            not signed) you will need to clear the App attributes in order to
+            be able to launch it. To do so open the terminal and run
+            `xattr -cr /Applications/Pragtical.app`, afterwards you should be
+            able to launch Pragtical normally.
 
   build_linux:
     name: Linux
@@ -60,6 +68,7 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with: { fetch-depth: 0 }
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -76,7 +85,6 @@ jobs:
           sudo apt-get install -y ccache
       - name: Build Portable
         run: |
-          bash --version
           bash scripts/build.sh --debug --forcefallback --portable --release
       - name: Package Portables
         run: |
@@ -104,14 +112,15 @@ jobs:
       CC: clang
       CXX: clang++
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with: { fetch-depth: 0 }
       - name: System Information
         run: |
           system_profiler SPSoftwareDataType
           bash --version
           gcc -v
           xcodebuild -version
-      - name: Checkout Code
-        uses: actions/checkout@v3
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -126,7 +135,6 @@ jobs:
         run: bash scripts/install-dependencies.sh --debug
       - name: Build
         run: |
-          bash --version
           bash scripts/build.sh --bundle --debug --forcefallback --release $ARCH
       - name: Create DMG Image
         run: |
@@ -152,6 +160,7 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
+        with: { fetch-depth: 0 }
       - name: System Information
         run: |
           system_profiler SPSoftwareDataType
@@ -169,7 +178,7 @@ jobs:
           name: macOS DMG Images
           path: dmgs-original
       - name: Python Setup
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.9
       - name: Install appdmg
@@ -201,6 +210,9 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with: { fetch-depth: 0 }
       - name: Setup MSYS
         uses: msys2/setup-msys2@v2
         with:
@@ -210,8 +222,6 @@ jobs:
             base-devel
             git
             zip
-      - name: Checkout Code
-        uses: actions/checkout@v3
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
