@@ -218,17 +218,19 @@ function StatusView:register_docview_items()
     get_item = function()
       local dv = core.active_view
       local line, col = dv.doc:get_selection()
-      local _, indent_size = dv.doc:get_indent_info()
+      local tab_type, indent_size = dv.doc:get_indent_info()
       -- Calculating tabs when the doc is using the "hard" indent type.
       local ntabs = 0
-      local last_idx = 0
-      while last_idx < col do
-        local s, e = string.find(dv.doc.lines[line], "\t", last_idx, true)
-        if s and s < col then
-          ntabs = ntabs + 1
-          last_idx = e + 1
-        else
-          break
+      if tab_type == "hard" then
+        local last_idx = 0
+        while last_idx < col do
+          local s, e = string.find(dv.doc.lines[line], "\t", last_idx, true)
+          if s and s < col then
+            ntabs = ntabs + 1
+            last_idx = e + 1
+          else
+            break
+          end
         end
       end
       col = col + ntabs * (indent_size - 1)
