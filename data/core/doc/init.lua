@@ -47,7 +47,10 @@ function Doc:reset()
 end
 
 
-function Doc:get_line(idx)
+---Always returns a valid utf8 line even if the file contains binary data.
+---@param idx integer
+---@return string
+function Doc:get_utf8_line(idx)
   if self.binary and self.clean_lines[idx] then
     return self.clean_lines[idx]
   end
@@ -221,7 +224,7 @@ end
 function Doc:is_dirty()
   if self.new_file then
     if self.filename then return true end
-    return #self.lines > 1 or #self:get_line(1) > 1
+    return #self.lines > 1 or #self:get_utf8_line(1) > 1
   else
     return self.clean_change_id ~= self:get_change_id()
   end
@@ -381,11 +384,11 @@ end
 function Doc:sanitize_position(line, col)
   local nlines = #self.lines
   if line > nlines then
-    return nlines, #self:get_line(nlines)
+    return nlines, #self:get_utf8_line(nlines)
   elseif line < 1 then
     return 1, 1
   end
-  return line, common.clamp(col, 1, #self:get_line(line))
+  return line, common.clamp(col, 1, #self:get_utf8_line(line))
 end
 
 
@@ -400,10 +403,10 @@ local function position_offset_byte(self, line, col, offset)
   col = col + offset
   while line > 1 and col < 1 do
     line = line - 1
-    col = col + #self:get_line(line)
+    col = col + #self:get_utf8_line(line)
   end
-  while line < #self.lines and col > #self:get_line(line) do
-    col = col - #self:get_line(line)
+  while line < #self.lines and col > #self:get_utf8_line(line) do
+    col = col - #self:get_utf8_line(line)
     line = line + 1
   end
   return self:sanitize_position(line, col)
@@ -446,7 +449,7 @@ end
 
 function Doc:get_char(line, col)
   line, col = self:sanitize_position(line, col)
-  return self:get_line(line):sub(col, col)
+  return self:get_utf8_line(line):sub(col, col)
 end
 
 
@@ -636,7 +639,7 @@ function Doc:text_input(text, idx)
 
     if self.overwrite
     and (line1 == line2 and col1 == col2)
-    and col1 < #self:get_line(line1)
+    and col1 < #self:get_utf8_line(line1)
     and text:ulen() == 1 then
       self:remove(line1, col1, translate.next_char(self, line1, col1))
     end

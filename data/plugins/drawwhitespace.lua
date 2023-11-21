@@ -234,7 +234,7 @@ function DocView:draw_line_text(idx, x, y)
     local cache = {}
 
     local tx
-    local text = self.doc:get_line(idx)
+    local text = self.doc:get_utf8_line(idx)
 
     for _, substitution in pairs(config.plugins.drawwhitespace.substitutions) do
       if substitution.binary_only and not self.doc.binary then
