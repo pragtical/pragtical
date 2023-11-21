@@ -121,7 +121,7 @@ function Doc:load(filename)
       table.insert(self.lines, line .. "\n")
       if not line:uisvalid() then
         self.binary = true
-        self.clean_lines[i] = line:uclean("?", true) .. "\n"
+        self.clean_lines[i] = line:uclean("\26", true) .. "\n"
       end
       self.highlighter.lines[i] = false
       i = i + 1
@@ -494,7 +494,7 @@ local function update_clean_lines(self, line1, line2)
     for i=line1, line2 do
       local clean_text, was_valid = "", true
       if self.lines[i] then
-        clean_text, was_valid = self.lines[i]:uclean("?", true)
+        clean_text, was_valid = self.lines[i]:uclean("\26", true)
       end
       if self.clean_lines[i] then self.clean_lines[i] = nil end
       if not was_valid then self.clean_lines[i] = clean_text end
