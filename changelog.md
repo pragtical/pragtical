@@ -1,5 +1,144 @@
 # Changes Log
 
+## [3.2.0] - 2023-11-21
+
+### New Features
+
+* CLI parser API
+  ([#28](https://github.com/pragtical/pragtical/pull/28))
+
+* Bundle the plugin manager as a meson subproject and new
+  plugins button as part of the welcome screen
+  ([#33](https://github.com/pragtical/pragtical/pull/33))
+
+* Allow console output on windows
+  ([#37](https://github.com/pragtical/pragtical/pull/37))
+
+### Fixes
+
+* Some overwrite mode fixes:
+  - Overwrite mode only on single character input
+    ([32f23027](https://github.com/pragtical/pragtical/commit/32f23027f41dd4c0cd80215b629f7073de2b6369))
+  - Overwrite mode only when no text selected
+    ([ae0d3502](https://github.com/pragtical/pragtical/commit/ae0d35024c408d0f7876763d296e79b0fd1567b7))
+
+* Fixed IPC plugin shmem not detected on MacOS
+  ([3cb3bf08](https://github.com/pragtical/pragtical/commit/3cb3bf08bed98c00a961ecc0b80c772d93a64d1a))
+
+* Fix node resizing on touch events
+  ([lite-xl/lite-xl#1657](https://github.com/lite-xl/lite-xl/pull/1657))
+
+* Call process.__gc() when restarting on LuaJIT
+  ([3066f278](https://github.com/pragtical/pragtical/commit/3066f278bc889aec1ce0223cf1786bb8053183de))
+
+* Set a minimum window size to prevent sizing issues
+  ([c87ae559](https://github.com/pragtical/pragtical/commit/c87ae5598dde30300a63fbdd16586503a14cdf42))
+
+* Fix an shmem segfault triggered on macOS
+  ([#44](https://github.com/pragtical/pragtical/pull/44))
+
+* Check in autocomplete plugin if doc cached on symbols iterator
+  ([6546ee8c](https://github.com/pragtical/pragtical/commit/6546ee8c66ee9df79852a8e2f12089a1706d657e))
+
+* Fix editor crash on invalid UTF-8 (#38)
+  ([#38](https://github.com/pragtical/pragtical/pull/38))
+
+### Enhancements
+
+* Improve toggle fullscreen using previous win state
+  ([c108b2d0](https://github.com/pragtical/pragtical/commit/c108b2d09896a8503d6b66b0c94e843d9cfd7b54))
+
+* Added document types and app category to Mac bundle
+  ([418e92f8](https://github.com/pragtical/pragtical/commit/418e92f893c8b5ad2aac926e4efc5c76d6c4be7f))
+
+* Added defaults for the 'tag' highlight group (better evergreen support)
+  ([cfc96634](https://github.com/pragtical/pragtical/commit/cfc96634c474568ed5457e86bd5a810b25607bec))
+
+### Build System
+
+* Switch luajit wrap to git branch v2.1
+  ([05e778d1](https://github.com/pragtical/pragtical/commit/05e778d15af350a40c34149948b0bca4b220bac3))
+
+* Do no check for X11 presence on macOS
+  ([5e518511](https://github.com/pragtical/pragtical/commit/5e518511fa4ac1b2a26b0f5cbd3a7a7de2360334))
+
+* Added luajit meson support for msvc
+  ([#43](https://github.com/pragtical/pragtical/pull/43))
+
+### Other Changes
+
+* Expose lua_setglobal/getglobal implementations for LuaJIT
+  ([82d61cca](https://github.com/pragtical/pragtical/commit/82d61cca4cfdea4702470924b97456ee0aa0c54c))
+
+* Some work to better support different lua runtimes
+  ([#40](https://github.com/pragtical/pragtical/pull/40))
+
+* StatusView: micro optimization that skips counting of tabs on current line
+  if tab type is not set to "hard".
+  ([a359b947](https://github.com/pragtical/pragtical/commit/a359b947713716fef81da30c33097c7364e1a79e))
+
+* Merge: Update luautf8 to latest
+  ([lite-xl/lite-xl#1613](https://github.com/lite-xl/lite-xl/pull/1613))
+
+* Merge: Improve font/color change detection in language_md
+  ([lite-xl/lite-xl#1614](https://github.com/lite-xl/lite-xl/pull/1614))
+
+* Merge: Fix deleting indentation with multiple cursors
+  ([lite-xl/lite-xl#1670](https://github.com/lite-xl/lite-xl/pull/1670))
+
+* Merge: Fix running core.step when receiving an event while not waiting
+  ([lite-xl/lite-xl#1667](https://github.com/lite-xl/lite-xl/pull/1667))
+
+* Merge: Limit system.{sleep,wait_event} to timeouts >= 0
+  ([lite-xl/lite-xl#1666](https://github.com/lite-xl/lite-xl/pull/1666))
+
+* Merge: Allow writing to hidden files on Windows
+  ([lite-xl/lite-xl#1653](https://github.com/lite-xl/lite-xl/pull/1653))
+
+* Merge: Expose plaintext syntax
+  ([lite-xl/lite-xl#1652](https://github.com/lite-xl/lite-xl/pull/1652))
+
+* Merge: Configurable statusview icon
+  ([lite-xl/lite-xl#1617](https://github.com/lite-xl/lite-xl/pull/1617))
+
+* Merge: Fix selecting newlines with find-replace:select-add-{next,all}
+  ([lite-xl/lite-xl#1608](https://github.com/lite-xl/lite-xl/pull/1608))
+
+* Merge: wasm cross file improvements
+  ([lite-xl/lite-xl#1660](https://github.com/lite-xl/lite-xl/pull/1660))
+
+### Lite XL Inherited Changes
+
+* fix: dim rendering when antialiasing is turned off
+  ([#1641](https://github.com/lite-xl/lite-xl/pull/1641))
+
+* Mark unsaved named files as dirty
+  ([#1598](https://github.com/lite-xl/lite-xl/pull/1598))
+
+* Improve common.serialize
+  ([#1640](https://github.com/lite-xl/lite-xl/pull/1640))
+
+* Ignore keypresses during IME composition
+  ([#1573](https://github.com/lite-xl/lite-xl/pull/1573))
+
+* Save in the workspace unsaved named files and crlf status
+  ([#1597](https://github.com/lite-xl/lite-xl/pull/1597))
+
+* ci: fix diff files having "wrong" path separator
+  ([#1648](https://github.com/lite-xl/lite-xl/pull/1648))
+
+* Set SDL hint to prefer software render driver
+  ([#1646](https://github.com/lite-xl/lite-xl/pull/1646))
+
+* fix(dirmonitor): deadlock if error handler jumps somewhere else
+  ([#1647](https://github.com/lite-xl/lite-xl/pull/1647))
+
+* Sanitize tab index in Node:add_view
+  ([#1651](https://github.com/lite-xl/lite-xl/pull/1651))
+
+* ease transparency of nagbar dim
+  ([#1658](https://github.com/lite-xl/lite-xl/pull/1658))
+
 ## [3.1.2] - 2023-09-24
 
 ### New Features
@@ -1490,6 +1629,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.2.0]: https://github.com/pragtical/pragtical/releases/tag/v3.2.0
 [3.1.2]: https://github.com/pragtical/pragtical/releases/tag/v3.1.2
 [3.1.1]: https://github.com/pragtical/pragtical/releases/tag/v3.1.1
 [3.1.0]: https://github.com/pragtical/pragtical/releases/tag/v3.1.0
