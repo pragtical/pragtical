@@ -35,6 +35,14 @@ config.plugins.drawwhitespace = common.merge({
       char = "\t",
       sub = "»",
     },
+    {
+      char = "\26",
+      sub = "█",
+      show_leading = true,
+      show_trailing = true,
+      show_middle = true,
+      binary_only = true
+    },
   },
 
   config_spec = {
@@ -226,9 +234,13 @@ function DocView:draw_line_text(idx, x, y)
     local cache = {}
 
     local tx
-    local text = self.doc.lines[idx]
+    local text = self.doc:get_utf8_line(idx)
 
     for _, substitution in pairs(config.plugins.drawwhitespace.substitutions) do
+      if substitution.binary_only and not self.doc.binary then
+        goto continue
+      end
+
       local char = substitution.char
       local sub = substitution.sub
       local offset = 1
@@ -289,6 +301,7 @@ function DocView:draw_line_text(idx, x, y)
         end
         offset = e + 1
       end
+      ::continue::
     end
     ws_cache[self.doc.highlighter][idx] = cache
   end

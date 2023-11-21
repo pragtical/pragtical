@@ -72,7 +72,7 @@ local LineWrapping = {}
 
 -- Optimzation function. The tokenizer is relatively slow (at present), and
 -- so if we don't need to run it, should be run sparingly.
-local function spew_tokens(doc, line) if line < math.huge then return math.huge, "normal", doc.lines[line] end end
+local function spew_tokens(doc, line) if line < math.huge then return math.huge, "normal", doc:get_utf8_line(line) end end
 local function get_tokens(doc, line)
   if config.plugins.linewrapping.require_tokenization then
     return doc.highlighter:each_token(line)

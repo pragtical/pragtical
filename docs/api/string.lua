@@ -152,9 +152,10 @@ function string.uisvalid(s) end
 ---Equivalent to utf8extra.clean()
 ---@param s string
 ---@param replacement_string? string
+---@param non_consecutive? boolean
 ---@return string cleaned_string
 ---@return boolean was_valid
-function string.uclean(s, replacement_string) end
+function string.uclean(s, replacement_string, non_consecutive) end
 
 ---Equivalent to utf8extra.invalidoffset()
 ---@param s string

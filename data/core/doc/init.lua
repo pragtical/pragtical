@@ -23,6 +23,7 @@ function Doc:new(filename, abs_filename, new_file)
   self.new_file = new_file
   self.encoding = nil
   self.convert = false
+  self.binary = false
   self:reset()
   if filename then
     self:set_filename(filename, abs_filename)
@@ -43,6 +44,17 @@ function Doc:reset()
   self.highlighter = Highlighter(self)
   self.overwrite = false
   self:reset_syntax()
+end
+
+
+---Always returns a valid utf8 line even if the file contains binary data.
+---@param idx integer
+---@return string
+function Doc:get_utf8_line(idx)
+  if self.binary and self.clean_lines[idx] then
+    return self.clean_lines[idx]
+  end
+  return self.lines[idx]
 end
 
 
@@ -72,7 +84,10 @@ function Doc:load(filename)
   if not self.encoding then
     local errmsg
     self.encoding, errmsg = encoding.detect(filename);
-    if not self.encoding then core.error("%s", errmsg) error(errmsg) end
+    if not self.encoding then
+      core.error("%s", errmsg)
+      self.encoding = "UTF-8"
+    end
   end
   self.convert = false
   if self.encoding ~= "UTF-8" and self.encoding ~= "ASCII" then
@@ -81,6 +96,7 @@ function Doc:load(filename)
   local fp = assert( io.open(filename, "rb") )
   self:reset()
   self.lines = {}
+  self.clean_lines = {}
   local i = 1
   if self.convert then
     local content = fp:read("*a");
@@ -106,6 +122,10 @@ function Doc:load(filename)
         self.crlf = true
       end
       table.insert(self.lines, line .. "\n")
+      if not line:uisvalid() then
+        self.binary = true
+        self.clean_lines[i] = line:uclean("\26", true) .. "\n"
+      end
       self.highlighter.lines[i] = false
       i = i + 1
     end
@@ -204,7 +224,7 @@ end
 function Doc:is_dirty()
   if self.new_file then
     if self.filename then return true end
-    return #self.lines > 1 or #self.lines[1] > 1
+    return #self.lines > 1 or #self:get_utf8_line(1) > 1
   else
     return self.clean_change_id ~= self:get_change_id()
   end
@@ -364,11 +384,11 @@ end
 function Doc:sanitize_position(line, col)
   local nlines = #self.lines
   if line > nlines then
-    return nlines, #self.lines[nlines]
+    return nlines, #self:get_utf8_line(nlines)
   elseif line < 1 then
     return 1, 1
   end
-  return line, common.clamp(col, 1, #self.lines[line])
+  return line, common.clamp(col, 1, #self:get_utf8_line(line))
 end
 
 
@@ -383,10 +403,10 @@ local function position_offset_byte(self, line, col, offset)
   col = col + offset
   while line > 1 and col < 1 do
     line = line - 1
-    col = col + #self.lines[line]
+    col = col + #self:get_utf8_line(line)
   end
-  while line < #self.lines and col > #self.lines[line] do
-    col = col - #self.lines[line]
+  while line < #self.lines and col > #self:get_utf8_line(line) do
+    col = col - #self:get_utf8_line(line)
     line = line + 1
   end
   return self:sanitize_position(line, col)
@@ -429,7 +449,7 @@ end
 
 function Doc:get_char(line, col)
   line, col = self:sanitize_position(line, col)
-  return self.lines[line]:sub(col, col)
+  return self:get_utf8_line(line):sub(col, col)
 end
 
 
@@ -472,6 +492,19 @@ local function pop_undo(self, undo_stack, redo_stack, modified)
   end
 end
 
+local function update_clean_lines(self, line1, line2)
+  if self.binary then
+    for i=line1, line2 do
+      local clean_text, was_valid = "", true
+      if self.lines[i] then
+        clean_text, was_valid = self.lines[i]:uclean("\26", true)
+      end
+      if self.clean_lines[i] then self.clean_lines[i] = nil end
+      if not was_valid then self.clean_lines[i] = clean_text end
+    end
+  end
+end
+
 
 function Doc:raw_insert(line, col, text, undo_stack, time)
   -- split text into lines and merge with line at insertion point
@@ -487,6 +520,8 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
 
   -- splice lines into line array
   common.splice(self.lines, line, 1, lines)
+
+  update_clean_lines(self, line, ((line + #lines - 1) == line) and line or #self.lines)
 
   -- keep cursors where they should be
   for idx, cline1, ccol1, cline2, ccol2 in self:get_selections(true, true) do
@@ -522,6 +557,8 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
 
   -- splice line into line array
   common.splice(self.lines, line1, line_removal + 1, { before .. after })
+
+  update_clean_lines(self, line1, line2 == line1 and line2 or #self.lines)
 
   local merge = false
 
@@ -602,7 +639,7 @@ function Doc:text_input(text, idx)
 
     if self.overwrite
     and (line1 == line2 and col1 == col2)
-    and col1 < #self.lines[line1]
+    and col1 < #self:get_utf8_line(line1)
     and text:ulen() == 1 then
       self:remove(line1, col1, translate.next_char(self, line1, col1))
     end
