@@ -113,7 +113,7 @@ end
 
 
 local function strip_trailing_slash(filename)
-  if filename:match("[^:][/\\]$") then
+  if filename:match("[^:]["..PATHSEP.."]$") then
     return filename:sub(1, -2)
   end
   return filename
