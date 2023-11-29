@@ -1,6 +1,56 @@
 -- mod-version:3
 local syntax = require "core.syntax"
 
+-- Regex pattern explanation:
+-- This will match / and will look ahead for something that looks like a regex.
+--
+-- (?!/) Don't match empty regexes.
+--
+-- (?>...) this is using an atomic group to minimize backtracking, as that'd
+--         cause "Catastrophic Backtracking" in some cases.
+--
+-- [^\\[\/]++ will match anything that's isn't an escape, a start of character
+--           class or an end of pattern, without backtracking (the second +).
+--
+-- \\. will match anything that's escaped.
+--
+-- \[(?:[^\\\]++]|\\.)*+\] will match character classes.
+--
+-- /[gmiyuvsd]*\s*[\n,;\)\]\}\.]) will match the end of pattern delimiter, optionally
+--                                followed by pattern options, and anything that can
+--                                be after a pattern.
+--
+-- Demo with some unit tests (click on the Unit Tests entry): https://regex101.com/r/R0w8Qw/1
+-- Note that it has a couple of changes to make it work on that platform.
+local regex_pattern = {
+  [=[/(?=(?!/)(?:(?>[^\\[\/]++|\\.|\[(?:[^\\\]]++|\\.)*+\])*+)++/[gmiyuvsd]*\s*[\n,;\)\]\}\.])()]=],
+  "/()[gmiyuvsd]*", "\\"
+}
+
+-- For the moment let's not actually differentiate the insides of the regex,
+-- as this will need new token types...
+local inner_regex_syntax = {
+  patterns = {
+    { pattern = "%(()%?[:!=><]", type = { "string", "string" } },
+    { pattern = "[.?+*%(%)|]", type = "string" },
+    { pattern = "{%d*,?%d*}", type = "string" },
+    { regex = { [=[\[()\^?]=], [=[(?:\]|(?=\n))()]=], "\\" },
+      type = { "string", "string" },
+      syntax = { -- Inside character class
+        patterns = {
+          { pattern = "\\\\", type = "string" },
+          { pattern = "\\%]", type = "string" },
+          { pattern = "[^%]\n]", type = "string" }
+        },
+        symbols = {}
+      }
+    },
+    { regex = "\\/", type = "string" },
+    { regex = "[^/\n]", type = "string" },
+  },
+  symbols = {}
+}
+
 syntax.add {
   name = "JavaScript",
   files = { "%.js$", "%.json$", "%.cson$", "%.mjs$", "%.cjs$" },
@@ -8,16 +58,16 @@ syntax.add {
   block_comment = { "/*", "*/" },
   patterns = {
     -- Comments
-    { pattern = "//.*",                 type = "comment"  },
-    { pattern = { "/%*", "%*/" },       type = "comment"  },
+    { pattern = "//.*",                      type = "comment"  },
+    { pattern = { "/%*", "%*/" },            type = "comment"  },
     -- Strings
-    { pattern = { '"', '"', '\\' },     type = "string"   },
-    { pattern = { "'", "'", '\\' },     type = "string"   },
-    { pattern = { "`", "`", '\\' },     type = "string"   },
+    { pattern = { '"', '"', '\\' },          type = "string"   },
+    { pattern = { "'", "'", '\\' },          type = "string"   },
+    { pattern = { "`", "`", '\\' },          type = "string"   },
     -- Numbers
-    { pattern = "0x[%da-fA-F_]+n?",     type = "number"   },
-    { pattern = "-?%d+[%d%.eE_n]*",     type = "number"   },
-    { pattern = "-?%.?%d+",             type = "number"   },
+    { pattern = "0x[%da-fA-F_]+n?()%s*()/?", type = {"number", "normal", "operator"}   },
+    { pattern = "-?%d+[%d%.eE_n]*()%s*()/?", type = {"number", "normal", "operator"}   },
+    { pattern = "-?%.?%d+()%s*()/?",         type = {"number", "normal", "operator"}   },
     -- Embedded html like that used on React
     { pattern = { "<%s*>", "<%s*/%s*>" },
       type = "operator", syntax = ".html"
@@ -35,12 +85,12 @@ syntax.add {
       type = { "operator", "function", "operator" }, syntax = ".html"
     },
     -- Regex string
-    { pattern = { '/[^= ]', '/[gim]*', '\\' },type = "string"   },
+    { regex = regex_pattern, syntax = inner_regex_syntax, type = {"string", "string"}  },
     -- Operators
-    { pattern = "[%+%-=/%*%^%%<>!~|&]", type = "operator" },
+    { pattern = "[%+%-=/%*%^%%<>!~|&]",      type = "operator" },
     -- Functions
-    { pattern = "[%a_][%w_]*%s*%f[(]",     type = "function" },
-    { pattern = "[%a_][%w_]*",          type = "symbol"   },
+    { pattern = "[%a_][%w_]*%s*%f[(]",       type = "function" },
+    { pattern = "[%a_][%w_]*()%s*()/?",      type = {"symbol", "normal", "operator"}   }
   },
   symbols = {
     ["async"]      = "keyword",
