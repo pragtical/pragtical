@@ -204,6 +204,23 @@ if not get_option('source-only')
         default_options: default_fallback_options + sdl_options
     )
 
+    harfbuzz_options = ['default_library=static']
+
+    harfbuzz_options += 'glib=disabled'
+    harfbuzz_options += 'gobject=disabled'
+    harfbuzz_options += 'cairo=disabled'
+    harfbuzz_options += 'icu=disabled'
+    harfbuzz_options += 'freetype=enabled'
+    harfbuzz_options += 'tests=disabled'
+    harfbuzz_options += 'introspection=disabled'
+    harfbuzz_options += 'docs=disabled'
+    harfbuzz_options += 'doc_tests=false'
+    harfbuzz_options += 'utilities=disabled'
+
+    harfbuzz_dep = dependency('harfbuzz', fallback: ['harfbuzz'],
+        default_options: default_fallback_options + harfbuzz_options
+    )
+
     if host_machine.system() == 'windows'
         if sdl_dep.type_name() == 'internal'
             sdlmain_dep = dependency('sdl2main', fallback: ['sdl2main_dep'])
@@ -214,7 +231,7 @@ if not get_option('source-only')
         sdlmain_dep = dependency('', required: false)
     endif
 
-    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, harfbuzz_dep, libm, libdl, librt]
 endif
 
 #===============================================================================
