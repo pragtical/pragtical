@@ -528,6 +528,25 @@ settings.add("Editor",
       max = 10
     },
     {
+      label = "Default Line Endings",
+      description = "If set to 'auto' defaults to `crlf` on Windows and `lf` on everything else.",
+      path = "line_endings_gui",
+      type = settings.type.SELECTION,
+      default = "auto",
+      values = {
+        {"Auto", "auto"},
+        {"CRLF (\\r\\n)", "crlf"},
+        {"LF (\\n)", "lf"}
+      },
+      on_apply = function(value)
+        if value == "auto" then
+          config.line_endings = PLATFORM == "Windows" and "crlf" or "lf"
+        else
+          config.line_endings = value
+        end
+      end
+    },
+    {
       label = "Keep Newline Whitespace",
       description = "Do not remove whitespace when pressing enter.",
       path = "keep_newline_whitespace",
