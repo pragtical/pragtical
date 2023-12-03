@@ -5,6 +5,7 @@ local core = require "core"
 local syntax = require "core.syntax"
 local config = require "core.config"
 local common = require "core.common"
+local tokenizer = require "core.tokenizer"
 
 ---@class core.doc : core.object
 local Doc = Object:extend()
@@ -802,24 +803,49 @@ function Doc:on_close()
   core.log_quiet("Closed doc \"%s\"", self:get_name())
 end
 
----Get the lua pattern used to match symbols on a document.
+---Get the lua pattern used to match symbols taking into account current subsyntax.
 ---@return string
 function Doc:get_symbol_pattern()
-  return (self.syntax and self.syntax.symbol_pattern)
-    and self.syntax.symbol_pattern or config.symbol_pattern
+  local line = self:get_selection(true)
+  local current_syntax = self.syntax
+  if current_syntax and line > 1 then
+    local state = self.highlighter:get_line(line - 1).state
+    local syntaxes = tokenizer.extract_subsyntaxes(current_syntax, state)
+    for _, s in pairs(syntaxes) do
+      if s.symbol_pattern then
+        current_syntax = s
+        break
+      end
+    end
+  end
+  return (current_syntax and current_syntax.symbol_pattern)
+    and current_syntax.symbol_pattern or config.symbol_pattern
 end
 
----Get a string of characters not belonging to a word.
+---Get a string of characters not belonging to a word taking into account
+---current subsyntax.
 ---
----Note: when setting `symbol` param to true the string of characters will be
----retrieved from the document current syntax `symbol_non_word_chars` property
----if available, otherwise will fallback to `config.non_word_chars`.
+---Note: when setting `symbol` param to true the characters property
+---`symbol_non_word_chars` will be searched, if false `non_word_chars`. In both
+---cases will fallback to `config.non_word_chars` when not found.
 ---@param symbol boolean Indicates if non word characters are for a symbol
 ---@return string
 function Doc:get_non_word_chars(symbol)
   local non_word_chars = symbol and "symbol_non_word_chars" or "non_word_chars"
-  return (self.syntax and self.syntax[non_word_chars])
-    and self.syntax[non_word_chars] or config.non_word_chars
+  local line = self:get_selection(true)
+  local current_syntax = self.syntax
+  if current_syntax and line > 1 then
+    local state = self.highlighter:get_line(line - 1).state
+    local syntaxes = tokenizer.extract_subsyntaxes(current_syntax, state)
+    for _, s in pairs(syntaxes) do
+      if s[non_word_chars] then
+        current_syntax = s
+        break
+      end
+    end
+  end
+  return (current_syntax and current_syntax[non_word_chars])
+    and current_syntax[non_word_chars] or config.non_word_chars
 end
 
 
