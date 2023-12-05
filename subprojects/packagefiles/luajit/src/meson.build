@@ -90,7 +90,9 @@ luajit_rolling_h = files('luajit_rolling.h')
 luajit_h = custom_target('luajit_h',
                          command: [minilua, '@INPUT@', '@OUTPUT@'],
                          input: ['host/genversion.lua', 'luajit_rolling.h', relver],
-                         output: 'luajit.h')
+                         output: 'luajit.h',
+                         install: true,
+                         install_dir: 'include')
 
 subdir('host')
 

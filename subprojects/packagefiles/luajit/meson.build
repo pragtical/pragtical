@@ -70,6 +70,12 @@ if system == 'linux' or system == 'darwin' or system == 'windows'
             language: 'c',
             native: true
         )
+        add_project_arguments(
+            '-DLUA_BUILD_AS_DLL',
+            '-DLUA_CORE',
+            language: 'c',
+            native: false
+        )
         if cc.get_id() != 'msvc'
             add_project_arguments('-malign-double', language: 'c', native: true)
         endif
@@ -102,8 +108,13 @@ else
         endif
     endif
 
+    luajit_cflags = '-fPIC'
+    if host_machine.system() == 'windows'
+        luajit_cflags += ' -DLUA_BUILD_AS_DLL -DLUA_CORE'
+    endif
+
     build_command += [
-        'CFLAGS=-fPIC',
+        'CFLAGS='+luajit_cflags,
         'XCFLAGS=-DLUAJIT_ENABLE_LUA52COMPAT',
         'BUILDMODE=static', '-l', '90', '-j'
     ]
@@ -123,3 +134,11 @@ else
         include_directories: include_directories('src')
     )
 endif
+
+install_headers(
+  'src/lauxlib.h',
+  'src/lua.h',
+  'src/lua.hpp',
+  'src/luaconf.h',
+  'src/lualib.h'
+)

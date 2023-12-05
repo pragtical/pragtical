@@ -1,15 +1,10 @@
-#ifndef RENDERER_H
-#define RENDERER_H
+#ifndef PRAGTICAL_RENDERER_H
+#define PRAGTICAL_RENDERER_H
 
 #include <SDL.h>
 #include <stdint.h>
 #include <stdbool.h>
-
-#ifdef __GNUC__
-#define UNUSED __attribute__((__unused__))
-#else
-#define UNUSED
-#endif
+#include "papi.h"
 
 #ifdef PRAGTICAL_USE_SDL_RENDERER
 #define RECT_TYPE double
@@ -30,30 +25,33 @@ typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
 
 struct RenWindow;
 typedef struct RenWindow RenWindow;
-extern RenWindow window_renderer;
+extern PAPI RenWindow window_renderer;
 
-RenFont* ren_font_load(RenWindow *window_renderer, const char *filename, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style);
-RenFont* ren_font_copy(RenWindow *window_renderer, RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style);
-const char* ren_font_get_path(RenFont *font);
-void ren_font_free(RenFont *font);
-int ren_font_get_metadata(const char *path, FontMetaData **data, int *count, bool *monospaced);
-int ren_font_group_get_tab_size(RenFont **font);
-int ren_font_group_get_height(RenFont **font);
-float ren_font_group_get_size(RenFont **font);
-void ren_font_group_set_size(RenWindow *window_renderer, RenFont **font, float size);
-void ren_font_group_set_tab_size(RenFont **font, int n);
-double ren_font_group_get_width(RenWindow *window_renderer, RenFont **font, const char *text, size_t len, int *x_offset);
-double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color);
+PAPI_BEGIN_EXTERN
 
-void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color);
+PAPI RenFont* PAPICALL ren_font_load(RenWindow *window_renderer, const char *filename, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style);
+PAPI RenFont* PAPICALL ren_font_copy(RenWindow *window_renderer, RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style);
+PAPI const char* PAPICALL ren_font_get_path(RenFont *font);
+PAPI void PAPICALL ren_font_free(RenFont *font);
+PAPI int PAPICALL ren_font_get_metadata(const char *path, FontMetaData **data, int *count, bool *monospaced);
+PAPI int PAPICALL ren_font_group_get_tab_size(RenFont **font);
+PAPI int PAPICALL ren_font_group_get_height(RenFont **font);
+PAPI float PAPICALL ren_font_group_get_size(RenFont **font);
+PAPI void PAPICALL ren_font_group_set_size(RenWindow *window_renderer, RenFont **font, float size);
+PAPI void PAPICALL ren_font_group_set_tab_size(RenFont **font, int n);
+PAPI double PAPICALL ren_font_group_get_width(RenWindow *window_renderer, RenFont **font, const char *text, size_t len, int *x_offset);
+PAPI double PAPICALL ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color);
 
-void ren_init(SDL_Window *win);
-void ren_resize_window(RenWindow *window_renderer);
-void ren_update_rects(RenWindow *window_renderer, RenRect *rects, int count);
-void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect);
-void ren_get_size(RenWindow *window_renderer, int *x, int *y); /* Reports the size in points. */
-void ren_free_window_resources(RenWindow *window_renderer);
-float ren_get_scale_factor(SDL_Window *win);
+PAPI void PAPICALL ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color);
 
+PAPI void PAPICALL ren_init(SDL_Window *win);
+PAPI void PAPICALL ren_resize_window(RenWindow *window_renderer);
+PAPI void PAPICALL ren_update_rects(RenWindow *window_renderer, RenRect *rects, int count);
+PAPI void PAPICALL ren_set_clip_rect(RenWindow *window_renderer, RenRect rect);
+PAPI void PAPICALL ren_get_size(RenWindow *window_renderer, int *x, int *y); /* Reports the size in points. */
+PAPI void PAPICALL ren_free_window_resources(RenWindow *window_renderer);
+PAPI float PAPICALL ren_get_scale_factor(SDL_Window *win);
 
-#endif
+PAPI_END_EXTERN
+
+#endif /* PRAGTICAL_RENDERER_H */

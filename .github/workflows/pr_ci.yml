@@ -226,7 +226,6 @@ jobs:
           meson install -C build --destdir="../pragtical"
       - name: Package
         run: |
-          Remove-Item -Recurse -Force -Path "pragtical/lib","pragtical/include"
           Compress-Archive -Path pragtical -DestinationPath "$env:INSTALL_NAME.zip"
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3

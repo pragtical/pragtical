@@ -1,3 +1,6 @@
+#ifndef PRAGTICAL_RENWINDOW_H
+#define PRAGTICAL_RENWINDOW_H
+
 #include <SDL.h>
 #include "renderer.h"
 
@@ -14,12 +17,18 @@ struct RenWindow {
 };
 typedef struct RenWindow RenWindow;
 
-void renwin_init_surface(RenWindow *ren);
-void renwin_init_command_buf(RenWindow *ren);
-void renwin_clip_to_surface(RenWindow *ren);
-void renwin_set_clip_rect(RenWindow *ren, RenRect rect);
-void renwin_resize_surface(RenWindow *ren);
-void renwin_show_window(RenWindow *ren);
-void renwin_update_rects(RenWindow *ren, RenRect *rects, int count);
-void renwin_free(RenWindow *ren);
-RenSurface renwin_get_surface(RenWindow *ren);
+PAPI_BEGIN_EXTERN
+
+PAPI void PAPICALL renwin_init_surface(RenWindow *ren);
+PAPI void PAPICALL renwin_init_command_buf(RenWindow *ren);
+PAPI void PAPICALL renwin_clip_to_surface(RenWindow *ren);
+PAPI void PAPICALL renwin_set_clip_rect(RenWindow *ren, RenRect rect);
+PAPI void PAPICALL renwin_resize_surface(RenWindow *ren);
+PAPI void PAPICALL renwin_show_window(RenWindow *ren);
+PAPI void PAPICALL renwin_update_rects(RenWindow *ren, RenRect *rects, int count);
+PAPI void PAPICALL renwin_free(RenWindow *ren);
+PAPI RenSurface PAPICALL renwin_get_surface(RenWindow *ren);
+
+PAPI_END_EXTERN
+
+#endif /* PRAGTICAL_RENWINDOW_H */
