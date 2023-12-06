@@ -206,7 +206,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Error creating pragtical window: %s", SDL_GetError());
     exit(1);
   }
-  ren_init(window);
+  window_renderer = ren_init(window);
 
   /* Set a minimum size to prevent too small to see issues on unmaximize.
   ** Needs to be set after renderer to work: libsdl-org/SDL/issues/1408 */
@@ -307,7 +307,7 @@ init_lua:
 
   // This allows the window to be destroyed before pragtical is done with
   // reaping child processes
-  ren_free_window_resources(&window_renderer);
+  ren_free(window_renderer);
   lua_close(L);
 
   return EXIT_SUCCESS;
