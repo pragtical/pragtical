@@ -59,12 +59,27 @@ function search.find(doc, line, col, text, opt)
     if opt.no_case and not opt.regex then
       line_text = line_text:lower()
     end
-    local s, e
-    if opt.reverse then
-      s, e = rfind(search_func, line_text, pattern, col - 1, plain)
-    else
-      s, e = search_func(line_text, pattern, col, plain)
-    end
+    local s, e = col, col
+    local matches
+    repeat
+      matches = true
+      if opt.reverse then
+        s, e = rfind(search_func, line_text, pattern, e - 1, plain)
+      else
+        s, e = search_func(line_text, pattern, e, plain)
+      end
+      if opt.whole_word and s and e then
+        if
+          (s ~= 1 and line_text:sub(s - 1, s - 1):match("[%w_]"))
+          or
+          (e ~= #line_text and line_text:sub(e + 1, e + 1):match("[%w_]"))
+        then
+          matches = false
+          if opt.reverse then e = e - 1 else e = e + 1 end
+          if e == #line_text then s = nil e = nil break end
+        end
+      end
+    until matches == true or not e or e >= #line_text
     if s then
       local line2 = line
       -- If we've matched the newline too,
