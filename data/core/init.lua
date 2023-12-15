@@ -1270,7 +1270,7 @@ local run_threads = coroutine.wrap(function()
               core.background_threads = core.background_threads - 1
             end
           else
-            wait = wait or 0.001
+            if not wait or wait <= 0 then wait = 0.001 end
             thread.wake = system.get_time() + wait
             minimal_time_to_wake = math.min(minimal_time_to_wake, wait)
           end
@@ -1345,7 +1345,11 @@ function core.run()
             local cursor_time_to_wake = dt + 1 / config.fps
             next_step = now + cursor_time_to_wake
           end
-          if system.wait_event(math.min(next_step - now, time_to_wake)) then
+          if
+            time_to_wake > 0
+            and
+            system.wait_event(math.min(next_step - now, time_to_wake))
+          then
             next_step = nil -- if we've recevied an event, perform a step
           end
         else
