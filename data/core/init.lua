@@ -344,6 +344,15 @@ function core.init()
     session = nil
   end
 
+  -- remove projects that don't exist any longer
+  local projects_removed = 0;
+  for i, project_dir in ipairs(core.recent_projects) do
+    if not system.get_file_info(project_dir) then
+      table.remove(core.recent_projects, i - projects_removed)
+      projects_removed = projects_removed + 1
+    end
+  end
+
   local project_dir = core.recent_projects[1] or "."
   local project_dir_explicit = false
   local files = {}
