@@ -1022,6 +1022,7 @@ local project_search_find = command.map["project-search:find"].perform
 command.map["project-search:find"].perform = function(path)
   if config.plugins.search_ui.replace_core_find then
     toggle_scope(2)
+    filepicker:set_path(path)
     command.perform "search-replace:show"
     return
   end
