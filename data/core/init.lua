@@ -29,12 +29,14 @@ end
 local function save_session()
   local fp = io.open(USERDIR .. PATHSEP .. "session.lua", "w")
   if fp then
-    fp:write("return {recents=", common.serialize(core.recent_projects),
-      ", window=", common.serialize(table.pack(system.get_window_size())),
-      ", window_mode=", common.serialize(system.get_window_mode()),
-      ", previous_find=", common.serialize(core.previous_find),
-      ", previous_replace=", common.serialize(core.previous_replace),
-      "}\n")
+    local session = {
+      recents = core.recent_projects,
+      window = table.pack(system.get_window_size()),
+      window_mode = system.get_window_mode(),
+      previous_find = core.previous_find,
+      previous_replace = core.previous_replace
+    }
+    fp:write("return " .. common.serialize(session, {pretty = true}))
     fp:close()
   end
 end
