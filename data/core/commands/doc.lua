@@ -455,12 +455,14 @@ local commands = {
         -- Use the previous line state, as it will be the state
         -- of the beginning of the current line
         local state = dv.doc.highlighter:get_line(line1 - 1).state
-        local syntaxes = tokenizer.extract_subsyntaxes(dv.doc.syntax, state)
-        -- Go through all the syntaxes until the first with `block_comment` defined
-        for _, s in pairs(syntaxes) do
-          if s.block_comment then
-            current_syntax = s
-            break
+        if state then
+          local syntaxes = tokenizer.extract_subsyntaxes(dv.doc.syntax, state)
+          -- Go through all the syntaxes until the first with `block_comment` defined
+          for _, s in pairs(syntaxes) do
+            if s.block_comment then
+              current_syntax = s
+              break
+            end
           end
         end
       end
@@ -487,12 +489,14 @@ local commands = {
         -- Use the previous line state, as it will be the state
         -- of the beginning of the current line
         local state = dv.doc.highlighter:get_line(line1 - 1).state
-        local syntaxes = tokenizer.extract_subsyntaxes(dv.doc.syntax, state)
-        -- Go through all the syntaxes until the first with comments defined
-        for _, s in pairs(syntaxes) do
-          if s.comment or s.block_comment then
-            current_syntax = s
-            break
+        if state then
+          local syntaxes = tokenizer.extract_subsyntaxes(dv.doc.syntax, state)
+          -- Go through all the syntaxes until the first with comments defined
+          for _, s in pairs(syntaxes) do
+            if s.comment or s.block_comment then
+              current_syntax = s
+              break
+            end
           end
         end
       end

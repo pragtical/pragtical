@@ -810,11 +810,13 @@ function Doc:get_symbol_pattern()
   local current_syntax = self.syntax
   if current_syntax and line > 1 then
     local state = self.highlighter:get_line(line - 1).state
-    local syntaxes = tokenizer.extract_subsyntaxes(current_syntax, state)
-    for _, s in pairs(syntaxes) do
-      if s.symbol_pattern then
-        current_syntax = s
-        break
+    if state then
+      local syntaxes = tokenizer.extract_subsyntaxes(current_syntax, state)
+      for _, s in pairs(syntaxes) do
+        if s.symbol_pattern then
+          current_syntax = s
+          break
+        end
       end
     end
   end
@@ -836,11 +838,13 @@ function Doc:get_non_word_chars(symbol)
   local current_syntax = self.syntax
   if current_syntax and line > 1 then
     local state = self.highlighter:get_line(line - 1).state
-    local syntaxes = tokenizer.extract_subsyntaxes(current_syntax, state)
-    for _, s in pairs(syntaxes) do
-      if s[non_word_chars] then
-        current_syntax = s
-        break
+    if state then
+      local syntaxes = tokenizer.extract_subsyntaxes(current_syntax, state)
+      for _, s in pairs(syntaxes) do
+        if s[non_word_chars] then
+          current_syntax = s
+          break
+        end
       end
     end
   end
