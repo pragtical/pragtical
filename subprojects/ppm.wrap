@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/pragtical/plugin-manager.git
-revision = head
+revision = df49342b29fc669570f0225197d192ea4c261411
 depth = 1
 patch_directory = ppm
 clone-recursive = true

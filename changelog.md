@@ -1,5 +1,86 @@
 # Changes Log
 
+## [3.2.1] - 2023-12-19
+
+### New Features
+
+* Added project wide search and replace support
+  ([#48](https://github.com/pragtical/pragtical/pull/48))
+
+* Added config.line_endings support to settings gui
+  ([c487a19f](https://github.com/pragtical/pragtical/commit/c487a19f732c3074a88dc3c005fc79501a8af7a7))
+
+### Fixes
+
+* Obtain symbols pattern/nonword-chars for subsyntax
+  ([#45](https://github.com/pragtical/pragtical/pull/45))
+
+* Build: system_iconv is needed on windows fixes #46
+  ([#47](https://github.com/pragtical/pragtical/pull/47))
+
+* search_ui: set filepicker path on project-search:find
+  ([d8e51e54](https://github.com/pragtical/pragtical/commit/d8e51e54f0ebe644587f16c28443814eb6a00211))
+
+* search_ui: do not set filepicker if path nil
+  ([6a5c9547](https://github.com/pragtical/pragtical/commit/6a5c954759bd7eb6747273765dcc4e3c745ad067))
+
+* Use cmalloc instead of malloc on render init
+  ([#51](https://github.com/pragtical/pragtical/pull/51))
+
+* Check tokenizer state to prevent issues with evergreen
+  ([#52](https://github.com/pragtical/pragtical/pull/52))
+
+### Enhancements
+
+* Remove recent projects that no longer exists
+  ([#49](https://github.com/pragtical/pragtical/pull/49))
+
+* Prettify the session file output for easy reading (#50)
+  ([#50](https://github.com/pragtical/pragtical/pull/50))
+
+* Reload applicable opened docs on project search/replace
+  ([bf471672](https://github.com/pragtical/pragtical/commit/bf4716725f127db4bb88b01b4d9ce70ae6603f46))
+
+### Widgets
+
+* Added SearchReplaceList widget
+  ([#3](https://github.com/pragtical/widget/pull/3))
+
+* SearchReplaceList: truncate long results
+  ([e54e8766](https://github.com/pragtical/widget/commit/e54e8766390effa72c2217a6c68619c59507509b))
+
+### Lite XL Inherited Changes
+
+* Fix editing after undo not clearing the change id
+  ([#1574](https://github.com/lite-xl/lite-xl/pull/1574))
+
+* Fix patterns starting with ^ in tokenizer
+  ([#1645](https://github.com/lite-xl/lite-xl/pull/1645))
+
+* Fix dirmonitor sorting issues
+  ([#1599](https://github.com/lite-xl/lite-xl/pull/1599))
+
+* Fix language_js regex constant detection
+  ([#1581](https://github.com/lite-xl/lite-xl/pull/1581))
+
+* Use x offset to define render command rect in rencache_draw_text
+  ([#1618](https://github.com/lite-xl/lite-xl/pull/1618))
+
+* feat(process): allow commands and envs on proces_start
+  ([#1477](https://github.com/lite-xl/lite-xl/pull/1477))
+
+* Use \r\n for new files on Windows
+  ([#1596](https://github.com/lite-xl/lite-xl/pull/1596))
+
+* fix nagbar failed save message
+  ([#1678](https://github.com/lite-xl/lite-xl/pull/1678))
+
+* Fixed a minor bug, should close issue
+  ([#1680](https://github.com/lite-xl/lite-xl/pull/1680))
+
+* turn window_renderer into managed pointer
+  ([#1683](https://github.com/lite-xl/lite-xl/pull/1683))
+
 ## [3.2.0] - 2023-11-21
 
 ### New Features
@@ -1629,6 +1710,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.2.1]: https://github.com/pragtical/pragtical/releases/tag/v3.2.1
 [3.2.0]: https://github.com/pragtical/pragtical/releases/tag/v3.2.0
 [3.1.2]: https://github.com/pragtical/pragtical/releases/tag/v3.1.2
 [3.1.1]: https://github.com/pragtical/pragtical/releases/tag/v3.1.1
