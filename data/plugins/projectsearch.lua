@@ -558,6 +558,12 @@ function ResultsView:begin_replace()
             self.total_files_processed = self.total_files_processed + 1
             status_channels[i]:pop()
             self.results_list:apply_replacement(value)
+            local item = self.results_list.items[value]
+            for _, doc in ipairs(core.docs) do
+              if doc.abs_filename and item.file.path == doc.abs_filename then
+                doc:reload()
+              end
+            end
             core.redraw = true
           end
           if c % 100 == 0 then coroutine.yield() end
