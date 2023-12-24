@@ -727,7 +727,7 @@ end
 
 
 function core.load_project_module()
-  local filename = ".pragtical_project.lua"
+  local filename = core.project_absolute_path(".pragtical_project.lua")
   if system.get_file_info(filename) then
     return core.try(function()
       local fn, err = loadfile(filename)
