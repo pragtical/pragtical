@@ -299,11 +299,9 @@ static void copy_global(const char* global, lua_State* from, lua_State* to)
 }
 
 #ifdef _WIN32
-#define PRAGTICAL_OS_HOME "USERPROFILE"
 #define PRAGTICAL_PATHSEP_PATTERN "\\\\"
 #define PRAGTICAL_NONPATHSEP_PATTERN "[^\\\\]+"
 #else
-#define PRAGTICAL_OS_HOME "HOME"
 #define PRAGTICAL_PATHSEP_PATTERN "/"
 #define PRAGTICAL_NONPATHSEP_PATTERN "[^/]+"
 #endif
@@ -312,9 +310,11 @@ static void init_start(lua_State* L)
 {
   /* partial code taken from main.c */
   const char *lua_code = \
-    "local exedir = EXEFILE:match('^(.*)" PRAGTICAL_PATHSEP_PATTERN PRAGTICAL_NONPATHSEP_PATTERN "$')\n"
-    "local prefix = exedir:match('^(.*)" PRAGTICAL_PATHSEP_PATTERN "bin$')\n"
-    "dofile((MACOS_RESOURCES or (prefix and prefix .. '/share/pragtical' or exedir .. '/data')) .. '/core/start.lua')\n";
+    "local match = require('utf8extra').match\n"
+    "local exedir = match(EXEFILE, '^(.*)" PRAGTICAL_PATHSEP_PATTERN PRAGTICAL_NONPATHSEP_PATTERN "$')\n"
+    "local prefix = os.getenv('PRAGTICAL_PREFIX') or match(exedir, '^(.*)" PRAGTICAL_PATHSEP_PATTERN "bin$')\n"
+    "dofile((MACOS_RESOURCES or (prefix and prefix .. '/share/pragtical' or exedir .. '/data')) .. '/core/start.lua')\n"
+  ;
 
   if (luaL_loadstring(L, lua_code)) {
     return;
@@ -377,6 +377,7 @@ static int f_thread_create(lua_State *L)
   copy_global("ARCH", L, thread->L);
   copy_global("EXEFILE", L, thread->L);
   copy_global("HOME", L, thread->L);
+  copy_global("LUAJIT", L, thread->L);
 
 #ifdef __APPLE__
   copy_global("MACOS_RESOURCES", L, thread->L);
