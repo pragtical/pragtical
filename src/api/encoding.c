@@ -10,6 +10,8 @@
   #include <windows.h>
 #endif
 
+const size_t MAX_READ_SIZE = 10 * 1024 * 1024;
+
 typedef struct {
   const char* charset;
   unsigned char bom[4];
@@ -317,8 +319,10 @@ int f_detect(lua_State *L) {
 
   fseek(file, 0, SEEK_END);
 
+  /* TODO: on max_read_size if the ending byte is incomplete codepoint expand it */
   size_t file_size = ftell(file);
-  char* string = malloc(file_size);
+  size_t read_size = file_size > MAX_READ_SIZE ? MAX_READ_SIZE : file_size;
+  char* string = malloc(read_size);
 
   if (!string) {
     lua_pushnil(L);
@@ -328,9 +332,9 @@ int f_detect(lua_State *L) {
   }
 
   fseek(file, 0, SEEK_SET);
-  fread(string, 1, file_size, file);
+  fread(string, 1, read_size, file);
 
-  const char* charset = encoding_detect(string, file_size);
+  const char* charset = encoding_detect(string, read_size);
 
   fclose(file);
   free(string);
