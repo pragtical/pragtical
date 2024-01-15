@@ -209,7 +209,17 @@ settings.add("General",
       type = settings.type.NUMBER,
       default = 10,
       min = 1,
-      max = 50
+      max = 50,
+      on_apply = function()
+        for _, project in ipairs(core.projects) do
+          project:compile_ignore_files()
+        end
+        core.add_thread(function()
+          if treeview then
+            treeview.cache = {}
+          end
+        end)
+      end
     },
     {
       label = "Ignore Files",
