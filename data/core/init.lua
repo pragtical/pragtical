@@ -1009,17 +1009,43 @@ function core.root_project() return core.projects[1] end
 function core.normalize_to_project_dir(path) return core.root_project():normalize_path(path) end
 function core.project_absolute_path(path) return core.root_project():absolute_path(path) end
 
+local function close_doc_view(doc)
+  core.add_thread(function()
+    local views = core.root_view.root_node:get_children()
+    for _, view in ipairs(views) do
+      if view.doc == doc then
+        local node = core.root_view.root_node:get_node_for_view(view)
+        node:close_view(core.root_view.root_node, view)
+      end
+    end
+  end)
+end
+
 function core.open_doc(filename)
   local new_file = true
   local abs_filename
+  local close_docview = false
   if filename then
     -- normalize filename and set absolute filename then
     -- try to find existing doc for filename
     filename = core.root_project():normalize_path(filename)
     abs_filename = core.root_project():absolute_path(filename)
-    new_file = not system.get_file_info(abs_filename)
+    local file_info = system.get_file_info(abs_filename)
+    new_file = not file_info
+    if file_info.size > config.file_size_limit * 1e6 then
+      local size = file_info.size / 1024 / 1024
+      core.error(
+        "File '%s' with size %0.2fMB exceeds config.file_size_limit of %sMB",
+        filename, size, config.file_size_limit
+      )
+      close_docview = true
+      filename = nil
+      abs_filename = nil
+      new_file = true
+    end
     for _, doc in ipairs(core.docs) do
       if doc.abs_filename and abs_filename == doc.abs_filename then
+        if close_docview then close_doc_view(doc) end
         return doc
       end
     end
@@ -1028,6 +1054,7 @@ function core.open_doc(filename)
   local doc = Doc(filename, abs_filename, new_file)
   table.insert(core.docs, doc)
   core.log_quiet(filename and "Opened doc \"%s\"" or "Opened new doc", filename)
+  if close_docview then close_doc_view(doc) end
   return doc
 end
 
