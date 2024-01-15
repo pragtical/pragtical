@@ -96,6 +96,7 @@ local function files_search_thread(tid, options)
   local pathsep = options.pathsep or "/"
   local ignore_files = options.ignore_files or {}
   local workers = options.workers or 2
+  local file_size_limit = options.file_size_limit or (10 * 1e6)
 
   ---A thread that waits for filenames to search the given text. If the given
   ---filename is "{{stop}}" then the thread will finish and exit.
@@ -275,7 +276,7 @@ local function files_search_thread(tid, options)
           then
             if info.type == "dir" then
               table.insert(directories, directory .. file)
-            else
+            elseif info.size <= file_size_limit then
               filename_channels[current_worker]:push(dir_path .. pathsep .. file)
               current_worker = current_worker + 1
               if current_worker > workers then current_worker = 1 end
@@ -367,7 +368,8 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
         path = path,
         pathsep = PATHSEP,
         ignore_files = config.ignore_files,
-        workers = workers
+        workers = workers,
+        file_size_limit = config.file_size_limit * 1e6
       }
     )
     ---@type thread.Channel[]
