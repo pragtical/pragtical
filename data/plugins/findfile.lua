@@ -25,7 +25,11 @@ local function basedir_files()
         project_directory .. PATHSEP .. file
       )
 
-      if info and not common.match_pattern(file, config.ignore_files) then
+      if
+        info and info.size <= config.file_size_limit * 1e6
+        and
+        not common.match_pattern(file, config.ignore_files)
+      then
         if info.type ~= "dir" then
           table.insert(files_return, file)
         end
@@ -72,7 +76,7 @@ local function update_loading_text(init)
   core.redraw = true
 end
 
-local function index_files_thread(pathsep, ignore_files)
+local function index_files_thread(pathsep, ignore_files, file_size_limit)
   local commons = require "core.common"
 
   ---@type thread.Channel
@@ -109,9 +113,9 @@ local function index_files_thread(pathsep, ignore_files)
           )
 
           if
-            info and not commons.match_pattern(
-              directory .. file, ignore_files
-            )
+            info and info.size <= file_size_limit
+            and
+            not commons.match_pattern(directory .. file, ignore_files)
           then
             if info.type == "dir" then
               table.insert(directories, directory .. file)
@@ -153,7 +157,8 @@ local function index_files_coroutine()
       local count = 0
 
       local indexing_thread = thread.create(
-        "findfile", index_files_thread, PATHSEP, config.ignore_files
+        "findfile", index_files_thread,
+        PATHSEP, config.ignore_files, config.file_size_limit * 1e6
       )
 
       local last_time = system.get_time()
