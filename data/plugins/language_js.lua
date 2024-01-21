@@ -65,9 +65,15 @@ syntax.add {
     { pattern = { "'", "'", '\\' },          type = "string"   },
     { pattern = { "`", "`", '\\' },          type = "string"   },
     -- Numbers
-    { pattern = "0x[%da-fA-F_]+n?()%s*()/?", type = {"number", "normal", "operator"}   },
-    { pattern = "-?%d+[%d%.eE_n]*()%s*()/?", type = {"number", "normal", "operator"}   },
-    { pattern = "-?%.?%d+()%s*()/?",         type = {"number", "normal", "operator"}   },
+    { pattern = "-?0[xXbBoO][%da-fA-F_]+n?()%s*()/?",
+      type = {"number", "normal", "operator"}
+    },
+    { pattern = "-?%d+[%d%.eE_n]*()%s*()/?",
+      type = {"number", "normal", "operator"}
+    },
+    { pattern = "-?%.?%d+()%s*()/?",
+      type = {"number", "normal", "operator"}
+    },
     -- Embedded html like that used on React
     { pattern = { "<%s*>", "<%s*/%s*>" },
       type = "operator", syntax = ".html"
