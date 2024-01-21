@@ -86,7 +86,7 @@ core.add_thread(function()
         if doc.abs_filename == file then
           local info = system.get_file_info(doc.abs_filename or "")
           if
-            info and times[doc]
+            info and info.type == "file" and times[doc]
             and
             (
               times[doc].modified ~= info.modified
