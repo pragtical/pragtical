@@ -1032,7 +1032,7 @@ function core.open_doc(filename)
     abs_filename = core.root_project():absolute_path(filename)
     local file_info = system.get_file_info(abs_filename)
     new_file = not file_info
-    if file_info.size > config.file_size_limit * 1e6 then
+    if file_info and file_info.size > config.file_size_limit * 1e6 then
       local size = file_info.size / 1024 / 1024
       core.error(
         "File '%s' with size %0.2fMB exceeds config.file_size_limit of %sMB",
