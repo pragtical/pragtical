@@ -449,9 +449,11 @@ function DocView:draw_line_text(line, x, y)
   if string.sub(tokens[tokens_count], -1) == "\n" then
     last_token = tokens_count - 1
   end
+  local _, indent_size = self.doc:get_indent_info()
   for tidx, type, text in self.doc.highlighter:each_token(line) do
     local color = style.syntax[type]
     local font = style.syntax_fonts[type] or default_font
+    if font ~= default_font then font:set_tab_size(indent_size) end
     -- do not render newline, fixes issue #1164
     if tidx == last_token then text = text:sub(1, -2) end
     tx = renderer.draw_text(font, text, tx, ty, color)
