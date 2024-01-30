@@ -1,5 +1,66 @@
 # Changes Log
 
+## [3.2.2] - 2024-01-30
+
+### Fixes
+
+* Fix project module sometimes not loading.
+  ([#54](https://github.com/pragtical/pragtical/pull/54))
+
+* Correct the runtime environment variable
+  ([#55](https://github.com/pragtical/pragtical/pull/55))
+
+* Use unique GUID for the inno setup installer
+  ([#58](https://github.com/pragtical/pragtical/pull/58))
+
+* Null check file_info on core.open_doc
+  ([4418bb6c](https://github.com/pragtical/pragtical/commit/4418bb6cae81e30f53ed54e97138c48dd7ee81d5))
+
+### Enhancements
+
+* Merge findfileimproved into findfile plugin
+  and made the loading text update smoother.
+  ([#53](https://github.com/pragtical/pragtical/pull/53))
+
+* Update thread initialization code to match main
+  ([#56](https://github.com/pragtical/pragtical/pull/56))
+
+* Update macOS icons to be more close to apple guidelines
+  ([#57](https://github.com/pragtical/pragtical/pull/57))
+
+* Limit max bytes read when detecting file encoding
+  ([#59](https://github.com/pragtical/pragtical/pull/59))
+
+* Respect config.file_size_limit on some components
+  ([#60](https://github.com/pragtical/pragtical/pull/60))
+
+### Lite XL Inherited Changes
+
+* Fix doc:create-cursor-previous/next-line with tabs
+  ([#1697](https://github.com/lite-xl/lite-xl/pull/1697))
+
+* Memory fixes
+  ([#1705](https://github.com/lite-xl/lite-xl/pull/1705))
+
+* Improve number highlighting for python syntax highlighting
+  ([#1704](https://github.com/lite-xl/lite-xl/pull/1704))
+
+* reorder nagview options on doc:save error to be more consistent with other
+  nagview confirmations
+  ([#1696](https://github.com/lite-xl/lite-xl/pull/1696))
+
+* autoreload docs only if their filename matches an actual file
+  ([#1698](https://github.com/lite-xl/lite-xl/pull/1698))
+
+* language_js: support binary and octal representation
+  ([#1710](https://github.com/lite-xl/lite-xl/pull/1710))
+
+* process: style changes
+  ([#1709](https://github.com/lite-xl/lite-xl/pull/1709))
+
+* Add system.setenv
+  ([#1706](https://github.com/lite-xl/lite-xl/pull/1706))
+
 ## [3.2.1] - 2023-12-19
 
 ### New Features
@@ -35,7 +96,7 @@
 * Remove recent projects that no longer exists
   ([#49](https://github.com/pragtical/pragtical/pull/49))
 
-* Prettify the session file output for easy reading (#50)
+* Prettify the session file output for easy reading
   ([#50](https://github.com/pragtical/pragtical/pull/50))
 
 * Reload applicable opened docs on project search/replace
@@ -121,7 +182,7 @@
 * Check in autocomplete plugin if doc cached on symbols iterator
   ([6546ee8c](https://github.com/pragtical/pragtical/commit/6546ee8c66ee9df79852a8e2f12089a1706d657e))
 
-* Fix editor crash on invalid UTF-8 (#38)
+* Fix editor crash on invalid UTF-8
   ([#38](https://github.com/pragtical/pragtical/pull/38))
 
 ### Enhancements
@@ -1710,6 +1771,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.2.2]: https://github.com/pragtical/pragtical/releases/tag/v3.2.2
 [3.2.1]: https://github.com/pragtical/pragtical/releases/tag/v3.2.1
 [3.2.0]: https://github.com/pragtical/pragtical/releases/tag/v3.2.0
 [3.1.2]: https://github.com/pragtical/pragtical/releases/tag/v3.1.2
