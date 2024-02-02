@@ -55,7 +55,7 @@ function TreeView:new()
   self.scrollable = true
   self.visible = true
   self.init_size = true
-  self.max_width = 0
+  self.scroll_width = 0
   self.target_size = config.plugins.treeview.size
   self.show_hidden = config.plugins.treeview.show_hidden
   self.show_ignored = config.plugins.treeview.show_ignored
@@ -338,8 +338,8 @@ end
 
 function TreeView:get_h_scrollable_size()
   local  _, _, v_scroll_w = self.v_scrollbar:get_thumb_rect()
-  return self.max_width + (
-    self.size.x > self.max_width + v_scroll_w and 0 or style.padding.x
+  return self.scroll_width + (
+    self.size.x > self.scroll_width + v_scroll_w and 0 or style.padding.x
   )
 end
 
@@ -454,7 +454,7 @@ function TreeView:draw()
         item == self.hovered_item,
         x, y, w, h
       ) + ox
-      self.max_width = math.max(w, self.max_width)
+      self.scroll_width = math.max(w, self.scroll_width)
     end
   end
 
@@ -515,7 +515,7 @@ function TreeView:toggle_expand(toggle, item)
   if not item then return end
 
   if item.type == "dir" then
-    self.max_width = 0
+    self.scroll_width = 0
     if type(toggle) == "boolean" then
       item.expanded = toggle
     else
