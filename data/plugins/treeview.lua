@@ -55,6 +55,7 @@ function TreeView:new()
   self.scrollable = true
   self.visible = true
   self.init_size = true
+  self.max_width = 0
   self.target_size = config.plugins.treeview.size
   self.show_hidden = config.plugins.treeview.show_hidden
   self.show_ignored = config.plugins.treeview.show_ignored
@@ -335,6 +336,14 @@ function TreeView:get_scrollable_size()
 end
 
 
+function TreeView:get_h_scrollable_size()
+  local  _, _, v_scroll_w = self.v_scrollbar:get_thumb_rect()
+  return self.max_width + (
+    self.size.x > self.max_width + v_scroll_w and 0 or style.padding.x
+  )
+end
+
+
 function TreeView:draw_tooltip()
   local text = common.home_encode(self.hovered_item.abs_filename)
   local w, h = style.font:get_width(text), style.font:get_height(text)
@@ -380,7 +389,7 @@ end
 
 function TreeView:draw_item_text(item, active, hovered, x, y, w, h)
   local item_text, item_font, item_color = self:get_item_text(item, active, hovered)
-  common.draw_text(item_font, item_color, item_text, nil, x, y, 0, h)
+  return common.draw_text(item_font, item_color, item_text, nil, x, y, 0, h)
 end
 
 
@@ -393,7 +402,7 @@ end
 
 function TreeView:draw_item_body(item, active, hovered, x, y, w, h)
     x = x + self:draw_item_icon(item, active, hovered, x, y, w, h)
-    self:draw_item_text(item, active, hovered, x, y, w, h)
+    return self:draw_item_text(item, active, hovered, x, y, w, h)
 end
 
 
@@ -411,9 +420,9 @@ function TreeView:draw_item_background(item, active, hovered, x, y, w, h)
   if hovered then
     local hover_color = { table.unpack(style.line_highlight) }
     hover_color[4] = 160
-    renderer.draw_rect(x, y, w, h, hover_color)
+    renderer.draw_rect(self.position.x, y, self.size.x, h, hover_color)
   elseif active then
-    renderer.draw_rect(x, y, w, h, style.line_highlight)
+    renderer.draw_rect(self.position.x, y, self.size.x, h, style.line_highlight)
   end
 end
 
@@ -424,7 +433,7 @@ function TreeView:draw_item(item, active, hovered, x, y, w, h)
   x = x + item.depth * style.padding.x + style.padding.x
   x = x + self:draw_item_chevron(item, active, hovered, x, y, w, h)
 
-  self:draw_item_body(item, active, hovered, x, y, w, h)
+  return self:draw_item_body(item, active, hovered, x, y, w, h)
 end
 
 
@@ -436,12 +445,16 @@ function TreeView:draw()
   local doc = core.active_view.doc
   local active_filename = doc and core.project_absolute_path(doc.abs_filename or "")
 
+  local ox = math.abs(self:get_content_offset())
   for item, x,y,w,h in self:each_item() do
     if y + h >= _y and y < _y + _h then
-      self:draw_item(item,
+      local w = self:draw_item(
+        item,
         item == self.selected_item,
         item == self.hovered_item,
-        x, y, w, h)
+        x, y, w, h
+      ) + ox
+      self.max_width = math.max(w, self.max_width)
     end
   end
 
@@ -502,6 +515,7 @@ function TreeView:toggle_expand(toggle, item)
   if not item then return end
 
   if item.type == "dir" then
+    self.max_width = 0
     if type(toggle) == "boolean" then
       item.expanded = toggle
     else
