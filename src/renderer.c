@@ -904,8 +904,8 @@ double ren_font_group_get_width(RenWindow *window_renderer, RenFont **fonts, con
 // dual source blending for LCD (subpixel rendering)
 static inline void lcd_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *src_rect, RenRect *dst_rect, RenColor *color) {
   unsigned char src_r, src_g, src_b, dst_r, dst_g, dst_b, dst_a, r, g, b;
-  uint8_t *src_row = (uint8_t *) src->pixels + src_rect->y * src->pitch + src_rect->x * src->format->BytesPerPixel;
-  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + dst_rect->y * dst->pitch + dst_rect->x * dst->format->BytesPerPixel);
+  uint8_t *src_row = (uint8_t *) src->pixels + (int) src_rect->y * src->pitch + (int) src_rect->x * src->format->BytesPerPixel;
+  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + (int) dst_rect->y * dst->pitch + (int) dst_rect->x * dst->format->BytesPerPixel);
   int src_skip = src->pitch - (src_rect->width * src->format->BytesPerPixel);
   int dst_skip = dst->pitch - (src_rect->width * dst->format->BytesPerPixel);
 
@@ -927,7 +927,7 @@ static inline void lcd_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *src_re
 
       // the correct way to do this is with SDL_MapRGBA() but it introduces performance regression
       *(dst_row++) = (r << dst->format->Rshift) | (g << dst->format->Gshift) | (b << dst->format->Bshift) | (dst_a << dst->format->Ashift);
-    , src_rect->width);
+    , (int) src_rect->width);
 
     src_row += src_skip;
     dst_row = (uint32_t *) ((uint8_t *) dst_row + dst_skip);
@@ -937,8 +937,8 @@ static inline void lcd_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *src_re
 // dual source blending for grayscale
 static inline void grayscale_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *src_rect, RenRect *dst_rect, RenColor *color) {
   unsigned char src_r, src_g, src_b, dst_r, dst_g, dst_b, dst_a, r, g, b;
-  uint8_t *src_row = (uint8_t *) src->pixels + src_rect->y * src->pitch + src_rect->x * src->format->BytesPerPixel;
-  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + dst_rect->y * dst->pitch + dst_rect->x * dst->format->BytesPerPixel);
+  uint8_t *src_row = (uint8_t *) src->pixels + (int) src_rect->y * src->pitch + (int) src_rect->x * src->format->BytesPerPixel;
+  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + (int) dst_rect->y * dst->pitch + (int) dst_rect->x * dst->format->BytesPerPixel);
   int src_skip = src->pitch - (src_rect->width * src->format->BytesPerPixel);
   int dst_skip = dst->pitch - (src_rect->width * dst->format->BytesPerPixel);
 
@@ -961,7 +961,7 @@ static inline void grayscale_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *
 
       // the correct way to do this is with SDL_MapRGBA() but it introduces performance regression
       *(dst_row++) = (r << dst->format->Rshift) | (g << dst->format->Gshift) | (b << dst->format->Bshift) | (dst_a << dst->format->Ashift);
-    , src_rect->width)
+    , (int) src_rect->width)
 
     src_row += src_skip;
     dst_row = (uint32_t *) ((uint8_t *) dst_row + dst_skip);
