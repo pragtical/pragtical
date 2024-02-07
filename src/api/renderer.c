@@ -222,71 +222,101 @@ static int f_font_set_size(lua_State *L) {
 }
 
 static int f_font_get_metadata(lua_State *L) {
-  const char *filename  = luaL_checkstring(L, 1);
-  int found = 0;
-  int ret_count = 1;
-  FontMetaData *data;
-  bool monospaced = false;
-  int error = ren_font_get_metadata(filename, &data, &found, &monospaced);
-
-  if (error == 0 && found > 0) {
-    lua_newtable(L);
-    for (int i=0; i<found; i++) {
-      switch(data[i].tag) {
-        case FONT_FAMILY:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "family");
-          break;
-        case FONT_SUBFAMILY:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "subfamily");
-          break;
-        case FONT_ID:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "id");
-          break;
-        case FONT_FULLNAME:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "fullname");
-          break;
-        case FONT_VERSION:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "version");
-          break;
-        case FONT_PSNAME:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "psname");
-          break;
-        case FONT_TFAMILY:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "tfamily");
-          break;
-        case FONT_TSUBFAMILY:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "tsubfamily");
-          break;
-        case FONT_WWSFAMILY:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "wwsfamily");
-          break;
-        case FONT_WWSSUBFAMILY:
-          lua_pushlstring(L, data[i].value, data[i].len);
-          lua_setfield(L, -2, "wwssubfamily");
-          break;
-      }
-      free(data[i].value);
-    }
-    lua_pushboolean(L, monospaced);
-    lua_setfield(L, -2, "monospace");
-    free(data);
-  } else if (error == 2) {
-    lua_pushnil(L);
-    lua_pushstring(L, "could not retrieve the font meta data");
-    ret_count = 2;
+  const char* filenames[FONT_FALLBACK_MAX];
+  int fonts_found = 0;
+  bool table = false;
+  if (lua_type(L, 1) == LUA_TSTRING) {
+    fonts_found = 1;
+    filenames[0] = luaL_checkstring(L, 1);
   } else {
-    lua_pushnil(L);
-    lua_pushstring(L, "no meta data found");
-    ret_count = 2;
+    RenFont* fonts[FONT_FALLBACK_MAX];
+    table = font_retrieve(L, fonts, 1);
+    if (table)
+      lua_newtable(L);
+    for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
+      filenames[i] = ren_font_get_path(fonts[i]);
+      fonts_found++;
+    }
+  }
+
+  int ret_count = 1;
+
+  for(int f=0; f<fonts_found; f++) {
+    int found = 0;
+    FontMetaData *data;
+    bool monospaced = false;
+    int error = ren_font_get_metadata(filenames[f], &data, &found, &monospaced);
+
+    if ((error == 0 && found > 0) || fonts_found > 1) {
+      int meta_idx = table ? 3 : 2;
+      lua_newtable(L);
+      for (int i=0; i<found; i++) {
+        switch(data[i].tag) {
+          case FONT_FAMILY:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "family");
+            break;
+          case FONT_SUBFAMILY:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "subfamily");
+            break;
+          case FONT_ID:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "id");
+            break;
+          case FONT_FULLNAME:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "fullname");
+            break;
+          case FONT_VERSION:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "version");
+            break;
+          case FONT_PSNAME:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "psname");
+            break;
+          case FONT_TFAMILY:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "tfamily");
+            break;
+          case FONT_TSUBFAMILY:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "tsubfamily");
+            break;
+          case FONT_WWSFAMILY:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "wwsfamily");
+            break;
+          case FONT_WWSSUBFAMILY:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "wwssubfamily");
+            break;
+          case FONT_SAMPLETEXT:
+            lua_pushlstring(L, data[i].value, data[i].len);
+            lua_setfield(L, meta_idx, "sampletext");
+            break;
+        }
+        free(data[i].value);
+      }
+
+      lua_pushboolean(L, monospaced);
+      lua_setfield(L, meta_idx, "monospace");
+      free(data);
+
+      if (table)
+        lua_rawseti(L, 2, f+1);
+    } else if (error == 2) {
+      lua_pushnil(L);
+      lua_pushstring(L, "could not retrieve the font meta data");
+      ret_count = 2;
+      break;
+    } else {
+      lua_pushnil(L);
+      lua_pushstring(L, "no meta data found");
+      ret_count = 2;
+      break;
+    }
   }
 
   return ret_count;
