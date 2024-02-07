@@ -51,6 +51,34 @@ function renderer.font.load(path, size, options) end
 function renderer.font.group(fonts) end
 
 ---
+---Representation of a font metadata.
+---
+---@class renderer.font.metadata
+---@field public id string?
+---@field public fullname string?
+---@field public version string?
+---@field public sampletext string?
+---@field public psname string?
+---@field public family string?
+---@field public subfamily string?
+---@field public tfamily string?
+---@field public tsubfamily string?
+---@field public wwsfamily string?
+---@field public wwssubfamily string?
+---Some monospace fonts do not set it to true, do not rely on it too much.
+---@field public monospace boolean
+
+---
+---Get a font file metadata. In case of a font group it will return an array
+---of metadata results for each font on the group.
+---
+---@param font_or_path renderer.font | string
+---
+---@return renderer.font.metadata | renderer.font.metadata[] | nil
+---@return string? errmsg
+function renderer.font.get_metadata(font_or_path) end
+
+---
 ---Clones a font object into a new one.
 ---
 ---@param size? number Optional new size for cloned font.

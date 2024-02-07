@@ -791,6 +791,9 @@ int ren_font_get_metadata(
           case TT_NAME_ID_WWS_SUBFAMILY:
             meta.tag = FONT_WWSSUBFAMILY;
             break;
+          case TT_NAME_ID_SAMPLE_TEXT:
+            meta.tag = FONT_SAMPLETEXT;
+            break;
         }
       }
       if (meta.tag == -1) {
