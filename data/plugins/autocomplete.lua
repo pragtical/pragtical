@@ -1,16 +1,58 @@
 -- mod-version:3
 local core = require "core"
+local command = require "core.command"
 local common = require "core.common"
 local config = require "core.config"
-local command = require "core.command"
-local style = require "core.style"
 local keymap = require "core.keymap"
-local RootView = require "core.rootview"
-local DocView = require "core.docview"
+local style = require "core.style"
+local translate = require "core.doc.translate"
 local Doc = require "core.doc"
+local DocView = require "core.docview"
+local RootView = require "core.rootview"
+
+---@class plugins.autocomplete.symbolinfo
+---Text value of the symbol displayed on the autocomplete box.
+---@field text string
+---Additional information displayed on autocomplete box, eg: item type.
+---@field info? string
+---Name of a registered icon.
+---@field icon? string
+---Description shown when the symbol is hovered on the autocomplete box.
+---@field desc? string
+---An optional callback called once when the symbol is hovered.
+---@field onhover? fun(idx:integer,item:plugins.autocomplete.symbolinfo)
+---An optional callback called when the symbol is selected.
+---@field onselect? fun(idx:integer,item:plugins.autocomplete.symbolinfo):boolean
+---Optional data that can be used for onhover and onselect callbacks.
+---@field data? any
+
+---@class plugins.autocomplete.symbols
+---Name of the symbols table.
+---@field name string
+---Lua patterns which match the files where the symbols are valid.
+---@field files string | table<integer,string>
+---List of symbols that belong to this symbols table.
+---@field items table<string,plugins.autocomplete.symbolinfo|string|false|nil>
+
+---@class plugins.autocomplete.map
+---Lua patterns which match the files where the symbols are valid.
+---@field files string | table<integer,string>
+---List of symbols that belong to this symbols table.
+---@field items table<string,plugins.autocomplete.symbolinfo>
+
+---@class plugins.autocomplete.icon
+---@field char string
+---@field font renderer.font
+---@field color string | renderer.color
+
+---@alias plugins.autocomplete.onclose fun(doc:core.doc,item:plugins.autocomplete.symbolinfo)
+
+---@class plugins.autocomplete.cachedata
+---@field last_change_id number
+---@field symbols table<string,boolean>
 
 ---Symbols cache of all open documents
----@type table<core.doc, table>
+---@type table<core.doc,plugins.autocomplete.cachedata>
 local cache = setmetatable({}, { __mode = "k" })
 
 config.plugins.autocomplete = common.merge({
@@ -129,9 +171,13 @@ config.plugins.autocomplete = common.merge({
 
 local autocomplete = {}
 
+---@type table<string,plugins.autocomplete.map>
 autocomplete.map = {}
+---@type table<string,plugins.autocomplete.map>
 autocomplete.map_manually = {}
+---@type nil | plugins.autocomplete.onclose
 autocomplete.on_close = nil
+---@type table<string,plugins.autocomplete.icon>
 autocomplete.icons = {}
 
 -- Flag that indicates if the autocomplete box was manually triggered
@@ -142,6 +188,9 @@ local triggered_manually = false
 
 local mt = { __tostring = function(t) return t.text end }
 
+---Register a symbols table used for autocompletion.
+---@param t plugins.autocomplete.symbols
+---@param manually_triggered? boolean
 function autocomplete.add(t, manually_triggered)
   local items = {}
   for text, info in pairs(t.items) do
@@ -152,11 +201,11 @@ function autocomplete.add(t, manually_triggered)
           {
             text = text,
             info = info.info,
-            icon = info.icon,          -- Name of icon to show
-            desc = info.desc,          -- Description shown on item selected
-            onhover = info.onhover,    -- A callback called once when item is hovered
-            onselect = info.onselect,  -- A callback called when item is selected
-            data = info.data           -- Optional data that can be used on cb
+            icon = info.icon,
+            desc = info.desc,
+            onhover = info.onhover,
+            onselect = info.onselect,
+            data = info.data
           },
           mt
         )
@@ -174,12 +223,46 @@ function autocomplete.add(t, manually_triggered)
   end
 end
 
+---Same as translate.start_of_word but uses `symbol_non_word_chars` instead.
+---@param doc core.doc
+---@param line integer
+---@param col integer
+---@return integer line
+---@return integer col
+local function translate_start_of_word(doc, line, col)
+  while true do
+    local line2, col2 = doc:position_offset(line, col, -1)
+    local char = doc:get_char(line2, col2)
+    if doc:get_non_word_chars(true):find(char, nil, true)
+    or line == line2 and col == col2 then
+      break
+    end
+    line, col = line2, col2
+  end
+  return line, col
+end
+
+---Retrieve the current document partial symbol.
+---@return string partial
+---@return integer line1
+---@return integer col1
+---@return integer line2
+---@return integer col2
+function autocomplete.get_partial_symbol()
+  local doc = core.active_view.doc
+  local line2, col2 = doc:get_selection()
+  local line1, col1 = doc:position_offset(line2, col2, translate_start_of_word)
+  return doc:get_text(line1, col1, line2, col2), line1, col1, line2, col2
+end
+
 --
 -- Thread that scans open document symbols and cache them
 --
 local global_symbols = {}
 
 core.add_thread(function()
+  ---@param doc core.doc
+  ---@return table<string,string>
   local function load_syntax_symbols(doc)
     if doc.syntax and not autocomplete.map["language_"..doc.syntax.name] then
       local symbols = {
@@ -196,6 +279,8 @@ core.add_thread(function()
     return {}
   end
 
+  ---@param doc core.doc
+  ---@return table<string,boolean>
   local function get_symbols(doc)
     local s = {}
     local syntax_symbols = load_syntax_symbols(doc)
@@ -234,6 +319,8 @@ core.add_thread(function()
     return s
   end
 
+  ---@param doc core.doc
+  ---@return boolean
   local function cache_is_valid(doc)
     local c = cache[doc]
     return c and c.last_change_id == doc:get_change_id()
@@ -359,7 +446,7 @@ local function update_suggestions()
   end
 
   -- fuzzy match, remove duplicates and store
-  items = common.fuzzy_match(items, partial)
+  items = common.fuzzy_match(items, partial, false)
   local j = 1
   for i = 1, config.plugins.autocomplete.max_suggestions do
     suggestions[i] = items[j]
@@ -369,32 +456,6 @@ local function update_suggestions()
     end
   end
   suggestions_idx = 1
-end
-
----Same as translate.start_of_word but uses `symbol_non_word_chars` instead.
----@param doc core.doc
----@param line integer
----@param col integer
----@return integer line
----@return integer col
-local function translate_start_of_word(doc, line, col)
-  while true do
-    local line2, col2 = doc:position_offset(line, col, -1)
-    local char = doc:get_char(line2, col2)
-    if doc:get_non_word_chars(true):find(char, nil, true)
-    or line == line2 and col == col2 then
-      break
-    end
-    line, col = line2, col2
-  end
-  return line, col
-end
-
-local function get_partial_symbol()
-  local doc = core.active_view.doc
-  local line2, col2 = doc:get_selection()
-  local line1, col1 = doc:position_offset(line2, col2, translate_start_of_word)
-  return doc:get_text(line1, col1, line2, col2)
 end
 
 local function get_active_view()
@@ -667,7 +728,7 @@ local function show_autocomplete()
   local av = get_active_view()
   if av then
     -- update partial symbol and suggestions
-    partial = get_partial_symbol()
+    partial = autocomplete.get_partial_symbol()
 
     if #partial >= config.plugins.autocomplete.min_len or triggered_manually then
       update_suggestions()
@@ -753,6 +814,9 @@ end
 --
 -- Public functions
 --
+
+---Manually invoke the completion list using already registered symbols.
+---@param on_close? plugins.autocomplete.onclose
 function autocomplete.open(on_close)
   triggered_manually = true
 
@@ -762,20 +826,26 @@ function autocomplete.open(on_close)
 
   local av = get_active_view()
   if av then
-    partial = get_partial_symbol()
+    partial = autocomplete.get_partial_symbol()
     last_line, last_col = av.doc:get_selection()
     update_suggestions()
   end
 end
 
+---Manually close the completions list.
 function autocomplete.close()
   reset_suggestions()
 end
 
+---Check if the completion lists is visible.
+---@return boolean
 function autocomplete.is_open()
   return #suggestions > 0
 end
 
+---Manually invoke the completion list using the provided symbols.
+---@param completions plugins.autocomplete.symbols
+---@param on_close? plugins.autocomplete.onclose
 function autocomplete.complete(completions, on_close)
   reset_suggestions()
 
@@ -785,6 +855,9 @@ function autocomplete.complete(completions, on_close)
   autocomplete.open(on_close)
 end
 
+---Check if autocomplete can be triggered by checking if current
+---partial symbol meets the required minimum autocompletion len.
+---@return boolean
 function autocomplete.can_complete()
   if #partial >= config.plugins.autocomplete.min_len then
     return true
@@ -835,7 +908,7 @@ command.add(predicate, {
       inserted = item.onselect(suggestions_idx, item)
     end
     if not inserted then
-      local current_partial = get_partial_symbol()
+      local current_partial = autocomplete.get_partial_symbol()
       local sz = #current_partial
 
       for idx, line1, col1, line2, col2 in doc:get_selections(true) do
