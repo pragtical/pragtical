@@ -5,7 +5,6 @@ local common = require "core.common"
 local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
-local translate = require "core.doc.translate"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local RootView = require "core.rootview"
@@ -479,7 +478,9 @@ local function get_suggestions_rect(av)
   local hide_icons = config.plugins.autocomplete.hide_icons
 
   local max_width = 0
-  for _, s in ipairs(suggestions) do
+  local width_exceeds = false
+  local win_width = system.get_window_size() - style.padding.x  * 2
+  for i, s in ipairs(suggestions) do
     local w = font:get_width(s.text)
     if s.info and not hide_info then
       w = w + style.font:get_width(s.info) + style.padding.x
@@ -492,6 +493,10 @@ local function get_suggestions_rect(av)
       has_icons = true
     end
     max_width = math.max(max_width, w)
+    if max_width > win_width then
+      width_exceeds = true
+      if i > 1 then break end
+    end
   end
 
   local ah = config.plugins.autocomplete.max_height
@@ -508,9 +513,16 @@ local function get_suggestions_rect(av)
     max_width = 150
   end
 
-  -- if portion not visiable to right, reposition to DocView right margin
-  if (x - av.position.x) + max_width > av.size.x then
-    x = (av.size.x + av.position.x) - max_width - (style.padding.x * 2)
+  if not width_exceeds then
+    -- if portion not visiable to right, reposition to DocView right margin
+    if max_width + style.padding.x * 2 >= av.size.x then
+      x = win_width / 2 - max_width / 2
+    elseif (x - av.position.x) + max_width > av.size.x then
+      x = (av.size.x + av.position.x) - max_width - (style.padding.x * 2)
+    end
+  else
+    max_width = win_width - style.padding.x * 2
+    x = style.padding.x * 2
   end
 
   return
@@ -564,13 +576,15 @@ local previous_scale = SCALE
 local desc_font = style.code_font:copy(
   config.plugins.autocomplete.desc_font_size * SCALE
 )
-local function draw_description_box(text, av, sx, sy, sw, sh)
+local function draw_description_box(text, sx, sy, sw, sh)
   if previous_scale ~= SCALE then
     desc_font = style.code_font:copy(
       config.plugins.autocomplete.desc_font_size * SCALE
     )
     previous_scale = SCALE
   end
+
+  local ww = system.get_window_size()
 
   local font = desc_font
   local lh = font:get_height()
@@ -581,12 +595,17 @@ local function draw_description_box(text, av, sx, sy, sw, sh)
   local draw_left = false;
 
   local max_chars = 0
-  if sx - av.position.x < av.size.x - (sx - av.position.x) - sw then
-    max_chars = (((av.size.x+av.position.x) - x) / char_width) - 5
+  if sw > (ww - style.padding.x * 2) * 0.5 then
+    sy = sy + sh + style.padding.x / 4
+    y = sy + style.padding.y
+    x = sx
+    max_chars = ((ww - x - style.padding.x * 4) / char_width)
+  elseif sx < ww - sx - sw then
+    max_chars = (((ww) - x) / char_width) - 5
   else
     draw_left = true;
     max_chars = (
-      (sx - av.position.x - (style.padding.x / 4) - style.scrollbar_size)
+      (sx - (style.padding.x / 4) - style.scrollbar_size)
       / char_width
     ) - 5
   end
@@ -648,6 +667,7 @@ local function draw_suggestions_box(av)
   local show_count = #suggestions <= ah and #suggestions or ah
   local start_index = suggestions_idx > ah and (suggestions_idx-(ah-1)) or 1
   local hide_info = config.plugins.autocomplete.hide_info
+  local dots_width = font:get_width("...")
 
   for i=start_index, start_index+show_count-1, 1 do
     if not suggestions[i] then
@@ -683,17 +703,36 @@ local function draw_suggestions_box(av)
     end
 
     local color = (i == suggestions_idx) and style.accent or style.text
-    common.draw_text(
-      font, color, s.text, "left",
-      rx + icon_l_padding + style.padding.x, y, rw, lh
-    )
+
+    local iw = 0
     if s.info and not hide_info then
       color = (i == suggestions_idx) and style.text or style.dim
-      common.draw_text(
+      local ix2, _, ix1, _ = common.draw_text(
         style.font, color, s.info, "right",
         rx, y, rw - icon_r_padding - style.padding.x, lh
       )
+      iw = ix2 - ix1 + style.padding.x
     end
+    local icon_padding = icon_l_padding > 0 and icon_l_padding or icon_r_padding
+    local text_width = rw - icon_padding - (style.padding.x * 2) - iw
+    local text_padding = rx + icon_l_padding + style.padding.x
+    core.push_clip_rect(text_padding, y, text_width, lh)
+    local tx2, _, tx1, _ = common.draw_text(
+      font, color, s.text, "left",
+      text_padding, y, text_width, lh
+    )
+    if tx2 - tx1 > text_width then
+      renderer.draw_rect(
+        text_padding + text_width - dots_width, y,
+        dots_width, lh,
+        style.background3
+      )
+      common.draw_text(
+        font, color, "...", "right",
+        text_padding, y, text_width, lh
+      )
+    end
+    core.pop_clip_rect()
     y = y + lh
     if suggestions_idx == i then
       if s.onhover then
@@ -701,7 +740,7 @@ local function draw_suggestions_box(av)
         s.onhover = nil
       end
       if s.desc and #s.desc > 0 then
-        draw_description_box(s.desc, av, rx, ry, rw, rh)
+        draw_description_box(s.desc, rx, ry, rw, rh)
       end
     end
   end
