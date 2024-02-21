@@ -333,7 +333,7 @@ static void font_allocate_glyphset(RenFont *font, int idx, bool cbox) {
         for (unsigned int line = 0; line < set->surface->h; ++line) {
           uint8_t *src_row = ((uint8_t *) set->surface->pixels) + line * set->surface->pitch;
           uint8_t *dst_row = ((uint8_t *) new_surface->pixels) + line * new_surface->pitch;
-          memcpy(dst_row, src_row, set->surface->w * set->surface->format->BytesPerPixel);
+          memcpy(dst_row, src_row, set->surface->w * set->surface->format->bytes_per_pixel);
         }
         SDL_DestroySurface(set->surface);
       }
@@ -442,7 +442,7 @@ static void font_render_glyph(RenFont* font, unsigned int codepoint) {
     dst_pixels = (uint8_t *) set->surface->pixels;
     for (unsigned int line = 0; line < height; ++line) {
       unsigned int src_offset =  line * slot->bitmap.pitch;
-      unsigned int dst_offset = (metric->y0 + line) * set->surface->pitch + metric->x0 * set->surface->format->BytesPerPixel;
+      unsigned int dst_offset = (metric->y0 + line) * set->surface->pitch + metric->x0 * set->surface->format->bytes_per_pixel;
       if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
         for (unsigned int column = 0; column < slot->bitmap.width; ++column) {
           int current_source_offset = src_offset + (column / 8);
@@ -904,10 +904,10 @@ double ren_font_group_get_width(RenWindow *window_renderer, RenFont **fonts, con
 // dual source blending for LCD (subpixel rendering)
 static inline void lcd_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *src_rect, RenRect *dst_rect, RenColor *color) {
   unsigned char src_r, src_g, src_b, dst_r, dst_g, dst_b, dst_a, r, g, b;
-  uint8_t *src_row = (uint8_t *) src->pixels + (int) src_rect->y * src->pitch + (int) src_rect->x * src->format->BytesPerPixel;
-  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + (int) dst_rect->y * dst->pitch + (int) dst_rect->x * dst->format->BytesPerPixel);
-  int src_skip = src->pitch - (src_rect->width * src->format->BytesPerPixel);
-  int dst_skip = dst->pitch - (src_rect->width * dst->format->BytesPerPixel);
+  uint8_t *src_row = (uint8_t *) src->pixels + (int) src_rect->y * src->pitch + (int) src_rect->x * src->format->bytes_per_pixel;
+  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + (int) dst_rect->y * dst->pitch + (int) dst_rect->x * dst->format->bytes_per_pixel);
+  int src_skip = src->pitch - (src_rect->width * src->format->bytes_per_pixel);
+  int dst_skip = dst->pitch - (src_rect->width * dst->format->bytes_per_pixel);
 
   for (int y = 0; y < src_rect->height; ++y) {
     DUFFS_LOOP4(
@@ -937,10 +937,10 @@ static inline void lcd_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *src_re
 // dual source blending for grayscale
 static inline void grayscale_blend(SDL_Surface *dst, SDL_Surface *src, RenRect *src_rect, RenRect *dst_rect, RenColor *color) {
   unsigned char src_r, src_g, src_b, dst_r, dst_g, dst_b, dst_a, r, g, b;
-  uint8_t *src_row = (uint8_t *) src->pixels + (int) src_rect->y * src->pitch + (int) src_rect->x * src->format->BytesPerPixel;
-  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + (int) dst_rect->y * dst->pitch + (int) dst_rect->x * dst->format->BytesPerPixel);
-  int src_skip = src->pitch - (src_rect->width * src->format->BytesPerPixel);
-  int dst_skip = dst->pitch - (src_rect->width * dst->format->BytesPerPixel);
+  uint8_t *src_row = (uint8_t *) src->pixels + (int) src_rect->y * src->pitch + (int) src_rect->x * src->format->bytes_per_pixel;
+  uint32_t *dst_row = (uint32_t *) ((uint8_t *) dst->pixels + (int) dst_rect->y * dst->pitch + (int) dst_rect->x * dst->format->bytes_per_pixel);
+  int src_skip = src->pitch - (src_rect->width * src->format->bytes_per_pixel);
+  int dst_skip = dst->pitch - (src_rect->width * dst->format->bytes_per_pixel);
 
   for (int y = 0; y < src_rect->height; ++y) {
 
@@ -1093,7 +1093,7 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color) {
 
     uint32_t *pixel = (uint32_t *)draw_rect_surface->pixels;
     *pixel = SDL_MapRGBA(draw_rect_surface->format, color.r, color.g, color.b, color.a);
-    SDL_BlitSurfaceScaled(draw_rect_surface, NULL, surface, &dest_rect);
+    SDL_BlitSurfaceScaled(draw_rect_surface, NULL, surface, &dest_rect, SDL_SCALEMODE_LINEAR);
   }
 }
 

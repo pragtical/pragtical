@@ -321,7 +321,7 @@ top:
       lua_pushstring(L, "touchpressed");
       lua_pushnumber(L, e.tfinger.x * w);
       lua_pushnumber(L, e.tfinger.y * h);
-      lua_pushinteger(L, e.tfinger.fingerId);
+      lua_pushinteger(L, e.tfinger.fingerID);
       return 4;
 
     case SDL_EVENT_FINGER_UP:
@@ -330,7 +330,7 @@ top:
       lua_pushstring(L, "touchreleased");
       lua_pushnumber(L, e.tfinger.x * w);
       lua_pushnumber(L, e.tfinger.y * h);
-      lua_pushinteger(L, e.tfinger.fingerId);
+      lua_pushinteger(L, e.tfinger.fingerID);
       return 4;
 
     case SDL_EVENT_FINGER_MOTION:
@@ -348,7 +348,7 @@ top:
       lua_pushnumber(L, e.tfinger.y * h);
       lua_pushnumber(L, e.tfinger.dx * w);
       lua_pushnumber(L, e.tfinger.dy * h);
-      lua_pushinteger(L, e.tfinger.fingerId);
+      lua_pushinteger(L, e.tfinger.fingerID);
       return 6;
     case SDL_EVENT_WILL_ENTER_FOREGROUND:
     case SDL_EVENT_DID_ENTER_FOREGROUND:
