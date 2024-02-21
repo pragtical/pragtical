@@ -19,7 +19,7 @@ config.plugins.scale = common.merge({
 local scale_steps = 0.05
 
 local current_scale = SCALE
-local default_scale = SCALE
+local default_scale = DEFAULT_SCALE
 
 local function set_scale(scale)
   scale = common.clamp(scale, 0.2, 6)

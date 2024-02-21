@@ -3,6 +3,8 @@
 #include <lauxlib.h>
 #include <lualib.h>
 #include <errno.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdbool.h>
 #include <uchardet.h>
 

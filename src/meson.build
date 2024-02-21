@@ -66,9 +66,6 @@ if host_machine.system() == 'windows'
     windows = import('windows')
     pragtical_rc += windows.compile_resources('../resources/icons/icon.rc')
     pragtical_rc += windows.compile_resources('../resources/windows/manifest.rc')
-
-    pragtical_sources += 'windows/darkmode.c'
-    pragtical_deps += cc.find_library('dwmapi', required : true)
 elif host_machine.system() == 'darwin'
     pragtical_sources += 'bundle_open.m'
 endif
