@@ -51,8 +51,13 @@ elif get_option('wrap_mode') != 'forcefallback'
         endif
     endforeach
 
+    microtar_lib = static_library('microtar', files('lib/microtar/src/microtar.c'))
+    microtar_dep = declare_dependency(
+        link_whole: [microtar_lib],
+        include_directories: ['lib/microtar/src']
+    )
+
     # Search the rest of dependencies
-    microtar_dep = subproject('microtar').get_variable('microtar_dep')
     zlib_dep = dependency('zlib')
     mbedtls_dep = dependency('mbedtls', version: '<3', required: false)
     libgit2_dep = dependency('libgit2')
