@@ -602,30 +602,30 @@ local function get_plugin_details(filename)
   local major, minor, patch
 
   for line in f:lines() do
-    if not version_match then
-      local _major, _minor, _patch = mod_version_regex:match(line)
-      if _major then
-        _major = tonumber(_major) or 0
-        _minor = tonumber(_minor) or 0
-        _patch = tonumber(_patch) or 0
-        major, minor, patch = _major, _minor, _patch
+    local header_found = false
 
-        version_match = major == MOD_VERSION_MAJOR
-        if version_match then
-          version_match = minor <= MOD_VERSION_MINOR
-        end
-        if version_match then
-          version_match = patch <= MOD_VERSION_PATCH
-        end
+    major, minor, patch = mod_version_regex:match(line)
+    major = tonumber(major)
+    if major then
+      minor, patch = tonumber(minor) or 0, tonumber(patch) or 0
+
+      if
+        major == MOD_VERSION_MAJOR
+        and
+        minor <= MOD_VERSION_MINOR
+        and
+        (minor < MOD_VERSION_MINOR or patch <= MOD_VERSION_PATCH)
+      then
+        version_match = true
       end
-    end
 
-    if not priority then
       priority = line:match('%-%-.*%f[%a]priority%s*:%s*(%d+)')
       if priority then priority = tonumber(priority) end
+
+      header_found = true
     end
 
-    if version_match then
+    if header_found then
       break
     end
   end
