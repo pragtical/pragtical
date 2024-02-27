@@ -1,5 +1,60 @@
 # Changes Log
 
+## [3.3.0] - 2024-02-26
+
+### API
+
+* Expose renderer.font.get_metadata() as a method, documented it, etc...
+  ([#64](https://github.com/pragtical/pragtical/pull/64))
+
+* Expose get_partial_symbol on autocomplete plugin (for LSP)
+  ([#66](https://github.com/pragtical/pragtical/pull/66))
+
+* Increase mod version from 3.3.1 to 3.4.0 (also because of new system.setenv)
+  ([#68](https://github.com/pragtical/pragtical/pull/68))
+
+### Fixes
+
+* Fix modversion matching to align with semver
+  ([#71](https://github.com/pragtical/pragtical/pull/71))
+
+### Enhancements
+
+* Enable horizontal scrollbar on treeview plugin
+  ([#63](https://github.com/pragtical/pragtical/pull/63))
+
+* Added adaptive sizing to autocomplete plugin
+  ([#67](https://github.com/pragtical/pragtical/pull/67))
+
+### Build System
+
+* Removed no longer needed microtar subproject
+  ([#70](https://github.com/pragtical/pragtical/pull/70))
+
+### Widgets
+
+* Optimize SearchReplaceList collapse/uncollapse
+  ([#4](https://github.com/pragtical/widget/pull/4))
+
+* FontDialog: use the font metadata preview text if available
+  ([#5](https://github.com/pragtical/widget/pull/5))
+
+* Added new TreeList widget
+  ([#6](https://github.com/pragtical/widget/pull/6))
+
+### Performance Improvements
+
+* Merged: glyphset loading optimization for faster font loading
+  ([#1543](https://github.com/lite-xl/lite-xl/pull/1543))
+
+### Lite XL Inherited Changes
+
+* process: fix unitialized variables
+  ([#1719](https://github.com/lite-xl/lite-xl/pull/1719))
+
+* Added .pyi extension to python.
+  ([#1728](https://github.com/lite-xl/lite-xl/pull/1728))
+
 ## [3.2.2] - 2024-01-30
 
 ### Fixes
@@ -1771,6 +1826,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.3.0]: https://github.com/pragtical/pragtical/releases/tag/v3.3.0
 [3.2.2]: https://github.com/pragtical/pragtical/releases/tag/v3.2.2
 [3.2.1]: https://github.com/pragtical/pragtical/releases/tag/v3.2.1
 [3.2.0]: https://github.com/pragtical/pragtical/releases/tag/v3.2.0
