@@ -118,7 +118,7 @@ static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *p
   return SDL_HITTEST_NORMAL;
 }
 
-static const char *numpad[] = { "end", "down", "pagedown", "left", "", "right", "home", "up", "pageup", "ins", "delete" };
+static const char *numpad[] = { "end", "down", "pagedown", "left", "clear", "right", "home", "up", "pageup", "insert", "delete" };
 
 static const char *get_key_name(const SDL_Event *e, char *buf) {
   SDL_Scancode scancode = e->key.keysym.scancode;
