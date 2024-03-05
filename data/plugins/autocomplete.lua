@@ -702,19 +702,19 @@ local function draw_suggestions_box(av)
       end
     end
 
-    local color = (i == suggestions_idx) and style.accent or style.text
+    local color = (i == suggestions_idx) and style.text or style.dim
 
     local iw = 0
     if s.info and not hide_info then
-      color = (i == suggestions_idx) and style.text or style.dim
       local ix2, _, ix1, _ = common.draw_text(
         style.font, color, s.info, "right",
         rx, y, rw - icon_r_padding - style.padding.x, lh
       )
       iw = ix2 - ix1 + style.padding.x
     end
+    color = (i == suggestions_idx) and style.accent or style.text
     local icon_padding = icon_l_padding > 0 and icon_l_padding or icon_r_padding
-    local text_width = rw - icon_padding - (style.padding.x * 2) - iw
+    local text_width = rw - icon_padding - style.padding.x - iw
     local text_padding = rx + icon_l_padding + style.padding.x
     core.push_clip_rect(text_padding, y, text_width, lh)
     local tx2, _, tx1, _ = common.draw_text(
