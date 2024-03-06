@@ -1,5 +1,6 @@
 local core = require "core"
 local common = require "core.common"
+local config = require "core.config"
 local style = require "core.style"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
@@ -20,8 +21,6 @@ end
 local CommandView = DocView:extend()
 
 CommandView.context = "application"
-
-local max_suggestions = 10
 
 local noop = function() end
 
@@ -298,11 +297,11 @@ function CommandView:update()
 
   -- update suggestions box height
   local lh = self:get_suggestion_line_height()
-  local dest = self.state.show_suggestions and math.min(#self.suggestions, max_suggestions) * lh or 0
+  local dest = self.state.show_suggestions and math.min(#self.suggestions, config.max_visible_commands) * lh or 0
   self:move_towards("suggestions_height", dest, nil, "commandview")
 
   -- update suggestion cursor offset
-  local dest = math.min(self.suggestion_idx, max_suggestions) * self:get_suggestion_line_height()
+  local dest = math.min(self.suggestion_idx, config.max_visible_commands) * self:get_suggestion_line_height()
   self:move_towards("selection_offset", dest, nil, "commandview")
 
   -- update size based on whether this is the active_view
@@ -361,12 +360,12 @@ local function draw_suggestions_box(self)
 
     -- draw suggestion text
     local current = self.suggestion_idx
-    local offset = math.max(current - max_suggestions, 0)
+    local offset = math.max(current - config.max_visible_commands, 0)
     if self.suggestions_first-1 == current then
       offset = math.max(self.suggestions_first - 2, 0)
     end
     local first = 1 + offset
-    local last = math.min(offset + max_suggestions, #self.suggestions)
+    local last = math.min(offset + config.max_visible_commands, #self.suggestions)
     if
       current < self.suggestions_first
       or
