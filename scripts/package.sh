@@ -208,21 +208,25 @@ main() {
     if [[ $platform == "windows" ]]; then
       exe_file="${exe_file}.exe"
       stripcmd="strip --strip-all"
-      # Copy MinGW libraries dependencies.
-      # MSYS2 ldd command seems to be only 64bit, so use ntldd
-      # see https://github.com/msys2/MINGW-packages/issues/4164
-      ntldd -R "${exe_file}" \
-        | grep mingw \
-        | awk '{print $3}' \
-        | sed 's#\\#/#g' \
-        | xargs -I '{}' cp -v '{}' "$(pwd)/${dest_dir}/"
-      # Copy ppm dependencies too
-      if [[ -d "${data_dir}/plugins/plugin_manager" ]]; then
-        ntldd -R "${data_dir}/plugins/plugin_manager"/ppm.* \
+      if command -v ntldd >/dev/null 2>&1; then
+        # Copy MinGW libraries dependencies.
+        # MSYS2 ldd command seems to be only 64bit, so use ntldd
+        # see https://github.com/msys2/MINGW-packages/issues/4164
+        ntldd -R "${exe_file}" \
           | grep mingw \
           | awk '{print $3}' \
           | sed 's#\\#/#g' \
-          | xargs -I '{}' cp -v '{}' "${data_dir}/plugins/plugin_manager/"
+          | xargs -I '{}' cp -v '{}' "$(pwd)/${dest_dir}/"
+        # Copy ppm dependencies too
+        if [[ -d "${data_dir}/plugins/plugin_manager" ]]; then
+          ntldd -R "${data_dir}/plugins/plugin_manager"/ppm.* \
+            | grep mingw \
+            | awk '{print $3}' \
+            | sed 's#\\#/#g' \
+            | xargs -I '{}' cp -v '{}' "${data_dir}/plugins/plugin_manager/"
+        fi
+      else
+        echo "WARNING: ntldd not found; assuming program is static"
       fi
     else
       # Windows archive is always portable
