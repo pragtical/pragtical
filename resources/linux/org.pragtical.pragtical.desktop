@@ -6,5 +6,5 @@ Exec=pragtical %F
 Icon=pragtical
 Terminal=false
 StartupWMClass=pragtical
-Categories=Development;IDE;
+Categories=Development;IDE;TextEditor;
 MimeType=text/plain;inode/directory;
