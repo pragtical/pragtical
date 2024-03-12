@@ -305,6 +305,7 @@ syntax.add {
     { pattern = { '"', '"', '\\' },          type = "string" },
     { pattern = { "'", "'", '\\' },          type = "string" },
     { pattern = { "%[%[", "%]%]" },          type = "string" },
+    { pattern = { "%[=", "=%]" },            type = "string" },
     { pattern = { "%-%-%[%[", "%]%]"},       type = "comment" },
     { pattern = "%-%-.-\n",                  type = "comment" },
     { pattern = "0x%x+%.%x*[pP][-+]?%d+",    type = "number" },
