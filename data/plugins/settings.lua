@@ -378,6 +378,14 @@ settings.add("User Interface",
       end
     },
     {
+      label = "Maximum Palette Items",
+      description = "The maximum amount of items visible on the command palette.",
+      path = "max_visible_commands",
+      type = settings.type.NUMBER,
+      default = 10,
+      min = 1
+    },
+    {
       label = "Always Show Tabs",
       description = "Shows tabs even if a single document is opened.",
       path = "always_show_tabs",
