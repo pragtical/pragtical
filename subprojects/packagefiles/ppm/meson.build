@@ -14,8 +14,9 @@ endif
 
 is_msys = false
 
-if host_machine.system() == 'windows' and meson.get_compiler('c').get_id() == 'gcc'
-    gcc_command = ['gcc', '-v']
+ccid = meson.get_compiler('c').get_id()
+if host_machine.system() == 'windows' and (ccid == 'gcc' or ccid == 'clang')
+    gcc_command = [ccid, '-v']
     gcc_command_out = run_command(gcc_command, check: true)
     gcc_out = gcc_command_out.stderr().to_lower()
     gcc_out += ' ' + gcc_command_out.stdout().to_lower()
