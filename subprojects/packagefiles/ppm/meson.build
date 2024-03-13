@@ -12,9 +12,22 @@ else
     arch_tuple = '@0@-@1@'.format(target_machine.cpu_family(), target_machine.system())
 endif
 
+is_msys = false
+
+ccid = meson.get_compiler('c').get_id()
+if host_machine.system() == 'windows' and (ccid == 'gcc' or ccid == 'clang')
+    gcc_command = [ccid, '-v']
+    gcc_command_out = run_command(gcc_command, check: true)
+    gcc_out = gcc_command_out.stderr().to_lower()
+    gcc_out += ' ' + gcc_command_out.stdout().to_lower()
+    if gcc_out.contains('msys')
+        is_msys = true
+    endif
+endif
+
 if meson.get_compiler('c').get_id() == 'msvc'
     message('MSVC compiler not supported, use MSYS to build.')
-elif get_option('wrap_mode') != 'forcefallback'
+elif get_option('wrap_mode') != 'forcefallback' and not is_msys
     cc = meson.get_compiler('c')
 
     lua_exe = find_program('lua')
