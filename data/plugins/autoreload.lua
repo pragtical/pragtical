@@ -7,7 +7,7 @@ local Doc = require "core.doc"
 local DirWatch = require "core.dirwatch"
 
 config.plugins.autoreload = common.merge({
-  always_show_nagview = false,
+  always_show_nagview = true,
   config_spec = {
     name = "Autoreload",
     {
@@ -16,7 +16,7 @@ config.plugins.autoreload = common.merge({
         .. "externally even if you haven't modified it.",
       path = "always_show_nagview",
       type = "toggle",
-      default = false
+      default = true
     }
   }
 }, config.plugins.autoreload)
