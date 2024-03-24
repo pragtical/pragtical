@@ -20,10 +20,10 @@ local syntax = require "core.syntax"
 --                                followed by pattern options, and anything that can
 --                                be after a pattern.
 --
--- Demo with some unit tests (click on the Unit Tests entry): https://regex101.com/r/R0w8Qw/1
+-- Demo with some unit tests (click on the Unit Tests entry): https://regex101.com/r/Vx5L5V/1
 -- Note that it has a couple of changes to make it work on that platform.
 local regex_pattern = {
-  [=[/(?=(?!/)(?:(?>[^\\[\/]++|\\.|\[(?:[^\\\]]++|\\.)*+\])*+)++/[gmiyuvsd]*\s*[\n,;\)\]\}\.])()]=],
+  [=[\/(?=(?!\/)(?:(?>[^\\[\/]++|\\.|\[(?:[^\\\]]++|\\.)*+\])*+)++\/[gmiyuvsd]*\s*(?:[\n,;\)\]\}\.]|\/[\/*]))()]=],
   "/()[gmiyuvsd]*", "\\"
 }
 
@@ -65,14 +65,14 @@ syntax.add {
     { pattern = { "'", "'", '\\' },          type = "string"   },
     { pattern = { "`", "`", '\\' },          type = "string"   },
     -- Numbers
-    -- Use (?:\/(?!\/))? to avoid that a regex can start after a number, while also allowing // comments
-    { regex = [[-?0[xXbBoO][\da-fA-F_]+n?()\s*()(?:\/(?!\/))?]],
+    -- Use (?:\/(?!\/|\*))? to avoid that a regex can start after a number, while also allowing // and /* comments
+    { regex = [[-?0[xXbBoO][\da-fA-F_]+n?()\s*()(?:\/(?!\/|\*))?]],
       type = {"number", "normal", "operator"}
     },
-    { regex = [[-?\d+[0-9.eE_n]*()\s*()(?:\/(?!\/))?]],
+    { regex = [[-?\d+[0-9.eE_n]*()\s*()(?:\/(?!\/|\*))?]],
       type = {"number", "normal", "operator"}
     },
-    { regex = [[-?\.?\d+()\s*()(?:\/(?!\/))?]],
+    { regex = [[-?\.?\d+()\s*()(?:\/(?!\/|\*))?]],
       type = {"number", "normal", "operator"}
     },
     -- Embedded html like that used on React
@@ -97,9 +97,7 @@ syntax.add {
     { pattern = "[%+%-=/%*%^%%<>!~|&]",      type = "operator" },
     -- Functions
     { pattern = "[%a_][%w_]*%s*%f[(]",       type = "function" },
-    { regex = [=[[a-zA-Z_]\w*()\s*()(?:\/(?!\/))?]=],
-      type = {"symbol", "normal", "operator"}
-    }
+    { pattern = "[%a_][%w_]*",               type = "symbol"   },
   },
   symbols = {
     ["async"]      = "keyword",
