@@ -343,40 +343,38 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         if find_results[1] > find_results[2] then
           report_bad_pattern(core.warn, current_syntax, n,
               "Pattern successfully matched, but nothing was captured.")
-          goto continue
-        end
-
         -- Check for patterns with mismatching number of `types`
-        local type_is_table = type(p.type) == "table"
-        local n_types = type_is_table and #p.type or 1
-        if #find_results == 2 and type_is_table then
-          report_bad_pattern(core.warn, current_syntax, n,
-            "Token type is a table, but a string was expected.")
-          p.type = p.type[1]
-        elseif #find_results - 1 > n_types then
-          report_bad_pattern(core.error, current_syntax, n,
-            "Not enough token types: got %d needed %d.", n_types, #find_results - 1)
-        elseif #find_results - 1 < n_types then
-          report_bad_pattern(core.warn, current_syntax, n,
-            "Too many token types: got %d needed %d.", n_types, #find_results - 1)
-        end
-
-        -- matched pattern; make and add tokens
-        push_tokens(res, current_syntax, p, text, find_results)
-        -- update state if this was a start|end pattern pair
-        if type(p.pattern or p.regex) == "table" then
-          -- If we have a subsyntax, push that onto the subsyntax stack.
-          if p.syntax then
-            push_subsyntax(p, n)
-          else
-            set_subsyntax_pattern_idx(n)
+        else
+          local type_is_table = type(p.type) == "table"
+          local n_types = type_is_table and #p.type or 1
+          if #find_results == 2 and type_is_table then
+            report_bad_pattern(core.warn, current_syntax, n,
+              "Token type is a table, but a string was expected.")
+            p.type = p.type[1]
+          elseif #find_results - 1 > n_types then
+            report_bad_pattern(core.error, current_syntax, n,
+              "Not enough token types: got %d needed %d.", n_types, #find_results - 1)
+          elseif #find_results - 1 < n_types then
+            report_bad_pattern(core.warn, current_syntax, n,
+              "Too many token types: got %d needed %d.", n_types, #find_results - 1)
           end
+
+          -- matched pattern; make and add tokens
+          push_tokens(res, current_syntax, p, text, find_results)
+          -- update state if this was a start|end pattern pair
+          if type(p.pattern or p.regex) == "table" then
+            -- If we have a subsyntax, push that onto the subsyntax stack.
+            if p.syntax then
+              push_subsyntax(p, n)
+            else
+              set_subsyntax_pattern_idx(n)
+            end
+          end
+          -- move cursor past this token
+          i = find_results[2] + 1
+          matched = true
+          break
         end
-        -- move cursor past this token
-        i = find_results[2] + 1
-        matched = true
-        break
-        ::continue::
       end
     end
 
