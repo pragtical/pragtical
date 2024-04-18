@@ -39,7 +39,7 @@
   ([abc2d93f](https://github.com/pragtical/pragtical/commit/abc2d93f880633aa966a6c762ede2e3b3d86a9d0))
 
 * Meson subproject updates
-  ([abc2d93f](https://github.com/pragtical/pragtical/commit/abc2d93f880633aa966a6c762ede2e3b3d86a9d0))
+  ([6f5ab121](https://github.com/pragtical/pragtical/commit/6f5ab1212f02e10219723a72df6abe54acb54cac))
 
 ### Lite XL Inherited Changes
 
