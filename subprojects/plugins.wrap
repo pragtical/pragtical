@@ -1,5 +1,5 @@
 [wrap-git]
 url = https://github.com/pragtical/plugins.git
-revision = 40d55e0f04a73fd09432704bf98e4c0fe6ef4cdf
+revision = eeab671a28e3f14b033d357cdbc1acea5c51bd03
 depth = 1
 patch_directory = plugins

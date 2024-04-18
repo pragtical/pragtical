@@ -18,7 +18,7 @@
 
 ### Enhancements
 
-* Renamed numpad insert key from 'ins' to 'insert'
+* Renamed numpad insert key from 'ins' to 'insert' and empty 5 to 'clear'
   ([#73](https://github.com/pragtical/pragtical/pull/73))
 
 * Added TextEditor category on linux
@@ -36,6 +36,9 @@
   ([#80](https://github.com/pragtical/pragtical/pull/80))
 
 * Fix for mbedtls2 detection on ppm subproject
+  ([abc2d93f](https://github.com/pragtical/pragtical/commit/abc2d93f880633aa966a6c762ede2e3b3d86a9d0))
+
+* Meson subproject updates
   ([abc2d93f](https://github.com/pragtical/pragtical/commit/abc2d93f880633aa966a6c762ede2e3b3d86a9d0))
 
 ### Lite XL Inherited Changes
