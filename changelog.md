@@ -1,5 +1,72 @@
 # Changes Log
 
+## [3.3.1] - 2024-04-18
+
+### New Features
+
+* settings ui: added max_visible_commands config
+  ([#79](https://github.com/pragtical/pragtical/pull/79))
+
+### Fixes
+
+* Fixes to autocomplete re-sizing code
+  ([#76](https://github.com/pragtical/pragtical/pull/76))
+
+* Fix conflicting goto jump on tokenizer which was introduced by the skipping
+  of patterns matching nothing code.
+  ([b2d03264](https://github.com/pragtical/pragtical/commit/b2d03264046e4f1afa7360c1cd738b44bc824af3))
+
+### Enhancements
+
+* Renamed numpad insert key from 'ins' to 'insert'
+  ([#73](https://github.com/pragtical/pragtical/pull/73))
+
+* Added TextEditor category on linux
+  ([#77](https://github.com/pragtical/pragtical/pull/77))
+
+* plugin language_lua: added unescaped \[\=string\=\] support
+  ([#78](https://github.com/pragtical/pragtical/pull/78))
+
+* Alert by default of file changes in autoreload plugin
+  ([#82](https://github.com/pragtical/pragtical/pull/82))
+
+### Build System
+
+* Build the plugin manager statically for msys
+  ([#80](https://github.com/pragtical/pragtical/pull/80))
+
+* Fix for mbedtls2 detection on ppm subproject
+  ([abc2d93f](https://github.com/pragtical/pragtical/commit/abc2d93f880633aa966a6c762ede2e3b3d86a9d0))
+
+### Lite XL Inherited Changes
+
+* Improve autocomplete scroll behavior
+  ([#1732](https://github.com/lite-xl/lite-xl/pull/1732))
+
+* Fix language_js regex/comment distinction
+  ([#1731](https://github.com/lite-xl/lite-xl/pull/1731))
+
+* scripts: not hardcode MSYSTEM
+  ([#1739](https://github.com/lite-xl/lite-xl/pull/1739))
+
+* Add SerenityOS platform support
+  ([#1745](https://github.com/lite-xl/lite-xl/pull/1745))
+
+* Limit language_js regex avoidance to numbers, and fix starting /\* comments
+  ([#1744](https://github.com/lite-xl/lite-xl/pull/1744))
+
+* Fixed some typos in core.init
+  ([#1755](https://github.com/lite-xl/lite-xl/pull/1755))
+
+* Added Arduino syntax highlighting support alongside C++.
+  ([#1767](https://github.com/lite-xl/lite-xl/pull/1767))
+
+* Fix BufferSize in g_read for Windows
+  ([#1722](https://github.com/lite-xl/lite-xl/pull/1722))
+
+* Skip patterns matching nothing in tokenizer
+  ([#1743](https://github.com/lite-xl/lite-xl/pull/1743))
+
 ## [3.3.0] - 2024-02-26
 
 ### API
@@ -1826,6 +1893,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.3.1]: https://github.com/pragtical/pragtical/releases/tag/v3.3.1
 [3.3.0]: https://github.com/pragtical/pragtical/releases/tag/v3.3.0
 [3.2.2]: https://github.com/pragtical/pragtical/releases/tag/v3.2.2
 [3.2.1]: https://github.com/pragtical/pragtical/releases/tag/v3.2.1
