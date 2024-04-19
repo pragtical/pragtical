@@ -44,6 +44,7 @@ if get_option('dirmonitor_backend') == ''
     endif
 else
     dirmonitor_backend = get_option('dirmonitor_backend')
+    pragtical_sources += 'api/dirmonitor/' + dirmonitor_backend + '.c'
 endif
 
 message('dirmonitor_backend: @0@'.format(dirmonitor_backend))
