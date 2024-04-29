@@ -1049,6 +1049,18 @@ config.plugins.treeview.config_spec = {
     end
   },
   {
+    label = "Show Toolbar",
+    description = "Show or hide the treeview toolbar.",
+    path = "show_toolbar",
+    type = "toggle",
+    default = true,
+    on_apply = function (value)
+    	if toolbar_view.visible ~= value then
+    	  toolbar_view:toggle_visible()
+    	end
+    end
+  },
+  {
     label = "Show Hidden",
     description = "Show hidden files and directories.",
     path = "show_hidden",
