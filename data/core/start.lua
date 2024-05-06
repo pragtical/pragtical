@@ -75,13 +75,15 @@ end
 -- On Mac OS X package managers like brew install binaries into /usr/local/bin
 -- but this location is not globally added to the PATH environment variable.
 if PLATFORM == "Mac OS X" then
-  local local_bin_path = "/usr/local/bin"
+  local path_list = {"/usr/local/sbin", "/usr/local/bin"}
   local system_path = os.getenv("PATH")
-  if system_path and not system_path:match(local_bin_path) then
-    local path_info = system.get_file_info(local_bin_path)
-    if path_info and path_info.type == "dir" then
-      system_path = local_bin_path .. ":" .. system_path
-      system.setenv("PATH", system_path)
+  for _, local_bin_path in ipairs(path_list) do
+    if system_path and not system_path:match(local_bin_path) then
+      local path_info = system.get_file_info(local_bin_path)
+      if path_info and path_info.type == "dir" then
+        system_path = local_bin_path .. ":" .. system_path
+        system.setenv("PATH", system_path)
+      end
     end
   end
 end
