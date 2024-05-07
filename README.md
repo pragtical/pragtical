@@ -138,7 +138,7 @@ See the [licenses] directory for details on licenses used by the required depend
 [website]:            https://pragtical.dev
 [documentation]:      https://pragtical.dev/docs/intro
 [download]:           https://github.com/pragtical/pragtical/releases
-[build]:              https://pragtical.github.io/documentation/build
+[build]:              https://pragtical.dev/docs/setup/building
 [Get Pragtical]:      https://github.com/pragtical/pragtical/releases
 [Get Plugins]:        https://github.com/pragtical/plugins
 [Get Color Themes]:   https://github.com/pragtical/colors
