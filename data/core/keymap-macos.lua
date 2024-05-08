@@ -3,6 +3,7 @@ local function keymap_macos(keymap)
     ["cmd+shift+p"] = "core:find-command",
     ["cmd+o"] = "core:open-file",
     ["cmd+n"] = "core:new-doc",
+    ["cmd+,"] = "core:open-user-module",
     ["cmd+shift+c"] = "core:change-project-folder",
     ["cmd+shift+o"] = "core:open-project-folder",
     ["cmd+option+r"] = "core:restart",
