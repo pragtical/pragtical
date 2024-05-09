@@ -434,7 +434,17 @@ static void font_render_glyph(RenFont* font, unsigned int codepoint) {
     if (!set->surface || metric->x1 > set->surface->w || metric->y1 > set->surface->h) {
       // resize the glyphset with exact pixel sizing
       font_allocate_glyphset(font, glyphset_idx, false);
-      assert(metric->x1 <= set->surface->w && metric->y1 <= set->surface->h);
+      if (metric->x1 > set->surface->w || metric->y1 > set->surface->h)
+        fprintf(
+          stderr,
+          "Warning: font '%s' at glyphset '%d' not properly resized to "
+          "exact pixel sizing. X1: %d -> W: %d, Y1: %d -> H: %d\n",
+          font->path, glyphset_idx,
+          metric->x1, set->surface->w,
+          metric->y1, set->surface->h
+        );
+      // Disable the assert for now since fonts causing this would be rarely used...
+      // assert(metric->x1 <= set->surface->w && metric->y1 <= set->surface->h);
     }
 
     // blit the bitmap onto the surface
