@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.tag.outputs.version }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - name: Set Tag
         id: tag
@@ -42,7 +42,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.version }}
           name: Pragtical ${{ steps.tag.outputs.version }}
@@ -67,14 +67,14 @@ jobs:
       CXX: g++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - name: Update Packages
@@ -93,7 +93,7 @@ jobs:
         run: |
           bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release
       - name: Upload Files
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
@@ -113,7 +113,7 @@ jobs:
       CXX: clang++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - name: System Information
         run: |
@@ -128,7 +128,7 @@ jobs:
           echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
           if [[ $(uname -m) != ${{ matrix.arch }} ]]; then echo "ARCH=--cross-arch ${{ matrix.arch }}" >> "$GITHUB_ENV"; fi
       - name: Python Setup
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - name: Install Dependencies
@@ -140,13 +140,13 @@ jobs:
         run: |
           bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --addons --dmg --release
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: macOS DMG Images
           path: |
             ${{ env.INSTALL_NAME }}.dmg
       - name: Upload Files
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
@@ -159,7 +159,7 @@ jobs:
     runs-on: macos-11
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with: { fetch-depth: 0 }
       - name: System Information
         run: |
@@ -171,14 +171,20 @@ jobs:
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_BASE=pragtical-${{ needs.release.outputs.version }}-macos" >> "$GITHUB_ENV"
-      - name: Download Artifacts
-        uses: actions/download-artifact@v3
-        id: download
+      - name: Download X86_64 DMG
+        uses: actions/download-artifact@v4
+        id: download_x86_64
         with:
-          name: macOS DMG Images
+          name: macOS DMG x86_64
+          path: dmgs-original
+      - name: Download ARM64 DMG
+        uses: actions/download-artifact@v4
+        id: download_arm64
+        with:
+          name: macOS DMG arm64
           path: dmgs-original
       - name: Python Setup
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - name: Install appdmg
@@ -186,18 +192,26 @@ jobs:
       - name: Prepare DMG Images
         run: |
           mkdir -p dmgs-normal
-          mv -v "${{ steps.download.outputs.download-path }}/$INSTALL_BASE-"{x86_64,arm64}.dmg dmgs-normal
+          mv -v "${{ steps.download_x86_64.outputs.download-path }}/$INSTALL_BASE-x86_64".dmg dmgs-normal
+          mv -v "${{ steps.download_arm64.outputs.download-path }}/$INSTALL_BASE-arm64".dmg dmgs-normal
       - name: Create Universal DMGs
         run: |
           bash --version
           bash scripts/make-universal-binaries.sh dmgs-normal "$INSTALL_BASE-universal"
       - name: Upload Files
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
           files: |
             ${{ env.INSTALL_BASE }}-universal.dmg
+      - name: Cleanup Artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+            name: |
+              macOS DMG x86_64
+              macOS DMG arm64
+            failOnError: false
 
   build_windows_msys2:
     name: Windows
@@ -205,23 +219,31 @@ jobs:
     runs-on: windows-2019
     strategy:
       matrix:
-        msystem: [MINGW32, MINGW64]
+        config:
+          - {msystem: MINGW32, arch: i686}
+          - {msystem: MINGW64, arch: x86_64}
     defaults:
       run:
         shell: msys2 {0}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - name: Setup MSYS
+      - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: ${{ matrix.msystem }}
-          update: true
+          msystem: ${{ matrix.config.msystem }}
           install: >-
             base-devel
             git
             zip
+            unzip
+            mingw-w64-${{ matrix.config.arch }}-gcc
+            mingw-w64-${{ matrix.config.arch }}-meson
+            mingw-w64-${{ matrix.config.arch }}-ninja
+            mingw-w64-${{ matrix.config.arch }}-cmake
+            mingw-w64-${{ matrix.config.arch }}-ca-certificates
+            mingw-w64-${{ matrix.config.arch }}-ntldd
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -233,8 +255,6 @@ jobs:
             echo "BUILD_ARCH=i686" >> "$GITHUB_ENV"
             echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-windows-i686" >> "$GITHUB_ENV"
           fi
-      - name: Install Dependencies
-        run: bash scripts/install-dependencies.sh --debug
       - name: Build
         run: |
           bash --version
@@ -244,7 +264,7 @@ jobs:
       - name: Build Installer
         run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
       - name: Upload Files
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
