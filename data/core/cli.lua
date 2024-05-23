@@ -196,7 +196,7 @@ local function print_command_help(command)
 end
 
 ---Display the generated application help or a specific command help.
----@param command core.cli.command?
+---@param command? core.cli.command
 function cli.print_help(command)
   if not command then
     -- ASCII Art generated with:
@@ -217,7 +217,7 @@ function cli.print_help(command)
     print(cli.colorize(cli.app_description, "blue"))
     print ""
     print(cli.colorize("Usage:", "yellow"))
-    print("  " .. cli.app_name .. " [options] " .. "[arguments]")
+    print("  " .. cli.app_name:ulower() .. " [options] " .. "[arguments]")
 
     if cli.commands.default then
       print_command_help(cli.commands.default)
