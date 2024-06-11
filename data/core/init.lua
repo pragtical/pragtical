@@ -93,6 +93,13 @@ function core.remove_project(project, force)
     if project == core.projects[i] or project == core.projects[i].path then
       local project = core.projects[i]
       table.remove(core.projects, i)
+      if
+        core.projects[1]
+        and
+        common.normalize_volume(system.getcwd()) == project.path
+      then
+        system.chdir(core.projects[1].path)
+      end
       return project
     end
   end
@@ -102,7 +109,9 @@ end
 
 function core.set_project(project)
   while #core.projects > 0 do core.remove_project(core.projects[#core.projects], true) end
-  return core.add_project(project)
+  local project_object = core.add_project(project)
+  system.chdir(project_object.path)
+  return project_object
 end
 
 
@@ -111,6 +120,39 @@ function core.open_project(project)
   core.root_view:close_all_docviews()
   reload_customizations()
   update_recents_project("add", project.path)
+end
+
+
+---Get project for currently opened DocView or given filename path.
+---If the given path does not belongs to any of the opened projects a new
+---project object will be created and returned using the directory of the
+---given filename path.
+---@param filename? string
+---@return core.project?
+function core.current_project(filename)
+  if not filename then
+    if
+      core.active_view:extends(DocView)
+      and
+      core.active_view.doc and core.active_view.doc.abs_filename
+    then
+      filename = core.active_view.doc.abs_filename
+    else
+      return core.projects[1]
+    end
+  end
+  if #core.projects > 1 then
+    for _, project in ipairs(core.projects) do
+      if project:path_belongs_to(filename) then
+        return project
+      end
+    end
+  end
+  if core.projects[1] and core.projects[1]:path_belongs_to(filename) then
+    return core.projects[1]
+  end
+  local dirname = common.dirname(filename)
+  if dirname then return Project(dirname) end
 end
 
 
@@ -957,6 +999,16 @@ function core.set_active_view(view)
     end
     core.last_active_view = core.active_view
     core.active_view = view
+  end
+  if
+    core.active_view:extends(DocView)
+    and
+    core.active_view.doc and core.active_view.doc.abs_filename
+  then
+    local project = core.current_project(
+      core.active_view.doc.abs_filename
+    )
+    if project then system.chdir(project.path) end
   end
 end
 

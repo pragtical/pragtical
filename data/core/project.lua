@@ -74,6 +74,24 @@ function Project:normalize_path(filename)
 end
 
 
+---Checks if the given path belongs to the project.
+---@param path string
+---@return boolean
+function Project:path_belongs_to(path)
+  if not common.is_absolute_path(path) then
+    path = common.normalize_path(self.path .. PATHSEP .. path)
+    if not path or not system.get_file_info(path) then
+      return false
+    end
+    return true
+  end
+  if common.path_belongs_to(path, self.path) then
+    return true
+  end
+  return false
+end
+
+
 local function fileinfo_pass_filter(info, ignore_compiled)
   if info.size >= config.file_size_limit * 1e6 then return false end
   local basename = common.basename(info.filename)

@@ -797,6 +797,24 @@ static int f_chdir(lua_State *L) {
 }
 
 
+static int f_getcwd(lua_State* L) {
+  #ifdef _WIN32
+    wchar_t buffer[MAX_PATH];
+    if (!_wgetcwd(buffer, sizeof(buffer)))
+      return luaL_error(L, "error getcwd: %s", strerror(errno));
+    char *utf8_buffer = utfconv_wctoutf8(buffer);
+    lua_pushstring(L, utf8_buffer);
+    free(utf8_buffer);
+  #else
+    char buffer[PATH_MAX];
+    if (!getcwd(buffer, sizeof(buffer)))
+      return luaL_error(L, "error getcwd: %s", strerror(errno));
+    lua_pushstring(L, buffer);
+  #endif
+  return 1;
+}
+
+
 static int f_list_dir(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
 
@@ -1423,6 +1441,7 @@ static const luaL_Reg lib[] = {
   { "show_fatal_error",    f_show_fatal_error    },
   { "rmdir",               f_rmdir               },
   { "chdir",               f_chdir               },
+  { "getcwd",              f_getcwd              },
   { "ftruncate",           f_ftruncate           },
   { "mkdir",               f_mkdir               },
   { "list_dir",            f_list_dir            },
