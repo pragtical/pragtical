@@ -194,6 +194,12 @@ function system.rmdir(path) end
 function system.chdir(path) end
 
 ---
+---Get the current working directory.
+---
+---@return string directory Current working directgory.
+function system.getcwd() end
+
+---
 ---Truncates a file to a set length.
 ---
 ---@param file file* A file handle returned by io.open().
