@@ -151,6 +151,9 @@ function core.current_project(filename)
   if core.projects[1] and core.projects[1]:path_belongs_to(filename) then
     return core.projects[1]
   end
+  if not system.get_file_info(filename) then
+    return core.projects[1]
+  end
   local dirname = common.dirname(filename)
   if dirname then return Project(dirname) end
 end
