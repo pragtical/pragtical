@@ -3,6 +3,9 @@
 #include "api.h"
 #include "../renderer.h"
 #include "../rencache.h"
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+#include "../renwindow.h"
+#endif
 #include "lua.h"
 
 RenWindow *active_window_renderer = NULL;
@@ -101,18 +104,24 @@ static int f_font_load(lua_State *L) {
 }
 
 static bool font_retrieve(lua_State* L, RenFont** fonts, int idx) {
+  bool is_table;
   memset(fonts, 0, sizeof(RenFont*)*FONT_FALLBACK_MAX);
   if (lua_type(L, idx) != LUA_TTABLE) {
     fonts[0] = *(RenFont**)luaL_checkudata(L, idx, API_TYPE_FONT);
-    return false;
+    is_table = false;
+  } else {
+    is_table = true;
+    int len = luaL_len(L, idx); len = len > FONT_FALLBACK_MAX ? FONT_FALLBACK_MAX : len;
+    for (int i = 0; i < len; i++) {
+      lua_rawgeti(L, idx, i+1);
+      fonts[i] = *(RenFont**) luaL_checkudata(L, -1, API_TYPE_FONT);
+      lua_pop(L, 1);
+    }
   }
-  int len = luaL_len(L, idx); len = len > FONT_FALLBACK_MAX ? FONT_FALLBACK_MAX : len;
-  for (int i = 0; i < len; i++) {
-    lua_rawgeti(L, idx, i+1);
-    fonts[i] = *(RenFont**) luaL_checkudata(L, -1, API_TYPE_FONT);
-    lua_pop(L, 1);
-  }
-  return true;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  update_font_scale(active_window_renderer, fonts);
+#endif
+  return is_table;
 }
 
 static int f_font_copy(lua_State *L) {
@@ -220,7 +229,13 @@ static int f_font_get_size(lua_State *L) {
 static int f_font_set_size(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
   float size = luaL_checknumber(L, 2);
-  ren_font_group_set_size(fonts, size);
+  double scale = 1.0;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  if (active_window_renderer != NULL) {
+    scale = renwin_get_surface(active_window_renderer).scale_x;
+  }
+#endif
+  ren_font_group_set_size(fonts, size, scale);
   return 0;
 }
 

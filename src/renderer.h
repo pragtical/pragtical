@@ -39,7 +39,10 @@ int ren_font_get_metadata(const char *path, FontMetaData **data, int *count, boo
 int ren_font_group_get_tab_size(RenFont **font);
 int ren_font_group_get_height(RenFont **font);
 float ren_font_group_get_size(RenFont **font);
-void ren_font_group_set_size(RenFont **font, float size);
+void ren_font_group_set_size(RenFont **font, float size, double surface_scale);
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+void update_font_scale(RenWindow *window_renderer, RenFont **fonts);
+#endif
 void ren_font_group_set_tab_size(RenFont **font, int n);
 double ren_font_group_get_width(RenFont **font, const char *text, size_t len, int *x_offset);
 double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color);

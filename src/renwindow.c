@@ -3,15 +3,17 @@
 #include "renwindow.h"
 
 #ifdef PRAGTICAL_USE_SDL_RENDERER
-static void update_surface_scale(RenWindow *ren) {
+static void query_surface_scale(RenWindow *ren, double* scale_x, double* scale_y) {
   int w_pixels, h_pixels;
   int w_points, h_points;
   SDL_GL_GetDrawableSize(ren->window, &w_pixels, &h_pixels);
   SDL_GetWindowSize(ren->window, &w_points, &h_points);
   double scaleX = (double) w_pixels / (double) w_points;
   double scaleY = (double) h_pixels / (double) h_points;
-  ren->rensurface.scale_x = round(scaleX * 100) / 100;
-  ren->rensurface.scale_y = round(scaleY * 100) / 100;
+  if(scale_x)
+    *scale_x = round(scaleX * 100) / 100;
+  if(scale_y)
+    *scale_y = round(scaleY * 100) / 100;
 }
 
 static void setup_renderer(RenWindow *ren, int w, int h) {
@@ -24,7 +26,7 @@ static void setup_renderer(RenWindow *ren, int w, int h) {
     SDL_DestroyTexture(ren->texture);
   }
   ren->texture = SDL_CreateTexture(ren->renderer, SDL_PIXELFORMAT_BGRA32, SDL_TEXTUREACCESS_STREAMING, w, h);
-  update_surface_scale(ren);
+  query_surface_scale(ren, &ren->rensurface.scale_x, &ren->rensurface.scale_y);
 }
 #endif
 
@@ -97,9 +99,13 @@ RenSurface renwin_get_surface(RenWindow *ren) {
 void renwin_resize_surface(UNUSED RenWindow *ren) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   int new_w, new_h;
+  double new_scale;
   SDL_GL_GetDrawableSize(ren->window, &new_w, &new_h);
+  query_surface_scale(ren, &new_scale, NULL);
   /* Note that (w, h) may differ from (new_w, new_h) on retina displays. */
-  if (new_w != ren->rensurface.surface->w || new_h != ren->rensurface.surface->h) {
+  if (new_scale != ren->rensurface.scale_x ||
+      new_w != ren->rensurface.surface->w ||
+      new_h != ren->rensurface.surface->h) {
     renwin_init_surface(ren);
     renwin_clip_to_surface(ren);
     setup_renderer(ren, new_w, new_h);

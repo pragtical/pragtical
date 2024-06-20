@@ -93,6 +93,9 @@ typedef struct RenFont {
   GlyphSet* sets[SUBPIXEL_BITMAPS_CACHED][MAX_LOADABLE_GLYPHSETS];
   float size, space_advance, tab_advance;
   unsigned short baseline, height;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  double scale;
+#endif
   ERenFontAntialiasing antialiasing;
   ERenFontHinting hinting;
   unsigned char style;
@@ -109,6 +112,19 @@ typedef struct RenFont {
   unsigned int missing_glyph_codepoint;
   char path[];
 } RenFont;
+
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+void update_font_scale(RenWindow *window_renderer, RenFont **fonts) {
+  if (window_renderer == NULL) return;
+  const double surface_scale = renwin_get_surface(window_renderer).scale_x;
+  for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
+    if (fonts[i]->scale != surface_scale) {
+      ren_font_group_set_size(fonts, fonts[0]->size, surface_scale);
+      return;
+    }
+  }
+}
+#endif
 
 static const char* utf8_to_codepoint(const char *p, unsigned *dst) {
   const unsigned char *up = (unsigned char*)p;
@@ -580,6 +596,9 @@ RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antial
   strcpy(font->path, path);
   font->face = face;
   font->size = size;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  font->scale = 1.0;
+#endif
   font->height = (short)((face->height / (float)face->units_per_EM) * font->size);
   font->baseline = (short)((face->ascender / (float)face->units_per_EM) * font->size);
   font->antialiasing = antialiasing;
@@ -859,12 +878,15 @@ float ren_font_group_get_size(RenFont **fonts) {
   return fonts[0]->size;
 }
 
-void ren_font_group_set_size(RenFont **fonts, float size) {
+void ren_font_group_set_size(RenFont **fonts, float size, double surface_scale) {
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
     font_clear_glyph_cache(fonts[i]);
     FT_Face face = fonts[i]->face;
-    FT_Set_Pixel_Sizes(face, 0, (int)(size));
+    FT_Set_Pixel_Sizes(face, 0, (int)(size*surface_scale));
     fonts[i]->size = size;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+    fonts[i]->scale = surface_scale;
+#endif
     fonts[i]->height = (short)((face->height / (float)face->units_per_EM) * size);
     fonts[i]->baseline = (short)((face->ascender / (float)face->units_per_EM) * size);
     FT_Load_Char(face, ' ', font_set_load_options(fonts[i]));
@@ -896,7 +918,11 @@ double ren_font_group_get_width(RenFont **fonts, const char *text, size_t len, i
   if (!set_x_offset) {
     *x_offset = 0;
   }
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  return width / fonts[0]->scale;
+#else
   return width;
+#endif
 }
 
 // 4-times unrolled loop
@@ -1193,8 +1219,12 @@ void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect) {
 
 void ren_get_size(RenWindow *window_renderer, int *x, int *y) {
   RenSurface rs = renwin_get_surface(window_renderer);
-  *x = rs.surface->w / rs.scale_x;
-  *y = rs.surface->h / rs.scale_y;
+  *x = rs.surface->w;
+  *y = rs.surface->h;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  *x /= rs.scale_x;
+  *y /= rs.scale_y;
+#endif
 }
 
 
