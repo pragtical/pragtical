@@ -199,9 +199,13 @@ local function save_workspace()
   local workspace_filename = get_workspace_filename(core.root_project().path)
   local fp = io.open(workspace_filename, "w")
   if fp then
-    local node_text = common.serialize(save_node(root))
-    local dir_text = common.serialize(save_directories())
-    fp:write(string.format("return { path = %q, documents = %s, directories = %s }\n", core.root_project().path, node_text, dir_text))
+    local workspace = {
+      path = core.root_project().path,
+      documents = save_node(root),
+      directories = save_directories(),
+      visited_files = core.visited_files
+    }
+    fp:write("return " .. common.serialize(workspace, {pretty = true}))
     fp:close()
   end
 end
@@ -211,6 +215,9 @@ local function load_workspace()
   core.add_thread(function()
     local workspace = consume_workspace_file(core.root_project().path)
     if workspace then
+      if workspace.visited_files then
+        core.visited_files = workspace.visited_files
+      end
       local root = get_unlocked_root(core.root_view.root_node)
       local active_view = load_node(root, workspace.documents)
       if active_view then

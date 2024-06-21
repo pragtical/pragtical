@@ -116,6 +116,7 @@ end
 
 
 function core.open_project(project)
+  core.visited_files = {}
   local project = core.set_project(project)
   core.root_view:close_all_docviews()
   reload_customizations()
@@ -983,6 +984,10 @@ function core.set_visited(filename)
     end
   end
   table.insert(core.visited_files, 1, filename)
+  if #core.visited_files > config.max_visited_files then
+    local remove = #core.visited_files - config.max_visited_files
+    common.splice(core.visited_files, config.max_visited_files, remove)
+  end
 end
 
 
@@ -997,8 +1002,8 @@ function core.set_active_view(view)
       return
     end
     core.next_active_view = nil
-    if view.doc and view.doc.filename then
-      core.set_visited(view.doc.filename)
+    if view.doc and view.doc.abs_filename then
+      core.set_visited(view.doc.abs_filename)
     end
     core.last_active_view = core.active_view
     core.active_view = view

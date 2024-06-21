@@ -118,6 +118,12 @@ config.max_tabs = 8
 ---@type integer
 config.max_visible_commands = 10
 
+---The maximum amount of recent files to keep on history.
+---
+---The default is 5.
+---@type integer
+config.max_visited_files = 5
+
 ---Shows/hides the tab bar when there is only one tab open.
 ---
 ---The tab bar is always shown by default.
