@@ -525,12 +525,12 @@ end
 
 
 ---@class common.serializeoptions
----@field pretty boolean Enables pretty printing.
----@field indent_str string The indentation character to use. Defaults to `"  "`.
----@field escape boolean Uses normal escape characters ("\n") instead of decimal escape sequences ("\10").
----@field limit number Limits the depth when serializing nested tables. Defaults to `math.huge`.
----@field sort boolean Sorts the output if it is a sortable table.
----@field initial_indent number The initial indentation level. Defaults to 0.
+---@field pretty? boolean Enables pretty printing.
+---@field indent_str? string The indentation character to use. Defaults to `"  "`.
+---@field escape? boolean Uses normal escape characters ("\n") instead of decimal escape sequences ("\10").
+---@field limit? number Limits the depth when serializing nested tables. Defaults to `math.huge`.
+---@field sort? boolean Sorts the output if it is a sortable table.
+---@field initial_indent? number The initial indentation level. Defaults to 0.
 
 ---Serializes a value into a Lua string that is loadable with load().
 ---
