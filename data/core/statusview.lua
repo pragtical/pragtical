@@ -99,11 +99,11 @@ local StatusViewItem = Object:extend()
 ---follows it.
 ---@field separator? core.statusview.item.separator
 
----Flag to tell the item should me aligned on left side of status bar.
+---Flag to tell the item should be aligned on left side of status bar.
 ---@type integer
 StatusViewItem.LEFT = 1
 
----Flag to tell the item should me aligned on right side of status bar.
+---Flag to tell the item should be aligned on right side of status bar.
 ---@type integer
 StatusViewItem.RIGHT = 2
 
@@ -203,10 +203,24 @@ function StatusView:register_docview_items()
     alignment = StatusView.Item.LEFT,
     get_item = function()
       local dv = core.active_view
+      local filename
+      if #core.projects > 1 and dv.doc.abs_filename then
+        local project, is_open, belongs = core.current_project(
+          dv.doc.abs_filename
+        )
+        if project and is_open and belongs then
+          filename = common.basename(project.path)
+            .. PATHSEP
+            .. common.relative_path(project.path, dv.doc.abs_filename)
+        end
+      end
+      if not filename then
+        filename = common.home_encode(dv.doc:get_name())
+      end
       return {
         dv.doc:is_dirty() and style.accent or style.text, style.icon_font, "f",
-        style.dim, style.font, self.separator2, style.text,
-        dv.doc.filename and style.text or style.dim, common.home_encode(dv.doc:get_name())
+        style.dim, style.font, self.separator2,
+        dv.doc.filename and style.text or style.dim, filename
       }
     end
   })
