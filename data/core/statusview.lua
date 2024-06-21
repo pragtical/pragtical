@@ -209,18 +209,23 @@ function StatusView:register_docview_items()
           dv.doc.abs_filename
         )
         if project and is_open and belongs then
-          filename = common.basename(project.path)
-            .. PATHSEP
-            .. common.relative_path(project.path, dv.doc.abs_filename)
+          filename = {
+            style.accent,
+            common.basename(project.path),
+            style.text,
+            PATHSEP .. common.relative_path(project.path, dv.doc.abs_filename)
+          }
         end
       end
       if not filename then
-        filename = common.home_encode(dv.doc:get_name())
+        filename = {
+          dv.doc.filename and style.text or style.dim,
+          common.home_encode(dv.doc:get_name())
+        }
       end
       return {
         dv.doc:is_dirty() and style.accent or style.text, style.icon_font, "f",
-        style.dim, style.font, self.separator2,
-        dv.doc.filename and style.text or style.dim, filename
+        style.dim, style.font, self.separator2, table.unpack(filename)
       }
     end
   })
