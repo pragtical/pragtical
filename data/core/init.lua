@@ -108,6 +108,7 @@ end
 
 
 function core.set_project(project)
+  core.visited_files = {}
   while #core.projects > 0 do core.remove_project(core.projects[#core.projects], true) end
   local project_object = core.add_project(project)
   system.chdir(project_object.path)
@@ -116,7 +117,6 @@ end
 
 
 function core.open_project(project)
-  core.visited_files = {}
   local project = core.set_project(project)
   core.root_view:close_all_docviews()
   reload_customizations()
