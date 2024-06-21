@@ -129,7 +129,9 @@ end
 ---project object will be created and returned using the directory of the
 ---given filename path.
 ---@param filename? string
----@return core.project?
+---@return core.project? project
+---@return boolean is_open The returned project is open
+---@return boolean belongs The file belongs to the returned project
 function core.current_project(filename)
   if not filename then
     if
@@ -139,24 +141,26 @@ function core.current_project(filename)
     then
       filename = core.active_view.doc.abs_filename
     else
-      return core.projects[1]
+      return core.projects[1], true, false
     end
   end
   if #core.projects > 1 then
     for _, project in ipairs(core.projects) do
       if project:path_belongs_to(filename) then
-        return project
+        return project, true, true
       end
     end
   end
   if core.projects[1] and core.projects[1]:path_belongs_to(filename) then
-    return core.projects[1]
+    return core.projects[1], true, true
   end
   if not system.get_file_info(filename) then
-    return core.projects[1]
+    return core.projects[1], true, false
   end
   local dirname = common.dirname(filename)
-  if dirname then return Project(dirname) end
+  if dirname then
+    return Project(dirname), false, true
+  end
 end
 
 
