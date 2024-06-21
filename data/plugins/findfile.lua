@@ -296,14 +296,10 @@ local function get_visited_files()
   local files = {}
   for _, file in ipairs(core.visited_files) do
     if is_file(file) then
-      local project = core.current_project(file)
+      local project, is_open, belongs = core.current_project(file)
       if project then
-        local found = false
-        for _, prj in ipairs(core.projects) do
-          if prj == project then found = true break end
-        end
         local entry_name = ""
-        if found then
+        if is_open and belongs then
           if multiple_projects then
             entry_name = common.basename(project.path)
               .. PATHSEP
