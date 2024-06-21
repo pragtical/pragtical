@@ -102,7 +102,7 @@ jobs:
   build_macos:
     name: macOS
     needs: release
-    runs-on: macos-11
+    runs-on: macos-13
     strategy:
       matrix:
         arch: [x86_64, arm64]
@@ -154,7 +154,7 @@ jobs:
   build_macos_universal:
     name: macOS (Universal)
     needs: [release, build_macos]
-    runs-on: macos-11
+    runs-on: macos-13
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
