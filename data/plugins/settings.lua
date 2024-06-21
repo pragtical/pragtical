@@ -386,6 +386,14 @@ settings.add("User Interface",
       min = 1
     },
     {
+      label = "Maximum Recent Files",
+      description = "The maximum amount of recently visited files to keep on history.",
+      path = "max_visited_files",
+      type = settings.type.NUMBER,
+      default = 5,
+      min = 1
+    },
+    {
       label = "Always Show Tabs",
       description = "Shows tabs even if a single document is opened.",
       path = "always_show_tabs",
