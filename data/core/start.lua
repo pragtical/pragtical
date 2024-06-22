@@ -61,6 +61,7 @@ table.pack = table.pack or pack or function(...) return {...} end
 table.unpack = table.unpack or unpack
 
 require "core.utf8string"
+require "core.process"
 
 -- Because AppImages change the working directory before running the executable,
 -- we need to change it back to the original one.
