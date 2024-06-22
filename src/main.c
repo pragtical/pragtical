@@ -9,7 +9,6 @@
 
 #ifdef _WIN32
   #include <windows.h>
-  #include "windows/darkmode.h"
 #elif defined(__linux__) || defined(__serenity__)
   #include <unistd.h>
 #elif defined(__APPLE__)
@@ -17,9 +16,6 @@
 #elif defined(__FreeBSD__)
   #include <sys/sysctl.h>
 #endif
-
-
-static SDL_Window *window;
 
 static void get_exe_filename(char *buf, int sz) {
 #if _WIN32
@@ -54,23 +50,6 @@ static void get_exe_filename(char *buf, int sz) {
   sysctl(mib, 4, buf, &len, NULL, 0);
 #else
   *buf = 0;
-#endif
-}
-
-
-static void init_window_icon(void) {
-#if !defined(_WIN32) && !defined(__APPLE__)
-  #include "../resources/icons/icon.inl"
-  (void) icon_rgba_len; /* unused */
-  SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(
-    icon_rgba, 64, 64,
-    32, 64 * 4,
-    0x000000ff,
-    0x0000ff00,
-    0x00ff0000,
-    0xff000000);
-  SDL_SetWindowIcon(window, surf);
-  SDL_FreeSurface(surf);
 #endif
 }
 
@@ -185,35 +164,10 @@ int main(int argc, char **argv) {
 
   SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 
-  window = SDL_CreateWindow(
-    "", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-    800, 450,
-    SDL_WINDOW_RESIZABLE
-    | SDL_WINDOW_HIDDEN
-#if PRAGTICAL_USE_SDL_RENDERER
-    /* causes pixelated rendering when not using the sdl renderer and scaled */
-    | SDL_WINDOW_ALLOW_HIGHDPI
-#endif
-  );
-
-#ifdef _WIN32
-   windows_darkmode_set_theme(window, NULL, false);
-#endif
-
-  SDL_DisplayMode dm;
-  SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(window), &dm);
-  SDL_SetWindowSize(window, dm.w * 0.8, dm.h * 0.8);
-
-  init_window_icon();
-  if (!window) {
-    fprintf(stderr, "Error creating pragtical window: %s", SDL_GetError());
+  if ( ren_init() ) {
+    fprintf(stderr, "internal font error when starting the application\n");
     exit(1);
   }
-  window_renderer = ren_init(window);
-
-  /* Set a minimum size to prevent too small to see issues on unmaximize.
-  ** Needs to be set after renderer to work: libsdl-org/SDL/issues/1408 */
-  SDL_SetWindowMinimumSize(window, 480, 360);
 
   lua_State *L;
 init_lua:
@@ -308,10 +262,9 @@ init_lua:
     goto init_lua;
   }
 
-  // This allows the window to be destroyed before pragtical is done with
-  // reaping child processes
-  ren_free(window_renderer);
   lua_close(L);
+
+  ren_free();
 
   return EXIT_SUCCESS;
 }
