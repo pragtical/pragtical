@@ -517,7 +517,7 @@ function core.init()
 
   do
     local pdir, pname = project_dir_abs:match("(.*)[/\\\\](.*)")
-    core.log("Opening project %q from directory %s", pname, pdir)
+    core.log_quiet("Opening project %q from directory %s", pname, pdir)
   end
 
   for _, filename in ipairs(files) do
