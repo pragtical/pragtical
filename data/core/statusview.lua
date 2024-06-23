@@ -168,7 +168,7 @@ end
 function StatusView:new()
   StatusView.super.new(self)
   self.message_timeout = 0
-  self.message = {}
+  self.message = nil
   self.tooltip_mode = false
   self.tooltip = {}
   self.items = {}
@@ -608,8 +608,9 @@ end
 function StatusView:show_message(icon, icon_color, text)
   if not self.visible or self.hide_messages then return end
   self.message = {
-    icon_color, style.icon_font, icon,
-    style.dim, style.font, StatusView.separator2, style.text, text
+    icon = icon,
+    icon_color = icon_color,
+    text = text
   }
   self.message_timeout = system.get_time() + config.message_timeout
 end
@@ -1092,7 +1093,7 @@ function StatusView:on_mouse_moved(x, y, dx, dy)
     return
   end
 
-  if y < self.position.y or system.get_time() <= self.message_timeout then
+  if y < self.position.y or self.message then
     self.cursor = "arrow"
     self.hovered_item = {}
     return
@@ -1177,7 +1178,7 @@ function StatusView:update()
     self.size.y = height
   end
 
-  if system.get_time() < self.message_timeout then
+  if self.message and system.get_time() < self.message_timeout then
     self.scroll.to.y = self.size.y
   else
     self.scroll.to.y = 0
@@ -1204,14 +1205,26 @@ local function get_item_bg_color(self, item)
 end
 
 
+---Render the message to be shown on the StatusView..
+---@param self core.statusview
+---@return core.statusview.styledtext
+local function get_rendered_message(self)
+  return {
+    self.message.icon_color, style.icon_font, self.message.icon,
+    style.dim, style.font, StatusView.separator2, style.text, self.message.text
+  }
+end
+
+
 function StatusView:draw()
   if not self.visible and self.size.y <= 0 then return end
 
   self:draw_background(style.background2)
 
   if self.message and system.get_time() <= self.message_timeout then
-    self:draw_items(self.message, false, 0, self.size.y)
+    self:draw_items(get_rendered_message(self), false, 0, self.size.y)
   else
+    if self.message then self.message = nil end
     if self.tooltip_mode then
       self:draw_items(self.tooltip)
     end
