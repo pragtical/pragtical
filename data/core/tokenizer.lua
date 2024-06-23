@@ -389,16 +389,28 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
 end
 
 
-local function iter(t, i)
-  i = i + 2
-  local type, text = t[i], t[i+1]
-  if type then
-    return i, type, text
+function tokenizer.each_token(t, scol)
+  local tcount, start, col = #t, 1, nil
+  if scol then
+    local ccol = 1
+    for i=1, tcount, 2 do
+      local text = t[i+1]
+      local len = #text
+      if scol <= (ccol + len - 1) then
+        start = i
+        col = scol - ccol + 1
+        break
+      end
+      ccol = ccol + len + 1
+    end
   end
-end
-
-function tokenizer.each_token(t)
-  return iter, t, -1
+  return coroutine.wrap(function()
+    for i=start, tcount, 2 do
+      local type, text = t[i], t[i+1]
+      if col then text = string.sub(text, col) col = nil end
+      coroutine.yield(i, type, text)
+    end
+  end)
 end
 
 

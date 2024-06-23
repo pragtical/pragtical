@@ -7,6 +7,8 @@ local translate = require "core.doc.translate"
 local ime = require "core.ime"
 local View = require "core.view"
 
+local CACHE_LINE_LEN = 500
+
 ---@class core.docview : core.view
 ---@field super core.view
 local DocView = View:extend()
@@ -59,6 +61,7 @@ function DocView:new(doc)
   self.cursor = "ibeam"
   self.scrollable = true
   self.doc = assert(doc)
+  self.doc.cache.col_x = {}
   self.font = "code_font"
   self.last_x_offset = {}
   self.ime_selection = { from = 0, size = 0 }
@@ -66,6 +69,10 @@ function DocView:new(doc)
   self.hovering_gutter = false
   self.v_scrollbar:set_forced_status(config.force_scrollbar_status)
   self.h_scrollbar:set_forced_status(config.force_scrollbar_status)
+  self.cache_font = self:get_font()
+  self.cache_font_size = self.cache_font:get_size()
+  local _, indent_size = self.doc:get_indent_info()
+  self.cache_indent_size = indent_size
 end
 
 
@@ -168,23 +175,47 @@ end
 
 
 function DocView:get_col_x_offset(line, col)
+  local column = 1
+  local xoffset = 0
+  local cache = self.doc.cache.col_x
+  local line_len = #self.doc.lines[line]
+  if line_len > CACHE_LINE_LEN then
+    if cache[line] and cache[line][col] then
+      return cache[line][col]
+    elseif not cache[line] then
+      cache[line] = {}
+    elseif col > 1 then
+      for i=col-1, 1, -1 do
+        if cache[line][i] then
+          column = i
+          xoffset = cache[line][i]
+          break
+        end
+      end
+    end
+  end
   local default_font = self:get_font()
   local _, indent_size = self.doc:get_indent_info()
   default_font:set_tab_size(indent_size)
-  local column = 1
-  local xoffset = 0
-  for _, type, text in self.doc.highlighter:each_token(line) do
+  local scol = column > 1 and (column+1) or nil
+  for _, type, text in self.doc.highlighter:each_token(line, scol) do
     local font = style.syntax_fonts[type] or default_font
     if font ~= default_font then font:set_tab_size(indent_size) end
     local length = #text
     if column + length <= col then
       xoffset = xoffset + font:get_width(text)
       column = column + length
+      if line_len > CACHE_LINE_LEN and cache[line] then
+        cache[line][column] = xoffset
+      end
       if column >= col then
         return xoffset
       end
     else
       for char in common.utf8_chars(text) do
+        if line_len > CACHE_LINE_LEN and cache[line] then
+          cache[line][column] = xoffset
+        end
         if column >= col then
           return xoffset
         end
@@ -193,13 +224,31 @@ function DocView:get_col_x_offset(line, col)
       end
     end
   end
-
+  if line_len > CACHE_LINE_LEN and cache[line] then
+    cache[line][column] = xoffset
+  end
   return xoffset
 end
 
 
 function DocView:get_x_offset_col(line, x)
   local line_text = self.doc.lines[line]
+  local line_len = #line_text
+
+  -- we leverage the caching already present on col_x, this works on all lines,
+  -- but for the moment lets do it only on the cached lines and keep original
+  -- code logic intact
+  if line_len > CACHE_LINE_LEN then
+    local xo, pxo = 0, 0
+    for col=1, line_len do
+      pxo = xo
+      xo = self:get_col_x_offset(line, col)
+      if xo >= x or col >= line_len then
+        local w = xo - pxo
+        return (xo - x > w / 2) and col-1 or col
+      end
+    end
+  end
 
   local xoffset, last_i, i = 0, 1, 1
   local default_font = self:get_font()
@@ -227,7 +276,7 @@ function DocView:get_x_offset_col(line, x)
     end
   end
 
-  return #line_text
+  return line_len
 end
 
 
@@ -406,6 +455,20 @@ function DocView:update_ime_location()
 end
 
 function DocView:update()
+  -- clear cache if font or indent size changed
+  local font = self:get_font()
+  local _, indent_size = self.doc:get_indent_info()
+  if
+    self.cache_indent_size ~= indent_size
+    or
+    self.cache_font ~= font or self.cache_font_size ~= font:get_size()
+  then
+    self.doc.cache.col_x = {}
+    self.cache_font = font
+    self.cache_font_size = font:get_size()
+    self.cache_indent_size = indent_size
+  end
+
   -- scroll to make caret visible and reset blink timer if it moved
   local line1, col1, line2, col2 = self.doc:get_selection()
   if (line1 ~= self.last_line1 or col1 ~= self.last_col1 or

@@ -97,6 +97,7 @@ end
 
 function Highlighter:update_notify(line, n)
   -- plugins can hook here to be notified that lines have been retokenized
+  self.doc:clear_cache(line, n)
 end
 
 
@@ -122,8 +123,8 @@ function Highlighter:get_line(idx)
 end
 
 
-function Highlighter:each_token(idx)
-  return tokenizer.each_token(self:get_line(idx).tokens)
+function Highlighter:each_token(idx, scol)
+  return tokenizer.each_token(self:get_line(idx).tokens, scol)
 end
 
 

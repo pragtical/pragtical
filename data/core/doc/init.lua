@@ -25,6 +25,7 @@ function Doc:new(filename, abs_filename, new_file)
   self.encoding = nil
   self.convert = false
   self.binary = false
+  self.cache = {}
   self:reset()
   if filename then
     self:set_filename(filename, abs_filename)
@@ -511,6 +512,20 @@ local function update_clean_lines(self, line1, line2)
 end
 
 
+function Doc:clear_cache(l, n)
+  for _, cache in pairs(self.cache) do
+    local lines = l + n
+    for ln=l-1, lines do
+      local line = ln + 1
+      if cache[line] then
+        cache[line] = nil
+      end
+      if line == lines then break end
+    end
+  end
+end
+
+
 function Doc:raw_insert(line, col, text, undo_stack, time)
   -- split text into lines and merge with line at insertion point
   local lines = split_lines(text)
@@ -543,6 +558,7 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
 
   -- update highlighter and assure selection is in bounds
   self.highlighter:insert_notify(line, #lines - 1)
+  self:clear_cache(line, #lines - 1)
   self:sanitize_selection()
 end
 
@@ -604,6 +620,7 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
 
   -- update highlighter and assure selection is in bounds
   self.highlighter:remove_notify(line1, line_removal)
+  self:clear_cache(line1, line_removal)
   self:sanitize_selection()
 end
 
