@@ -197,7 +197,7 @@ function DocView:get_col_x_offset(line, col)
   local default_font = self:get_font()
   local _, indent_size = self.doc:get_indent_info()
   default_font:set_tab_size(indent_size)
-  local scol = column > 1 and (column+1) or nil
+  local scol = column > 1 and column or nil
   for _, type, text in self.doc.highlighter:each_token(line, scol) do
     local font = style.syntax_fonts[type] or default_font
     if font ~= default_font then font:set_tab_size(indent_size) end
@@ -213,14 +213,14 @@ function DocView:get_col_x_offset(line, col)
       end
     else
       for char in common.utf8_chars(text) do
-        if line_len > CACHE_LINE_LEN and cache[line] then
-          cache[line][column] = xoffset
-        end
         if column >= col then
           return xoffset
         end
         xoffset = xoffset + font:get_width(char)
         column = column + #char
+        if line_len > CACHE_LINE_LEN and cache[line] then
+          cache[line][column] = xoffset
+        end
       end
     end
   end
@@ -239,14 +239,15 @@ function DocView:get_x_offset_col(line, x)
   -- but for the moment lets do it only on the cached lines and keep original
   -- code logic intact
   if line_len > CACHE_LINE_LEN then
-    local xo, pxo = 0, 0
-    for col=1, line_len do
+    local xo, pxo, last_col = 0, 0, 0
+    for col, _ in utf8extra.next, line_text do
       pxo = xo
       xo = self:get_col_x_offset(line, col)
       if xo >= x or col >= line_len then
         local w = xo - pxo
-        return (xo - x > w / 2) and col-1 or col
+        return (xo - x > w / 2) and last_col or col
       end
+      last_col = col
     end
   end
 
