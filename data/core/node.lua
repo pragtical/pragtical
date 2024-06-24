@@ -524,8 +524,8 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
   local align = "center"
   if font:get_width(text) > w then
     align = "left"
-    for i = 1, #text do
-      local reduced_text = text:sub(1, #text - i)
+    for i = 1, text:ulen() do
+      local reduced_text = text:usub(1, text:ulen() - i)
       if font:get_width(reduced_text) + dots_width <= w then
         text = reduced_text .. "…"
         break
