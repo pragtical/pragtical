@@ -60,6 +60,7 @@ end)
 table.pack = table.pack or pack or function(...) return {...} end
 table.unpack = table.unpack or unpack
 
+require "core.encoding"
 require "core.utf8string"
 require "core.process"
 
