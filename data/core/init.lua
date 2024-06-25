@@ -31,8 +31,8 @@ local function save_session()
   if fp then
     local session = {
       recents = core.recent_projects,
-      window = table.pack(system.get_window_size()),
-      window_mode = system.get_window_mode(),
+      window = table.pack(system.get_window_size(core.window)),
+      window_mode = system.get_window_mode(core.window),
       previous_find = core.previous_find,
       previous_replace = core.previous_replace
     }
@@ -355,10 +355,10 @@ end
 local function position_window(session)
   if session.window_mode == "normal" then
     if session.window then
-      system.set_window_size(table.unpack(session.window))
+      system.set_window_size(core.window, table.unpack(session.window))
     end
   elseif session.window_mode == "maximized" then
-    system.set_window_mode("maximized")
+    system.set_window_mode(core.window, "maximized")
   end
 end
 
@@ -386,6 +386,14 @@ function core.init()
     DATADIR = common.normalize_volume(DATADIR)
     EXEDIR  = common.normalize_volume(EXEDIR)
   end
+
+  core.window = renwindow._restore()
+  if core.window == nil then
+    core.window = renwindow.create("")
+  end
+
+  DEFAULT_SCALE = system.get_scale(core.window)
+  SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
 
   local session = load_session()
   core.recent_projects = session.recents or {}
@@ -632,7 +640,10 @@ end
 
 
 function core.restart()
-  core.exit(function() core.restart_request = true end)
+  core.exit(function()
+    core.restart_request = true
+    core.window:_persist()
+  end)
 end
 
 
@@ -1241,7 +1252,7 @@ function core.on_event(type, ...)
   elseif type == "touchmoved" then
     core.root_view:on_touch_moved(...)
   elseif type == "resized" then
-    core.window_mode = system.get_window_mode()
+    core.window_mode = system.get_window_mode(core.window)
   elseif type == "minimized" or type == "maximized" or type == "restored" then
     core.window_mode = type == "restored" and "normal" or type
   elseif type == "filedropped" then
@@ -1284,7 +1295,7 @@ function core.step()
     elseif type == "displaychanged" and SCALE == DEFAULT_SCALE then
       -- Change SCALE when pragtical window is moved to a display
       -- with a different resolution than previous one.
-      local new_scale = system.get_scale()
+      local new_scale = system.get_scale(core.window)
       if SCALE ~= new_scale then
         DEFAULT_SCALE = new_scale
         local old_scale_mode = "ui"
@@ -1302,7 +1313,7 @@ function core.step()
     core.redraw = true
   end
 
-  local width, height = renderer.get_size()
+  local width, height = core.window:get_size()
 
   -- update
   core.root_view.size.x, core.root_view.size.y = width, height
@@ -1322,12 +1333,12 @@ function core.step()
   -- update window title
   local current_title = get_title_filename(core.active_view)
   if current_title ~= nil and current_title ~= core.window_title then
-    system.set_window_title(core.compose_window_title(current_title))
+    system.set_window_title(core.window, core.compose_window_title(current_title))
     core.window_title = current_title
   end
 
   -- draw
-  renderer.begin_frame()
+  renderer.begin_frame(core.window)
   core.clip_rect_stack[1] = { 0, 0, width, height }
   renderer.set_clip_rect(table.unpack(core.clip_rect_stack[1]))
   core.root_view:draw()
@@ -1387,7 +1398,7 @@ function core.run()
   local skip_no_focus = 0
   while true do
     core.frame_start = system.get_time()
-    local has_focus = system.window_has_focus()
+    local has_focus = system.window_has_focus(core.window)
     local forced_draw = core.redraw
     if forced_draw then
       -- allow things like project search to keep working even without focus
