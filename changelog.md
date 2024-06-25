@@ -1,5 +1,131 @@
 # Changes Log
 
+## [3.4.0] - 2024-06-25
+
+### New Features
+
+* Add ui config to toggle the treeview toolbar
+  ([#84](https://github.com/pragtical/pragtical/pull/84))
+
+* Support multiple projects on the findfile plugin
+  ([#100](https://github.com/pragtical/pragtical/pull/100))
+
+* Multiproject handling for statusview doc:file
+  ([#101](https://github.com/pragtical/pragtical/pull/101))
+
+* Introductory window creation and management using Lua
+  ([#108](https://github.com/pragtical/pragtical/pull/108))
+
+### Performance Improvements
+
+* Basic doc/docview cache for better performance
+  ([#110](https://github.com/pragtical/pragtical/pull/110))
+
+### Fixes
+
+* CLI: lowercase the appname on usage description
+  ([#92](https://github.com/pragtical/pragtical/pull/92))
+
+* Mark common.serializeoptions fields as optional
+  ([#95](https://github.com/pragtical/pragtical/pull/95))
+
+* Render the statusview message on demand
+  ([#103](https://github.com/pragtical/pragtical/pull/103))
+
+* Check doc is still in view before autoreloading it
+  ([#104](https://github.com/pragtical/pragtical/pull/104))
+
+* Handle conversion of \ to ¥ as reported on #94
+  ([#106](https://github.com/pragtical/pragtical/pull/106))
+
+* Support for utf-8 text reduction on node title
+  ([#107](https://github.com/pragtical/pragtical/pull/107))
+
+### Enhancements
+
+* Add /usr/local/bin, /usr/local/sbin to PATH on Mac OS X
+  ([#87](https://github.com/pragtical/pragtical/pull/87))
+
+* Assign `ctrl+,` binding to open user module command
+  ([#88](https://github.com/pragtical/pragtical/pull/88))
+
+* Update JetBrains Mono font to latest version 2.304
+  ([#91](https://github.com/pragtical/pragtical/pull/91))
+
+* Auto chdir to project depending on active document
+  ([#93](https://github.com/pragtical/pragtical/pull/93))
+
+* Improvements to core.visited_files handling
+  ([#96](https://github.com/pragtical/pragtical/pull/96))
+
+### Workarounds
+
+* Disable assert on font resizing to allow fonts scanning.
+  ([#89](https://github.com/pragtical/pragtical/pull/89))
+
+### Build System
+
+* Changes to msys build on rolling release workflow
+  ([d5811328](https://github.com/pragtical/pragtical/commit/d581132858e9427717fa853e7fd21f0963a90ad0))
+
+* Various maintainance changes to github workflows
+
+### Widgets
+
+* Use correct path separator on FilePicker widget
+  ([1347e8c3](https://github.com/pragtical/widget/commit/1347e8c337fd4715702e3347f2277f93c1379570))
+
+* Update for lua window management
+  ([#7](https://github.com/pragtical/widget/pull/7))
+
+### Lite XL Inherited Changes
+
+* build: fix dirmonitor backend selection
+  ([#1790](https://github.com/lite-xl/lite-xl/pull/1790))
+
+* api/system: fix newlines returned by get_clipboard
+  ([#1788](https://github.com/lite-xl/lite-xl/pull/1788))
+
+* Change co_wait to co_await in language_cpp
+  ([#1800](https://github.com/lite-xl/lite-xl/pull/1800))
+
+* build: fix dirmonitor backend selection
+  ([#1790](https://github.com/lite-xl/lite-xl/pull/1790))
+
+* Handle static constexpr in language_cpp
+  ([#1806](https://github.com/lite-xl/lite-xl/pull/1806))
+
+* improve number highlighting for c
+  ([#1752](https://github.com/lite-xl/lite-xl/pull/1752))
+
+* language_cpp: backport number highlighting from c
+  ([#1818](https://github.com/lite-xl/lite-xl/pull/1818))
+
+* Add support for binary integer literals.
+  ([#1819](https://github.com/lite-xl/lite-xl/pull/1819))
+
+* Update language_python.lua
+  ([#1723](https://github.com/lite-xl/lite-xl/pull/1723))
+
+* rootview: workaround macos weird dnd event timing
+
+* Expand Process API
+  ([#1757](https://github.com/lite-xl/lite-xl/pull/1757))
+
+* fix(dirmonitor): avoid calling the change callback multiple times
+  in the same notification
+  ([#1824](https://github.com/lite-xl/lite-xl/pull/1824))
+
+* core/rootview: fix dnd multiple folders into dock
+  ([#1828](https://github.com/lite-xl/lite-xl/pull/1828))
+
+*  fix(doc): convert Doc:merge_cursors parameter from "selection index"
+   to table index
+
+* core/doc: fix wrong table index in Doc:merge_cursors
+
+* Keep font scale updated for RENDERER backend
+
 ## [3.3.1] - 2024-04-18
 
 ### New Features
@@ -1896,6 +2022,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.4.0]: https://github.com/pragtical/pragtical/releases/tag/v3.4.0
 [3.3.1]: https://github.com/pragtical/pragtical/releases/tag/v3.3.1
 [3.3.0]: https://github.com/pragtical/pragtical/releases/tag/v3.3.0
 [3.2.2]: https://github.com/pragtical/pragtical/releases/tag/v3.2.2
