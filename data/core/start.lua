@@ -5,8 +5,8 @@ MOD_VERSION_MINOR = 5
 MOD_VERSION_PATCH = 0
 MOD_VERSION_STRING = string.format("%d.%d.%d", MOD_VERSION_MAJOR, MOD_VERSION_MINOR, MOD_VERSION_PATCH)
 
-DEFAULT_SCALE = system.get_scale()
-SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
+DEFAULT_SCALE = 1.0
+SCALE = 1.0
 PATHSEP = package.config:sub(1, 1)
 
 EXEDIR = EXEFILE:match("^(.+)[/\\][^/\\]+$")
