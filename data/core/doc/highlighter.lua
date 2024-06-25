@@ -19,6 +19,7 @@ function Highlighter:start()
   if self.running then return end
   self.running = true
   core.add_thread(function()
+    local views = #core.get_views_referencing_doc(self.doc)
     while self.first_invalid_line <= self.max_wanted_line do
       local max = math.min(self.first_invalid_line + 40, self.max_wanted_line)
       local retokenized_from
@@ -49,6 +50,13 @@ function Highlighter:start()
       end
       core.redraw = true
       coroutine.yield()
+
+      -- stop tokenizer if the doc was originally referenced by a docview
+      -- but it was closed, helps when closing files that have huge lines
+      -- and tokenization is taking a long time
+      if views > 0 and #core.get_views_referencing_doc(self.doc) == 0 then
+        break
+      end
     end
     self.max_wanted_line = 0
     self.running = false
@@ -97,6 +105,7 @@ end
 
 function Highlighter:update_notify(line, n)
   -- plugins can hook here to be notified that lines have been retokenized
+  self.doc:clear_cache(line, n)
 end
 
 
@@ -122,8 +131,8 @@ function Highlighter:get_line(idx)
 end
 
 
-function Highlighter:each_token(idx)
-  return tokenizer.each_token(self:get_line(idx).tokens)
+function Highlighter:each_token(idx, scol)
+  return tokenizer.each_token(self:get_line(idx).tokens, scol)
 end
 
 
