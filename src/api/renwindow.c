@@ -3,6 +3,10 @@
 #include "lua.h"
 #include <SDL.h>
 
+#ifdef _WIN32
+  #include "windows/darkmode.h"
+#endif
+
 static RenWindow *persistant_window = NULL;
 
 static void init_window_icon(SDL_Window *window) {
@@ -47,12 +51,21 @@ static int f_renwin_create(lua_State *L) {
   if (!window) {
     return luaL_error(L, "Error creating lite-xl window: %s", SDL_GetError());
   }
+
+#ifdef _WIN32
+   windows_darkmode_set_theme(window, NULL, false);
+#endif
+
   init_window_icon(window);
 
   RenWindow **window_renderer = (RenWindow**)lua_newuserdata(L, sizeof(RenWindow*));
   luaL_setmetatable(L, API_TYPE_RENWINDOW);
 
   *window_renderer = ren_create(window);
+
+  /* Set a minimum size to prevent too small to see issues on unmaximize.
+  ** Needs to be set after renderer to work: libsdl-org/SDL/issues/1408 */
+  SDL_SetWindowMinimumSize(window, 240, 180);
 
   return 1;
 }
