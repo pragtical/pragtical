@@ -8,7 +8,7 @@ renwindow = {}
 ---
 ---Create a new window
 ---
---- 
+---
 ---
 ---@param x integer? if nil will be undefined
 ---@param y integer? if nil will be undefined
@@ -19,7 +19,7 @@ renwindow = {}
 function renwindow.create(x, y, width, height) end
 
 ---
---- Get width and height of a window 
+--- Get width and height of a window
 ---
 ---@param renwindow
 ---
