@@ -6,7 +6,7 @@ local LogView = require "core.logview"
 
 
 local previous_win_mode = "normal"
-local previous_win_pos = table.pack(system.get_window_size())
+local previous_win_pos = table.pack(system.get_window_size(core.window))
 local restore_title_view = false
 
 local function suggest_directory(text)
@@ -39,18 +39,18 @@ command.add(nil, {
   end,
 
   ["core:toggle-fullscreen"] = function()
-    local current_mode = system.get_window_mode()
+    local current_mode = system.get_window_mode(core.window)
     local fullscreen = current_mode == "fullscreen"
     if current_mode ~= "fullscreen" then
       previous_win_mode = current_mode
       if current_mode == "normal" then
-        previous_win_pos = table.pack(system.get_window_size())
+        previous_win_pos = table.pack(system.get_window_size(core.window))
       end
     end
     if not fullscreen then
       restore_title_view = core.title_view.visible
     end
-    system.set_window_mode(fullscreen and previous_win_mode or "fullscreen")
+    system.set_window_mode(core.window, fullscreen and previous_win_mode or "fullscreen")
     core.show_title_bar(fullscreen and restore_title_view)
     core.title_view:configure_hit_test(fullscreen and restore_title_view)
     if fullscreen and previous_win_mode == "normal" then

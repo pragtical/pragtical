@@ -482,7 +482,7 @@ local function get_suggestions_rect(av)
 
   local max_width = 0
   local width_exceeds = false
-  local win_width = system.get_window_size() - style.padding.x  * 2
+  local win_width = system.get_window_size(core.window) - style.padding.x  * 2
   for i, s in ipairs(suggestions) do
     local w = font:get_width(s.text)
     if s.info and not hide_info then
@@ -587,7 +587,7 @@ local function draw_description_box(text, sx, sy, sw, sh)
     previous_scale = SCALE
   end
 
-  local ww = system.get_window_size()
+  local ww = system.get_window_size(core.window)
 
   local font = desc_font
   local lh = font:get_height()

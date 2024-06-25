@@ -911,21 +911,21 @@ end
 --------------------------------------------------------------------------------
 ipc:register_method("core.open_file", function(file)
   if system.get_file_info(file) then
-    if system.raise_window then system.raise_window() end
+    system.raise_window(core.window)
     core.root_view:open_doc(core.open_doc(file))
   end
 end, {{name = "file", type = "string"}})
 
 ipc:register_method("core.open_directory", function(directory)
   if system.get_file_info(directory) then
-    if system.raise_window then system.raise_window() end
+    system.raise_window(core.window)
     core.add_project_directory(directory)
   end
 end, {{name = "directory", type = "string"}})
 
 ipc:register_method("core.change_directory", function(directory)
   if system.get_file_info(directory) then
-    if system.raise_window then system.raise_window() end
+    system.raise_window(core.window)
     if directory == core.root_project().path then return end
     core.confirm_close_docs(core.docs, function(dirpath)
       core.open_project(dirpath)
@@ -961,7 +961,7 @@ function RootView:on_mouse_moved(x, y, dx, dy)
       rootview_dragged_node = self.dragged_node
     end
   elseif rootview_dragged_node then
-    local w, h, wx, wy = system.get_window_size()
+    local w, h, wx, wy = system.get_window_size(core.window)
     if x < 0 or x > w or y < 0 or y > h then
       self.dragged_node = nil
       self:set_show_overlay(self.drag_overlay, false)
