@@ -31,8 +31,9 @@ local function save_session()
   if fp then
     local session = {
       recents = core.recent_projects,
-      window = table.pack(system.get_window_size(core.window)),
-      window_mode = system.get_window_mode(core.window),
+      window = core.window_size,
+      window_mode = core.window_mode ~= "fullscreen"
+        and core.window_mode or core.prev_window_mode,
       previous_find = core.previous_find,
       previous_replace = core.previous_replace
     }
@@ -352,17 +353,6 @@ local function add_config_files_hooks()
 end
 
 
-local function position_window(session)
-  if session.window_mode == "normal" then
-    if session.window then
-      system.set_window_size(core.window, table.unpack(session.window))
-    end
-  elseif session.window_mode == "maximized" then
-    system.set_window_mode(core.window, "maximized")
-  end
-end
-
-
 function core.init()
   core.log_items = {}
   core.log_quiet("Pragtical version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
@@ -399,10 +389,9 @@ function core.init()
   core.recent_projects = session.recents or {}
   core.previous_find = session.previous_find or {}
   core.previous_replace = session.previous_replace or {}
-  if PLATFORM ~= "Windows" then
-    position_window(session)
-    session = nil
-  end
+  core.window_mode = session.window_mode or "normal"
+  core.prev_window_mode = core.window_mode
+  core.window_size = session.window or system.get_window_size(core.window)
 
   -- remove projects that don't exist any longer
   local projects_removed = 0;
@@ -447,7 +436,6 @@ function core.init()
   core.projects = {}
   core.cursor_clipboard = {}
   core.cursor_clipboard_whole_line = {}
-  core.window_mode = "normal"
   core.threads = setmetatable({}, { __mode = "k" })
   core.background_threads = 0
   core.blink_start = system.get_time()
@@ -513,12 +501,16 @@ function core.init()
   -- Parse commandline arguments
   cli.parse(ARGS)
 
-  -- Maximizing the window makes it lose the hidden attribute on windows
-  -- so we delay this to keep window hidden until args parsed
-  if PLATFORM == "Windows" then
+  -- Maximizing the window makes it lose the hidden attribute on Windows
+  -- so we delay this to keep window hidden until args parsed. Also, on
+  -- Wayland we have issues applying the mode before showing the window
+  -- so we delay it on all platforms.
+  if session.window then
+    system.set_window_size(core.window, table.unpack(session.window))
+  end
+  if session.window_mode == "maximized" then
     core.add_thread(function()
-      position_window(session)
-      session = nil
+      system.set_window_mode(core.window, "maximized")
     end)
   end
 
@@ -1252,9 +1244,19 @@ function core.on_event(type, ...)
   elseif type == "touchmoved" then
     core.root_view:on_touch_moved(...)
   elseif type == "resized" then
-    core.window_mode = system.get_window_mode(core.window)
+    local window_mode = system.get_window_mode(core.window)
+    if window_mode ~= "fullscreen" and window_mode ~= "maximized" then
+      core.window_size = table.pack(system.get_window_size(core.window))
+    -- check needed because fullscreen can be triggered twice
+    elseif core.window_mode ~= "fullscreen" then
+      core.prev_window_mode = core.window_mode
+    end
+    core.window_mode = window_mode
   elseif type == "minimized" or type == "maximized" or type == "restored" then
     core.window_mode = type == "restored" and "normal" or type
+    if core.window_mode == "normal" then
+      core.window_size = table.pack(system.get_window_size(core.window))
+    end
   elseif type == "filedropped" then
     core.root_view:on_file_dropped(...)
   elseif type == "focuslost" then
