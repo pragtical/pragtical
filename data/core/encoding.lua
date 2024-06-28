@@ -18,3 +18,25 @@ encoding.convert = function(tocharset, fromcharset, text, options)
   end
   return encoding_convert(tocharset, fromcharset, text, options)
 end
+
+local encoding_detect = encoding.detect
+
+encoding.detect = function(filename)
+  local charset, errmsg = encoding_detect(filename)
+  if not charset then
+    local file = io.open(filename, "r")
+    if file then
+      local content = file:read("*a")
+      file:close()
+      local test_encodings = {
+        "UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE"
+      }
+      for _, encoding in ipairs(test_encodings) do
+        if encoding_convert("UTF-8", encoding, content, {strict = true}) then
+          return encoding
+        end
+      end
+    end
+  end
+  return charset, errmsg
+end
