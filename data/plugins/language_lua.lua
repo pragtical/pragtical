@@ -373,8 +373,11 @@ syntax.add {
       type = { "keyword", "normal", "keyword2", "normal", "operator", "normal", "function" }
     },
     -- Placeholder
-    { pattern = "_%s*(),",
-      type = { "operator", "normal" }
+    { pattern = "%f[%g]_%f[%G,%)]",
+      type = "operator"
+    },
+    { pattern = "%f[^,%(]_%f[%G,%)]",
+      type = "operator"
     },
     -- Function calls
     { pattern = "[%a_][%w_]+()%s*%f[(\"'{]", type = { "function", "normal" } },
