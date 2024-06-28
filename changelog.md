@@ -19,7 +19,7 @@
 ### Performance Improvements
 
 * Basic doc/docview cache for better performance
-  ([#110](https://github.com/pragtical/pragtical/pull/110))
+  ([#105](https://github.com/pragtical/pragtical/pull/105))
 
 ### Fixes
 
