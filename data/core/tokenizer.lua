@@ -339,8 +339,9 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     for n, p in ipairs(current_syntax.patterns) do
       local find_results = { find_text(text, p, i, true, false) }
       if find_results[1] then
-        -- Check for patterns successfully matching nothing
-        if find_results[1] > find_results[2] then
+        -- Check for patterns successfully matching nothing but allows
+        -- those that delegate the result to a subsyntax
+        if find_results[1] > find_results[2] and not p.syntax then
           report_bad_pattern(core.warn, current_syntax, n,
               "Pattern successfully matched, but nothing was captured.")
         -- Check for patterns with mismatching number of `types`
