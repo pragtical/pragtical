@@ -446,6 +446,11 @@ local function update_suggestions()
     end
   end
 
+  -- when triggered manually and first character is a punctuation, it causes
+  -- none of the items to match if they don't also start with the punctuation,
+  -- we remove the punctuations to ensure results with plugins like lsp
+  if triggered_manually then partial = partial:gsub("^%p+", "") end
+
   -- fuzzy match, remove duplicates and store
   items = common.fuzzy_match(items, partial, false)
   local j = 1
