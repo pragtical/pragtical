@@ -31,7 +31,8 @@ local function save_session()
   if fp then
     local session = {
       recents = core.recent_projects,
-      window = core.window_size,
+      window = core.window_mode ~= "fullscreen"
+        and table.pack(system.get_window_size(core.window)) or core.window_size,
       window_mode = core.window_mode ~= "fullscreen"
         and core.window_mode or core.prev_window_mode,
       previous_find = core.previous_find,
