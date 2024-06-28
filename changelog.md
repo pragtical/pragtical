@@ -1,5 +1,32 @@
 # Changes Log
 
+## [3.4.1] - 2024-06-28
+
+### Fixes
+
+* If no surface return on font_render_glyph
+  ([#114](https://github.com/pragtical/pragtical/pull/114))
+
+* Restore support for tokenizer empty matches with subsyntax
+  ([#111](https://github.com/pragtical/pragtical/pull/112))
+
+* If encoding detect fails check if UTF-16/32 LE/BE
+  ([#115](https://github.com/pragtical/pragtical/pull/115))
+
+### Enhancements
+
+* Better matching of placeholder chars (_) on lua
+  ([#112](https://github.com/pragtical/pragtical/pull/112))
+
+* Better restore of window mode/size on startup
+  ([#113](https://github.com/pragtical/pragtical/pull/113))
+
+* Added custom symbols pattern to language c and cpp
+  ([#116](https://github.com/pragtical/pragtical/pull/116))
+
+* autocomplete: strip punctuations from partials
+  ([#117](https://github.com/pragtical/pragtical/pull/117))
+
 ## [3.4.0] - 2024-06-25
 
 ### New Features
@@ -2022,6 +2049,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.4.1]: https://github.com/pragtical/pragtical/releases/tag/v3.4.1
 [3.4.0]: https://github.com/pragtical/pragtical/releases/tag/v3.4.0
 [3.3.1]: https://github.com/pragtical/pragtical/releases/tag/v3.3.1
 [3.3.0]: https://github.com/pragtical/pragtical/releases/tag/v3.3.0
