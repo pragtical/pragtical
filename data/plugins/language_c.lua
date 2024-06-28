@@ -11,6 +11,8 @@ syntax.add {
   files = { "%.c$" },
   comment = "//",
   block_comment = { "/*", "*/" },
+  symbol_pattern = "[%a_#][%w_]*",
+  symbol_non_word_chars = " \t\n/\\()\"':,.;<>~!@$%^&*|+=[]{}`?-",
   patterns = {
     { pattern = "//.*",                  type = "comment" },
     { pattern = { "/%*", "%*/" },        type = "comment" },
@@ -134,4 +136,3 @@ syntax.add {
     ["#pragma"] = "keyword",
   },
 }
-
