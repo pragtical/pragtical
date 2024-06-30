@@ -314,6 +314,7 @@ static void init_start(lua_State* L)
     "local exedir = match(EXEFILE, '^(.*)" PRAGTICAL_PATHSEP_PATTERN PRAGTICAL_NONPATHSEP_PATTERN "$')\n"
     "local prefix = os.getenv('PRAGTICAL_PREFIX') or match(exedir, '^(.*)" PRAGTICAL_PATHSEP_PATTERN "bin$')\n"
     "dofile((MACOS_RESOURCES or (prefix and prefix .. '/share/pragtical' or exedir .. '/data')) .. '/core/start.lua')\n"
+    "require('core.regex')\n"
   ;
 
   if (luaL_loadstring(L, lua_code)) {
@@ -379,7 +380,7 @@ static int f_thread_create(lua_State *L)
   copy_global("HOME", L, thread->L);
   copy_global("LUAJIT", L, thread->L);
 
-#ifdef __APPLE__
+#ifdef MACOS_USE_BUNDLE
   copy_global("MACOS_RESOURCES", L, thread->L);
 #endif
 
