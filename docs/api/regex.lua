@@ -48,13 +48,52 @@ function regex.compile(pattern, options) end
 ---
 ---Search a string for valid matches and returns a list of matching offsets.
 ---
+---@param pattern regex|string The regex pattern to use, either as a simple string or precompiled.
 ---@param subject string The string to search for valid matches.
 ---@param offset? integer The position on the subject to start searching.
 ---@param options? integer A bit field of matching options, eg:
 ---regex.NOTBOL | regex.NOTEMPTY
 ---
 ---@return integer? ... List of offsets where a match was found.
-function regex:cmatch(subject, offset, options) end
+function regex.cmatch(pattern, subject, offset, options) end
+
+---
+---Behaves like `string.find`.
+---Looks for the first match of `pattern` in the string `str`.
+---If it finds a match, it returns the indices of `str` where this occurrence
+---starts and ends; otherwise, it returns `nil`.
+---If the pattern has captures, the captured strings are returned,
+---after the two indexes ones.
+---If a capture is empty, its offset is returned instead.
+---
+---@param pattern regex|string The regex pattern to use, either as a simple string or precompiled.
+---@param subject string The string to search for valid matches.
+---@param offset? integer The position on the subject to start searching.
+---@param options? integer A bit field of matching options, eg:
+---regex.NOTBOL | regex.NOTEMPTY
+---
+---@return integer? start Offset where the first match was found; `nil` if no match.
+---@return integer? end Offset where the first match ends; `nil` if no match.
+---@return (string|integer)? ... #List of captured matches; if the match is empty, its offset is returned instead.
+function regex.find(pattern, subject, offset, options) end
+
+---
+---Looks for the first match of `pattern` in the string `subject`.
+---If it finds a match, it returns the indices of `subject` where this occurrence
+---starts and ends; otherwise, it returns `nil`.
+---If the pattern has captures, the captured start and end indexes are returned,
+---after the two initial ones.
+---
+---@param pattern regex|string The regex pattern to use, either as a simple string or precompiled.
+---@param subject string The string to search for valid matches.
+---@param offset? integer The position on the subject to start searching.
+---@param options? integer A bit field of matching options, eg:
+---regex.NOTBOL | regex.NOTEMPTY
+---
+---@return integer? start Offset where the first match was found; `nil` if no match.
+---@return integer? end Offset where the first match ends; `nil` if no match.
+---@return integer? ... #Captured matches offsets.
+function regex.find_offsets(pattern, subject, offset, options) end
 
 ---
 ---Returns an iterator function that, each time it is called, returns the
@@ -68,7 +107,7 @@ function regex:cmatch(subject, offset, options) end
 ---    end
 ---```
 ---
----@param pattern string
+---@param pattern regex|string The regex pattern to use, either as a simple string or precompiled.
 ---@param subject string
 ---@param offset? integer
 ---
@@ -81,7 +120,7 @@ function regex.gmatch(pattern, subject, offset) end
 ---$[1-9][0-9]* substitutions. Raises an error when failing to compile the
 ---pattern or by a substitution mistake.
 ---
----@param pattern regex|string
+---@param pattern regex|string The regex pattern to use, either as a simple string or precompiled.
 ---@param subject string
 ---@param replacement string
 ---@param limit? integer Limits the number of substitutions that will be done.
@@ -89,6 +128,22 @@ function regex.gmatch(pattern, subject, offset) end
 ---@return string? replaced_subject
 ---@return integer? total_replacements
 function regex.gsub(pattern, subject, replacement, limit) end
+
+---
+---Behaves like `string.match`.
+---Looks for the first match of `pattern` in the string `subject`.
+---If it finds a match, it returns the matched string; otherwise, it returns `nil`.
+---If the pattern has captures, only the captured strings are returned.
+---If a capture is empty, its offset is returned instead.
+---
+---@param pattern regex|string The regex pattern to use, either as a simple string or precompiled.
+---@param subject string The string to search for valid matches.
+---@param offset? integer The position on the subject to start searching.
+---@param options? integer A bit field of matching options, eg:
+---regex.NOTBOL | regex.NOTEMPTY
+---
+---@return (string|integer)? ... #List of captured matches; the entire match if no matches were specified; if the match is empty, its offset is returned instead.
+function regex.match(pattern, subject, offset, options) end
 
 
 return regex
