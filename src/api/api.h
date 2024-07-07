@@ -9,6 +9,7 @@
 #include "compat/compat-5.3.h"
 
 #define API_TYPE_FONT "Font"
+#define API_TYPE_REGEX "Regex"
 #define API_TYPE_THREAD "Thread"
 #define API_TYPE_CHANNEL "Channel"
 #define API_TYPE_PROCESS "Process"

@@ -1,5 +1,4 @@
 require "core.strict"
-require "core.regex"
 local common = require "core.common"
 local config = require "core.config"
 local style = require "colors.default"

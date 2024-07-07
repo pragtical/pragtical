@@ -6,6 +6,10 @@
 #include <pcre2.h>
 #include <stdbool.h>
 
+typedef struct RegexContainer {
+  pcre2_code* re;
+} RegexContainer;
+
 typedef struct RegexState {
   pcre2_code* re;
   pcre2_match_data* match_data;
@@ -20,10 +24,9 @@ static pcre2_code* regex_get_pattern(lua_State *L, bool* should_free) {
   pcre2_code* re = NULL;
   *should_free = false;
 
-  if (lua_type(L, 1) == LUA_TTABLE) {
-    lua_rawgeti(L, 1, 1);
-    re = (pcre2_code*)lua_touserdata(L, -1);
-    lua_settop(L, -2);
+  if (lua_type(L, 1) == LUA_TUSERDATA) {
+    RegexContainer* self = (RegexContainer*)luaL_checkudata(L, 1, API_TYPE_REGEX);
+    re = self->re;
   } else {
     int errornumber;
     PCRE2_SIZE erroroffset;
@@ -129,10 +132,9 @@ static size_t regex_offset_relative(lua_Integer pos, size_t len) {
 }
 
 static int f_pcre_gc(lua_State* L) {
-  lua_rawgeti(L, -1, 1);
-  pcre2_code* re = (pcre2_code*)lua_touserdata(L, -1);
-  if (re)
-    pcre2_code_free(re);
+  RegexContainer* self = (RegexContainer*)luaL_checkudata(L, 1, API_TYPE_REGEX);
+  if (self->re)
+    pcre2_code_free(self->re);
   return 0;
 }
 
@@ -161,10 +163,9 @@ static int f_pcre_compile(lua_State *L) {
   );
   if (re) {
     pcre2_jit_compile(re, PCRE2_JIT_COMPLETE);
-    lua_newtable(L);
-    lua_pushlightuserdata(L, re);
-    lua_rawseti(L, -2, 1);
-    luaL_setmetatable(L, "regex");
+    RegexContainer* self = lua_newuserdata(L, sizeof(RegexContainer));
+    luaL_setmetatable(L, API_TYPE_REGEX);
+    self->re = re;
     return 1;
   }
   PCRE2_UCHAR buffer[256];
@@ -178,30 +179,31 @@ static int f_pcre_compile(lua_State *L) {
 
 // Takes string, compiled regex, returns list of indices of matched groups
 // (including the whole match), if a match was found.
-static int f_pcre_match(lua_State *L) {
-  size_t len, offset = 1, opts = 0;
+static int f_pcre_cmatch(lua_State *L) {
+  /* pattern param */
   bool regex_compiled = false;
   pcre2_code* re = regex_get_pattern(L, &regex_compiled);
-  if (!re) return 0 ;
-  const char* str = luaL_checklstring(L, 2, &len);
-  if (lua_gettop(L) > 2)
-    offset = regex_offset_relative(luaL_checknumber(L, 3), len);
-  offset -= 1;
-  len -= offset;
-  if (lua_gettop(L) > 3)
-    opts = luaL_checknumber(L, 4);
-  lua_rawgeti(L, 1, 1);
+  if (!re) return 0;
+  /* subject param */
+  size_t subject_len = 0;
+  const char* subject = luaL_checklstring(L, 2, &subject_len);
+  /* offset param */
+  size_t offset = regex_offset_relative(
+    luaL_optnumber(L, 3, 1), subject_len
+  ) - 1;
+  /* options param */
+  int opts = luaL_optnumber(L, 4, 0);
+  int total_results = 0;
+  subject_len -= offset;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
-  int rc = pcre2_match(re, (PCRE2_SPTR)&str[offset], len, 0, opts, md, NULL);
+  int rc = pcre2_match(re, (PCRE2_SPTR)&subject[offset], subject_len, 0, opts, md, NULL);
   if (rc < 0) {
-    if (regex_compiled) pcre2_code_free(re);
-    pcre2_match_data_free(md);
     if (rc != PCRE2_ERROR_NOMATCH) {
       PCRE2_UCHAR buffer[120];
       pcre2_get_error_message(rc, buffer, sizeof(buffer));
       luaL_error(L, "regex matching error %d: %s", rc, buffer);
     }
-    return 0;
+    goto clean;
   }
   PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(md);
   if (ovector[0] > ovector[1]) {
@@ -210,15 +212,124 @@ static int f_pcre_match(lua_State *L) {
     we just detect this case and give up. */
     luaL_error(L, "regex matching error: \\K was used in an assertion to "
     " set the match start after its end");
-    if (regex_compiled) pcre2_code_free(re);
-    pcre2_match_data_free(md);
-    return 0;
+    goto clean;
   }
-  for (int i = 0; i < rc*2; i++)
+  total_results = rc*2;
+  for (int i = 0; i < total_results; i++)
     lua_pushinteger(L, ovector[i]+offset+1);
+
+clean:
   if (regex_compiled) pcre2_code_free(re);
   pcre2_match_data_free(md);
-  return rc*2;
+
+  return total_results;
+}
+
+static int f_pcre_find(lua_State *L) {
+  /* pattern param */
+  bool regex_compiled = false;
+  pcre2_code* re = regex_get_pattern(L, &regex_compiled);
+  if (!re) return 0;
+  /* subject param */
+  size_t subject_len = 0;
+  const char* subject = luaL_checklstring(L, 2, &subject_len);
+  /* offset param */
+  size_t offset = regex_offset_relative(
+    luaL_optnumber(L, 3, 1), subject_len
+  ) - 1;
+  /* options param */
+  int opts = luaL_optnumber(L, 4, 0);
+  int total_results = 0;
+  subject_len -= offset;
+  pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
+  int rc = pcre2_match(re, (PCRE2_SPTR)&subject[offset], subject_len, 0, opts, md, NULL);
+  if (rc < 0) {
+    if (rc != PCRE2_ERROR_NOMATCH) {
+      PCRE2_UCHAR buffer[120];
+      pcre2_get_error_message(rc, buffer, sizeof(buffer));
+      luaL_error(L, "regex matching error %d: %s", rc, buffer);
+    }
+    goto clean;
+  }
+  PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(md);
+  if (ovector[0] > ovector[1]) {
+    /* We must guard against patterns such as /(?=.\K)/ that use \K in an
+    assertion  to set the start of a match later than its end. In the editor,
+    we just detect this case and give up. */
+    luaL_error(L, "regex matching error: \\K was used in an assertion to "
+    " set the match start after its end");
+    goto clean;
+  }
+  int results_count = rc*2;
+  if (results_count > 0) {
+    lua_pushinteger(L, ovector[0]+offset+1); lua_pushinteger(L, ovector[1]+offset);
+    total_results += 2;
+  }
+  for (int i=2; i < results_count; i+=2) {
+    if (ovector[i] == ovector[i+1])
+      lua_pushinteger(L, ovector[0]+offset+1);
+    else
+      lua_pushlstring(L, subject+ovector[i], ovector[i+1] - ovector[i]);
+
+    total_results++;
+  }
+
+clean:
+  if (regex_compiled) pcre2_code_free(re);
+  pcre2_match_data_free(md);
+
+  return total_results;
+}
+
+static int f_pcre_find_offsets(lua_State *L) {
+  /* pattern param */
+  bool regex_compiled = false;
+  pcre2_code* re = regex_get_pattern(L, &regex_compiled);
+  if (!re) return 0;
+  /* subject param */
+  size_t subject_len = 0;
+  const char* subject = luaL_checklstring(L, 2, &subject_len);
+  /* offset param */
+  size_t offset = regex_offset_relative(
+    luaL_optnumber(L, 3, 1), subject_len
+  ) - 1;
+  /* options param */
+  int opts = luaL_optnumber(L, 4, 0);
+  int total_results = 0;
+  pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
+  int rc = pcre2_match(re, (PCRE2_SPTR)&subject[offset], subject_len, 0, opts, md, NULL);
+  if (rc < 0) {
+    if (rc != PCRE2_ERROR_NOMATCH) {
+      PCRE2_UCHAR buffer[120];
+      pcre2_get_error_message(rc, buffer, sizeof(buffer));
+      luaL_error(L, "regex matching error %d: %s", rc, buffer);
+    }
+    goto clean;
+  }
+  PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(md);
+  if (ovector[0] > ovector[1]) {
+    /* We must guard against patterns such as /(?=.\K)/ that use \K in an
+    assertion  to set the start of a match later than its end. In the editor,
+    we just detect this case and give up. */
+    luaL_error(L, "regex matching error: \\K was used in an assertion to "
+    " set the match start after its end");
+    goto clean;
+  }
+  total_results = rc*2;
+  if (total_results > 0) {
+    lua_pushinteger(L, ovector[0]+offset+1);
+    lua_pushinteger(L, ovector[1]+offset+1);
+  }
+  for (int i = 2; i < total_results; i+=2) {
+    lua_pushinteger(L, ovector[i]+offset+1);
+    lua_pushinteger(L, ovector[i+1]+offset);
+  }
+
+clean:
+  if (regex_compiled) pcre2_code_free(re);
+  pcre2_match_data_free(md);
+
+  return total_results;
 }
 
 static int f_pcre_gmatch(lua_State *L) {
@@ -226,11 +337,9 @@ static int f_pcre_gmatch(lua_State *L) {
   bool regex_compiled = false;
   pcre2_code* re = regex_get_pattern(L, &regex_compiled);
   if (!re) return 0;
-  size_t subject_len = 0;
-
   /* subject param */
+  size_t subject_len = 0;
   const char* subject = luaL_checklstring(L, 2, &subject_len);
-
   /* offset param */
   size_t offset = regex_offset_relative(
     luaL_optnumber(L, 3, 1), subject_len
@@ -354,21 +463,87 @@ static int f_pcre_gsub(lua_State *L) {
   return return_count;
 }
 
-static const luaL_Reg lib[] = {
-  { "compile",  f_pcre_compile },
-  { "cmatch",   f_pcre_match },
-  { "gmatch",   f_pcre_gmatch },
-  { "gsub",     f_pcre_gsub },
-  { "__gc",     f_pcre_gc },
-  { NULL,       NULL }
+static int f_pcre_match(lua_State *L) {
+  /* pattern param */
+  bool regex_compiled = false;
+  pcre2_code* re = regex_get_pattern(L, &regex_compiled);
+  if (!re) return 0;
+  /* subject param */
+  size_t subject_len = 0;
+  const char* subject = luaL_checklstring(L, 2, &subject_len);
+  /* offset param */
+  size_t offset = regex_offset_relative(
+    luaL_optnumber(L, 3, 1), subject_len
+  ) - 1;
+  /* options param */
+  int opts = luaL_optnumber(L, 4, 0);
+  int total_results = 0;
+  subject_len -= offset;
+  pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
+  int rc = pcre2_match(re, (PCRE2_SPTR)&subject[offset], subject_len, 0, opts, md, NULL);
+  if (rc < 0) {
+    if (rc != PCRE2_ERROR_NOMATCH) {
+      PCRE2_UCHAR buffer[120];
+      pcre2_get_error_message(rc, buffer, sizeof(buffer));
+      luaL_error(L, "regex matching error %d: %s", rc, buffer);
+    }
+    goto clean;
+  }
+  PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(md);
+  if (ovector[0] > ovector[1]) {
+    /* We must guard against patterns such as /(?=.\K)/ that use \K in an
+    assertion  to set the start of a match later than its end. In the editor,
+    we just detect this case and give up. */
+    luaL_error(L, "regex matching error: \\K was used in an assertion to "
+    " set the match start after its end");
+    goto clean;
+  }
+  int results_count = rc*2;
+  for (int i = 2; i < results_count; i+=2) {
+    if (ovector[i] == ovector[i+1])
+      lua_pushinteger(L, ovector[i]+1);
+    else
+      lua_pushlstring(L, subject+ovector[i], ovector[i+1] - ovector[i]);
+    total_results++;
+  }
+
+clean:
+  if (regex_compiled) pcre2_code_free(re);
+  pcre2_match_data_free(md);
+
+  return total_results;
+}
+
+static const struct luaL_Reg regex_lib[] = {
+  { "compile",      f_pcre_compile },
+  { "cmatch",       f_pcre_cmatch },
+  { "find",         f_pcre_find },
+  { "find_offsets", f_pcre_find_offsets },
+  { "gmatch",       f_pcre_gmatch },
+  { "gsub",         f_pcre_gsub },
+  { "match",        f_pcre_match },
+  {NULL, NULL}
+};
+
+static const struct luaL_Reg regex_object[] = {
+  { "cmatch",       f_pcre_cmatch },
+  { "find",         f_pcre_find },
+  { "find_offsets", f_pcre_find_offsets },
+  { "gmatch",       f_pcre_gmatch },
+  { "gsub",         f_pcre_gsub },
+  { "match",        f_pcre_match },
+  { "__gc",         f_pcre_gc },
+  {NULL, NULL}
 };
 
 int luaopen_regex(lua_State *L) {
-  luaL_newlib(L, lib);
-  lua_pushliteral(L, "regex");
-  lua_setfield(L, -2, "__name");
+  luaL_newmetatable(L, API_TYPE_REGEX);
+  luaL_setfuncs(L, regex_object, 0);
   lua_pushvalue(L, -1);
-  lua_setfield(L, LUA_REGISTRYINDEX, "regex");
+  lua_setfield(L, -2, "__index");
+
+  luaL_newlib(L, regex_lib);
+
   lua_pushinteger(L, PCRE2_ANCHORED);
   lua_setfield(L, -2, "ANCHORED");
   lua_pushinteger(L, PCRE2_ANCHORED) ;
