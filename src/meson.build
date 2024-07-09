@@ -10,6 +10,7 @@ pragtical_sources = [
     'api/shmem.c',
     'api/utf8.c',
     'api/encoding.c',
+    'arena_allocator.c',
     'renderer.c',
     'renwindow.c',
     'rencache.c',
@@ -99,7 +100,7 @@ executable('pragtical',
 )
 
 if host_machine.system() == 'windows'
-    executable('pragtical', 
+    executable('pragtical',
         'main_com.c',
         name_suffix: 'com',
         install_dir: pragtical_bindir,
