@@ -919,7 +919,7 @@ end, {{name = "file", type = "string"}})
 ipc:register_method("core.open_directory", function(directory)
   if system.get_file_info(directory) then
     system.raise_window(core.window)
-    core.add_project_directory(directory)
+    core.add_project(directory)
   end
 end, {{name = "directory", type = "string"}})
 
