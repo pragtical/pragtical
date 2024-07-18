@@ -30,7 +30,7 @@
 #define CMD_BUF_INIT_SIZE (1024 * 512)
 #define COMMAND_BARE_SIZE offsetof(Command, command)
 
-enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT };
+enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_POLY };
 
 typedef struct {
   enum CommandType type;
@@ -59,6 +59,13 @@ typedef struct {
   RenRect rect;
   RenColor color;
 } DrawRectCommand;
+
+typedef struct {
+  RenRect rect;
+  RenColor color;
+  unsigned short npoints;
+  RenPoint points[];
+} DrawBezierCommand;
 
 static bool show_debug = false;
 
@@ -229,6 +236,23 @@ double rencache_draw_text(RenCache *ren_cache, RenFont **fonts, const char *text
   return x + width;
 }
 
+RenRect rencache_draw_poly(RenCache *ren_cache, RenPoint *points, int npoints, RenColor color) {
+  RenRect rect;
+  if (ren_poly_cbox(points, npoints, &rect) != 0) {
+    return (RenRect){-1};
+  }
+  if (rects_overlap(ren_cache->last_clip_rect, rect)) {
+    size_t size = npoints + npoints * sizeof(RenPoint);
+    DrawBezierCommand *cmd = push_command(ren_cache, DRAW_POLY, sizeof(DrawBezierCommand) + size);
+    if (cmd) {
+      cmd->rect = rect;
+      cmd->color = color;
+      cmd->npoints = npoints;
+      memcpy(cmd->points, points, npoints * sizeof(RenPoint));
+    }
+  }
+  return rect;
+}
 
 void rencache_invalidate(RenCache *ren_cache) {
   memset(ren_cache->cells_prev, 0xff, sizeof(ren_cache->cells_buf1));
@@ -330,6 +354,7 @@ void rencache_end_frame(RenCache *ren_cache) {
       SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
       DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
       DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
+      DrawBezierCommand *bcmd = (DrawBezierCommand*)&cmd->command;
       switch (cmd->type) {
         case SET_CLIP:
           ren_set_clip_rect(&rs, intersect_rects(ccmd->rect, r));
@@ -340,6 +365,9 @@ void rencache_end_frame(RenCache *ren_cache) {
         case DRAW_TEXT:
           ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
           ren_draw_text(&rs, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y, tcmd->color, tcmd->tab);
+          break;
+        case DRAW_POLY:
+          ren_draw_poly(&rs, bcmd->points, bcmd->npoints, bcmd->color);
           break;
       }
     }
