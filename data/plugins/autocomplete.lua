@@ -297,14 +297,14 @@ core.add_thread(function()
             doc.disable_symbols = true
             local filename_message
             if doc.filename then
-              filename_message = "document " .. doc.filename
+              filename_message = doc.filename
             else
-              filename_message = "unnamed document"
+              filename_message = "unnamed"
             end
-            core.status_view:show_message("!", style.accent,
-              "Too many symbols in "..filename_message..
-              ": stopping auto-complete for this document according to "..
-              "config.plugins.autocomplete.max_symbols."
+            core.warn(
+              "Too many symbols in '%s': stopping auto-complete for this document "
+                .. "according to config.plugins.autocomplete.max_symbols.",
+              filename_message
             )
             collectgarbage('collect')
             return {}
