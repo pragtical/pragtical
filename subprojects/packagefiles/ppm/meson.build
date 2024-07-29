@@ -34,7 +34,7 @@ elif get_option('wrap_mode') != 'forcefallback' and not is_msys
 
     ppm_lua_c = configure_file(
         capture: false,
-        command: [lua_exe, '-e', 'f = string.dump(assert(loadfile("@INPUT0@"))) io.open("@OUTPUT0@", "wb"):write("unsigned char ppm_luac[] = \"" .. f:gsub(".", function (c) return string.format("\\\x%02X",string.byte(c)) end) .. "\";unsigned int ppm_luac_len = " .. #f .. ";")'],
+        command: [lua_exe, '-e', 'f = string.dump(assert(load(io.lines("@INPUT0@", "L"), "=ppm.lua"))) io.open("@OUTPUT0@", "wb"):write("unsigned char ppm_luac[] = \"" .. f:gsub(".", function (c) return string.format("\\\x%02X",string.byte(c)) end) .. "\";unsigned int ppm_luac_len = " .. #f .. ";")'],
         input: files('src/ppm.lua'),
         output: 'ppm.lua.c'
     )
@@ -132,6 +132,11 @@ else
             bin = 'ppm.aarch64-darwin'
             env.set('CC', 'clang')
             env.set('CFLAGS', '-arch arm64')
+        endif
+    else
+        env.set('LDFLAGS', '-lpthread')
+        if is_msys
+            env.set('CFLAGS', '-Wno-incompatible-pointer-types')
         endif
     endif
 
