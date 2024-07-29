@@ -444,6 +444,7 @@ function core.init()
   core.visited_files = {}
   core.restart_request = false
   core.quit_request = false
+  core.init_working_dir = system.getcwd()
 
   -- We load core views before plugins that may need them.
   ---@type core.rootview
