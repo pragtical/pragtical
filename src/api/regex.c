@@ -267,7 +267,7 @@ static int f_pcre_find(lua_State *L) {
   }
   for (int i=2; i < results_count; i+=2) {
     if (ovector[i] == ovector[i+1])
-      lua_pushinteger(L, ovector[0]+offset+1);
+      lua_pushinteger(L, ovector[i]+offset+1);
     else
       lua_pushlstring(L, subject+ovector[i], ovector[i+1] - ovector[i]);
 
