@@ -871,6 +871,7 @@ system.get_time = function()
     if primary_instance and ARGS[2] then
       local open_directory = false
       for i=2, #ARGS do
+        system.chdir(core.init_working_dir)
         local path = system.absolute_path(ARGS[i])
 
         if path then
