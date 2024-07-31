@@ -499,12 +499,17 @@ static int f_pcre_match(lua_State *L) {
     goto clean;
   }
   int results_count = rc*2;
-  for (int i = 2; i < results_count; i+=2) {
-    if (ovector[i] == ovector[i+1])
-      lua_pushinteger(L, ovector[i]+1);
-    else
-      lua_pushlstring(L, subject+ovector[i], ovector[i+1] - ovector[i]);
+  if (results_count == 2) {
+    lua_pushlstring(L, subject+ovector[0], ovector[1] - ovector[0]);
     total_results++;
+  } else if(results_count > 0) {
+    for (int i = 2; i < results_count; i+=2) {
+      if (ovector[i] == ovector[i+1])
+        lua_pushinteger(L, ovector[i]+1);
+      else
+        lua_pushlstring(L, subject+ovector[i], ovector[i+1] - ovector[i]);
+      total_results++;
+    }
   }
 
 clean:
