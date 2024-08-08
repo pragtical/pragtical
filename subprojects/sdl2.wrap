@@ -1,13 +1,13 @@
 [wrap-file]
-directory = SDL2-2.30.3
-source_url = https://github.com/libsdl-org/SDL/releases/download/release-2.30.3/SDL2-2.30.3.tar.gz
-source_filename = SDL2-2.30.3.tar.gz
-source_hash = 820440072f8f5b50188c1dae104f2ad25984de268785be40c41a099a510f0aec
-patch_filename = sdl2_2.30.3-3_patch.zip
-patch_url = https://wrapdb.mesonbuild.com/v2/sdl2_2.30.3-3/get_patch
-patch_hash = 58db4d525787a2f0585cc5256b3cf3ef1150ff7a100bd2e8995b478c7ee55e5f
-source_fallback_url = https://github.com/mesonbuild/wrapdb/releases/download/sdl2_2.30.3-3/SDL2-2.30.3.tar.gz
-wrapdb_version = 2.30.3-3
+directory = SDL2-2.30.6
+source_url = https://github.com/libsdl-org/SDL/releases/download/release-2.30.6/SDL2-2.30.6.tar.gz
+source_filename = SDL2-2.30.6.tar.gz
+source_hash = c6ef64ca18a19d13df6eb22df9aff19fb0db65610a74cc81dae33a82235cacd4
+patch_filename = sdl2_2.30.6-1_patch.zip
+patch_url = https://wrapdb.mesonbuild.com/v2/sdl2_2.30.6-1/get_patch
+patch_hash = 9c143c81d02ac33fe4d50b320ee2860e59552a30e087630de298af44a16ed015
+source_fallback_url = https://github.com/mesonbuild/wrapdb/releases/download/sdl2_2.30.6-1/SDL2-2.30.6.tar.gz
+wrapdb_version = 2.30.6-1
 
 [provide]
 sdl2 = sdl2_dep

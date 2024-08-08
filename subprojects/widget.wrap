@@ -1,5 +1,5 @@
 [wrap-git]
 url = https://github.com/pragtical/widget.git
-revision = a748887a79858faf6be3ed33ef39bb52da4bdd64
+revision = f7c3e04f248fe455c4ba867e2c33e65932f86170
 depth = 1
 patch_directory = widget
