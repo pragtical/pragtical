@@ -28,6 +28,7 @@ syntax.add {
     { pattern = "[%+%-=/%*%^%%<>!~|&]",  type = "operator" },
     { pattern = "##",                    type = "operator" },
     { pattern = "struct%s()[%a_][%w_]*", type = {"keyword", "keyword2"} },
+    { pattern = "enum%s()[%a_][%w_]*",   type = {"keyword", "keyword2"} },
     { pattern = "union%s()[%a_][%w_]*",  type = {"keyword", "keyword2"} },
     -- static declarations
     { pattern = "static()%s+()inline",
@@ -39,15 +40,25 @@ syntax.add {
     { pattern = "static()%s+()[%a_][%w_]*",
       type = { "keyword", "normal", "literal" }
     },
-    -- match function type declarations
-    { pattern = "[%a_][%w_]*()%*+()%s+()[%a_][%w_]*%f[%(]",
-      type = { "literal", "operator", "normal", "function" }
+    -- match single line type declarations (exclude keywords)
+    { pattern = "^%s*_?%u[%u_][%u%d_]*%s*\n", -- skip uppercase constants
+      type = "number"
     },
-    { pattern = "[%a_][%w_]*()%s+()%*+()[%a_][%w_]*%f[%(]",
-      type = { "literal", "normal", "operator", "function" }
+    { pattern = "^%s*()[%a_][%w_]*()%s*%*+()%s*\n", -- pointer
+      type = { "normal", "literal", "operator", "normal" }
     },
-    { pattern = "[%a_][%w_]*()%s+()[%a_][%w_]*%f[%(]",
-      type = { "literal", "normal", "function" }
+    { pattern = "^%s*()[%a_][%w_]*()%s*\n", -- non-pointer
+      type = { "normal", "literal", "normal" }
+    },
+    -- match function type declarations (exclude keywords)
+    { pattern = "[%a_][%w_]*()%*+()%s+()[%a_][%w_]*()%s*%f[%(]",
+      type = { "literal", "operator", "normal", "function", "normal" }
+    },
+    { pattern = "[%a_][%w_]*()%s+()%*+()[%a_][%w_]*()%s*%f[%(]",
+      type = { "literal", "normal", "operator", "function", "normal" }
+    },
+    { pattern = "[%a_][%w_]*()%s+()[%a_][%w_]*()%s*%f[%(]",
+      type = { "literal", "normal", "function", "normal" }
     },
     -- match variable type declarations
     { pattern = "[%a_][%w_]*()%*+()%s+()[%a_][%w_]*",
@@ -59,6 +70,9 @@ syntax.add {
     { pattern = "[%a_][%w_]*()%s+()[%a_][%w_]*()%s*()[;,%[%)]",
       type = { "literal", "normal", "normal", "normal", "normal" }
     },
+    { pattern = "^%s*()[%a_][%w_]*()%s+[%a_][%w_]*()%s*\n",
+      type = { "normal", "literal", "normal", "normal" }
+    },
     { pattern = "[%a_][%w_]*()%s+()[%a_][%w_]*()%s*()=",
       type = { "literal", "normal", "normal", "normal", "operator" }
     },
@@ -69,13 +83,16 @@ syntax.add {
       type = { "literal", "normal", "operator", "normal" }
     },
     -- Uppercase constants of at least 2 chars in len
+    { pattern = "_?%u[%u_][%u%d_]*%s*%f[%(]", -- when used as function
+      type = "number"
+    },
     { pattern = "_?%u[%u_][%u%d_]*%f[%s%+%*%-%.%)%]}%?%^%%=/<>~|&;:,!]",
       type = "number"
     },
     -- Magic constants
     { pattern = "__[%u%l]+__",           type = "number"   },
-    -- all other functions
-    { pattern = "[%a_][%w_]*%f[(]",      type = "function" },
+    -- all other functions (excludes keywords)
+    { pattern = "[%a_][%w_]*()%s*%f[(]", type = {"function", "normal"} },
     -- Macros
     { pattern = "^%s*#%s*define%s+()[%a_][%a%d_]*",
       type = { "keyword", "symbol" }
