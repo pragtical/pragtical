@@ -1,5 +1,47 @@
 # Changes Log
 
+## [3.4.2] - 2024-08-11
+
+### Performance Improvements
+
+* Revert previous optimized glyphset loading lite-xl/lite-xl#1543
+  and rebased/merged new implementation which is even faster
+  ([lite-xl/lite-xl#1845](https://github.com/lite-xl/lite-xl/pull/1845))
+
+* Port rest of regex functions from Lua to C
+  ([#120](https://github.com/pragtical/pragtical/pull/120))
+
+### Enhancements
+
+* Enable utf8 module for Lua < 5.3 using utf8extra
+  ([#119](https://github.com/pragtical/pragtical/pull/119))
+
+* Use core.warn on autocomplete plugin
+  ([89d24eb4](https://github.com/pragtical/pragtical/commit/89d24eb45e82a2bd49ce0a8ed56e313169c17693))
+
+* Improvements to c/c++ language plugins (#128)
+  ([#128](https://github.com/pragtical/pragtical/pull/128))
+
+### Fixes
+
+* Fix thread initialization on non macOS bundle
+  ([#118](https://github.com/pragtical/pragtical/pull/118))
+
+* Fix use of no longer valid core.add_project_directory
+  ([#121](https://github.com/pragtical/pragtical/pull/121))
+
+* Fix for IPC plugin to properly open a relative path
+  ([#125](https://github.com/pragtical/pragtical/pull/125))
+
+### Build System
+
+* Fix PPM build on msys (#126)
+  ([#126](https://github.com/pragtical/pragtical/pull/126))
+
+* Update sdl2 wrap to v2.30.6 which fixes an initialization
+  issue on hyprland and other wrap components.
+  ([#127](https://github.com/pragtical/pragtical/pull/127))
+
 ## [3.4.1] - 2024-06-28
 
 ### Fixes
@@ -2049,6 +2091,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.4.2]: https://github.com/pragtical/pragtical/releases/tag/v3.4.2
 [3.4.1]: https://github.com/pragtical/pragtical/releases/tag/v3.4.1
 [3.4.0]: https://github.com/pragtical/pragtical/releases/tag/v3.4.0
 [3.3.1]: https://github.com/pragtical/pragtical/releases/tag/v3.3.1
