@@ -61,7 +61,7 @@ function View:new()
   self.scrollable = false
   self.v_scrollbar = Scrollbar({direction = "v", alignment = "e"})
   self.h_scrollbar = Scrollbar({direction = "h", alignment = "e"})
-  self.current_scale = SCALE
+  self.current_scale = 1.0
 end
 
 function View:move_towards(t, k, dest, rate, name)

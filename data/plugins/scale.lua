@@ -18,8 +18,8 @@ config.plugins.scale = common.merge({
 
 local scale_steps = 0.05
 
-local current_scale = SCALE
-local default_scale = SCALE
+local current_scale = 1.0
+local default_scale = DEFAULT_SCALE
 
 local function set_scale(scale)
   scale = common.clamp(scale, 0.2, 6)
@@ -179,6 +179,10 @@ if config.plugins.scale.use_mousewheel then
     ["ctrl+wheelup"] = "scale:increase",
     ["ctrl+wheeldown"] = "scale:decrease"
   }
+end
+
+if current_scale ~= default_scale then
+  set_scale(default_scale)
 end
 
 return {

@@ -96,9 +96,7 @@ typedef struct RenFont {
   FT_Face face;
   CharMap charmap;
   GlyphMap glyphs;
-#ifdef PRAGTICAL_USE_SDL_RENDERER
   double scale;
-#endif
   float size, space_advance;
   unsigned short max_height, baseline, height, tab_size;
   unsigned short underline_thickness;
@@ -235,7 +233,7 @@ static SDL_Surface *font_allocate_glyph_surface(RenFont *font, FT_GlyphSlot slot
     // allocate a new surface array, and a surface
     int h = FONT_HEIGHT_OVERFLOW_PX + (double) font->face->size->metrics.height / 64.0f;
     if (h <= FONT_HEIGHT_OVERFLOW_PX) h += slot->bitmap.rows;
-    if (h <= FONT_HEIGHT_OVERFLOW_PX) h += font->size;
+    if (h <= FONT_HEIGHT_OVERFLOW_PX) h += font->size * font->scale;
     atlas->surfaces = check_alloc(realloc(atlas->surfaces, sizeof(SDL_Surface *) * (atlas->nsurface + 1)));
     atlas->surfaces[atlas->nsurface] = check_alloc(SDL_CreateRGBSurface(
       0, atlas->width, GLYPHS_PER_ATLAS * h, FONT_BITMAP_COUNT(font) * 8,
@@ -397,16 +395,17 @@ static void font_file_close(FT_Stream stream) {
 
 static int font_set_face_metrics(RenFont *font, FT_Face face) {
   FT_Error err;
-  if ((err = FT_Set_Pixel_Sizes(face, 0, (int) font->size)) != 0)
+  int font_size = font->size * font->scale;
+  if ((err = FT_Set_Pixel_Sizes(face, 0, font_size)) != 0)
     return err;
 
   font->face = face;
   if(FT_IS_SCALABLE(face)) {
-  font->height = (short)((face->height / (float)face->units_per_EM) * font->size);
-  font->baseline = (short)((face->ascender / (float)face->units_per_EM) * font->size);
+  font->height = (short)((face->height / (float)face->units_per_EM) * font_size);
+  font->baseline = (short)((face->ascender / (float)face->units_per_EM) * font_size);
 
   if(FT_IS_SCALABLE(face))
-    font->underline_thickness = (unsigned short)((face->underline_thickness / (float)face->units_per_EM) * font->size);
+    font->underline_thickness = (unsigned short)((face->underline_thickness / (float)face->units_per_EM) * font_size);
   } else {
     font->height = (short) font->face->size->metrics.height / 64.0f;
     font->baseline = (short) font->face->size->metrics.ascender / 64.0f;
@@ -435,9 +434,7 @@ RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antial
   font->hinting = hinting;
   font->style = style;
   font->tab_size = 2;
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-  font->scale = 1;
-#endif
+  font->scale = 1.0;
 
   stream = check_alloc(calloc(1, sizeof(FT_StreamRec)));
   if (!stream) goto stream_failure;
@@ -953,6 +950,7 @@ void ren_destroy(RenWindow* window_renderer) {
 
 void ren_resize_window(RenWindow *window_renderer) {
   renwin_resize_surface(window_renderer);
+  renwin_update_scale(window_renderer);
 }
 
 // TODO: Does not work nicely with multiple windows
