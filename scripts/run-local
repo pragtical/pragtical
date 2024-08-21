@@ -113,7 +113,7 @@ run_pragtical () {
     if [ ! -z ${run_windows+x} ]; then
       USERPROFILE="$userdir" exec "$bindir/pragtical" "${pargs[@]:1}"
     else
-      HOME="$userdir" exec "$bindir/pragtical" "${pargs[@]:1}"
+      PRAGTICAL_USERDIR="$userdir" exec "$bindir/pragtical" "${pargs[@]:1}"
     fi
   fi
 }
