@@ -3,6 +3,7 @@ url = https://github.com/LuaJIT/LuaJIT
 revision = v2.1
 depth = 1
 patch_directory = luajit
+diff_files = luajit/001-luajit-unicode.diff
 
 [provide]
 luajit = luajit_dep

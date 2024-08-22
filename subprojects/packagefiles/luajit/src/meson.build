@@ -11,6 +11,7 @@ ljlib_src = files(
     'lib_package.c',
     'lib_string.c',
     'lib_table.c',
+    'utf8_wrappers.c',
 )
 
 ljcore_src = files(
