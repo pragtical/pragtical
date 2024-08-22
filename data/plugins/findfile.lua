@@ -355,24 +355,17 @@ command.add(nil, {
       last_indexed_projects = current_projects
     end
 
-    -- allows quick switching to previous file when the show recent files
-    -- option is enabled or to pick the first entry on the list without
-    -- having to tab (complete) the entry
-    local first_result = nil
-
     core.command_view:enter("Open File From Project", {
-      submit = function(text)
-        if text == "" then
-          if first_result then
-            if type(first_result) == "table" then
-              text = first_result.text
-            else
-              text = first_result[1]
-            end
-          else
-            return
-          end
+      submit = function(text, suggestion)
+        if not suggestion then
+          if text == "" then return end
+          local filename = core.current_project():absolute_path(
+            common.home_expand(text)
+          )
+          core.root_view:open_doc(core.open_doc(filename))
+          return
         end
+        text = suggestion.text
         if multiple_projects then
           local project_name, file_path = text:match(
             "^([^"..PATHSEP.."]+)"..PATHSEP.."(.*)"
@@ -411,7 +404,6 @@ command.add(nil, {
         if config.plugins.findfile.show_recent then
           results = common.fuzzy_match_with_recents(results, get_visited_files(), text)
         end
-        first_result = results[1]
         matching_files = #results
         return results
       end
