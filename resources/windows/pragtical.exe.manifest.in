@@ -2,9 +2,17 @@
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
     type="win32"
-    name="Pragtical.Pragtical.Pragtical"
+    name="Pragtical"
     version="@PROJECT_ASSEMBLY_VERSION@"
   />
+  <description>Pragtical - The Pragtical and Pragmatic Code Editor</description>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
@@ -13,24 +21,17 @@
     </security>
   </trustInfo>
   <dependency>
-      <dependentAssembly>
-          <assemblyIdentity
-            type="win32"
-            name="Microsoft.Windows.Common-Controls"
-            version="6.0.0.0"
-            processorArchitecture="*"
-            publicKeyToken="6595b64144ccf1df"
-            language="*"
-          />
-      </dependentAssembly>
+    <dependentAssembly>
+        <assemblyIdentity
+          type="win32"
+          name="Microsoft.Windows.Common-Controls"
+          version="6.0.0.0"
+          processorArchitecture="*"
+          publicKeyToken="6595b64144ccf1df"
+          language="*"
+        />
+    </dependentAssembly>
   </dependency>
-
-  <asmv3:application xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-    <asmv3:windowsSettings xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
-      <dpiAware>true</dpiAware>
-    </asmv3:windowsSettings>
-  </asmv3:application>
-
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <!--The ID below indicates application support for Windows Vista -->
