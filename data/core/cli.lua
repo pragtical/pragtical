@@ -1,4 +1,4 @@
-local core = "core"
+local core = require "core"
 
 ---@alias core.cli.flag_type
 ---|>'"empty"'   # Does not needs a value
@@ -70,11 +70,8 @@ function cli.register(command, overwrite)
   if not cli.commands[command.command] or overwrite then
     cli.commands[command.command] = command
     cli.commands_count = cli.commands_count + 1
-  elseif core.error then
-    core.error("CLI command '%s' already registered", command.command)
   else
-    print(string.format("CLI command '%s' already registered", command.command))
-    os.exit(1)
+    core.error("CLI command '%s' already registered", command.command)
   end
 end
 
@@ -454,6 +451,11 @@ cli.set_default {
       name = "version",
       short_name = "v",
       description = "Display application version"
+    },
+    {
+      name = "fork",
+      short_name = "f",
+      description = "Fork the editor to the background"
     }
   },
   execute = function(flags, arguments)
@@ -462,6 +464,15 @@ cli.set_default {
         cli.print_help()
       elseif flag.name == "version" then
         print(cli.app_version)
+        os.exit()
+      elseif flag.name == "fork" then
+        local arguments_string = ""
+        for _, argument in ipairs(arguments) do
+          arguments_string = arguments_string
+            .. ' '
+            .. string.format("%q", argument)
+        end
+        system.exec(string.format("%q %s", EXEFILE, arguments_string))
         os.exit()
       end
     end
