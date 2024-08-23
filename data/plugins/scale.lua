@@ -5,23 +5,27 @@ local command = require "core.command"
 local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
-local CommandView = require "core.commandview"
 
 config.plugins.scale = common.merge({
   -- The method used to apply the scaling: "code", "ui"
   mode = "ui",
+  -- Toggle auto detection of system scale.
+  autodetect = true,
   -- Default scale applied at startup.
-  default_scale = "autodetect",
+  default_scale = DEFAULT_SCALE,
   -- Allow using CTRL + MouseWheel for changing the scale.
   use_mousewheel = true
 }, config.plugins.scale)
 
 local scale_steps = 0.05
 
-local current_scale = SCALE
-local default_scale = SCALE
+local current_scale = 1
+local user_scale = tonumber(os.getenv("PRAGTICAL_SCALE"))
+local default_scale = DEFAULT_SCALE
 
 local function set_scale(scale)
+  if current_scale == scale then return end
+
   scale = common.clamp(scale, 0.2, 6)
 
   -- save scroll positions
@@ -98,6 +102,9 @@ if default_scale ~= config.plugins.scale.default_scale then
   end
 end
 
+local scale_set_by_user = 0
+local first_on_apply_scale = user_scale and true or false
+
 -- The config specification used by gui generators
 config.plugins.scale.config_spec = {
   name = "Scale",
@@ -113,29 +120,41 @@ config.plugins.scale.config_spec = {
     }
   },
   {
+    label = "Autodetect Scale",
+    description = "Keeps the scale equal to display, ignored on startup if PRAGTICAL_SCALE is set.",
+    path = "autodetect",
+    type = "toggle",
+    default = true,
+    on_apply = function(enabled)
+      if not first_on_apply_scale then
+        if not enabled then
+          set_scale(config.plugins.scale.default_scale)
+        else
+          set_scale(default_scale)
+        end
+      end
+    end
+  },
+  {
     label = "Default Scale",
-    description = "The scaling factor applied to pragtical.",
+    description = "The scaling factor applied to pragtical when autodetect is not enabled.",
     path = "default_scale",
-    type = "selection",
-    default = "autodetect",
-    values = {
-      {"Autodetect", "autodetect"},
-      {"80%", 0.80},
-      {"90%", 0.90},
-      {"100%", 1.00},
-      {"110%", 1.10},
-      {"120%", 1.20},
-      {"125%", 1.25},
-      {"130%", 1.30},
-      {"140%", 1.40},
-      {"150%", 1.50},
-      {"175%", 1.75},
-      {"200%", 2.00},
-      {"250%", 2.50},
-      {"300%", 3.00}
-    },
+    type = "number",
+    default = DEFAULT_SCALE,
+    step = 0.05,
+    min = 0.80,
+    max = 3.00,
+    set_value = function(value)
+      scale_set_by_user = value
+      return value
+    end,
     on_apply = function(value)
-      if type(value) == "string" then value = default_scale end
+      -- Perevents overwriting the scale set by user in PRAGTICAL_SCALE
+      if first_on_apply_scale then
+        first_on_apply_scale = false
+        if scale_set_by_user == 0 then return end
+      end
+      if config.plugins.scale.autodetect then return end
       if value ~= current_scale then
         set_scale(value)
       end
@@ -179,6 +198,13 @@ if config.plugins.scale.use_mousewheel then
     ["ctrl+wheelup"] = "scale:increase",
     ["ctrl+wheeldown"] = "scale:decrease"
   }
+end
+
+-- on startup rescale if default scale not 1
+-- this is needed now because the main window is initialized
+-- late from within lua, so we can't detect scale earlier
+if current_scale ~= default_scale or user_scale then
+  set_scale(user_scale or default_scale)
 end
 
 return {

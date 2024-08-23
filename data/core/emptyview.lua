@@ -13,7 +13,7 @@ local EmptyView = Widget:extend()
 
 ---Font used to render the logo
 ---@type renderer.font
-local icon_huge_font = style.icon_big_font:copy(110 * SCALE)
+local icon_huge_font
 
 ---Prevent the font getting scaled more than once from multiple instances
 ---@type boolean
@@ -61,6 +61,10 @@ end
 ---Constructor
 function EmptyView:new()
   EmptyView.super.new(self, nil, false)
+
+  if not icon_huge_font then
+    icon_huge_font = style.icon_big_font:copy(110 * SCALE)
+  end
 
   self.name = "Welcome"
   self.type_name = "core.emptyview"
