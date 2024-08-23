@@ -94,7 +94,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
-          draft: true
+          draft: false
+          prerelease: true
           files: |
             pragtical-${{ env.INSTALL_REF }}-linux-x86_64-portable.tar.gz
             Pragtical-${{ env.INSTALL_REF }}-x86_64.AppImage
@@ -147,7 +148,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
-          draft: true
+          draft: false
+          prerelease: true
           files: |
             ${{ env.INSTALL_NAME }}.dmg
 
@@ -200,7 +202,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
-          draft: true
+          draft: false
+          prerelease: true
           files: |
             ${{ env.INSTALL_BASE }}-universal.dmg
       - name: Cleanup Artifacts
@@ -265,7 +268,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
-          draft: true
+          draft: false
+          prerelease: true
           files: |
             ${{ env.INSTALL_NAME }}.zip
             Pragtical-${{ env.INSTALL_REF }}-${{ env.BUILD_ARCH }}-setup.exe
