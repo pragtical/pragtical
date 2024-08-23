@@ -583,7 +583,6 @@ static int f_get_scale(lua_State *L) {
   }
 
   float scale = 1.0;
-#ifndef __APPLE__
   char* env_scale = NULL;
   float system_scale = 0;
 #if _WIN32
@@ -620,11 +619,10 @@ static int f_get_scale(lua_State *L) {
   ) {
     scale = system_scale;
   }
-#endif /* __APPLE__ */
   got_initial_scale = true;
   lua_pushnumber(L, scale);
   return 1;
-#endif
+#endif /* PRAGTICAL_USE_SDL_RENDERER */
 }
 
 static int f_set_window_title(lua_State *L) {
