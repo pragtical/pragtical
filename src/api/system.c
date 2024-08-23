@@ -563,6 +563,11 @@ static float x11_scale_factor() {
 #endif
 
 static int f_get_scale(lua_State *L) {
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  /* Since scaling is performed internally always return 1 */
+  lua_pushinteger(L, 1);
+  return 1;
+#else
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
   SDL_Window* window = window_renderer->window;
   static bool got_initial_scale = false;
@@ -619,6 +624,7 @@ static int f_get_scale(lua_State *L) {
   got_initial_scale = true;
   lua_pushnumber(L, scale);
   return 1;
+#endif
 }
 
 static int f_set_window_title(lua_State *L) {
