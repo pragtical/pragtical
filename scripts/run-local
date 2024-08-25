@@ -73,7 +73,7 @@ copy_pragtical_build () {
     cp "$builddir/src/pragtical" "$bindir"
   fi
   mkdir -p "$datadir/core"
-  for module_name in core compat plugins colors fonts widget; do
+  for module_name in core compat plugins colors fonts; do
     cp -r "data/$module_name" "$datadir"
   done
   if [ -d "subprojects/widget" ]; then
