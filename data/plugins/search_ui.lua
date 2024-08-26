@@ -747,7 +747,7 @@ function ui:update_bottom_positioning()
     findprev:set_position(findnext:get_position().x - 10 - findprev:get_width(), line_separator:get_bottom() + 10)
     replacetext:set_position(10, findtext:get_bottom() + 10)
     replacetext.size.x = findtext.size.x
-    replace:set_position(self.size.x - 15 - replace:get_width(), findtext:get_bottom() + 10)
+    replace:set_position(findprev:get_position().x, findtext:get_bottom() + 10)
     replace.size.x = findprev:get_width() + findnext:get_width() + 10
     line_options:hide()
   else
