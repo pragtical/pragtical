@@ -1,5 +1,57 @@
 # Changes Log
 
+## [3.4.3] - 2024-08-26
+
+### New Features
+
+* Add cli flag to allow forking editor to background
+  ([#132](https://github.com/pragtical/pragtical/pull/132))
+
+* Scale plugin: added commands and bindings to allow zooming/scaling the code
+  independently of the user interface.
+  ([#150](https://github.com/pragtical/pragtical/pull/150))
+
+### Performance Improvements
+
+* Widgets: moved most calculations out of `update` to specialized
+  `update_size_position` function that gets called mostly only when neccesary.
+  Also improved widgets size/position calculations for better scaling.
+  ([#9](https://github.com/pragtical/widget/pull/9))
+
+### Enhancements
+
+* Patched some luajit functions to support unicode file names
+  and strings on windows
+  ([#138](https://github.com/pragtical/pragtical/pull/138))
+
+* Always select first result on findfile plugin
+  ([#141](https://github.com/pragtical/pragtical/pull/141))
+
+### Fixes
+
+* Use PRAGTICAL_USERDIR instead of HOME on `scripts/run-local` because
+  XDG_CONFIG_HOME been set has priority over HOME.
+  ([#133](https://github.com/pragtical/pragtical/pull/133))
+
+* Fix scaling logic regressions, now macOS builds are configure by default
+  with the software renderer since current display scale is detected at startup
+  and applied on the whole interface, also the plain software renderer is faster.
+  ([#134](https://github.com/pragtical/pragtical/pull/134))
+
+* Return actual scale on `system.get_scale()` for macOS too
+  ([#143](https://github.com/pragtical/pragtical/pull/143))
+
+* Minor correction on search_ui replace button position
+  ([#149](https://github.com/pragtical/pragtical/pull/149))
+
+### Build System
+
+* Fix rolling builds staying as draft
+  ([a0d062f5](https://github.com/pragtical/pragtical/commit/a0d062f5e9017f2f1878daf42dd197a007ff45b6))
+
+* Remove widget submodule in favor of subproject
+  ([#148](https://github.com/pragtical/pragtical/pull/148))
+
 ## [3.4.2] - 2024-08-11
 
 ### Performance Improvements
@@ -19,7 +71,7 @@
 * Use core.warn on autocomplete plugin
   ([89d24eb4](https://github.com/pragtical/pragtical/commit/89d24eb45e82a2bd49ce0a8ed56e313169c17693))
 
-* Improvements to c/c++ language plugins (#128)
+* Improvements to c/c++ language plugins
   ([#128](https://github.com/pragtical/pragtical/pull/128))
 
 ### Fixes
@@ -35,7 +87,7 @@
 
 ### Build System
 
-* Fix PPM build on msys (#126)
+* Fix PPM build on msys
   ([#126](https://github.com/pragtical/pragtical/pull/126))
 
 * Update sdl2 wrap to v2.30.6 which fixes an initialization
@@ -2091,6 +2143,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.4.3]: https://github.com/pragtical/pragtical/releases/tag/v3.4.3
 [3.4.2]: https://github.com/pragtical/pragtical/releases/tag/v3.4.2
 [3.4.1]: https://github.com/pragtical/pragtical/releases/tag/v3.4.1
 [3.4.0]: https://github.com/pragtical/pragtical/releases/tag/v3.4.0
