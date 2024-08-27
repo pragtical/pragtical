@@ -1211,6 +1211,26 @@ function core.try(fn, ...)
   return false, err
 end
 
+local function update_scale()
+  if SCALE == DEFAULT_SCALE or config.plugins.scale.autodetect then
+    local new_scale = system.get_scale(core.window)
+    if DEFAULT_SCALE ~= new_scale then
+      if new_scale == SCALE then
+        DEFAULT_SCALE = new_scale
+        return
+      end
+      if new_scale > DEFAULT_SCALE then
+        scale.set(scale.get() + (new_scale - DEFAULT_SCALE))
+        scale.set_code(scale.get_code() + (new_scale - DEFAULT_SCALE))
+      else
+        scale.set(scale.get() - (DEFAULT_SCALE - new_scale))
+        scale.set_code(scale.get_code() - (DEFAULT_SCALE - new_scale))
+      end
+      DEFAULT_SCALE = new_scale
+    end
+  end
+end
+
 function core.on_event(type, ...)
   local did_keymap = false
   if type == "textinput" then
@@ -1245,6 +1265,7 @@ function core.on_event(type, ...)
   elseif type == "touchmoved" then
     core.root_view:on_touch_moved(...)
   elseif type == "resized" then
+    update_scale()
     local window_mode = system.get_window_mode(core.window)
     if window_mode ~= "fullscreen" and window_mode ~= "maximized" then
       core.window_size = table.pack(system.get_window_size(core.window))
@@ -1295,20 +1316,8 @@ function core.step()
       -- required to avoid flashing and refresh issues on mobile
       core.redraw = true
       break
-    elseif type == "displaychanged" and SCALE == DEFAULT_SCALE then
-      -- Change SCALE when pragtical window is moved to a display
-      -- with a different resolution than previous one.
-      local new_scale = system.get_scale(core.window)
-      if SCALE ~= new_scale then
-        DEFAULT_SCALE = new_scale
-        local old_scale_mode = "ui"
-        if config.plugins.scale.mode ~= "ui" then
-          old_scale_mode = config.plugins.scale.mode
-          config.plugins.scale.mode = "ui"
-        end
-        scale.set(new_scale)
-        config.plugins.scale.mode = old_scale_mode
-      end
+    elseif type == "displaychanged" then
+      update_scale()
     else
       local _, res = core.try(core.on_event, type, a, b, c, d)
       did_keymap = res or did_keymap
