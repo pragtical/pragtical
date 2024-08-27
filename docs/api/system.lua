@@ -76,10 +76,13 @@ function system.wait_event(timeout) end
 function system.set_cursor(type) end
 
 ---
----Retrieve a sane scale value using current desktop resolution.
+---Retrieve current system scale for the given window. When the SDL renderer
+---is enabled this function always returns 1 since scaling is peformed internally.
+---
+---@param window renwindow
 ---
 ---@return number scale
-function system.get_scale() end
+function system.get_scale(window) end
 
 ---
 ---Change the window title.
