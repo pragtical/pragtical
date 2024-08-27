@@ -1,5 +1,21 @@
 # Changes Log
 
+## [3.4.4] - 2024-08-27
+
+### Fixes
+
+* Adjust scale retrieveal on startup
+  ([#152](https://github.com/pragtical/pragtical/pull/152))
+
+* When scale changes rescale item sizes on LogView
+  ([#154](https://github.com/pragtical/pragtical/pull/154))
+
+* Updated widgets to latest with smaller rescale fix
+  ([#155](https://github.com/pragtical/pragtical/pull/155))
+
+* Rescale the EmptyView icons font on instantiation
+  ([#156](https://github.com/pragtical/pragtical/pull/156))
+
 ## [3.4.3] - 2024-08-26
 
 ### New Features
@@ -2143,6 +2159,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.4.4]: https://github.com/pragtical/pragtical/releases/tag/v3.4.4
 [3.4.3]: https://github.com/pragtical/pragtical/releases/tag/v3.4.3
 [3.4.2]: https://github.com/pragtical/pragtical/releases/tag/v3.4.2
 [3.4.1]: https://github.com/pragtical/pragtical/releases/tag/v3.4.1
