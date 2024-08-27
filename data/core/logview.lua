@@ -122,6 +122,12 @@ function LogView:on_mouse_pressed(button, px, py, clicks)
 end
 
 
+function LogView:on_scale_change()
+  -- reset item sizes
+  item_height_result = {}
+end
+
+
 function LogView:update()
   local item = core.log_items[#core.log_items]
   if self.last_item ~= item then
