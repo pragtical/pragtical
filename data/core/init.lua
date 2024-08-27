@@ -1,7 +1,7 @@
 require "core.strict"
 local common = require "core.common"
 local config = require "core.config"
-local style = require "colors.default"
+local style
 local cli
 local scale
 local command
@@ -18,6 +18,7 @@ local Doc
 local Project
 
 local core = {}
+local map_new_syntax_colors
 
 local function load_session()
   local ok, t = pcall(dofile, USERDIR .. PATHSEP .. "session.lua")
@@ -357,6 +358,15 @@ function core.init()
   core.log_items = {}
   core.log_quiet("Pragtical version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
 
+  core.window = renwindow._restore()
+  if core.window == nil then
+    core.window = renwindow.create("")
+  end
+
+  DEFAULT_SCALE = system.get_scale(core.window)
+  SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
+
+  style = require "colors.default"
   cli = require "core.cli"
   command = require "core.command"
   keymap = require "core.keymap"
@@ -371,19 +381,14 @@ function core.init()
   DocView = require "core.docview"
   Doc = require "core.doc"
 
+  -- apply to default color scheme
+  map_new_syntax_colors()
+
   if PATHSEP == '\\' then
     USERDIR = common.normalize_volume(USERDIR)
     DATADIR = common.normalize_volume(DATADIR)
     EXEDIR  = common.normalize_volume(EXEDIR)
   end
-
-  core.window = renwindow._restore()
-  if core.window == nil then
-    core.window = renwindow.create("")
-  end
-
-  DEFAULT_SCALE = system.get_scale(core.window)
-  SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
 
   local session = load_session()
   core.recent_projects = session.recents or {}
@@ -796,7 +801,7 @@ end
 
 ---Map newly introduced syntax symbols when missing from current color scheme.
 ---@param clear_new? boolean Only perform removal of new syntax symbols
-local function map_new_syntax_colors(clear_new)
+map_new_syntax_colors = function(clear_new)
   ---New syntax symbols that may not be defined by all color schemes
   local symbols_map = {
     -- symbols related to doc comments
@@ -958,9 +963,6 @@ local function map_new_syntax_colors(clear_new)
     end
   })
 end
-
--- apply to default color scheme
-map_new_syntax_colors()
 
 
 function core.reload_module(name)
@@ -1211,6 +1213,32 @@ function core.try(fn, ...)
   return false, err
 end
 
+---This function rescales the interface to the system default scale
+---by incrementing or decrementing current user scale.
+local function update_scale()
+  if SCALE == DEFAULT_SCALE or config.plugins.scale.autodetect then
+    local new_scale = system.get_scale(core.window)
+    if DEFAULT_SCALE ~= new_scale then
+      if new_scale == SCALE then
+        DEFAULT_SCALE = new_scale
+        return
+      end
+      local target, target_code
+      if new_scale > DEFAULT_SCALE then
+        target = scale.get() + (new_scale - DEFAULT_SCALE)
+        target_code = scale.get_code() + (new_scale - DEFAULT_SCALE)
+      else
+        target = scale.get() - (DEFAULT_SCALE - new_scale)
+        target_code = scale.get_code() - (DEFAULT_SCALE - new_scale)
+      end
+      -- do not scale smaller than new_scale
+      scale.set(target < new_scale and new_scale or target)
+      scale.set_code(target_code < new_scale and new_scale or target_code)
+      DEFAULT_SCALE = new_scale
+    end
+  end
+end
+
 function core.on_event(type, ...)
   local did_keymap = false
   if type == "textinput" then
@@ -1245,6 +1273,14 @@ function core.on_event(type, ...)
   elseif type == "touchmoved" then
     core.root_view:on_touch_moved(...)
   elseif type == "resized" then
+    if not core.updating_scale then
+      core.updating_scale = true
+      core.add_thread(function()
+        coroutine.yield(1) -- don't call system.get_scale too frequently
+        update_scale()
+        core.updating_scale = nil
+      end)
+    end
     local window_mode = system.get_window_mode(core.window)
     if window_mode ~= "fullscreen" and window_mode ~= "maximized" then
       core.window_size = table.pack(system.get_window_size(core.window))
@@ -1295,20 +1331,8 @@ function core.step()
       -- required to avoid flashing and refresh issues on mobile
       core.redraw = true
       break
-    elseif type == "displaychanged" and SCALE == DEFAULT_SCALE then
-      -- Change SCALE when pragtical window is moved to a display
-      -- with a different resolution than previous one.
-      local new_scale = system.get_scale(core.window)
-      if SCALE ~= new_scale then
-        DEFAULT_SCALE = new_scale
-        local old_scale_mode = "ui"
-        if config.plugins.scale.mode ~= "ui" then
-          old_scale_mode = config.plugins.scale.mode
-          config.plugins.scale.mode = "ui"
-        end
-        scale.set(new_scale)
-        config.plugins.scale.mode = old_scale_mode
-      end
+    elseif type == "displaychanged" then
+      update_scale()
     else
       local _, res = core.try(core.on_event, type, a, b, c, d)
       did_keymap = res or did_keymap

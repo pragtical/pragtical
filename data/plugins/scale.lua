@@ -17,8 +17,8 @@ config.plugins.scale = common.merge({
 
 local scale_steps = 0.05
 
-local current_scale = 1
-local current_code_scale = 1
+local current_scale = SCALE
+local current_code_scale = SCALE
 local user_scale = tonumber(os.getenv("PRAGTICAL_SCALE"))
 local default_scale = DEFAULT_SCALE
 
@@ -235,12 +235,10 @@ if config.plugins.scale.use_mousewheel then
   }
 end
 
--- on startup rescale if default scale not 1
--- this is needed now because the main window is initialized
--- late from within lua, so we can't detect scale earlier
-if current_scale ~= default_scale or user_scale then
-  set_scale(user_scale or default_scale)
-  set_scale_code(user_scale or default_scale)
+-- Apply custom PRAGTICAL_SCALE if set by user
+if user_scale then
+  set_scale(user_scale)
+  set_scale_code(user_scale)
 end
 
 return {
