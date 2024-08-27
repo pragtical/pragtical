@@ -322,4 +322,17 @@ function EmptyView:update()
   return true
 end
 
+---We store the prealloc instance on the main object to allow overwriting.
+---@type core.emptyview
+EmptyView.prealloc_instance = nil
+
+---Get reference to pre-allocated EmptyView.
+---@return core.emptyview
+function EmptyView.get_instance()
+  if not EmptyView.prealloc_instance  then
+    EmptyView.prealloc_instance  = EmptyView()
+  end
+  return EmptyView.prealloc_instance
+end
+
 return EmptyView

@@ -3,6 +3,7 @@ local core = require "core"
 local common = require "core.common"
 local DocView = require "core.docview"
 local LogView = require "core.logview"
+local EmptyView = require "core.emptyview"
 
 
 local function workspace_files_for(project_dir)
@@ -125,6 +126,9 @@ local function load_view(t)
       dv.scroll.y, dv.scroll.to.y = t.scroll.y, t.scroll.y
     end
     return dv
+  end
+  if string.find(t.module, "core.emptyview", 1, true) then
+    return EmptyView.get_instance()
   end
   return require(t.module)()
 end

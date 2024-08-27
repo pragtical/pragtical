@@ -16,7 +16,7 @@ function Node:new(type)
   self.views = {}
   self.divider = 0.5
   if self.type == "leaf" then
-    self:add_view(EmptyView())
+    self:add_view(EmptyView.get_instance())
   end
   self.hovered_close = 0
   self.tab_shift = 0
@@ -140,7 +140,7 @@ function Node:remove_view(root, view)
     end
     if locked_size or (self.is_primary_node and not next_primary) then
       self.views = {}
-      self:add_view(EmptyView())
+      self:add_view(EmptyView.get_instance())
     else
       if other == next_primary then
         next_primary = parent
@@ -666,7 +666,7 @@ function Node:close_all_docviews(keep_active)
       -- matter to reattribute the active view because, within the close_all_docviews
       -- top call, the primary node will take the active view anyway.
       -- Set the empty view and takes the active view.
-      self:add_view(EmptyView())
+      self:add_view(EmptyView.get_instance())
     elseif #self.views > 0 and lost_active_view then
       -- In practice we never get there but if a view remain we need
       -- to reset the Node's active view.
