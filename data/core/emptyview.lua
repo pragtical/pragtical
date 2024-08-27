@@ -19,6 +19,9 @@ local icon_huge_font
 ---@type boolean
 local icon_font_scaled = false
 
+---Current font scale in case rescaling is required on EmptyView creation
+local icon_font_current_scale = SCALE
+
 local buttons = {
   { name = "new_file", icon = "f", cmd = "core:new-doc",
     label = "New File", tooltip = "Create a new file"
@@ -62,7 +65,7 @@ end
 function EmptyView:new()
   EmptyView.super.new(self, nil, false)
 
-  if not icon_huge_font then
+  if not icon_huge_font or icon_font_current_scale ~= SCALE then
     icon_huge_font = style.icon_big_font:copy(110 * SCALE)
   end
 
@@ -155,6 +158,7 @@ function EmptyView:on_scale_change(new_scale)
     core.add_thread(function()
       icon_huge_font = style.icon_big_font:copy(110 * new_scale)
       icon_font_scaled = false
+      icon_font_current_scale = new_scale
     end)
   end
 end
