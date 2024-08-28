@@ -177,19 +177,27 @@ main() {
 
   rm -rf "${build_dir}"
 
+  # Download the subprojects so we can copy plugin manager or patch lua before
+  # configure, this will prevent reconfiguring the project.
+  meson subprojects download
+
   if [[ $patch_lua == "true" ]] && [[ ! -z $force_fallback ]]; then
-    # download the subprojects so we can start patching before configure.
-    # this will prevent reconfiguring the project.
-    meson subprojects download
     lua_subproject_path=$(echo subprojects/lua-*/)
     if [[ -d $lua_subproject_path ]]; then
       patch -d $lua_subproject_path -p1 --forward < resources/windows/001-lua-unicode.diff
     fi
   fi
 
+  # Enable ppm only for windows 32 Bits which binary download is not available
+  local ppm="-Dppm=false"
+  if [[ $platform == "windows" && $arch == "i686" ]]; then
+    ppm="-Dppm=true"
+  fi
+
   CFLAGS=$CFLAGS LDFLAGS=$LDFLAGS meson setup \
     --buildtype=$build_type \
     --prefix "$prefix" \
+    $ppm \
     "${cross_file[@]}" \
     $force_fallback \
     $bundle \

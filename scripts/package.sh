@@ -60,6 +60,30 @@ source_package() {
   gzip -9 ${package_name}.tar
 }
 
+package_plugin_manager() {
+  if [[ -d "${data_dir}/plugins/plugin_manager" ]]; then
+    return
+  fi
+  local platform=$1
+  local arch=$2
+  local data_dir=$3
+  local file="ppm.${arch}-${platform}"
+  if [[ $platform == "windows" ]]; then
+    file="$file.exe"
+  fi
+  if [ ! -e "$file" ]; then
+    if ! wget -O "$file" "https://github.com/pragtical/plugin-manager/releases/download/continuous/${file}" ; then
+      echo "Could not download PPM for the arch '${arch}'."
+      return
+    else
+      chmod 0755 "$file"
+    fi
+  fi
+  cp -av "subprojects/ppm/libraries" "${data_dir}/"
+  cp -av "subprojects/ppm/plugins/plugin_manager" "${data_dir}/plugins/"
+  cp "$file" "${data_dir}/plugins/plugin_manager/"
+}
+
 main() {
   local arch="$(get_platform_arch)"
   local platform="$(get_platform_name)"
@@ -191,7 +215,14 @@ main() {
 
   rm -rf "${dest_dir}"
 
-  DESTDIR="$(pwd)/${dest_dir}" meson install --skip-subprojects="freetype2,pcre2" -C "${build_dir}"
+  local strip_flag=""
+  if [[ $release == true ]]; then
+    strip_flag="--strip"
+  fi
+
+  DESTDIR="$(pwd)/${dest_dir}" meson install $strip_flag \
+    --skip-subprojects="freetype2,pcre2" \
+    -C "${build_dir}"
 
   local data_dir="$(pwd)/${dest_dir}/data"
   local exe_file="$(pwd)/${dest_dir}/pragtical"
@@ -199,7 +230,6 @@ main() {
   local package_name=pragtical$version-$platform-$arch
   local bundle=false
   local portable=false
-  local stripcmd="strip"
 
   if [[ -d "${data_dir}" ]]; then
     echo "Creating a portable, compressed archive..."
@@ -207,7 +237,6 @@ main() {
     exe_file="$(pwd)/${dest_dir}/pragtical"
     if [[ $platform == "windows" ]]; then
       exe_file="${exe_file}.exe"
-      stripcmd="strip --strip-all"
       if command -v ntldd >/dev/null 2>&1; then
         # Copy MinGW libraries dependencies.
         # MSYS2 ldd command seems to be only 64bit, so use ntldd
@@ -258,6 +287,8 @@ main() {
     addons_install "${build_dir}" "${data_dir}"
   fi
 
+  package_plugin_manager "$platform" "$arch" "$data_dir"
+
   # TODO: use --skip-subprojects when 0.58.0 will be available on supported
   # distributions to avoid subprojects' include and lib directories to be copied.
   # Install Meson with PIP to get the latest version is not always possible.
@@ -266,10 +297,6 @@ main() {
   find . -type d -name 'lib' -prune -exec rm -rf {} \;
   find . -type d -empty -delete
   popd
-
-  if [[ $release == true ]]; then
-    $stripcmd "${exe_file}"
-  fi
 
   echo "Creating a compressed archive ${package_name}"
   if [[ $binary == true ]]; then
