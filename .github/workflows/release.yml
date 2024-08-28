@@ -65,6 +65,11 @@ jobs:
     env:
       CC: gcc
       CXX: g++
+    strategy:
+      matrix:
+        config:
+          - {compiler: default, arch: x86_64}
+          - {compiler: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu, arch: aarch64}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -73,6 +78,9 @@ jobs:
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
+          if [[ $(uname -m) != ${{ matrix.config.arch }} ]]; then
+            echo "ARCH=--cross-arch ${{ matrix.config.arch }}" >> "$GITHUB_ENV"
+          fi
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
@@ -83,23 +91,26 @@ jobs:
         run: |
           bash scripts/install-dependencies.sh --debug
           sudo apt-get install -y ccache
+      - name: Install Cross Compiler
+        if: ${{ matrix.config.compiler != 'default' }}
+        run: sudo apt-get install -y ${{ matrix.config.compiler }}
       - name: Build Portable
         run: |
-          bash scripts/build.sh --debug --forcefallback --portable --release
+          bash scripts/build.sh --debug --forcefallback --portable --release $ARCH
       - name: Package Portables
         run: |
-          bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
+          bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release $ARCH
       - name: Build AppImages
         run: |
-          bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release
+          bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release $ARCH
       - name: Upload Files
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
           files: |
-            pragtical-${{ env.INSTALL_REF }}-linux-x86_64-portable.tar.gz
-            Pragtical-${{ env.INSTALL_REF }}-x86_64.AppImage
+            pragtical-${{ env.INSTALL_REF }}-linux-${{ matrix.config.arch }}-portable.tar.gz
+            Pragtical-${{ env.INSTALL_REF }}-${{ matrix.config.arch }}.AppImage
 
   build_macos:
     name: macOS
