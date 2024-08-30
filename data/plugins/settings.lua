@@ -162,6 +162,25 @@ end
 -- Add Core Settings
 --------------------------------------------------------------------------------
 
+-- We need our own copy of ignore files for when we implement reset setting.
+local ignore_files = {
+  -- folders
+  "^%.svn/",        "^%.git/",   "^%.hg/",        "^CVS/", "^%.Trash/", "^%.Trash%-.*/",
+  "^node_modules/", "^%.cache/", "^__pycache__/",
+  -- files
+  "%.pyc$",         "%.pyo$",       "%.exe$",        "%.dll$",   "%.obj$", "%.o$",
+  "%.a$",           "%.lib$",       "%.so$",         "%.dylib$", "%.ncb$", "%.sdf$",
+  "%.suo$",         "%.pdb$",       "%.idb$",        "%.class$", "%.psd$", "%.db$",
+  "^desktop%.ini$", "^%.DS_Store$", "^%.directory$",
+}
+
+-- Adjust patterns path separator for windows
+if PLATFORM == "Windows" then
+  for idx, pattern in ipairs(ignore_files) do
+    ignore_files[idx] = pattern:gsub("/", "\\")
+  end
+end
+
 settings.add("General",
   {
     {
@@ -226,16 +245,7 @@ settings.add("General",
       description = "List of lua patterns matching files to be ignored by the editor.",
       path = "ignore_files",
       type = settings.type.LIST_STRINGS,
-      default = {
-        -- folders
-        "^%.svn/",        "^%.git/",   "^%.hg/",        "^CVS/", "^%.Trash/", "^%.Trash%-.*/",
-        "^node_modules/", "^%.cache/", "^__pycache__/",
-        -- files
-        "%.pyc$",         "%.pyo$",       "%.exe$",        "%.dll$",   "%.obj$", "%.o$",
-        "%.a$",           "%.lib$",       "%.so$",         "%.dylib$", "%.ncb$", "%.sdf$",
-        "%.suo$",         "%.pdb$",       "%.idb$",        "%.class$", "%.psd$", "%.db$",
-        "^desktop%.ini$", "^%.DS_Store$", "^%.directory$",
-      },
+      default = ignore_files,
       on_apply = function()
         for _, project in ipairs(core.projects) do
           project:compile_ignore_files()

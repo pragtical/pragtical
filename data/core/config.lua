@@ -78,6 +78,13 @@ config.ignore_files = {
   "^desktop%.ini$", "^%.DS_Store$", "^%.directory$",
 }
 
+-- Adjust patterns path separator for windows
+if PLATFORM == "Windows" then
+  for idx, pattern in ipairs(config.ignore_files) do
+    config.ignore_files[idx] = pattern:gsub("/", "\\")
+  end
+end
+
 ---Lua pattern used to find symbols when advanced syntax highlighting
 ---is not available.
 ---This pattern is also used for navigation, e.g. move to next word.
