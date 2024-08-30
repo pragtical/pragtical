@@ -54,7 +54,7 @@ command.add(nil, {
     core.show_title_bar(fullscreen and restore_title_view)
     core.title_view:configure_hit_test(fullscreen and restore_title_view)
     if fullscreen and previous_win_mode == "normal" then
-      system.set_window_size(table.unpack(previous_win_pos))
+      system.set_window_size(core.window, table.unpack(previous_win_pos))
     end
   end,
 

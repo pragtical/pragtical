@@ -396,7 +396,7 @@ function core.init()
   core.previous_replace = session.previous_replace or {}
   core.window_mode = session.window_mode or "normal"
   core.prev_window_mode = core.window_mode
-  core.window_size = session.window or system.get_window_size(core.window)
+  core.window_size = session.window or table.pack(system.get_window_size(core.window))
 
   -- remove projects that don't exist any longer
   local projects_removed = 0;
