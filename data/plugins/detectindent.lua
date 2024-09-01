@@ -301,16 +301,34 @@ end
 local new = Doc.new
 function Doc:new(...)
   new(self, ...)
-  update_cache(self)
+  core.add_thread(function()
+    -- perform detection only to ui loaded documents
+    if #core.get_views_referencing_doc(self) > 0 then
+      local type, size, confirmed = self:get_indent_info()
+      if not confirmed then
+        update_cache(self)
+      else
+        cache[self] = { type = type, size = size, confirmed = confirmed }
+      end
+    end
+  end)
 end
 
 local clean = Doc.clean
 function Doc:clean(...)
   clean(self, ...)
-  local _, _, confirmed = self:get_indent_info()
-  if not confirmed then
-    update_cache(self)
+  if cache[self] then
+    local _, _, confirmed = self:get_indent_info()
+    if not confirmed then
+      update_cache(self)
+    end
   end
+end
+
+local on_close = Doc.on_close
+function Doc:on_close()
+  on_close(self)
+  if cache[self] then cache[self] = nil end
 end
 
 

@@ -450,6 +450,7 @@ function core.init()
   core.restart_request = false
   core.quit_request = false
   core.init_working_dir = system.getcwd()
+  core.collect_garbage = false
 
   -- We load core views before plugins that may need them.
   ---@type core.rootview
@@ -1354,6 +1355,7 @@ function core.step()
     if #core.get_views_referencing_doc(doc) == 0 then
       table.remove(core.docs, i)
       doc:on_close()
+      core.collect_garbage = true
     end
   end
 
@@ -1493,6 +1495,10 @@ function core.run()
         next_step = next_step or (now + next_frame)
         system.sleep(math.min(next_frame, time_to_wake))
       end
+    end
+    if core.collect_garbage then
+      collectgarbage("collect")
+      core.collect_garbage = false
     end
   end
 end

@@ -131,18 +131,32 @@ end)
 -- patch `Doc.save|load` to store modified time
 local load = Doc.load
 local save = Doc.save
+local on_close = Doc.on_close
 
 Doc.load = function(self, ...)
   local res = load(self, ...)
-  if not times[self] then watch:watch(self.abs_filename, true) end
-  update_time(self)
+  core.add_thread(function()
+    -- apply autoreload only to ui loaded documents
+    if #core.get_views_referencing_doc(self) > 0 then
+      if not times[self] then watch:watch(self.abs_filename, true) end
+      update_time(self)
+    end
+  end)
   return res
 end
 
 Doc.save = function(self, ...)
   local res = save(self, ...)
   -- if starting with an unsaved document with a filename.
-  if not times[self] then watch:watch(self.abs_filename, true) end
-  update_time(self)
+  if #core.get_views_referencing_doc(self) > 0 then
+    if not times[self] then watch:watch(self.abs_filename, true) end
+    update_time(self)
+  end
   return res
+end
+
+Doc.on_close = function(self)
+  on_close(self)
+  if times[self] then times[self] = nil end
+  if changed[self] then changed[self] = nil end
 end

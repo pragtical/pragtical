@@ -340,6 +340,12 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
   end
 end
 
+local old_doc_on_close = Doc.on_close
+function Doc:on_close()
+  old_doc_on_close(self)
+  if open_files[self] then open_files[self] = nil end
+end
+
 local old_doc_update = DocView.update
 function DocView:update()
   old_doc_update(self)
