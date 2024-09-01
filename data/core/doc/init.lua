@@ -818,6 +818,11 @@ end
 
 -- For plugins to get notified when a document is closed
 function Doc:on_close()
+  -- this shouldn't be needed but we do it to better hint the gc to collect
+  self.highlighter.doc = nil
+  self.highlighter.lines = nil
+  self.highlighter = nil
+
   core.log_quiet("Closed doc \"%s\"", self:get_name())
 end
 

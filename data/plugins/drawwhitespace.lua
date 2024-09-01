@@ -2,6 +2,7 @@
 
 local core = require "core"
 local style = require "core.style"
+local Doc = require "core.doc"
 local DocView = require "core.docview"
 local common = require "core.common"
 local command = require "core.command"
@@ -355,6 +356,12 @@ function DocView:draw_line_text(idx, x, y)
   end
 
   return draw_line_text(self, idx, x, y)
+end
+
+local doc_on_close = Doc.on_close
+function Doc:on_close()
+  doc_on_close(self)
+  if ws_cache[self.highlighter] then ws_cache[self.highlighter] = nil end
 end
 
 

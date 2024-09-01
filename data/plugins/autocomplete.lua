@@ -808,6 +808,7 @@ end
 --
 local on_text_input = RootView.on_text_input
 local on_text_remove = Doc.remove
+local on_doc_close = Doc.on_close
 local update = RootView.update
 local draw = RootView.draw
 
@@ -826,6 +827,11 @@ Doc.remove = function(self, line1, col1, line2, col2)
       show_autocomplete()
     end
   end
+end
+
+Doc.on_close = function(self)
+  on_doc_close(self)
+  if cache[self] then cache[self] = nil end
 end
 
 RootView.update = function(...)

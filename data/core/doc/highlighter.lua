@@ -21,6 +21,7 @@ function Highlighter:start()
   core.add_thread(function()
     local views = #core.get_views_referencing_doc(self.doc)
     while self.first_invalid_line <= self.max_wanted_line do
+      if not self.doc then return end
       local max = math.min(self.first_invalid_line + 40, self.max_wanted_line)
       local retokenized_from
       for i = self.first_invalid_line, max do
