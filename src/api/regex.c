@@ -551,7 +551,7 @@ int luaopen_regex(lua_State *L) {
 
   lua_pushinteger(L, PCRE2_ANCHORED);
   lua_setfield(L, -2, "ANCHORED");
-  lua_pushinteger(L, PCRE2_ANCHORED) ;
+  lua_pushinteger(L, PCRE2_ENDANCHORED) ;
   lua_setfield(L, -2, "ENDANCHORED");
   lua_pushinteger(L, PCRE2_NOTBOL);
   lua_setfield(L, -2, "NOTBOL");
