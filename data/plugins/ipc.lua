@@ -871,6 +871,7 @@ system.get_time = function()
     if primary_instance and ARGS[2] then
       local open_directory = false
       for i=2, #ARGS do
+        -- chdir to initial working directory to properly resolve absolute path
         system.chdir(core.init_working_dir)
         local path = system.absolute_path(ARGS[i])
 
@@ -898,6 +899,10 @@ system.get_time = function()
       ipc:wait_for_messages()
       if not open_directory then
         os.exit()
+      end
+      -- revert chdir to core.init_working_dir
+      if core.projects[1] then
+        system.chdir(core.projects[1].path)
       end
     end
   else
