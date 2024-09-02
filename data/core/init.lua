@@ -1356,6 +1356,9 @@ function core.step()
       table.remove(core.docs, i)
       doc:on_close()
       core.collect_garbage = true
+      if #core.docs == 0 then
+        system.chdir(core.projects[1].path)
+      end
     end
   end
 
