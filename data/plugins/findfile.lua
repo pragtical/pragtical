@@ -384,7 +384,9 @@ command.add(nil, {
             end
           end
         end
-        local file = common.home_expand(text)
+        local file = core.projects[1]:absolute_path(
+          common.home_expand(text)
+        )
         if is_file(file) then
           core.root_view:open_doc(core.open_doc(file))
         end
