@@ -1038,7 +1038,11 @@ function core.show_title_bar(show)
   core.title_view.visible = show
 end
 
+-- The amount of active coroutines
+local coroutines_count = 0
+
 local function add_thread(f, weak_ref, background, ...)
+  coroutines_count = coroutines_count + 1
   local key = weak_ref or #core.threads + 1
   local args = {...}
   local fn = function() return core.try(f, table.unpack(args)) end
@@ -1320,6 +1324,10 @@ function core.compose_window_title(title)
 end
 
 
+-- The maximum time coroutines have to run on a per frame iteration basis.
+-- This value is automatically updated on each core.step().
+local max_time = 1 / config.fps - 0.004
+
 function core.step()
   -- handle events
   local did_keymap = false
@@ -1372,11 +1380,34 @@ function core.step()
   end
 
   -- draw
+  local start_time = system.get_time()
   renderer.begin_frame(core.window)
   core.clip_rect_stack[1] = { 0, 0, width, height }
   renderer.set_clip_rect(table.unpack(core.clip_rect_stack[1]))
   core.root_view:draw()
   renderer.end_frame()
+
+  -- Time it takes to render a single frame (cap it to 1000fps).
+  local rendering_speed = math.max(0.001, system.get_time() - start_time)
+
+  if rendering_speed * config.fps < 1 then
+    -- Calculate max allowed coroutines run time based on rendering speed.
+    -- verbose formula: (1 - (rendering_speed * config.fps)) / config.fps
+    max_time = 1 / config.fps - rendering_speed
+  elseif max_time < 0 then
+    -- If fps rendering dropped from config target we set the max time to
+    -- to consume a fourth of the time that would be spent rendering.
+    -- For example, if fps dropped from 60 to 25 then we use 1/4 of that time
+    -- to run coroutines, which leaves us with a total of 18.75fps and a
+    -- maximum time for coroutines of 0.013333333333333 per iteration.
+    -- verbose formula: (rendering_speed * (fps / 4)) / (fps - (fps / 4))
+    max_time = rendering_speed / 3
+  end
+
+  -- reduce max time in a 50% as a margin of error since coroutines
+  -- could missbehave and there is no way to stop them from the runner
+  max_time = max_time * 0.5
+
   return true
 end
 
@@ -1386,15 +1417,19 @@ local run_threads_mode = "all"
 
 local run_threads = coroutine.wrap(function()
   while true do
-    local max_time = 1 / config.fps - 0.004
+    -- Wait time until next run_threads iteration
     local minimal_time_to_wake = math.huge
 
     for k, thread in pairs(core.threads) do
       -- run thread
+      local end_time = 0
       if run_threads_mode == "all" or thread.background then
         if thread.wake < system.get_time() then
+          local start_time = system.get_time()
           local _, wait = assert(coroutine.resume(thread.cr))
+          end_time = system.get_time() - start_time
           if coroutine.status(thread.cr) == "dead" then
+            coroutines_count = coroutines_count - 1
             if type(k) == "number" then
               table.remove(core.threads, k)
             else
@@ -1404,7 +1439,15 @@ local run_threads = coroutine.wrap(function()
               core.background_threads = core.background_threads - 1
             end
           else
-            if not wait or wait <= 0 then wait = 0.001 end
+            -- penalize slow coroutines by setting their wait time to the
+            -- same it took to execute them.
+            if not wait or wait < 0 then
+              wait = end_time > max_time
+                and end_time
+                or math.max(end_time, 0.001)
+            elseif end_time > wait or end_time > max_time then
+              wait = end_time
+            end
             thread.wake = system.get_time() + wait
             minimal_time_to_wake = math.min(minimal_time_to_wake, wait)
           end
