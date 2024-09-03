@@ -142,7 +142,7 @@ static int f_pcre_compile(lua_State *L) {
   size_t len;
   PCRE2_SIZE errorOffset;
   int errorNumber;
-  int pattern = PCRE2_UTF;
+  uint32_t pattern = PCRE2_UTF;
   const char* str = luaL_checklstring(L, 1, &len);
   if (lua_gettop(L) > 1) {
     const char* options = luaL_checkstring(L, 2);
@@ -189,10 +189,10 @@ static int f_pcre_cmatch(lua_State *L) {
   const char* subject = luaL_checklstring(L, 2, &subject_len);
   /* offset param */
   size_t offset = regex_offset_relative(
-    luaL_optnumber(L, 3, 1), subject_len
+    luaL_optinteger(L, 3, 1), subject_len
   ) - 1;
   /* options param */
-  int opts = luaL_optnumber(L, 4, 0);
+  uint32_t opts = luaL_optinteger(L, 4, 0);
   int total_results = 0;
   subject_len -= offset;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
@@ -235,10 +235,10 @@ static int f_pcre_find(lua_State *L) {
   const char* subject = luaL_checklstring(L, 2, &subject_len);
   /* offset param */
   size_t offset = regex_offset_relative(
-    luaL_optnumber(L, 3, 1), subject_len
+    luaL_optinteger(L, 3, 1), subject_len
   ) - 1;
   /* options param */
-  int opts = luaL_optnumber(L, 4, 0);
+  uint32_t opts = luaL_optinteger(L, 4, 0);
   int total_results = 0;
   subject_len -= offset;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
@@ -291,10 +291,10 @@ static int f_pcre_find_offsets(lua_State *L) {
   const char* subject = luaL_checklstring(L, 2, &subject_len);
   /* offset param */
   size_t offset = regex_offset_relative(
-    luaL_optnumber(L, 3, 1), subject_len
+    luaL_optinteger(L, 3, 1), subject_len
   ) - 1;
   /* options param */
-  int opts = luaL_optnumber(L, 4, 0);
+  uint32_t opts = luaL_optinteger(L, 4, 0);
   int total_results = 0;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
   int rc = pcre2_match(re, (PCRE2_SPTR)&subject[offset], subject_len, 0, opts, md, NULL);
@@ -342,7 +342,7 @@ static int f_pcre_gmatch(lua_State *L) {
   const char* subject = luaL_checklstring(L, 2, &subject_len);
   /* offset param */
   size_t offset = regex_offset_relative(
-    luaL_optnumber(L, 3, 1), subject_len
+    luaL_optinteger(L, 3, 1), subject_len
   ) - 1;
 
   /* keep strings on closure to avoid being collected */
@@ -380,7 +380,7 @@ static int f_pcre_gsub(lua_State *L) {
   size_t buffer_size = 1024;
   char *output = (char *)malloc(buffer_size);
 
-  int options = PCRE2_SUBSTITUTE_OVERFLOW_LENGTH | PCRE2_SUBSTITUTE_EXTENDED;
+  uint32_t options = PCRE2_SUBSTITUTE_OVERFLOW_LENGTH | PCRE2_SUBSTITUTE_EXTENDED;
   if (limit == 0) options |= PCRE2_SUBSTITUTE_GLOBAL;
 
   int results_count = 0;
@@ -473,10 +473,10 @@ static int f_pcre_match(lua_State *L) {
   const char* subject = luaL_checklstring(L, 2, &subject_len);
   /* offset param */
   size_t offset = regex_offset_relative(
-    luaL_optnumber(L, 3, 1), subject_len
+    luaL_optinteger(L, 3, 1), subject_len
   ) - 1;
   /* options param */
-  int opts = luaL_optnumber(L, 4, 0);
+  uint32_t opts = luaL_optinteger(L, 4, 0);
   int total_results = 0;
   subject_len -= offset;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
