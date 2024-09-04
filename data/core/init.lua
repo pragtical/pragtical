@@ -511,11 +511,13 @@ function core.init()
   -- Maximizing the window makes it lose the hidden attribute on Windows
   -- so we delay this to keep window hidden until args parsed. Also, on
   -- Wayland we have issues applying the mode before showing the window
-  -- so we delay it on all platforms.
+  -- so we delay it on all platforms, except macOS. On macOS setting the
+  -- mode to maximized seems to cause issues resetting its size so setting
+  -- the size is all we need on that platform.
   if session.window then
     system.set_window_size(core.window, table.unpack(session.window))
   end
-  if session.window_mode == "maximized" then
+  if session.window_mode == "maximized" and PLATFORM ~= "Mac OS X" then
     core.add_thread(function()
       system.set_window_mode(core.window, "maximized")
     end)
