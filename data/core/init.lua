@@ -435,6 +435,10 @@ function core.init()
     end
   end
 
+  ---The actual maximum frames per second that can be rendered.
+  ---@type number
+  core.fps = config.fps
+
   core.frame_start = 0
   core.clip_rect_stack = {{ 0,0,0,0 }}
   core.docs = {}
@@ -1325,6 +1329,17 @@ end
 ---@type number
 local max_time = 1 / config.fps - 0.004
 
+---Each second there is time assigned to drawing the amount of config.fps
+---and for executing the coroutine tasks, this value represents the time
+---that coroutines should not exceed for each 1s cycle.
+---@type number
+local cycle_end_time = 0
+
+---Amount of time spent running the main loop without the time it takes to
+---run the coroutines. (resets at very cycle end)
+---@type number
+local main_loop_time = 0
+
 function core.step()
   -- handle events
   local did_keymap = false
@@ -1391,6 +1406,7 @@ function core.step()
     -- Calculate max allowed coroutines run time based on rendering speed.
     -- verbose formula: (1s - (rendering_speed * config.fps)) / config.fps
     max_time = 1 / config.fps - rendering_speed
+    core.fps = config.fps
   else
     -- If fps rendering dropped from config target we set the max time to
     -- to consume a fourth of the time that would be spent rendering.
@@ -1399,6 +1415,12 @@ function core.step()
     -- maximum time for coroutines of 0.013333333333333 per iteration.
     -- verbose formula: (rendering_speed * (fps / 4)) / (fps - (fps / 4))
     max_time = rendering_speed / 3
+
+    -- current frames per second substracting portion given to coroutines
+    core.fps = 1 / (rendering_speed + max_time)
+
+    -- reset cycle end time
+    cycle_end_time = 0
   end
 
   return true
@@ -1419,6 +1441,8 @@ local run_threads = coroutine.wrap(function()
     local minimal_time_to_wake = math.huge
     -- a count on the amount of threads that ran
     local runs = 0
+    -- time taken to execute coroutines without yielding
+    local total_time = 0
 
     for k, thread in pairs(core.threads) do
       -- run thread
@@ -1426,8 +1450,23 @@ local run_threads = coroutine.wrap(function()
       if run_threads_mode == "all" or thread.background then
         if thread.wake < system.get_time() then
           local start_time = system.get_time()
+          -- if the avg time of running the thread exceeds cycle_end_time
+          -- execute the thread on next run
+          if
+            thread.avg_time
+            and
+            start_time + thread.avg_time > cycle_end_time - main_loop_time
+          then
+              coroutine.yield(
+                math.max(cycle_end_time - start_time, 0),
+                total_time
+              )
+              start_time = system.get_time()
+              total_time = 0
+          end
           local _, wait = assert(coroutine.resume(thread.cr))
           end_time = system.get_time() - start_time
+          total_time = total_time + end_time
           runs = runs + 1
           if coroutine.status(thread.cr) == "dead" then
             if type(k) == "number" then
@@ -1439,12 +1478,20 @@ local run_threads = coroutine.wrap(function()
               core.background_threads = core.background_threads - 1
             end
           else
+            -- store coroutine stats
+            if not thread.time then
+              thread.time = end_time
+              thread.calls = 1
+              thread.avg_time = end_time
+            else
+              thread.time = thread.time + end_time
+              thread.calls = thread.calls + 1
+              thread.avg_time = thread.time / thread.calls
+            end
             -- penalize slow coroutines by setting their wait time to the
             -- same time it took to execute them.
             if not wait or wait < 0 then
-              wait = end_time > max_time
-                and end_time
-                or math.max(end_time, 0.001)
+              wait = math.max(end_time, 0.001)
             elseif end_time > wait or end_time > max_time then
               wait = end_time
             end
@@ -1464,9 +1511,11 @@ local run_threads = coroutine.wrap(function()
         if max_coroutines > 1 then
           max_coroutines = math.max(runs-1, 1)
         end
-        coroutine.yield(0)
+        coroutine.yield(0, total_time)
+        total_time = 0
       elseif runs >= max_coroutines then
-        coroutine.yield(minimal_time_to_wake)
+        coroutine.yield(minimal_time_to_wake, total_time)
+        total_time = 0
       end
     end
 
@@ -1474,7 +1523,7 @@ local run_threads = coroutine.wrap(function()
     -- slow downs so we reset the maximum coroutines to amount it ran
     max_coroutines = math.max(max_coroutines, runs)
 
-    coroutine.yield(minimal_time_to_wake)
+    coroutine.yield(minimal_time_to_wake, total_time)
   end
 end)
 
@@ -1485,6 +1534,11 @@ function core.run()
   local skip_no_focus = 0
   while true do
     core.frame_start = system.get_time()
+    if core.frame_start >= cycle_end_time then
+      -- we are starting a new 1s cycle
+      cycle_end_time = core.frame_start + (max_time * core.fps)
+      main_loop_time = 0
+    end
     local has_focus = system.window_has_focus(core.window)
     local forced_draw = core.redraw
     if forced_draw then
@@ -1501,7 +1555,7 @@ function core.run()
       run_threads_mode = "all"
     end
 
-    local time_to_wake = run_threads()
+    local time_to_wake, threads_end_time = run_threads()
 
     -- respect coroutines redraw requests while on focus
     if has_focus and not forced_draw and core.redraw then
@@ -1529,7 +1583,7 @@ function core.run()
             local t = now - core.blink_start
             local h = config.blink_period / 2
             local dt = math.ceil(t / h) * h - t
-            local cursor_time_to_wake = dt + 1 / config.fps
+            local cursor_time_to_wake = dt + 1 / core.fps
             next_step = now + cursor_time_to_wake
           end
           if
@@ -1549,7 +1603,7 @@ function core.run()
       else -- if we redrew, then make sure we only draw at most FPS/sec
         local now = system.get_time()
         local elapsed = now - core.frame_start
-        local next_frame = math.max(0, 1 / config.fps - elapsed)
+        local next_frame = math.max(0, 1 / core.fps - elapsed)
         next_step = next_step or (now + next_frame)
         system.sleep(math.min(next_frame, time_to_wake))
       end
@@ -1558,6 +1612,9 @@ function core.run()
       collectgarbage("collect")
       core.collect_garbage = false
     end
+    main_loop_time = main_loop_time + (
+      (system.get_time() - core.frame_start) - threads_end_time
+    )
   end
 end
 

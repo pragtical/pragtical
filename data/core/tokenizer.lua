@@ -271,7 +271,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     -- Every 200 chars, check if we're out of time
     if i - starting_i > 200 then
       starting_i = i
-      if system.get_time() - start_time > 0.5 / config.fps then
+      if system.get_time() - start_time > 0.5 / core.fps then
         -- We're out of time
         push_token(res, "incomplete", string.usub(text, i))
         return res, string.char(0), {
