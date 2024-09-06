@@ -1391,7 +1391,7 @@ function core.step()
     -- Calculate max allowed coroutines run time based on rendering speed.
     -- verbose formula: (1s - (rendering_speed * config.fps)) / config.fps
     max_time = 1 / config.fps - rendering_speed
-  elseif max_time < 0 then
+  else
     -- If fps rendering dropped from config target we set the max time to
     -- to consume a fourth of the time that would be spent rendering.
     -- For example, if fps dropped from 60 to 25 then we use 1/4 of that time
