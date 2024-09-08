@@ -439,6 +439,11 @@ function core.init()
   ---@type number
   core.fps = config.fps
 
+  ---The maximum time coroutines have to run on a per frame iteration basis.
+  ---This value is automatically updated on each core.step().
+  ---@type number
+  core.co_max_time = 1 / config.fps - 0.004
+
   core.frame_start = 0
   core.clip_rect_stack = {{ 0,0,0,0 }}
   core.docs = {}
@@ -1324,11 +1329,6 @@ function core.compose_window_title(title)
 end
 
 
----The maximum time coroutines have to run on a per frame iteration basis.
----This value is automatically updated on each core.step().
----@type number
-local max_time = 1 / config.fps - 0.004
-
 ---Each second there is time assigned to drawing the amount of config.fps
 ---and for executing the coroutine tasks, this value represents the time
 ---that coroutines should not exceed for each 1s cycle.
@@ -1405,7 +1405,7 @@ function core.step()
   if rendering_speed * config.fps < 1 then
     -- Calculate max allowed coroutines run time based on rendering speed.
     -- verbose formula: (1s - (rendering_speed * config.fps)) / config.fps
-    max_time = 1 / config.fps - rendering_speed
+    core.co_max_time = 1 / config.fps - rendering_speed
     core.fps = config.fps
   else
     -- If fps rendering dropped from config target we set the max time to
@@ -1414,10 +1414,10 @@ function core.step()
     -- to run coroutines, which leaves us with a total of 18.75fps and a
     -- maximum time for coroutines of 0.013333333333333 per iteration.
     -- verbose formula: (rendering_speed * (fps / 4)) / (fps - (fps / 4))
-    max_time = rendering_speed / 3
+    core.co_max_time = rendering_speed / 3
 
     -- current frames per second substracting portion given to coroutines
-    core.fps = 1 / (rendering_speed + max_time)
+    core.fps = 1 / (rendering_speed + core.co_max_time)
 
     -- reset cycle end time
     cycle_end_time = 0
@@ -1492,7 +1492,7 @@ local run_threads = coroutine.wrap(function()
             -- same time it took to execute them.
             if not wait or wait < 0 then
               wait = math.max(end_time, 0.001)
-            elseif end_time > wait or end_time > max_time then
+            elseif end_time > wait or end_time > core.co_max_time then
               wait = end_time
             end
             thread.wake = system.get_time() + wait
@@ -1506,7 +1506,7 @@ local run_threads = coroutine.wrap(function()
       end
 
       -- stop running threads if we're about to hit the end of frame
-      if system.get_time() - core.frame_start > max_time then
+      if system.get_time() - core.frame_start > core.co_max_time then
         -- set the maximum amount of coroutines to prevent exceeding max_time
         if max_coroutines > 1 then
           max_coroutines = math.max(runs-1, 1)
@@ -1536,7 +1536,7 @@ function core.run()
     core.frame_start = system.get_time()
     if core.frame_start >= cycle_end_time then
       -- we are starting a new 1s cycle
-      cycle_end_time = core.frame_start + (max_time * core.fps)
+      cycle_end_time = core.frame_start + (core.co_max_time * core.fps)
       main_loop_time = 0
     end
     local has_focus = system.window_has_focus(core.window)
