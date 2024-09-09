@@ -686,6 +686,13 @@ settings.add("Development",
       path = "skip_plugins_version",
       type = settings.type.TOGGLE,
       default = false
+    },
+    {
+      label = "Log Slow Coroutines",
+      description = "Logs those taking more time than allowed.",
+      path = "log_slow_threads",
+      type = settings.type.TOGGLE,
+      default = false
     }
   }
 )

@@ -1051,8 +1051,10 @@ local function add_thread(f, weak_ref, background, ...)
   local key = weak_ref or #core.threads + 1
   local args = {...}
   local fn = function() return core.try(f, table.unpack(args)) end
+  local info = debug.getinfo(2, "Sl")
+  local loc = string.format("%s:%d", info.short_src, info.currentline)
   core.threads[key] = {
-    cr = coroutine.create(fn), wake = 0, background = background
+    cr = coroutine.create(fn), wake = 0, background = background, loc = loc
   }
   if background then
     core.background_threads = core.background_threads + 1
@@ -1497,6 +1499,12 @@ local run_threads = coroutine.wrap(function()
             end
             thread.wake = system.get_time() + wait
             minimal_time_to_wake = math.min(minimal_time_to_wake, wait)
+            if config.log_slow_threads and end_time > core.co_max_time then
+              core.log_quiet(
+                "Slow co-routine took %fs of max %fs at: \n%s",
+                end_time, core.co_max_time, thread.loc
+              )
+            end
           end
         else
           minimal_time_to_wake =  math.min(
