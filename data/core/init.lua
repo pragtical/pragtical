@@ -1331,6 +1331,10 @@ function core.compose_window_title(title)
 end
 
 
+---Time it takes to render a single frame (value will be cap to 1000fps).
+---@type number
+local rendering_speed = 0.004
+
 ---Each second there is time assigned to drawing the amount of config.fps
 ---and for executing the coroutine tasks, this value represents the time
 ---that coroutines should not exceed for each 1s cycle.
@@ -1401,8 +1405,7 @@ function core.step()
   core.root_view:draw()
   renderer.end_frame()
 
-  -- Time it takes to render a single frame (cap it to 1000fps).
-  local rendering_speed = math.max(0.001, system.get_time() - start_time)
+  rendering_speed = math.max(0.001, system.get_time() - start_time)
 
   if rendering_speed * config.fps < 1 then
     -- Calculate max allowed coroutines run time based on rendering speed.
@@ -1540,19 +1543,28 @@ function core.run()
   scale = require "plugins.scale"
   local next_step
   local skip_no_focus = 0
+  local burst_events = 0
+  local has_focus = true
   while true do
     core.frame_start = system.get_time()
+
+    -- start a new 1s cycle
     if core.frame_start >= cycle_end_time then
-      -- we are starting a new 1s cycle
       cycle_end_time = core.frame_start + (core.co_max_time * core.fps)
       main_loop_time = 0
+      has_focus = system.window_has_focus(core.window)
     end
-    local has_focus = system.window_has_focus(core.window)
-    local forced_draw = core.redraw
-    if forced_draw then
-      -- allow things like project search to keep working even without focus
+
+    -- run all coroutine tasks
+    local time_to_wake, threads_end_time = run_threads()
+
+    -- respect coroutines redraw requests
+    if has_focus or core.redraw then
       skip_no_focus = core.frame_start + 5
+      next_step = nil
     end
+
+    -- set the run mode
     if
       not has_focus
       and skip_no_focus < core.frame_start
@@ -1563,27 +1575,20 @@ function core.run()
       run_threads_mode = "all"
     end
 
-    local time_to_wake, threads_end_time = run_threads()
-
-    -- respect coroutines redraw requests while on focus
-    if has_focus and not forced_draw and core.redraw then
-      skip_no_focus = core.frame_start + 5
-      next_step = nil
-    end
-
     if run_threads_mode == "background" then
+      -- run background threads, no drawing or events processing
       next_step = nil
       if system.wait_event(time_to_wake) then
         skip_no_focus = system.get_time() + 5
       end
     else
+      -- run all threads, listen events and perform drawing as needed
       local did_redraw = false
       if not next_step or system.get_time() >= next_step then
         did_redraw = core.step()
         next_step = nil
       end
       if core.restart_request or core.quit_request then break end
-
       if not did_redraw then
         local now = system.get_time()
         if has_focus or core.background_threads > 0 or skip_no_focus > now then
@@ -1594,19 +1599,19 @@ function core.run()
             local cursor_time_to_wake = dt + 1 / core.fps
             next_step = now + cursor_time_to_wake
           end
-          if
-            time_to_wake > 0
-            and
-            system.wait_event(math.min(next_step - now, time_to_wake))
-          then
-            next_step = nil -- if we've recevied an event, perform a step
+          local b = burst_events > now and rendering_speed or 1
+          if system.wait_event(math.min(next_step - now, time_to_wake, b)) then
+            next_step = nil
+            -- burst event processing speed to reduce input lag
+            burst_events = now + 3
           end
         else
           system.wait_event()
           -- allow normal rendering for up to 5 seconds after receiving event
           -- to let any animations render smoothly
           skip_no_focus = system.get_time() + 5
-          next_step = nil -- perform a step when we're not in focus if get we an event
+          -- perform a step when we're not in focus in case we get an event
+          next_step = nil
         end
       else -- if we redrew, then make sure we only draw at most FPS/sec
         local now = system.get_time()
@@ -1616,10 +1621,14 @@ function core.run()
         system.sleep(math.min(next_frame, time_to_wake))
       end
     end
+
+    -- run the garbage collector on request
     if core.collect_garbage then
       collectgarbage("collect")
       core.collect_garbage = false
     end
+
+    -- Update the loop run time
     main_loop_time = main_loop_time + (
       (system.get_time() - core.frame_start) - threads_end_time
     )
