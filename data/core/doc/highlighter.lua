@@ -20,13 +20,15 @@ function Highlighter:start()
   self.running = true
   core.add_thread(function()
     local views = #core.get_views_referencing_doc(self.doc)
+    local prev_line = 0
     while self.first_invalid_line <= self.max_wanted_line do
       if not self.doc then return end
       local max = math.min(self.first_invalid_line + 40, self.max_wanted_line)
+      local line
       local retokenized_from
       for i = self.first_invalid_line, max do
         local state = (i > 1) and self.lines[i - 1].state
-        local line = self.lines[i]
+        line = self.lines[i]
         if line and line.resume and (line.init_state ~= state or line.text ~= self.doc:get_utf8_line(i)) then
           -- Reset the progress if no longer valid
           line.resume = nil
@@ -46,7 +48,16 @@ function Highlighter:start()
 
       self.first_invalid_line = max + 1
       ::yield::
-      if retokenized_from then
+      -- depending on installed plugins notifying can be expensive with long
+      -- lines so we perform only on first and last tokenization
+      if
+        retokenized_from and (
+          prev_line ~= retokenized_from
+          or
+          not (line.resume and #line.text > 200)
+        )
+      then
+        prev_line = retokenized_from
         self:update_notify(retokenized_from, max - retokenized_from)
       end
       core.redraw = true

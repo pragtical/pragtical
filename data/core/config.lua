@@ -257,6 +257,14 @@ config.max_clicks = 3
 ---@type boolean
 config.skip_plugins_version = false
 
+---Quiet logging of threads that are taking longer than the maximum time
+---allowed on a per frame iteration basis. Enable only when troubleshooting
+---performance issues, since enabling this may degrade performance.
+---
+---Defaults to false.
+---@type boolean
+config.log_slow_threads = false
+
 ---Increases the performance of the editor and its user.
 ---Do not change this unless you know what you are doing.
 ---
