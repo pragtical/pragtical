@@ -2041,12 +2041,32 @@ function View:new()
   local mode = config.force_scrollbar_status_mode or "global"
   local globally = mode == "global"
   if globally then
-    --This is delayed to allow widgets to also apply it to child views/widgets
-    core.add_thread(function()
+    self.v_scrollbar:set_forced_status(config.force_scrollbar_status)
+    self.h_scrollbar:set_forced_status(config.force_scrollbar_status)
+  end
+end
+
+local widget_new = Widget.new
+function Widget:new(parent, floating)
+  widget_new(self, parent, floating)
+  if not parent then
+    self.init_scrollbars_status = true
+  end
+end
+
+local widget_draw = Widget.draw
+function Widget:draw()
+  if self.init_scrollbars_status then
+    local mode = config.force_scrollbar_status_mode or "global"
+    local globally = mode == "global"
+    if globally then
+      --This is delayed to allow widgets to also apply it to child views/widgets
       self.v_scrollbar:set_forced_status(config.force_scrollbar_status)
       self.h_scrollbar:set_forced_status(config.force_scrollbar_status)
-    end)
+    end
+    self.init_scrollbars_status = nil
   end
+  return widget_draw(self)
 end
 
 return settings;
