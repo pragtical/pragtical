@@ -429,6 +429,32 @@ function common.match_pattern(text, pattern, ...)
 end
 
 
+---Checks if a path matches one of the given ignore rules.
+---@param path string
+---@param info system.fileinfo
+---@param ignore_rules core.ignore_file_rule[]
+---@return boolean
+function common.match_ignore_rule(path, info, ignore_rules)
+  local basename = common.basename(path)
+  -- replace '\' with '/' for Windows where PATHSEP = '\'
+  path = PLATFORM == "Windows" and path:gsub("\\", "/") or path
+  local fullname = "/" .. path
+  for _, compiled in ipairs(ignore_rules) do
+    local test = compiled.use_path and fullname or basename
+    if compiled.match_dir then
+      if info.type == "dir" and string.match(test .. "/", compiled.pattern) then
+        return true
+      end
+    else
+      if string.match(test, compiled.pattern) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+
 ---Draws text onto the window.
 ---The function returns the X and Y coordinates of the bottom-right
 ---corner of the text.

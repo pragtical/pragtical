@@ -1672,4 +1672,36 @@ function core.deprecation_log(kind)
 end
 
 
+---A pre-processed config.ignore_files entry.
+---@class core.ignore_file_rule
+---A lua pattern.
+---@field pattern string
+---Match a full path including path separators, otherwise match filename only.
+---@field use_path boolean
+---Match directories only.
+---@field match_dir boolean
+
+---Gets a list of pre-processed config.ignore_files patterns for usage in
+---combination of common.match_ignore_rule()
+---@return core.ignore_file_rule[]
+function core.get_ignore_file_rules()
+  local ipatterns = config.ignore_files
+  local compiled = {}
+  -- config.ignore_files could be a simple string...
+  if type(ipatterns) ~= "table" then ipatterns = {ipatterns} end
+  for _, pattern in ipairs(ipatterns) do
+    -- we ignore malformed pattern that raise an error
+    if pcall(string.match, "a", pattern) then
+      table.insert(compiled, {
+        use_path = pattern:match("/[^/$]"), -- contains a slash but not at the end
+        -- An '/' or '/$' at the end means we want to match a directory.
+        match_dir = pattern:match(".+/%$?$"), -- to be used as a boolen value
+        pattern = pattern -- get the actual pattern
+      })
+    end
+  end
+  return compiled
+end
+
+
 return core

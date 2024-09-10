@@ -66,7 +66,7 @@ local function basedir_files()
         if
           info and info.size <= config.file_size_limit * 1e6
           and
-          not common.match_pattern(file, config.ignore_files)
+          not common.match_ignore_rule(file, info, core.get_ignore_file_rules())
         then
           if info.type ~= "dir" then
             if multiple_projects then
@@ -159,7 +159,7 @@ local function index_files_thread(pathsep, ignore_files, file_size_limit)
             if
               info and info.size <= file_size_limit
               and
-              not commons.match_pattern(directory .. file, ignore_files)
+              not commons.match_ignore_rule(directory..file, info, ignore_files)
             then
               if info.type == "dir" then
                 table.insert(directories, directory .. file)
@@ -213,7 +213,7 @@ local function index_files_coroutine()
 
       local indexing_thread = thread.create(
         "findfile", index_files_thread,
-        PATHSEP, config.ignore_files, config.file_size_limit * 1e6
+        PATHSEP, core.get_ignore_file_rules(), config.file_size_limit * 1e6
       )
 
       local last_time = system.get_time()
