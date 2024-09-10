@@ -297,21 +297,28 @@ local function update_cache(doc)
   doc.indent_info = cache[doc]
 end
 
+-- Override DocView to ensure we only apply detectindent to visible doc views.
+local docview_new = DocView.new
+function DocView:new(...)
+  docview_new(self, ...)
+  self.init_detectindent = true
+end
 
-local new = Doc.new
-function Doc:new(...)
-  new(self, ...)
-  core.add_thread(function()
+local docview_draw = DocView.draw
+function DocView:draw(...)
+  docview_draw(self, ...)
+  if self.init_detectindent then
     -- perform detection only to ui loaded documents
-    if #core.get_views_referencing_doc(self) > 0 then
-      local type, size, confirmed = self:get_indent_info()
+    if #core.get_views_referencing_doc(self.doc) > 0 then
+      local type, size, confirmed = self.doc:get_indent_info()
       if not confirmed then
-        update_cache(self)
+        update_cache(self.doc)
       else
-        cache[self] = { type = type, size = size, confirmed = confirmed }
+        cache[self.doc] = { type = type, size = size, confirmed = confirmed }
       end
     end
-  end)
+    self.init_detectindent = nil
+  end
 end
 
 local clean = Doc.clean

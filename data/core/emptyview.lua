@@ -83,18 +83,15 @@ function EmptyView:new()
   self.text_x = 0
   self.text_y = 0
 
+  -- we use this to flag to check if plugin manager loaded as set buttons
+  -- tooltip when the view is draw for the first time, this way we ensure
+  -- the system is properly loaded with the things we need
+  self.first_update = false
+
   for _, button in ipairs(buttons) do
     self[button.name] = Button(self, button.label)
     self[button.name]:set_icon(button.icon)
     self[button.name].border.width = 0
-    core.add_thread(function()
-      self[button.name]:set_tooltip(
-        string.format(
-          "%s (%s)",
-          button.tooltip, keymap.get_binding(button.cmd) or ""
-        )
-      )
-    end)
     self[button.name].on_click = function(_, pressed)
       if pressed == "left" then
         command.perform(button.cmd)
@@ -116,18 +113,8 @@ function EmptyView:new()
 
   self.force_update = false
   self.plugin_manager_loaded = false
-  core.add_thread(function()
-    self.plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
-    if self.plugin_manager_loaded then
-      self.plugins = Button(self, "Plugins")
-      self.plugins:set_icon("B")
-      self.plugins:set_tooltip("Open the plugin manager")
-      self.plugins.on_click = function(_, pressed)
-        command.perform("plugin-manager:show")
-      end
-      self.force_update = true
-    end
-  end)
+  self.plugins = Button(self, "Plugins")
+  self.plugins:hide()
 
   self.recent_projects = ListBox(self)
   self.recent_projects:add_column("Recent Projects")
@@ -155,11 +142,9 @@ end
 function EmptyView:on_scale_change(new_scale)
   if not icon_font_scaled then
     icon_font_scaled = true
-    core.add_thread(function()
-      icon_huge_font = style.icon_big_font:copy(110 * new_scale)
-      icon_font_scaled = false
-      icon_font_current_scale = new_scale
-    end)
+    icon_huge_font = style.icon_big_font:copy(110 * new_scale)
+    icon_font_scaled = false
+    icon_font_current_scale = new_scale
   end
 end
 
@@ -202,9 +187,33 @@ function EmptyView:draw()
     self.first_draw = false
     return false
   end
+
   EmptyView.super.draw(self)
   local _, oy = self:get_content_offset()
   draw_text(self, self.text_x, self.text_y + oy)
+
+  if not self.first_update then
+    for _, button in ipairs(buttons) do
+      self[button.name]:set_tooltip(
+        string.format(
+          "%s (%s)",
+          button.tooltip, keymap.get_binding(button.cmd) or ""
+        )
+      )
+    end
+    self.plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
+    if self.plugin_manager_loaded then
+      self.plugins:show()
+      self.plugins:set_icon("B")
+      self.plugins:set_tooltip("Open the plugin manager")
+      self.plugins.on_click = function(_, pressed)
+        command.perform("plugin-manager:show")
+      end
+      self.force_update = true
+    end
+    self.first_update = true
+  end
+
   return true
 end
 
