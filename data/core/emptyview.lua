@@ -210,6 +210,7 @@ function EmptyView:draw()
         command.perform("plugin-manager:show")
       end
       self.force_update = true
+      self:schedule_update()
     end
     self.first_update = true
   end
