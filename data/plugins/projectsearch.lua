@@ -270,8 +270,8 @@ local function files_search_thread(tid, options)
           )
           count = count + 1
           if
-            info and not commons.match_pattern(
-              directory .. file, ignore_files
+            info and not commons.match_ignore_rule(
+              directory..file, info, ignore_files
             )
           then
             if info.type == "dir" then
@@ -367,7 +367,7 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
         whole_word = whole_word,
         path = path,
         pathsep = PATHSEP,
-        ignore_files = config.ignore_files,
+        ignore_files = core.get_ignore_file_rules(),
         workers = workers,
         file_size_limit = config.file_size_limit * 1e6
       }

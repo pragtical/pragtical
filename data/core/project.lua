@@ -1,3 +1,4 @@
+local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local Object = require "core.object"
@@ -21,22 +22,7 @@ end
 
 ---Inspect config.ignore_files patterns and prepare ready to use entries.
 function Project:compile_ignore_files()
-  local ipatterns = config.ignore_files
-  local compiled = {}
-  -- config.ignore_files could be a simple string...
-  if type(ipatterns) ~= "table" then ipatterns = {ipatterns} end
-  for _, pattern in ipairs(ipatterns) do
-    -- we ignore malformed pattern that raise an error
-    if pcall(string.match, "a", pattern) then
-      table.insert(compiled, {
-        use_path = pattern:match("/[^/$]"), -- contains a slash but not at the end
-        -- An '/' or '/$' at the end means we want to match a directory.
-        match_dir = pattern:match(".+/%$?$"), -- to be used as a boolen value
-        pattern = pattern -- get the actual pattern
-      })
-    end
-  end
-  self.compiled = compiled
+  self.compiled = core.get_ignore_file_rules()
 end
 
 
@@ -94,22 +80,7 @@ end
 
 local function fileinfo_pass_filter(info, ignore_compiled)
   if info.size >= config.file_size_limit * 1e6 then return false end
-  local basename = common.basename(info.filename)
-  -- replace '\' with '/' for Windows where PATHSEP = '\'
-  local fullname = "/" .. info.filename:gsub("\\", "/")
-  for _, compiled in ipairs(ignore_compiled) do
-    local test = compiled.use_path and fullname or basename
-    if compiled.match_dir then
-      if info.type == "dir" and string.match(test .. "/", compiled.pattern) then
-        return false
-      end
-    else
-      if string.match(test, compiled.pattern) then
-        return false
-      end
-    end
-  end
-  return true
+  return not common.match_ignore_rule(info.filename, info, ignore_compiled)
 end
 
 ---Compute a file's info entry completed with "filename" to be used
@@ -121,7 +92,7 @@ function Project:get_file_info(path)
   -- info can be not nil but info.type may be nil if is neither a file neither
   -- a directory, for example for /dev/* entries on linux.
   if info and info.type then
-    info.filename = path
+    info.filename = common.relative_path(self.path, path)
     return fileinfo_pass_filter(info, self.compiled) and info or false
   end
   return false
