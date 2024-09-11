@@ -61,15 +61,19 @@ jobs:
   build_linux:
     name: Linux
     needs: release
-    runs-on: ubuntu-20.04
-    env:
-      CC: gcc
-      CXX: g++
     strategy:
       matrix:
         config:
-          - {compiler: default, arch: x86_64}
-          - {compiler: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu, arch: aarch64}
+          - compiler: default
+            arch: x86_64
+            container: ubuntu-20.04
+          - compiler: gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+            arch: aarch64
+            container: ubuntu-22.04
+    runs-on: ${{ matrix.config.container }}
+    env:
+      CC: gcc
+      CXX: g++
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -87,11 +91,30 @@ jobs:
         with:
           python-version: 3.9
       - name: Update Packages
-        run: sudo apt-get update
+        run: |
+          if [[ $(uname -m) = ${{ matrix.config.arch }} ]]; then
+            sudo apt-get update
+          else
+            url="http://ports.ubuntu.com/ubuntu-ports"
+            repos="main restricted universe multiverse"
+            echo "deb [arch=arm64] $url jammy $repos" > arm64.list
+            echo "deb [arch=arm64] $url jammy-updates $repos" >> arm64.list
+            echo "deb [arch=arm64] $url jammy-security $repos" >> arm64.list
+            echo "deb [arch=arm64] $url jammy-backports $repos" >> arm64.list
+            sudo mv arm64.list /etc/apt/sources.list.d/
+            sudo apt-get update
+            sudo dpkg --add-architecture arm64
+          fi
       - name: Install Dependencies
         run: |
-          bash scripts/install-dependencies.sh --debug
           sudo apt-get install -y ccache
+          if [[ $(uname -m) = ${{ matrix.config.arch }} ]]; then
+            bash scripts/install-dependencies.sh --debug
+          else
+            pip3 install meson
+            sudo apt-get install -y libfuse2 ninja-build
+            sudo apt-get install -y wayland-protocols:arm64 libsdl2-dev:arm64 libfreetype6:arm64
+          fi
       - name: Install Cross Compiler
         if: ${{ matrix.config.compiler != 'default' }}
         run: sudo apt-get install -y ${{ matrix.config.compiler }}
