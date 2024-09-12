@@ -235,10 +235,10 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       res = p.pattern and { text:ufind((at_start or p.whole_line[p_idx]) and "^" .. code or code, next) }
         or { regex.find(code, text, text:ucharpos(next), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
       if p.regex and #res > 0 then -- set correct utf8 len for regex result
-        local char_pos_1 = res[1] > next and string.ulen(text:sub(1, res[1])) or next
-        local char_pos_2 = string.ulen(text:sub(1, res[2]))
+        local char_pos_1 = res[1] > next and string.ulen(text:sub(1, res[1]), nil, nil, true) or next
+        local char_pos_2 = string.ulen(text:sub(1, res[2]), nil, nil, true)
         for i=3,#res do
-          res[i] = string.ulen(text:sub(1, res[i] - 1)) + 1
+          res[i] = string.ulen(text:sub(1, res[i] - 1), nil, nil, true) + 1
         end
         res[1] = char_pos_1
         res[2] = char_pos_2
@@ -264,7 +264,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
     return table.unpack(res)
   end
 
-  local text_len = text:ulen()
+  local text_len = text:ulen(nil, nil, true)
   local start_time = system.get_time()
   local starting_i = i
   local max_time = math.floor(10000 * (core.co_max_time / 2)) / 10000
