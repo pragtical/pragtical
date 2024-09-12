@@ -5,7 +5,7 @@
 utf8extra = {}
 
 ---UTF-8 equivalent of string.byte
----@param s  string
+---@param s string
 ---@param i? integer
 ---@param j? integer
 ---@return integer
@@ -13,27 +13,27 @@ utf8extra = {}
 function utf8extra.byte(s, i, j) end
 
 ---UTF-8 equivalent of string.find
----@param s       string
+---@param s string
 ---@param pattern string
----@param init?   integer
----@param plain?  boolean
+---@param init? integer
+---@param plain? boolean
 ---@return integer start
 ---@return integer end
 ---@return ... captured
 function utf8extra.find(s, pattern, init, plain) end
 
 ---UTF-8 equivalent of string.gmatch
----@param s       string
+---@param s string
 ---@param pattern string
----@param init?   integer
+---@param init? integer
 ---@return fun():string, ...
 function utf8extra.gmatch(s, pattern, init) end
 
 ---UTF-8 equivalent of string.gsub
----@param s       string
+---@param s string
 ---@param pattern string
----@param repl    string|table|function
----@param n       integer
+---@param repl string|table|function
+---@param n integer
 ---@return string
 ---@return integer count
 function utf8extra.gsub(s, pattern, repl, n) end
@@ -44,20 +44,21 @@ function utf8extra.gsub(s, pattern, repl, n) end
 function utf8extra.lower(s) end
 
 ---UTF-8 equivalent of string.match
----@param s       string
+---@param s string
 ---@param pattern string
----@param init?   integer
+---@param init? integer
 ---@return string | number captured
 function utf8extra.match(s, pattern, init) end
 
 ---UTF-8 equivalent of string.reverse
 ---@param s string
+---@param lax? boolean Do not check if string is invalid utf8
 ---@return string
-function utf8extra.reverse(s) end
+function utf8extra.reverse(s, lax) end
 
 ---UTF-8 equivalent of string.sub
----@param s  string
----@param i  integer
+---@param s string
+---@param i integer
 ---@param j? integer
 ---@return string
 function utf8extra.sub(s, i, j) end
@@ -81,7 +82,7 @@ function utf8extra.upper(s) end
 ---print(u"%123%u123%{123}%u{123}%xABC%x{ABC}")
 ---print(u"%%123%?%d%%u")
 ---```
----@param s  string
+---@param s string
 ---@return string utf8_string
 function utf8extra.escape(s) end
 
@@ -90,7 +91,7 @@ function utf8extra.escape(s) end
 ---charpos will be calculated, by add/subtract UTF-8 char index to current
 ---charpos. in all cases, it returns a new char position, and code point
 ---(a number) at this position.
----@param s  string
+---@param s string
 ---@param charpos? integer
 ---@param index? integer
 ---@return integer charpos
@@ -107,7 +108,7 @@ function utf8extra.charpos(s, charpos, index) end
 ---charpos and index is given, a new charpos will be calculated, by add/subtract
 ---UTF-8 char offset to current charpos. in all case, it return a new char
 ---position (in bytes), and code point (a number) at this position.
----@param s  string
+---@param s string
 ---@param charpos? integer
 ---@param index? integer
 ---@return integer charpos
@@ -249,7 +250,10 @@ function utf8extra.char(...) end
 ---will iterate over all characters in string s, with p being the position
 ---(in bytes) and c the code point of each character. It raises an error if
 ---it meets any invalid byte sequence.
-function utf8extra.codes(s) end
+---@param s string
+---@param lax? boolean Do not check if string is invalid utf8
+---@return fun():integer,integer
+function utf8extra.codes(s, lax) end
 
 ---Returns the codepoints (as integers) from all characters in s that start
 ---between byte position i and j (both included). The default for i is 1 and
@@ -257,8 +261,9 @@ function utf8extra.codes(s) end
 ---@param s string
 ---@param i? integer
 ---@param j? integer
----@return fun():integer, ...
-function utf8extra.codepoint(s, i, j) end
+---@param lax? boolean Do not check if string is invalid utf8
+---@return fun():integer,...
+function utf8extra.codepoint(s, i, j, lax) end
 
 ---Returns the number of UTF-8 characters in string s that start between
 ---positions i and j (both inclusive). The default for i is 1 and for j is -1.
@@ -267,9 +272,10 @@ function utf8extra.codepoint(s, i, j) end
 ---@param s string
 ---@param i? integer
 ---@param j? integer
+---@param lax? boolean Do not check if string is invalid utf8
 ---@return integer?
 ---@return integer?
-function utf8extra.len(s, i, j) end
+function utf8extra.len(s, i, j, lax) end
 
 ---Returns the position (in bytes) where the encoding of the n-th character
 ---of s (counting from position i) starts. A negative n gets characters before
