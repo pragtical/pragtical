@@ -396,6 +396,7 @@ keymap.add_direct {
   ["1lclick"] = "doc:set-cursor",
   ["2lclick"] = { "doc:set-cursor-word", "tabbar:new-doc" },
   ["3lclick"] = "doc:set-cursor-line",
+  ["mclick"] = "doc:paste-primary-selection",
   ["shift+left"] = "doc:select-to-previous-char",
   ["shift+right"] = "doc:select-to-next-char",
   ["shift+up"] = "doc:select-to-previous-line",
