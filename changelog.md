@@ -1,5 +1,84 @@
 # Changes Log
 
+## [3.5.0] - 2024-09-15
+
+### Performance Improvements
+
+* Lower input latency improving co-routine scheduling and tokenizer
+  ([#174](https://github.com/pragtical/pragtical/pull/174))
+
+* Reduce the amount of co-routines needed on startup
+  ([#176](https://github.com/pragtical/pragtical/pull/176))
+
+* Document lax param and use on tokenizer ulen calls
+  ([#183](https://github.com/pragtical/pragtical/pull/183))
+
+### Enhancements
+
+* Added PerMonitor dpi awareness to windows manifest
+  ([#158](https://github.com/pragtical/pragtical/pull/158))
+
+* Don't trust weak table keys to clean cached items
+  ([#164](https://github.com/pragtical/pragtical/pull/164))
+
+### API
+
+* Introduce new ignore files handling functions
+  ([#177](https://github.com/pragtical/pragtical/pull/177))
+
+* Use project version as mods version
+  ([#184](https://github.com/pragtical/pragtical/pull/184))
+
+### Fixes
+
+* Fix issues with window size restoration (spotted on Windows)
+  ([#162](https://github.com/pragtical/pragtical/pull/162))
+
+* IPC Plugin: restore current project working dir
+  ([#167](https://github.com/pragtical/pragtical/pull/167))
+
+* If all documents are closed chdir to root project
+  ([#168](https://github.com/pragtical/pragtical/pull/168))
+
+* findfile: use project when resolving file path
+  ([#169](https://github.com/pragtical/pragtical/pull/169))
+
+* Fix regex api wrong value set to regex.ENDANCHORED
+  ([#170](https://github.com/pragtical/pragtical/pull/170))
+
+* regex api: use proper type for options parameter
+  ([#171](https://github.com/pragtical/pragtical/pull/171))
+
+* Do not maximize window on macOS at startup
+  ([#175](https://github.com/pragtical/pragtical/pull/175))
+
+* Process TitleView button actions on mouse release
+  ([#178](https://github.com/pragtical/pragtical/pull/178))
+
+### Build System
+
+* Add Linux AArch64 build target to CI
+  ([#157](https://github.com/pragtical/pragtical/pull/157))
+
+* CI: Properly enable ccache for linux builds
+  ([#161](https://github.com/pragtical/pragtical/pull/161))
+
+### Widgets
+
+* Allow scheduling core updates and redraws
+  ([a2637c37](https://github.com/pragtical/widget/commit/a2637c377da8a92eb4bd966d12ab6a45e71c4e43))
+
+### Lite XL Inherited Changes
+
+* DocView: check token_count not 0
+  ([#1879](https://github.com/lite-xl/lite-xl/pull/1879))
+
+* Added in keyboard shortcut tooltips.
+  ([#1880](https://github.com/lite-xl/lite-xl/pull/1880))
+
+* Add primary selection support
+  ([#1729](https://github.com/lite-xl/lite-xl/pull/1729))
+
 ## [3.4.4] - 2024-08-27
 
 ### Fixes
@@ -2159,6 +2238,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.5.0]: https://github.com/pragtical/pragtical/releases/tag/v3.5.0
 [3.4.4]: https://github.com/pragtical/pragtical/releases/tag/v3.4.4
 [3.4.3]: https://github.com/pragtical/pragtical/releases/tag/v3.4.3
 [3.4.2]: https://github.com/pragtical/pragtical/releases/tag/v3.4.2
