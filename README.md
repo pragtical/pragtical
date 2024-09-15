@@ -5,6 +5,7 @@ The practical and pragmatic code editor.
 [website] | [documentation] | [download]
 
 [![Build Rolling]](https://github.com/pragtical/pragtical/actions/workflows/rolling.yml)
+[![Discord]](https://discord.gg/RC9ZHY8y)
 
 ![screenshot](https://pragtical.github.io/assets/img/editor.png)
 
@@ -132,6 +133,7 @@ See the [licenses] directory for details on licenses used by the required depend
 
 
 [Build Rolling]:      https://github.com/pragtical/pragtical/actions/workflows/rolling.yml/badge.svg
+[Discord]:            https://discord.com/api/guilds/1285023036071743542/widget.png?style=shield
 [Lite XL]:            https://github.com/lite-xl/lite-xl
 [screenshot-dark]:    https://user-images.githubusercontent.com/433545/111063905-66943980-84b1-11eb-9040-3876f1133b20.png
 [lite]:               https://github.com/rxi/lite
