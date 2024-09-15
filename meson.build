@@ -1,6 +1,6 @@
 project('pragtical',
     ['c'],
-    version : '3.4.4',
+    version : '3.5.0',
     license : 'MIT',
     meson_version : '>= 0.56',
     default_options : [
@@ -10,6 +10,7 @@ project('pragtical',
 )
 
 version = meson.project_version()
+mod_version = version.split('.')
 
 #===============================================================================
 # System dependency settings
@@ -64,6 +65,9 @@ conf_data.set('PROJECT_BUILD_DIR', meson.current_build_dir())
 conf_data.set('PROJECT_SOURCE_DIR', meson.current_source_dir())
 conf_data.set('PROJECT_VERSION', version)
 conf_data.set('PROJECT_ASSEMBLY_VERSION', meson.project_version() + '.0')
+conf_data.set('MOD_VERSION_MAJOR', mod_version[0])
+conf_data.set('MOD_VERSION_MINOR', mod_version[1])
+conf_data.set('MOD_VERSION_PATCH', mod_version[2])
 
 #===============================================================================
 # Compiler Settings
