@@ -6,6 +6,7 @@ local style = require "core.style"
 local keymap = require "core.keymap"
 local View = require "core.view"
 
+---@class plugins.toolbarview
 local ToolbarView = View:extend()
 
 function ToolbarView:__tostring() return "ToolbarView" end

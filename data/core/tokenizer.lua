@@ -2,7 +2,10 @@ local core = require "core"
 local syntax = require "core.syntax"
 local config = require "core.config"
 
+---Functionality to tokenize source code using syntax definitions.
+---@class core.tokenizer
 local tokenizer = {}
+
 local bad_patterns = {}
 
 local function push_token(t, type, text)

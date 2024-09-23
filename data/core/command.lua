@@ -1,4 +1,7 @@
 local core = require "core"
+
+---Functions to register and handle commands.
+---@class core.command
 local command = {}
 
 ---A predicate function accepts arguments from `command.perform()` and evaluates to a boolean. </br>

@@ -16,8 +16,11 @@ local settings_found, settings = pcall(require, "plugins.settings")
 ---@type integer
 local MESSAGE_EXPIRATION=3
 
+---Configuration options for `ipc` plugin.
 ---@class config.plugins.ipc
+---Run a single instance of pragtical.
 ---@field single_instance boolean
+---Control how to open directories in single instance mode.
 ---@field dirs_instance '"new"' | '"add"' | '"change"'
 config.plugins.ipc = common.merge({
   single_instance = true,

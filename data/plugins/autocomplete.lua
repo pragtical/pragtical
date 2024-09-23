@@ -54,6 +54,26 @@ local RootView = require "core.rootview"
 ---@type table<core.doc,plugins.autocomplete.cachedata>
 local cache = setmetatable({}, { __mode = "k" })
 
+---Configuration options for `autocomplete` plugin.
+---@class config.plugins.autocomplete
+---Amount of characters that need to be written for autocomplete
+---@field min_len integer
+---The max amount of visible items
+---@field max_height integer
+---The max amount of scrollable items
+---@field max_suggestions integer
+---Maximum amount of symbols to cache per document
+---@field max_symbols integer
+---Which symbols to show on the suggestions list: global, local, related, none
+---@field suggestions_scope "global" | "local" | "related" | "none"
+---Font size of the description box
+---@field desc_font_size number
+---Do not show the icons associated to the suggestions
+---@field hide_icons boolean
+---Position where icons will be displayed on the suggestions list
+---@field icon_position "left" | "right"
+---Do not show the additional information related to a suggestion
+---@field hide_info boolean
 config.plugins.autocomplete = common.merge({
   -- Amount of characters that need to be written for autocomplete
   min_len = 3,
@@ -168,6 +188,7 @@ config.plugins.autocomplete = common.merge({
   }
 }, config.plugins.autocomplete)
 
+---@class plugins.autocomplete
 local autocomplete = {}
 
 ---@type table<string,plugins.autocomplete.map>

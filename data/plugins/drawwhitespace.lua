@@ -9,6 +9,40 @@ local command = require "core.command"
 local config = require "core.config"
 local Highlighter = require "core.doc.highlighter"
 
+---Base configuration options.
+---@class config.plugins.drawwhitespace.options
+---Disable or enable the drawing of white spaces.
+---@field enabled boolean
+---Show white spaces at the beginning of a line.
+---@field show_leading boolean
+---Show white spaces at the end of a line.
+---@field show_trailing boolean
+---Show white spaces between words.
+---@field show_middle boolean
+---Show white spaces on selected text only.
+---@field show_selected_only boolean
+---Minimum amount of white spaces between words in order to show them.
+---@field show_middle_min integer
+---Default color used to render the white spaces.
+---@field color renderer.color
+---Color for leading white spaces.
+---@field leading_color renderer.color
+---Color for middle white spaces.
+---@field middle_color renderer.color
+---Color for trailing white spaces.
+---@field trailing_color renderer.color
+
+---Character substitution options.
+---@class config.plugins.drawwhitespace.substitutions : config.plugins.drawwhitespace.options
+---The character to substitute.
+---@field char string
+---The substitution character,
+---@field sub string
+
+---Configuration options for `drawwhitespace` plugin.
+---@class config.plugins.drawwhitespace : config.plugins.drawwhitespace.options
+---Character substitutions.
+---@field substitutions config.plugins.drawwhitespace.substitutions[]
 config.plugins.drawwhitespace = common.merge({
   enabled = false,
   show_leading = true,

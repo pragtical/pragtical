@@ -1,5 +1,7 @@
 local common = require "core.common"
 
+---Configuration options.
+---@class core.config
 local config = {}
 
 ---The frame rate of Pragtical.

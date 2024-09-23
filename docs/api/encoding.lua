@@ -1,7 +1,7 @@
 ---@meta
 
 ---
----Utilites for encoding detection and conversion.
+---Utilities for encoding detection and conversion.
 ---@class encoding
 encoding = {}
 

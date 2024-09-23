@@ -6,6 +6,10 @@ local style = require "core.style"
 local Doc = require "core.doc"
 local DirWatch = require "core.dirwatch"
 
+---Configuration options for `autoreload` plugin.
+---@class config.plugins.autoreload
+---Always ask before auto-reloading a file that changed.
+---@field always_show_nagview boolean
 config.plugins.autoreload = common.merge({
   always_show_nagview = true,
   config_spec = {

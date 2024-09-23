@@ -1,3 +1,5 @@
+---Utility functions.
+---@class core.common
 local common = {}
 
 
