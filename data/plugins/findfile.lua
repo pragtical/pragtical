@@ -7,6 +7,14 @@ local keymap = require "core.keymap"
 local style = require "core.style"
 local StatusView = require "core.statusview"
 
+---Configuration options for `findfile` plugin.
+---@class config.plugins.findfile
+---Show the latest visited files.
+---@field show_recent boolean
+---Enable a cache of indexed project files for faster core:find-file invocation.
+---@field enable_cache boolean
+---Amount of minutes before having to re-index project files.
+---@field cache_expiration number
 config.plugins.findfile = common.merge({
   show_recent = true,
   enable_cache = false,

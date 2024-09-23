@@ -6,6 +6,18 @@ local style = require "core.style"
 local DocView = require "core.docview"
 local CommandView = require "core.commandview"
 
+---Configuration options for `lineguide` plugin.
+---@class config.plugins.lineguide
+---Disable or enable drawing of the line guide.
+---@field enabled boolean
+---Width in pixels of the line guide.
+---@field width number
+---The different column numbers for the line guides to draw.
+---@field rulers table<integer,integer>
+---Enable the utilization of a custom line color.
+---@field use_custom_color boolean
+---Applied when `use_custom_color` is enabled.
+---@field custom_color renderer.color
 config.plugins.lineguide = common.merge({
   enabled = false,
   width = 2,
