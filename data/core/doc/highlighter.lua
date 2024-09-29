@@ -54,7 +54,7 @@ function Highlighter:start()
         retokenized_from and (
           prev_line ~= retokenized_from
           or
-          not (line.resume and #line.text > 200)
+          not (line and line.resume and #line.text > 200)
         )
       then
         prev_line = retokenized_from
