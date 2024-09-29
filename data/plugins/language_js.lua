@@ -79,16 +79,16 @@ syntax.add {
     { pattern = { "<%s*>", "<%s*/%s*>" },
       type = "operator", syntax = ".html"
     },
-    { regex = "<\\s*/()\\s*()[\\w\\d\\-_]+()\\s*>",
-      type = { "operator", "normal", "function", "operator" }
+    { regex = "</()\\w[\\w\\d\\-_\\.]*()\\s*>",
+      type = { "operator", "function", "operator" }
     },
-    { regex = "<\\s*()[\\w\\d\\-_]+(?=.*/>)",
+    { regex = "<()\\w[\\w\\d\\-_\\.]*(?=.*/>)",
       type = { "operator", "function" }, syntax = ".html"
     },
-    { regex = { "<\\s*()[\\w\\d\\-_]+()(?=.*>)", "</().*()>" },
+    { regex = { "<()\\w[\\w\\d\\-_\\.]*()(?=.*>)", "</().*()>" },
       type = { "operator", "function", "operator" }, syntax = ".html"
     },
-    { regex = { "^\\s*<\\s*()(?=[\\w\\d\\-_]\\s*.*)()", "</().*()>" },
+    { regex = { "^\\s*<()(?=\\w[\\w\\d\\-_\\.]*\\s*.*)()", "</().*()>" },
       type = { "operator", "function", "operator" }, syntax = ".html"
     },
     -- Regex string
