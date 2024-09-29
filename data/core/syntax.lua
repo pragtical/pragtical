@@ -1,6 +1,9 @@
 local common = require "core.common"
 
+---Functions to add and get syntax definitions.
+---@class core.syntax
 local syntax = {}
+
 syntax.items = {}
 
 syntax.plain_text_syntax = { name = "Plain Text", patterns = {}, symbols = {} }

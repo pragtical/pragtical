@@ -1,14 +1,12 @@
 ---@meta
 
 ---
----Functionality to create and manage windows
+---Functionality to create and manage windows.
 ---@class renwindow
 renwindow = {}
 
 ---
 ---Create a new window
----
----
 ---
 ---@param x integer? if nil will be undefined
 ---@param y integer? if nil will be undefined
@@ -21,7 +19,7 @@ function renwindow.create(x, y, width, height) end
 ---
 --- Get width and height of a window
 ---
----@param renwindow
+---@param window renwindow
 ---
 ---@return number width
 ---@return number height

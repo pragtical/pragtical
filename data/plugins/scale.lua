@@ -6,6 +6,14 @@ local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
 
+---Configuration options for `scale` plugin.
+---@class config.plugins.scale
+---Toggle auto detection of system scale.
+---@field autodetect boolean
+---Default scale applied at startup.
+---@field default_scale number
+---Allow using CTRL + MouseWheel for changing the scale.
+---@field use_mousewheel boolean
 config.plugins.scale = common.merge({
   -- Toggle auto detection of system scale.
   autodetect = true,
@@ -16,13 +24,15 @@ config.plugins.scale = common.merge({
 }, config.plugins.scale)
 
 local scale_steps = 0.05
-
 local current_scale = SCALE
 local current_code_scale = SCALE
 local user_scale = tonumber(os.getenv("PRAGTICAL_SCALE"))
 local default_scale = DEFAULT_SCALE
 
-local function set_scale(scale)
+---@class plugins.scale
+local scale = {}
+
+function scale.set(scale)
   if current_scale == scale then return end
 
   scale = common.clamp(scale, 0.2, 6)
@@ -71,7 +81,7 @@ local function set_scale(scale)
   core.redraw = true
 end
 
-local function set_scale_code(scale)
+function scale.set_code(scale)
   if current_code_scale == scale then return end
 
   scale = common.clamp(scale, 0.2, 6)
@@ -87,46 +97,46 @@ local function set_scale_code(scale)
   core.redraw = true
 end
 
-local function get_scale()
+function scale.get()
   return current_scale
 end
 
-local function res_scale()
-  set_scale(default_scale)
+function scale.reset()
+  scale.set(default_scale)
   if current_scale == current_code_scale then
-    set_scale_code(default_scale)
+    scale.set_code(default_scale)
   end
 end
 
-local function inc_scale()
-  set_scale(current_scale + scale_steps)
-  set_scale_code(current_code_scale + scale_steps)
+function scale.increase()
+  scale.set(current_scale + scale_steps)
+  scale.set_code(current_code_scale + scale_steps)
 end
 
-local function dec_scale()
-  set_scale(current_scale - scale_steps)
-  set_scale_code(current_code_scale - scale_steps)
+function scale.decrease()
+  scale.set(current_scale - scale_steps)
+  scale.set_code(current_code_scale - scale_steps)
 end
 
-local function get_scale_code()
+function scale.get_code()
   return current_code_scale
 end
 
-local function res_scale_code()
-  set_scale_code(default_scale)
+function scale.reset_code()
+  scale.set_code(default_scale)
 end
 
-local function inc_scale_code()
-  set_scale_code(current_code_scale + scale_steps)
+function scale.increase_code()
+  scale.set_code(current_code_scale + scale_steps)
 end
 
-local function dec_scale_code()
-  set_scale_code(current_code_scale - scale_steps)
+function scale.decrease_code()
+  scale.set_code(current_code_scale - scale_steps)
 end
 
 if default_scale ~= config.plugins.scale.default_scale then
   if type(config.plugins.scale.default_scale) == "number" then
-    set_scale(config.plugins.scale.default_scale)
+    scale.set(config.plugins.scale.default_scale)
   end
 end
 
@@ -145,11 +155,11 @@ config.plugins.scale.config_spec = {
     on_apply = function(enabled)
       if not first_on_apply_scale then
         if not enabled then
-          set_scale(config.plugins.scale.default_scale)
-          set_scale_code(config.plugins.scale.default_scale)
+          scale.set(config.plugins.scale.default_scale)
+          scale.set_code(config.plugins.scale.default_scale)
         else
-          set_scale(default_scale)
-          set_scale_code(default_scale)
+          scale.set(default_scale)
+          scale.set_code(default_scale)
         end
       end
     end
@@ -175,8 +185,8 @@ config.plugins.scale.config_spec = {
       end
       if config.plugins.scale.autodetect then return end
       if value ~= current_scale then
-        set_scale(value)
-        set_scale_code(value)
+        scale.set(value)
+        scale.set_code(value)
       end
     end
   },
@@ -206,15 +216,15 @@ config.plugins.scale.config_spec = {
 
 
 command.add(nil, {
-  ["scale:reset"] = function() res_scale() end,
-  ["scale:decrease"] = function() dec_scale() end,
-  ["scale:increase"] = function() inc_scale() end
+  ["scale:reset"] = function() scale.reset() end,
+  ["scale:decrease"] = function() scale.decrease() end,
+  ["scale:increase"] = function() scale.increase() end
 })
 
 command.add("core.docview", {
-  ["scale:reset-code"] = function() res_scale_code() end,
-  ["scale:decrease-code"] = function() dec_scale_code() end,
-  ["scale:increase-code"] = function() inc_scale_code() end,
+  ["scale:reset-code"] = function() scale.reset_code() end,
+  ["scale:decrease-code"] = function() scale.decrease_code() end,
+  ["scale:increase-code"] = function() scale.increase_code() end,
 })
 
 keymap.add {
@@ -237,19 +247,9 @@ end
 
 -- Apply custom PRAGTICAL_SCALE if set by user
 if user_scale then
-  set_scale(user_scale)
-  set_scale_code(user_scale)
+  scale.set(user_scale)
+  scale.set_code(user_scale)
 end
 
-return {
-  ["set"] = set_scale,
-  ["get"] = get_scale,
-  ["increase"] = inc_scale,
-  ["decrease"] = dec_scale,
-  ["reset"] = res_scale,
-  ["set_code"] = set_scale_code,
-  ["get_code"] = get_scale_code,
-  ["increase_code"] = inc_scale_code,
-  ["decrease_code"] = dec_scale_code,
-  ["reset_code"] = res_scale_code
-}
+
+return scale

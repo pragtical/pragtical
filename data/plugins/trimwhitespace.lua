@@ -4,8 +4,11 @@ local config = require "core.config"
 local command = require "core.command"
 local Doc = require "core.doc"
 
+---Configuration options for `trimwhitespace` plugin.
 ---@class config.plugins.trimwhitespace
+---Disable or enable the trimming of white spaces by default.
 ---@field enabled boolean
+---Remove any empty new lines at the end of documents.
 ---@field trim_empty_end_lines boolean
 config.plugins.trimwhitespace = common.merge({
   enabled = false,
