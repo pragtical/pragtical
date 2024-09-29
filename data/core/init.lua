@@ -1599,7 +1599,7 @@ function core.run()
             local cursor_time_to_wake = dt + 1 / core.fps
             next_step = now + cursor_time_to_wake
           end
-          local b = burst_events > now and rendering_speed or 1
+          local b = (config.lower_input_latency and burst_events > now) and rendering_speed or 1
           if system.wait_event(math.min(next_step - now, time_to_wake, b)) then
             next_step = nil
             -- burst event processing speed to reduce input lag

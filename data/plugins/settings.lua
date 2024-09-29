@@ -658,6 +658,13 @@ settings.add("Editor",
       path = "scroll_past_end",
       type = settings.type.TOGGLE,
       default = true
+    },
+    {
+      label = "Lower Input Latency",
+      description = "Reduce input latency by processing background tasks more aggressively, may use more CPU.",
+      path = "lower_input_latency",
+      type = settings.type.TOGGLE,
+      default = true
     }
   }
 )
