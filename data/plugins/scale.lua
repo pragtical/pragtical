@@ -20,7 +20,6 @@ local scale_steps = 0.05
 local current_scale = SCALE
 local current_code_scale = SCALE
 local user_scale = tonumber(os.getenv("PRAGTICAL_SCALE"))
-local default_scale = DEFAULT_SCALE
 
 local function set_scale(scale)
   if current_scale == scale then return end
@@ -92,9 +91,9 @@ local function get_scale()
 end
 
 local function res_scale()
-  set_scale(default_scale)
+  set_scale(DEFAULT_SCALE)
   if current_scale == current_code_scale then
-    set_scale_code(default_scale)
+    set_scale_code(DEFAULT_SCALE)
   end
 end
 
@@ -113,7 +112,7 @@ local function get_scale_code()
 end
 
 local function res_scale_code()
-  set_scale_code(default_scale)
+  set_scale_code(DEFAULT_SCALE)
 end
 
 local function inc_scale_code()
@@ -124,7 +123,7 @@ local function dec_scale_code()
   set_scale_code(current_code_scale - scale_steps)
 end
 
-if default_scale ~= config.plugins.scale.default_scale then
+if DEFAULT_SCALE ~= config.plugins.scale.default_scale then
   if type(config.plugins.scale.default_scale) == "number" then
     set_scale(config.plugins.scale.default_scale)
   end
@@ -148,8 +147,8 @@ config.plugins.scale.config_spec = {
           set_scale(config.plugins.scale.default_scale)
           set_scale_code(config.plugins.scale.default_scale)
         else
-          set_scale(default_scale)
-          set_scale_code(default_scale)
+          set_scale(DEFAULT_SCALE)
+          set_scale_code(DEFAULT_SCALE)
         end
       end
     end

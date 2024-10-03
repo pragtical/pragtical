@@ -1230,26 +1230,21 @@ end
 ---This function rescales the interface to the system default scale
 ---by incrementing or decrementing current user scale.
 local function update_scale()
-  if SCALE == DEFAULT_SCALE or config.plugins.scale.autodetect then
-    local new_scale = system.get_scale(core.window)
-    if DEFAULT_SCALE ~= new_scale then
-      if new_scale == SCALE then
-        DEFAULT_SCALE = new_scale
-        return
-      end
-      local target, target_code
-      if new_scale > DEFAULT_SCALE then
-        target = scale.get() + (new_scale - DEFAULT_SCALE)
-        target_code = scale.get_code() + (new_scale - DEFAULT_SCALE)
-      else
-        target = scale.get() - (DEFAULT_SCALE - new_scale)
-        target_code = scale.get_code() - (DEFAULT_SCALE - new_scale)
-      end
-      -- do not scale smaller than new_scale
-      scale.set(target < new_scale and new_scale or target)
-      scale.set_code(target_code < new_scale and new_scale or target_code)
-      DEFAULT_SCALE = new_scale
+  local new_scale, prev_default = system.get_scale(core.window), DEFAULT_SCALE
+  DEFAULT_SCALE = new_scale
+  if SCALE == prev_default or config.plugins.scale.autodetect then
+    if new_scale == SCALE then return end
+    local target, target_code
+    if new_scale > prev_default then
+      target = scale.get() + (new_scale - prev_default)
+      target_code = scale.get_code() + (new_scale - prev_default)
+    else
+      target = scale.get() - (prev_default - new_scale)
+      target_code = scale.get_code() - (prev_default - new_scale)
     end
+    -- do not scale smaller than new_scale
+    scale.set(target < new_scale and new_scale or target)
+    scale.set_code(target_code < new_scale and new_scale or target_code)
   end
 end
 
