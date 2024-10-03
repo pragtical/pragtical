@@ -105,7 +105,13 @@ end
 ---@param color "red" | "green" | "yellow" | "purple" | "blue" | "liteblue" | "gray"
 ---@return string colorized_text
 function cli.colorize(text, color)
-  if os.getenv("SHELL") or PLATFORM ~= "Windows" then
+  if
+    -- Mostly any standard shell
+    os.getenv("SHELL") or PLATFORM ~= "Windows"
+    or
+    -- Windows 10+
+    os.getenv("ProgramFiles")
+  then
     if color == "green" then
       return "\27[92m"..text.."\27[0m"
     elseif color == "red" then
@@ -277,15 +283,6 @@ end
 ---Parse the command line arguments and execute the applicable commands.
 ---@param args string[]
 function cli.parse(args)
-  -- Since console output on windows is mixed with interpreter we need this
-  if
-    PLATFORM == "Windows" and not os.getenv("SHELL")
-    and
-    (os.getenv("ComSpec") or os.getenv("COMSPEC"))
-  then
-    print ""
-  end
-
   args = table.pack(table.unpack(args))
 
   -- on macOS we can get an argument like "-psn_0_52353" so we strip it.
@@ -431,14 +428,6 @@ function cli.parse(args)
   end
 
   execute_command(cmd, flags_list, arguments_list)
-
-  if
-    PLATFORM == "Windows" and not os.getenv("SHELL")
-    and
-    (os.getenv("ComSpec") or os.getenv("COMSPEC"))
-  then
-    print ""
-  end
 end
 
 -- Register default command

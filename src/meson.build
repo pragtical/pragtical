@@ -97,3 +97,13 @@ executable('pragtical',
     install: true,
     win_subsystem: 'windows',
 )
+
+if host_machine.system() == 'windows'
+    executable('pragtical', 
+        'main_com.c',
+        name_suffix: 'com',
+        install_dir: pragtical_bindir,
+        install: true,
+        win_subsystem: 'console'
+    )
+endif
