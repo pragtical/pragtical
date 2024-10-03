@@ -30,6 +30,8 @@ local core = require "core"
 ---@field long_description? string
 ---Description of the arguments printed on command help.
 ---@field arguments? table<string,string>
+---Do not perform invalid arguments checking for this command.
+---@field skip_arguments_check? boolean
 ---Single line brief of using the command, eg: [options] [<argument>]
 ---@field usage? string
 ---The minimum amount of arguments required for the command
@@ -371,7 +373,7 @@ function cli.parse(args)
         else
           table.insert(flags_list, flag_found)
         end
-      else
+      elseif not cmd.skip_arguments_check then
         print(cli.colorize("Invalid flag '" .. argument .. "' given", "red"))
         os.exit(1)
       end
