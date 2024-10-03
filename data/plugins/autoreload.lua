@@ -83,7 +83,6 @@ function core.set_active_view(view)
 end
 
 core.add_thread(function()
-  local close_docs_time = system.get_time() + 5
   while true do
     watch:check(function(file)
       for _, doc in ipairs(core.docs) do
@@ -113,17 +112,6 @@ core.add_thread(function()
         end
       end
     end)
-    -- unwatch closed docs every 5 secs
-    if close_docs_time < system.get_time() then
-      for doc, _ in pairs(times) do
-        if #core.get_views_referencing_doc(doc) == 0 then
-          watch:unwatch(doc.abs_filename)
-          times[doc] = nil
-          if changed[doc] then changed[doc] = nil end
-        end
-      end
-      close_docs_time = system.get_time() + 5
-    end
     coroutine.yield(1)
   end
 end)
@@ -157,6 +145,9 @@ end
 
 Doc.on_close = function(self)
   on_close(self)
-  if times[self] then times[self] = nil end
-  if changed[self] then changed[self] = nil end
+  if times[self] then
+    times[self] = nil
+    watch:unwatch(self.abs_filename)
+    if changed[self] then changed[self] = nil end
+  end
 end
