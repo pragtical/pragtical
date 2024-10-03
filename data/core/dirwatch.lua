@@ -132,14 +132,12 @@ function DirWatch:check(change_callback, scan_time, wait_time)
     elseif self.reverse_watched[id] then
       local path = self.reverse_watched[id]
       change_callback(path)
-      -- This causes indefinite changes reporting on inotify backend when the
-      -- first item added to watch is a file instead of a directory, maybe other
-      -- backends could need this? On inotify doesn't seems to be needed...
-      -- local info = system.get_file_info(path)
-      -- if info and info.type == "file" then
-      --   self:unwatch(path)
-      --   self:watch(path)
-      -- end
+      -- the watch may get lost when a file is deleted and re-added, eg: git checkout
+      local info = system.get_file_info(path)
+      if info and info.type == "file" then
+        self:unwatch(path)
+        self:watch(path)
+      end
     end
   end, function(err)
     last_error = err
