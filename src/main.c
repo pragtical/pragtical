@@ -117,12 +117,32 @@ int main(int argc, char **argv) {
    *      https://stackoverflow.com/q/17111308
   */
   if (
-    !getenv("SHELL") && (getenv("ComSpec") || getenv("COMSPEC"))
+    !getenv("SHELL")
+    &&
+    (
+      /* Command Prompt */
+      getenv("ComSpec") || getenv("COMSPEC")
+      ||
+      /* PowerShell */
+      (getenv("PSExecutionPolicy") && getenv("PSExecutionPolicy") != NULL)
+    )
     &&
     AttachConsole(ATTACH_PARENT_PROCESS)
   ) {
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
+
+    /* Enable ANSI escape codes in Windows 10 and later */
+    OSVERSIONINFO osvi;
+    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+    if (GetVersionEx(&osvi)) {
+      if (osvi.dwMajorVersion >= 10) {
+        HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+        DWORD mode;
+        GetConsoleMode(hConsole, &mode);
+        SetConsoleMode(hConsole, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+      }
+    }
   }
 #endif
 

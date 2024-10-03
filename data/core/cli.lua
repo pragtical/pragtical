@@ -105,7 +105,13 @@ end
 ---@param color "red" | "green" | "yellow" | "purple" | "blue" | "liteblue" | "gray"
 ---@return string colorized_text
 function cli.colorize(text, color)
-  if os.getenv("SHELL") or PLATFORM ~= "Windows" then
+  if
+    -- Mostly any standard shell
+    os.getenv("SHELL") or PLATFORM ~= "Windows"
+    or
+    -- Windows 10+
+    os.getenv("ProgramFiles")
+  then
     if color == "green" then
       return "\27[92m"..text.."\27[0m"
     elseif color == "red" then
