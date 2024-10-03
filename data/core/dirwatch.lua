@@ -25,6 +25,7 @@ function DirWatch:new()
   self.scanned = {}
   self.watched = {}
   self.reverse_watched = {}
+  self.last_modified = {}
   self.monitor = dirmonitor.new()
   self.single_watch_top = nil
   self.single_watch_count = 0
@@ -131,12 +132,22 @@ function DirWatch:check(change_callback, scan_time, wait_time)
       change_callback(path)
     elseif self.reverse_watched[id] then
       local path = self.reverse_watched[id]
-      change_callback(path)
-      -- the watch may get lost when a file is deleted and re-added, eg: git checkout
+      local last_modified = self.last_modified[path]
       local info = system.get_file_info(path)
+      if last_modified then
+        self.last_modified[path] = nil
+        if info and info.modified == last_modified then
+          return
+        end
+      end
+      change_callback(path)
+      -- The watch may get lost when a file is deleted and re-added, eg:
+      -- git checkout <branch>. We register modified timestamp to prevent
+      -- sending unnecessary notifications or duplicating them.
       if info and info.type == "file" then
         self:unwatch(path)
         self:watch(path)
+        self.last_modified[path] = info.modified
       end
     end
   end, function(err)
