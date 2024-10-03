@@ -134,6 +134,9 @@ Doc.load = function(self, ...)
 end
 
 Doc.save = function(self, ...)
+  -- prevent watch loop since DirWatch:check will unwatch/watch the file when
+  -- it is saved causing an infinite check loop if we don't unwatch it first
+  if times[self] then watch:unwatch(self.abs_filename) times[self] = nil end
   local res = save(self, ...)
   -- if starting with an unsaved document with a filename.
   if #core.get_views_referencing_doc(self) > 0 then
