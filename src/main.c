@@ -126,6 +126,16 @@ int main(int argc, char **argv) {
   }
 #endif
 
+#ifdef __linux__
+  /* Use wayland by default if SDL_VIDEODRIVER not set and session type wayland */
+  if (getenv("SDL_VIDEODRIVER") == NULL) {
+    const char *session_type = getenv("XDG_SESSION_TYPE");
+    if (session_type && strcmp(session_type, "wayland") == 0) {
+      SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland");
+    }
+  }
+#endif
+
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
     fprintf(stderr, "Error initializing sdl: %s", SDL_GetError());
     exit(1);
