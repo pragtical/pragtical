@@ -5,7 +5,7 @@ The practical and pragmatic code editor.
 [website] | [documentation] | [download]
 
 [![Build Rolling]](https://github.com/pragtical/pragtical/actions/workflows/rolling.yml)
-[![Discord]](https://discord.gg/RC9ZHY8y)
+[![Discord]](https://discord.gg/jAAqT7eYEN)
 
 ![screenshot](https://pragtical.github.io/assets/img/editor.png)
 
