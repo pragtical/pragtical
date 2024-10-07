@@ -3,7 +3,6 @@
  * console ready stdout/stderr for normal behavior on CMD or PowerShell.
  */
 
-#include <processenv.h>
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
