@@ -468,18 +468,6 @@ static int f_draw_rect(lua_State *L) {
   return 0;
 }
 
-static void *realloc_ud(lua_State *L, int ref, void *prev, size_t s) {
-  void *ptr = lua_newuserdatauv(L, s, 1);
-  lua_pushinteger(L, s); lua_setiuservalue(L, -2, 1);
-  lua_rawsetp(L, ref, ptr);
-  if (prev) {
-    if (lua_rawgetp(L, ref, prev) != LUA_TUSERDATA) luaL_error(L, "invalid previous pointer");
-    lua_getiuservalue(L, -1, 1); memcpy(ptr, prev, lua_tointeger(L, -1)); // copy previous memory
-    lua_pushnil(L); lua_rawsetp(L, ref, prev); // remove previous allocated memory
-    lua_pop(L, 2);
-  }
-  return ptr;
-}
 
 static int f_draw_poly(lua_State *L) {
   static const char normal_tag[] = { POLY_NORMAL };
@@ -491,8 +479,6 @@ static int f_draw_poly(lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   RenColor color = checkcolor(L, 2, 255);
   lua_settop(L, 2);
-  // create a table, and store all the renpoint as userdata in the table as crude GC
-  int arena_idx = (lua_newtable(L), lua_gettop(L));
 
   int len = luaL_len(L, 1);
   RenPoint *points = NULL; int npoints = 0;
@@ -506,7 +492,7 @@ static int f_draw_poly(lua_State *L) {
       default: return luaL_error(L, "invalid number of points, expected 2, 6 and 8, got %d", coord_len);
     }
     if (npoints + coord_len / 2 > MAX_POLY_POINTS) return luaL_error(L, "too many points");
-    points = realloc_ud(L, arena_idx, points, (npoints + coord_len / 2) * sizeof(RenPoint));
+    points = SDL_realloc(points, (npoints + coord_len / 2) * sizeof(RenPoint));
     for (int lidx = 1; lidx <= coord_len; lidx += 2) {
       points[npoints].x = (lua_rawgeti(L, -1, lidx),   luaL_checknumber(L, -1));
       points[npoints].y = (lua_rawgeti(L, -2, lidx+1), luaL_checknumber(L, -1));
@@ -515,10 +501,12 @@ static int f_draw_poly(lua_State *L) {
     }
   }
   RenRect res = rencache_draw_poly(&window->cache, points, npoints, color);
+  if (points) SDL_free(points);
   lua_pushinteger(L, res.x);     lua_pushinteger(L, res.y);
   lua_pushinteger(L, res.width); lua_pushinteger(L, res.height);
   return 4;
 }
+
 
 static int f_draw_text(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX];
