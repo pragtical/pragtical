@@ -1,5 +1,49 @@
 # Changes Log
 
+## [3.5.1] - 2024-10-09
+
+### Fixes
+
+* Check valid line state on retokenization check
+  ([#186](https://github.com/pragtical/pragtical/pull/186))
+
+* Fix language_js embedded html matching
+  ([#187](https://github.com/pragtical/pragtical/pull/187))
+
+* Fix DirWatch check duplication on multiple mode
+  ([#197](https://github.com/pragtical/pragtical/pull/197))
+
+### Enhancements
+
+* Make the input latency reduction toggleable
+  ([#188](https://github.com/pragtical/pragtical/pull/188))
+
+* Always keep default scale updated on scale changes
+  ([#190](https://github.com/pragtical/pragtical/pull/190))
+
+* Use wayland by default if possible on linux
+  ([#191](https://github.com/pragtical/pragtical/pull/191))
+
+* CLI subcommands: allow skipping invalid arguments
+  ([#192](https://github.com/pragtical/pragtical/pull/192))
+
+* Restore DirWatch unwatch/watch behavior
+  ([#193](https://github.com/pragtical/pragtical/pull/193))
+
+* Fully move autoreload cleanup from co to Doc:on_close
+  ([#194](https://github.com/pragtical/pragtical/pull/194))
+
+* Add a .exe to .com console wrapper on windows
+  ([#199](https://github.com/pragtical/pragtical/pull/199))
+
+### Lite XL Merged Changes
+
+* api/system: make stat() call consistent across platforms
+  ([#195](https://github.com/pragtical/pragtical/pull/195))
+
+* treeview: remove unused code
+  ([#1895](https://github.com/lite-xl/lite-xl/pull/1895))
+
 ## [3.5.0] - 2024-09-15
 
 ### Performance Improvements
@@ -2238,6 +2282,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.5.1]: https://github.com/pragtical/pragtical/releases/tag/v3.5.1
 [3.5.0]: https://github.com/pragtical/pragtical/releases/tag/v3.5.0
 [3.4.4]: https://github.com/pragtical/pragtical/releases/tag/v3.4.4
 [3.4.3]: https://github.com/pragtical/pragtical/releases/tag/v3.4.3
