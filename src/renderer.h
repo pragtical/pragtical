@@ -61,5 +61,7 @@ float ren_get_scale_factor(SDL_Window *win);
 size_t ren_get_window_list(RenWindow ***window_list_dest);
 RenWindow* ren_find_window(SDL_Window *window);
 RenWindow* ren_find_window_from_id(uint32_t id);
+RenWindow* ren_get_target_window(void);
+void ren_set_target_window(RenWindow *window);
 
 #endif

@@ -18,6 +18,7 @@
 // #define RENDERER_DEBUG
 
 static RenWindow **window_list = NULL;
+static RenWindow *target_window = NULL;
 static size_t window_count = 0;
 
 // draw_rect_surface is used as a 1x1 surface to simplify ren_draw_rect with blending
@@ -1008,4 +1009,14 @@ RenWindow* ren_find_window(SDL_Window *window) {
 RenWindow* ren_find_window_from_id(uint32_t id) {
   SDL_Window *window = SDL_GetWindowFromID(id);
   return ren_find_window(window);
+}
+
+RenWindow* ren_get_target_window(void)
+{
+  return target_window;
+}
+
+void ren_set_target_window(RenWindow *window)
+{
+  target_window = window;
 }
