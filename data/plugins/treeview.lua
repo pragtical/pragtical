@@ -884,8 +884,16 @@ command.add(
   ["treeview:new-file"] = function(item)
     local text, path
     if not is_project_folder(item) then
-      text = item.filename .. PATHSEP
       path = common.dirname(item.abs_filename)
+      if item.type == "dir" then
+        text = item.filename .. PATHSEP
+      elseif item.type == "file" then
+        local parent_dir = common.dirname(
+          item.project:normalize_path(item.abs_filename)
+        )
+        text = parent_dir and parent_dir .. PATHSEP
+        path = common.dirname(path)
+      end
     else
       path = item.project.path
     end
@@ -908,8 +916,16 @@ command.add(
   ["treeview:new-folder"] = function(item)
     local text, path
     if not is_project_folder(item) then
-      text = item.filename .. PATHSEP
       path = common.dirname(item.abs_filename)
+      if item.type == "dir" then
+        text = item.filename .. PATHSEP
+      elseif item.type == "file" then
+        local parent_dir = common.dirname(
+          item.project:normalize_path(item.abs_filename)
+        )
+        text = parent_dir and parent_dir .. PATHSEP
+        path = common.dirname(path)
+      end
     else
       path = item.project.path
     end
