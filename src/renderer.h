@@ -25,6 +25,7 @@ typedef enum { FONT_STYLE_BOLD = 1, FONT_STYLE_ITALIC = 2, FONT_STYLE_UNDERLINE 
 typedef enum { FONT_FAMILY, FONT_SUBFAMILY, FONT_ID, FONT_FULLNAME, FONT_VERSION, FONT_PSNAME, FONT_TFAMILY, FONT_TSUBFAMILY, FONT_WWSFAMILY, FONT_WWSSUBFAMILY, FONT_SAMPLETEXT } EFontMetaTag;
 typedef struct { uint8_t b, g, r, a; } RenColor;
 typedef struct { RECT_TYPE x, y, width, height; } RenRect;
+typedef struct { double offset; } RenTab;
 typedef struct { SDL_Surface *surface; double scale_x, scale_y; } RenSurface;
 typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
 
@@ -44,8 +45,8 @@ void ren_font_group_set_size(RenFont **font, float size, double surface_scale);
 void update_font_scale(RenWindow *window_renderer, RenFont **fonts);
 #endif
 void ren_font_group_set_tab_size(RenFont **font, int n);
-double ren_font_group_get_width(RenFont **font, const char *text, size_t len, int *x_offset);
-double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color);
+double ren_font_group_get_width(RenFont **font, const char *text, size_t len, RenTab tab, int *x_offset);
+double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab);
 
 void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color);
 

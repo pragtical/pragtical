@@ -203,7 +203,7 @@ function DocView:get_col_x_offset(line, col)
     if font ~= default_font then font:set_tab_size(indent_size) end
     local length = #text
     if column + length <= col then
-      xoffset = xoffset + font:get_width(text)
+      xoffset = xoffset + font:get_width(text, {tab_offset = xoffset})
       column = column + length
       if line_len > CACHE_LINE_LEN and cache[line] then
         cache[line][column] = xoffset
@@ -216,7 +216,7 @@ function DocView:get_col_x_offset(line, col)
         if column >= col then
           return xoffset
         end
-        xoffset = xoffset + font:get_width(char)
+        xoffset = xoffset + font:get_width(char, {tab_offset = xoffset})
         column = column + #char
         if line_len > CACHE_LINE_LEN and cache[line] then
           cache[line][column] = xoffset
@@ -258,7 +258,7 @@ function DocView:get_x_offset_col(line, x)
   for _, type, text in self.doc.highlighter:each_token(line) do
     local font = style.syntax_fonts[type] or default_font
     if font ~= default_font then font:set_tab_size(indent_size) end
-    local width = font:get_width(text)
+    local width = font:get_width(text, {tab_offset = xoffset})
     -- Don't take the shortcut if the width matches x,
     -- because we need last_i which should be calculated using utf-8.
     if xoffset + width < x then
@@ -266,7 +266,7 @@ function DocView:get_x_offset_col(line, x)
       i = i + #text
     else
       for char in common.utf8_chars(text) do
-        local w = font:get_width(char)
+        local w = font:get_width(char, {tab_offset = xoffset})
         if xoffset >= x then
           return (xoffset - x > w / 2) and last_i or i
         end
@@ -515,13 +515,14 @@ function DocView:draw_line_text(line, x, y)
     last_token = tokens_count - 1
   end
   local _, indent_size = self.doc:get_indent_info()
+  local start_tx = tx
   for tidx, type, text in self.doc.highlighter:each_token(line) do
     local color = style.syntax[type]
     local font = style.syntax_fonts[type] or default_font
     if font ~= default_font then font:set_tab_size(indent_size) end
     -- do not render newline, fixes issue #1164
     if tidx == last_token then text = text:sub(1, -2) end
-    tx = renderer.draw_text(font, text, tx, ty, color)
+    tx = renderer.draw_text(font, text, tx, ty, color, {tab_offset = tx - start_tx})
     if tx > self.position.x + self.size.x then break end
   end
   return self:get_line_height()
