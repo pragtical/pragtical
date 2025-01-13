@@ -908,7 +908,7 @@ command.add(
         core.log("Created %s", doc_filename)
       end,
       suggest = function(text)
-        return common.path_suggest(text, item.abs_filename)
+        return common.path_suggest(text, path)
       end
     })
   end,
@@ -937,7 +937,7 @@ command.add(
         core.log("Created %s", dir_path)
       end,
       suggest = function(text)
-        return common.path_suggest(text, item.abs_filename)
+        return common.path_suggest(text, path)
       end
     })
   end,
