@@ -37,10 +37,11 @@ static void get_exe_filename(char *buf, int sz) {
 }
 
 /**
- * Attaches to the given command stdout and stderr and redirects it to it self.
+ * Attaches to the given command stdin, stdout, and stderr and redirects them to itself.
  */
 void executeCommand(const char *command, DWORD *exit_code) {
-    // Create pipes for stdout and stderr
+    // Create pipes for stdin, stdout, and stderr
+    HANDLE hStdInRead, hStdInWrite;
     HANDLE hStdOutRead, hStdOutWrite;
     HANDLE hStdErrRead, hStdErrWrite;
 
@@ -48,6 +49,12 @@ void executeCommand(const char *command, DWORD *exit_code) {
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.bInheritHandle = TRUE; // Allow child processes to inherit the handles
     sa.lpSecurityDescriptor = NULL;
+
+    // Create pipe for stdin
+    if (!CreatePipe(&hStdInRead, &hStdInWrite, &sa, 0)) {
+        fprintf(stderr, "Error creating stdin pipe\n");
+        return;
+    }
 
     // Create pipe for stdout
     if (!CreatePipe(&hStdOutRead, &hStdOutWrite, &sa, 0)) {
@@ -61,7 +68,8 @@ void executeCommand(const char *command, DWORD *exit_code) {
         return;
     }
 
-    // Set the write end of the stdout pipe to be inherited
+    // Set the write end of the pipes to not be inherited
+    SetHandleInformation(hStdInWrite, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(hStdOutWrite, HANDLE_FLAG_INHERIT, 0);
     SetHandleInformation(hStdErrWrite, HANDLE_FLAG_INHERIT, 0);
 
@@ -70,8 +78,9 @@ void executeCommand(const char *command, DWORD *exit_code) {
     PROCESS_INFORMATION pi;
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
+    si.hStdInput = hStdInRead;    // Redirect stdin
     si.hStdOutput = hStdOutWrite; // Redirect stdout
-    si.hStdError = hStdErrWrite;   // Redirect stderr
+    si.hStdError = hStdErrWrite;  // Redirect stderr
     si.dwFlags |= STARTF_USESTDHANDLES;
 
     ZeroMemory(&pi, sizeof(pi));
@@ -82,19 +91,21 @@ void executeCommand(const char *command, DWORD *exit_code) {
         return;
     }
 
-    // Close the write ends of the pipes
+    // Close unused ends of the pipes
+    CloseHandle(hStdInRead);
     CloseHandle(hStdOutWrite);
     CloseHandle(hStdErrWrite);
 
-    // Read output in a loop
+    // Input and output handling loops
     char buffer[4096];
-    DWORD bytesRead;
+    DWORD bytesRead, bytesWritten;
+
+    // Read input from the parent process and write to the child process
     while (true) {
-        // Check if the process is still running
-        DWORD waitResult = WaitForSingleObject(pi.hProcess, 0);
-        if (waitResult == WAIT_OBJECT_0) {
-            // Process has finished
-            break;
+        if (PeekNamedPipe(hStdInWrite, NULL, 0, NULL, &bytesRead, NULL) && bytesRead > 0) {
+            if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), buffer, sizeof(buffer) - 1, &bytesRead, NULL)) {
+                WriteFile(hStdInWrite, buffer, bytesRead, &bytesWritten, NULL);
+            }
         }
 
         // Read from stdout
@@ -109,8 +120,13 @@ void executeCommand(const char *command, DWORD *exit_code) {
             fprintf(stderr, "%s", buffer);
         }
 
-        // Sleep for a short time to avoid busy waiting
-        Sleep(10);
+        // Check if the process is still running
+        DWORD waitResult = WaitForSingleObject(pi.hProcess, 0);
+        if (waitResult == WAIT_OBJECT_0) {
+            break; // Process has finished
+        }
+
+        Sleep(10); // Avoid busy waiting
     }
 
     // Get the exit code of the child process
@@ -121,6 +137,7 @@ void executeCommand(const char *command, DWORD *exit_code) {
     CloseHandle(pi.hThread);
     CloseHandle(hStdOutRead);
     CloseHandle(hStdErrRead);
+    CloseHandle(hStdInWrite);
 }
 
 int main(int argc, char *argv[]) {
