@@ -123,10 +123,18 @@ int main(int argc, char **argv) {
   }
 #endif
 
-/* don't use wayland on sdl2-compat ref: pragtical/pragtical#210 */
-#if defined(__linux__) && SDL_VERSION_ATLEAST(2, 30, 50) == 0
+  /* detect buggy sdl2-compat ref: pragtical/pragtical#210 */
+  SDL_version version;
+  SDL_GetVersion(&version);
+  int buggy_sdl_compat = version.minor == 30 && version.patch >= 50;
+
+#ifdef __linux__
   /* Use wayland by default if SDL_VIDEODRIVER not set and session type wayland */
-  if (getenv("SDL_VIDEODRIVER") == NULL) {
+  /* Skip wayland video driver on buggy sdl2-compat plus wayfire */
+  int is_wayfire = getenv("WAYFIRE_SOCKET") != NULL
+    || getenv("WAYFIRE_CONFIG_FILE") != NULL
+  ;
+  if (getenv("SDL_VIDEODRIVER") == NULL && (!buggy_sdl_compat || !is_wayfire)) {
     const char *session_type = getenv("XDG_SESSION_TYPE");
     if (session_type && strcmp(session_type, "wayland") == 0) {
       SDL_SetHint(SDL_HINT_VIDEODRIVER, "wayland");
@@ -170,7 +178,8 @@ int main(int argc, char **argv) {
   SDL_SetHint("SDL_MOUSE_DOUBLE_CLICK_RADIUS", "4");
 #endif
 
-  SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+  if (!buggy_sdl_compat)
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
 
   if ( ren_init() ) {
     fprintf(stderr, "internal font error when starting the application\n");
