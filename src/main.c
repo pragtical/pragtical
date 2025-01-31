@@ -119,6 +119,7 @@ int main(int argc, char **argv) {
   if (getenv("PRAGTICAL_COM_WRAP") && AttachConsole(ATTACH_PARENT_PROCESS)) {
     freopen("CONOUT$", "w", stdout);
     freopen("CONOUT$", "w", stderr);
+    freopen("CONIN$", "r", stdin);
   }
 #endif
 
