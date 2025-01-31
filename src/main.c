@@ -122,7 +122,8 @@ int main(int argc, char **argv) {
   }
 #endif
 
-#ifdef __linux__
+/* don't use wayland on sdl2-compat ref: pragtical/pragtical#210 */
+#if defined(__linux__) && SDL_VERSION_ATLEAST(2, 30, 50) == 0
   /* Use wayland by default if SDL_VIDEODRIVER not set and session type wayland */
   if (getenv("SDL_VIDEODRIVER") == NULL) {
     const char *session_type = getenv("XDG_SESSION_TYPE");
