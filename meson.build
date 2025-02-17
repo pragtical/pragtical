@@ -2,7 +2,7 @@ project('pragtical',
     ['c'],
     version : '3.5.1',
     license : 'MIT',
-    meson_version : '>= 0.56',
+    meson_version : '>= 0.63',
     default_options : [
         'c_std=gnu11',
         'wrap_mode=nofallback'
@@ -279,16 +279,22 @@ install_data('licenses/licenses.md', install_dir : pragtical_docdir)
 install_subdir('docs/api' , install_dir : pragtical_datadir, strip_directory: true)
 install_subdir('data/core' , install_dir : pragtical_datadir, exclude_files : 'start.lua')
 
+fs = import('fs')
+
 data_dirs = ['fonts', 'plugins', 'colors', 'widget']
 if lua_jit_found
     data_dirs += ['compat']
 endif
 foreach data_module : data_dirs
-    install_subdir(join_paths('data', data_module), install_dir : pragtical_datadir)
+    module_path = 'data' / data_module
+    if fs.exists(module_path)
+        install_subdir(module_path, install_dir : pragtical_datadir)
+    else
+        install_emptydir(pragtical_datadir / data_module)
+    endif
 endforeach
 
 # Pull in widgets if necessary
-fs = import('fs')
 if not fs.exists('data/widget/init.lua')
     subproject('widget', default_options: ['data_dir='+pragtical_datadir])
 endif
