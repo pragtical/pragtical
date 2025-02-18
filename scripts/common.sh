@@ -29,13 +29,14 @@ addons_install() {
   local build_dir="$1"
   local data_dir="$2"
 
+  # Disabled since pragtical can load binary files without crashing
   # Plugins
-  mkdir -p "${data_dir}/plugins"
+  # mkdir -p "${data_dir}/plugins"
 
-  for plugin_name in open_ext; do
-    cp -r "${build_dir}/third/data/plugins/${plugin_name}.lua" \
-      "${data_dir}/plugins/"
-  done
+  # for plugin_name in open_ext; do
+  #   cp -r "${build_dir}/third/data/plugins/${plugin_name}.lua" \
+  #     "${data_dir}/plugins/"
+  # done
 }
 
 get_platform_name() {
