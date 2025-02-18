@@ -28,21 +28,22 @@ end
 local encoding_detect = encoding.detect
 
 encoding.detect = function(filename)
-  local charset, errmsg = encoding_detect(filename)
+  local charset, bom, errmsg = encoding_detect(filename)
   if not charset then
     local file = io.open(filename, "r")
     if file then
       local content = file:read("*a")
       file:close()
-      local test_encodings = {
+      local test_charsets = {
         "UTF-16LE", "UTF-16BE", "UTF-32LE", "UTF-32BE"
       }
-      for _, encoding in ipairs(test_encodings) do
-        if encoding_convert("UTF-8", encoding, content, {strict = true}) then
-          return encoding
+      for _, from_charset in ipairs(test_charsets) do
+        if encoding_convert("UTF-8", from_charset, content, {strict = true}) then
+          _, bom = encoding.strip_bom(content:sub(1, 32), from_charset)
+          return from_charset, bom
         end
       end
     end
   end
-  return charset, errmsg
+  return charset, bom, errmsg
 end

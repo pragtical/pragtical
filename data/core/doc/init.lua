@@ -23,7 +23,7 @@ end
 function Doc:new(filename, abs_filename, new_file)
   self.new_file = new_file
   self.encoding = nil
-  self.convert = false
+  self.bom = nil
   self.binary = false
   self.cache = {}
   self:reset()
@@ -85,25 +85,33 @@ function Doc:set_filename(filename, abs_filename)
 end
 
 
+function Doc:needs_encoding_conversion()
+  local charset = self.encoding
+  if charset and charset ~= "UTF-8" and charset ~= "ASCII" then
+    return true
+  end
+  return false
+end
+
+
 function Doc:load(filename)
   if not self.encoding then
     local errmsg
-    self.encoding, errmsg = encoding.detect(filename);
+    self.encoding, self.bom, errmsg = encoding.detect(filename);
     if not self.encoding then
       core.error("%s", errmsg)
       self.encoding = "UTF-8"
     end
+  elseif self.bom then
+    self.bom = encoding.get_charset_bom(self.encoding)
   end
-  self.convert = false
-  if self.encoding ~= "UTF-8" and self.encoding ~= "ASCII" then
-    self.convert = true
-  end
+  local convert = self:needs_encoding_conversion()
   local fp = assert( io.open(filename, "rb") )
   self:reset()
   self.lines = {}
   self.clean_lines = {}
   local i = 1
-  if self.convert then
+  if convert then
     local content = fp:read("*a");
     content = assert(encoding.convert("UTF-8", self.encoding, content, {
       strict = false,
@@ -183,8 +191,10 @@ function Doc:save(filename, abs_filename)
   end
   local fp
   local output = ""
-  if not self.convert then
+  local convert = self:needs_encoding_conversion()
+  if not convert then
     fp = open_for_writing(abs_filename)
+    if self.bom then fp:write(self.bom) end
     for _, line in ipairs(self.lines) do
       if self.crlf then line = line:gsub("\n", "\r\n") end
       fp:write(line)
@@ -194,15 +204,15 @@ function Doc:save(filename, abs_filename)
       if self.crlf then output = output:gsub("\n", "\r\n") end
   end
   local conversion_error = false
-  if self.convert then
+  if convert then
     local errmsg
     output, errmsg = encoding.convert(self.encoding, "UTF-8", output, {
-      strict = true,
-      handle_to_bom = true
+      strict = true
     })
     if output then
       fp = open_for_writing(abs_filename)
-      fp:write(encoding.get_charset_bom(self.encoding) .. output)
+      if self.bom then fp:write(self.bom) end
+      fp:write(output)
       fp:close()
     else
       conversion_error = true

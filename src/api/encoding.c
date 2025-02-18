@@ -225,7 +225,7 @@ static const char* encoding_charset_from_bom(
 
 
 /* Detects the encoding of a string. */
-const char* encoding_detect(const char* string, size_t string_len) {
+const char* encoding_detect(const char* string, size_t string_len, size_t* bom_len) {
   static char charset[30];
 
   if (string_len == 0) {
@@ -234,9 +234,9 @@ const char* encoding_detect(const char* string, size_t string_len) {
 
   memset(charset, 0, 30);
 
-  size_t bom_len = 0;
+  *bom_len = 0;
   const char* bom_charset = encoding_charset_from_bom(
-    string, string_len, &bom_len
+    string, string_len, bom_len
   );
 
   uint32_t state = UTF8_ACCEPT;
@@ -264,7 +264,7 @@ const char* encoding_detect(const char* string, size_t string_len) {
     (
       (utf8_output = SDL_iconv_string_custom(
         "UTF-8", bom_charset,
-        string+bom_len, string_len-bom_len,
+        string+(*bom_len), string_len-(*bom_len),
         &utf8_len, true
       )) != NULL
       &&
@@ -298,6 +298,7 @@ const char* encoding_detect(const char* string, size_t string_len) {
  *
  * Returns:
  *  The charset string or nil
+ *  The byte order mark sequence or nil
  *  The error message
  */
 int f_detect(lua_State *L) {
@@ -314,8 +315,9 @@ int f_detect(lua_State *L) {
 
   if (!file) {
     lua_pushnil(L);
+    lua_pushnil(L);
     lua_pushfstring(L, "unable to open file '%s', code=%d", file_name, errno);
-    return 2;
+    return 3;
   }
 
   fseek(file, 0, SEEK_END);
@@ -327,28 +329,37 @@ int f_detect(lua_State *L) {
 
   if (!string) {
     lua_pushnil(L);
+    lua_pushnil(L);
 		lua_pushfstring(L, "out of ram while detecting charset of '%s'", file_name);
 		fclose(file);
-		return 2;
+		return 3;
   }
 
   fseek(file, 0, SEEK_SET);
   fread(string, 1, read_size, file);
 
-  const char* charset = encoding_detect(string, read_size);
+  size_t bom_len = 0;
+  const char* charset = encoding_detect(string, read_size, &bom_len);
 
   fclose(file);
-  free(string);
+  int rcount = 1;
 
   if (charset) {
     lua_pushstring(L, charset);
+    if(bom_len > 0) {
+      lua_pushlstring(L, string, bom_len);
+      rcount = 2;
+    }
   } else {
     lua_pushnil(L);
+    lua_pushnil(L);
 		lua_pushstring(L, "could not detect the file encoding");
-		return 2;
+		rcount = 3;
   }
 
-  return 1;
+  free(string);
+
+  return rcount;
 }
 
 
@@ -362,20 +373,27 @@ int f_detect(lua_State *L) {
  *
  * Returns:
  *  The charset string or nil
+ *  The byte order mark sequence or nil
  *  The error message
  */
 int f_detect_string(lua_State *L) {
 	size_t string_len = 0;
   const char* string = luaL_checklstring(L, 1, &string_len);
 
-  const char* charset = encoding_detect(string, string_len);
+  size_t bom_len = 0;
+  const char* charset = encoding_detect(string, string_len, &bom_len);
 
   if (charset) {
     lua_pushstring(L, charset);
+    if (bom_len > 0) {
+      lua_pushlstring(L, string, bom_len);
+      return 2;
+    }
   } else {
     lua_pushnil(L);
+    lua_pushnil(L);
 		lua_pushstring(L, "could not detect the file encoding");
-		return 2;
+		return 3;
   }
 
   return 1;
@@ -445,14 +463,12 @@ int f_convert(lua_State *L) {
   }
 
   if (output != NULL && handle_to_bom) {
-    if (handle_to_bom) {
-      bom = encoding_bom_from_charset(to, &bom_len);
-      if (bom != NULL) {
-        output = SDL_realloc(output, output_len + bom_len);
-        SDL_memmove(output+bom_len, output, output_len);
-        SDL_memcpy(output, bom, bom_len);
-        output_len += bom_len;
-      }
+    bom = encoding_bom_from_charset(to, &bom_len);
+    if (bom != NULL) {
+      output = SDL_realloc(output, output_len + bom_len);
+      SDL_memmove(output+bom_len, output, output_len);
+      SDL_memcpy(output, bom, bom_len);
+      output_len += bom_len;
     }
   } else if (!output) {
     lua_pushnil(L);
@@ -477,7 +493,7 @@ int f_convert(lua_State *L) {
  *  charset, a string representing a valid iconv charset
  *
  * Returns:
- *  The bom sequence string or empty string if not applicable.
+ *  The bom sequence string or nil if not applicable.
  */
 int f_get_charset_bom(lua_State *L) {
   const char* charset = luaL_checkstring(L, 1);
@@ -488,7 +504,7 @@ int f_get_charset_bom(lua_State *L) {
   if (bom)
     lua_pushlstring(L, (char*)bom, bom_len);
   else
-    lua_pushstring(L, "");
+    lua_pushnil(L);
 
   return 1;
 }
@@ -505,6 +521,7 @@ int f_get_charset_bom(lua_State *L) {
  *
  * Returns:
  *  The input text string with the byte order marks removed if found.
+ *  The stripped byte order mark sequence or nil.
  */
 int f_strip_bom(lua_State* L) {
   size_t text_len = 0;
@@ -542,11 +559,16 @@ int f_strip_bom(lua_State* L) {
 
   if (bom_len > 0 && text_len-bom_len > 0) {
     lua_pushlstring(L, text+bom_len, text_len-bom_len);
+    lua_pushlstring(L, text, bom_len);
+  } else if (bom_len > 0) {
+    lua_pushlstring(L, "", 0);
+    lua_pushlstring(L, text, bom_len);
   } else {
     lua_pushlstring(L, text, text_len);
+    lua_pushnil(L);
   }
 
-  return 1;
+  return 2;
 }
 
 

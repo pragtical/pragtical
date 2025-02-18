@@ -58,6 +58,10 @@ local function save(filename)
   end
 end
 
+local function save_existing(doc)
+  if doc.filename then doc:save() end
+end
+
 local function cut_or_copy(delete)
   local full_text = ""
   local text = ""
@@ -131,6 +135,13 @@ local function set_cursor(dv, x, y, snap_type)
   end
   dv.mouse_selecting = { line, col, snap_type }
   core.blink_reset()
+end
+
+local function set_encoding(doc, charset)
+  doc.encoding = charset
+  if doc.bom then
+    doc.bom = encoding.get_charset_bom(charset)
+  end
 end
 
 local function line_comment(comment, line1, col1, line2, col2)
@@ -574,24 +585,14 @@ local commands = {
 
   ["doc:change-encoding"] = function(dv)
     encodings.select_encoding("Select Output Encoding", function(charset)
-      dv.doc.encoding = charset
-      if charset ~= "UTF-8" and charset ~= "ASCII" then
-        dv.doc.convert = true
-      else
-        dv.doc.convert = false
-      end
-      dv.doc:save()
+      set_encoding(dv.doc, charset)
+      save_existing(dv.doc)
     end)
   end,
 
   ["doc:reload-with-encoding"] = function(dv)
     encodings.select_encoding("Reload With Encoding", function(charset)
-      dv.doc.encoding = charset
-      if charset ~= "UTF-8" and charset ~= "ASCII" then
-        dv.doc.convert = true
-      else
-        dv.doc.convert = false
-      end
+      set_encoding(dv.doc, charset)
       dv.doc:reload()
     end)
   end,
@@ -721,6 +722,28 @@ end, {
     end
     dv.mouse_selecting = { line, col, "set" }
   end
+})
+
+command.add(function()
+  if not core.active_view:extends(DocView) then return false end
+  local doc = core.active_view.doc
+  local bom = encoding.get_charset_bom(doc.encoding or "none")
+  return  bom ~= nil, doc, bom
+end, {
+  ["doc:disable-bom"] = function(doc)
+    doc.bom = nil
+    save_existing(doc)
+  end,
+
+  ["doc:enable-bom"] = function(doc, bom)
+    doc.bom = bom
+    save_existing(doc)
+  end,
+
+  ["doc:toggle-bom"] = function(doc, bom)
+    if doc.bom then doc.bom = nil else doc.bom = bom end
+    save_existing(doc)
+  end,
 })
 
 local translations = {

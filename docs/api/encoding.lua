@@ -73,21 +73,23 @@ encoding = {}
 ---Try and detect the encoding to best of capabilities for given file given or
 ---returns nil and error message on failure.
 ---@param filename string
----@return string | nil charset
----@return string errmsg
+---@return string? charset
+---@return string? bom
+---@return string? errmsg
 function encoding.detect(filename) end
 
 ---
 ---Same as encoding.detect() but for strings.
 ---@param text string
----@return string | nil charset
----@return string errmsg
+---@return string? charset
+---@return string? bom
+---@return string? errmsg
 function encoding.detect_string(text) end
 
 ---@class encoding.convert_options
----@field handle_to_bom boolean @If applicable adds the byte order marks.
----@field handle_from_bom boolean @If applicable strips the byte order marks.
----@field strict boolean @When true fail if errors found.
+---@field handle_to_bom? boolean @If applicable adds the byte order marks.
+---@field handle_from_bom? boolean @If applicable strips the byte order marks.
+---@field strict? boolean @When true fail if errors found.
 
 ---
 ---Converts the given text from one encoding into another.
@@ -95,14 +97,14 @@ function encoding.detect_string(text) end
 ---@param fromcharset encoding.charset
 ---@param text string
 ---@param options? encoding.convert_options
----@return string | nil converted_text
----@return string errmsg
+---@return string? converted_text
+---@return string? errmsg
 function encoding.convert(tocharset, fromcharset, text, options) end
 
 ---
 ---Get the byte order marks for the given charset if applicable.
 ---@param charset encoding.charset
----@return string bom
+---@return string? bom
 function encoding.get_charset_bom(charset) end
 
 ---
@@ -110,4 +112,5 @@ function encoding.get_charset_bom(charset) end
 ---@param text string A string that may contain a byte order marks.
 ---@param charset? encoding.charset Charset to scan, if nil scan all charsets with bom.
 ---@return string cleaned_text
+---@return string? bom The stripped bytes order mark.
 function encoding.strip_bom(text, charset) end

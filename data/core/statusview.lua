@@ -355,9 +355,10 @@ function StatusView:register_docview_items()
     name = "doc:encoding",
     alignment = StatusView.Item.RIGHT,
     get_item = function()
-      local dv = core.active_view
+      local dv, bom = core.active_view, ""
+      if dv.doc.bom then bom = " (BOM)" end
       return {
-        style.text, dv.doc.encoding or "none"
+        style.text, (dv.doc.encoding or "none"), bom
       }
     end,
     command = function(button)
