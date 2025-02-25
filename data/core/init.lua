@@ -823,6 +823,9 @@ map_new_syntax_colors = function(clear_new)
     ["annotation.type"]       = { alt = "keyword2", dec=30 },
     ["annotation.operator"]   = { alt = "operator", dec=30 },
     ["annotation.function"]   = { alt = "function", dec=30 },
+    ["annotation.number"]     = { alt = "number",   dec=30 },
+    ["annotation.keyword2"]   = { alt = "keyword2", dec=30 },
+    ["annotation.literal"]    = { alt = "literal",  dec=30 },
     ["attribute"]             = { alt = "keyword",  dec=30 },
     -- Keywords like: true or false
     ["boolean"]               = { alt = "literal"   },
