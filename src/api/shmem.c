@@ -37,6 +37,11 @@
 
 typedef struct {
   shmem_handle handle;
+  /* reminder: when the shmem_object is used as a namespace handle the name is
+   * no longer than SHMEM_NAME_LEN, but when the shmem_object is used as
+   * entry_handles then a length of SHMEM_NS_LEN is used to accomodate the
+   * namespace name and entry item name.
+   */
   char name[SHMEM_NS_LEN];
   size_t size;
   void* map;
@@ -79,7 +84,8 @@ static inline void shmem_ns_name(
 static inline void shmem_ns_entry_name(
   char* ns_name, shmem_container* container, const char* entry_name
 ) {
-  sprintf(ns_name, "%s.%s", container->handle->name, entry_name);
+  const char* ns = container->handle->name;
+  snprintf(ns_name, SHMEM_NS_LEN, "%.*s.%s", (int)strlen(ns), ns, entry_name);
 }
 
 static inline bool shmem_name_valid(const char* name) {
