@@ -742,6 +742,51 @@ settings.add("Status Bar",
   }
 )
 
+settings.add("Advanced",
+  {
+    {
+      label = "Garbage Collector Pause",
+      description = "How many times ram has to increase after last clean in order to reclean. Lower value makes GC more aggressive but may cause stuttering.",
+      path = "gc_pause",
+      type = settings.type.NUMBER,
+      default = 2,
+      min = 1,
+      max = 10,
+      step = 0.1,
+      set_value = function(value)
+        return common.clamp(value, 1, 10)
+      end,
+      on_apply = function(value)
+        if LUA_VERSION < 5.4 then
+          collectgarbage("setpause", value*100)
+        else
+          collectgarbage("incremental", value*100, 0, 0)
+        end
+      end
+    },
+    {
+      label = "Garbage Collector Step Multiplier",
+      description = "How many times faster to run the collector in relation to allocations. Higher value makes GC more aggressive but may cause stuttering.",
+      path = "gc_step_multiplier",
+      type = settings.type.NUMBER,
+      default = 2,
+      min = 1,
+      max = 10,
+      step = 0.1,
+      set_value = function(value)
+        return common.clamp(value, 1, 10)
+      end,
+      on_apply = function(value)
+        if LUA_VERSION < 5.4 then
+          collectgarbage("setstepmul", value*100)
+        else
+          collectgarbage("incremental", 0, value*100, 0)
+        end
+      end
+    },
+  }
+)
+
 ---Retrieve from given config the associated value using the given path.
 ---@param conf table
 ---@param path string
