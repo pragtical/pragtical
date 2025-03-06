@@ -168,6 +168,11 @@ COMPAT53_API void lua_rawsetp(lua_State *L, int i, const void *p);
 #define lua_tonumberx COMPAT53_CONCAT(COMPAT53_PREFIX, _tonumberx)
 COMPAT53_API lua_Number lua_tonumberx (lua_State *L, int i, int *isnum);
 
+#ifndef LUA_JITLIBNAME
+#define lua_version COMPAT53_CONCAT(COMPAT53_PREFIX, _version)
+COMPAT53_API const lua_Number *lua_version (lua_State *L);
+#endif
+
 #define luaL_checkversion COMPAT53_CONCAT(COMPAT53_PREFIX, L_checkversion)
 COMPAT53_API void luaL_checkversion (lua_State *L);
 
@@ -209,9 +214,6 @@ COMPAT53_API int luaL_fileresult (lua_State *L, int stat, const char *fname);
 
 #define luaL_execresult COMPAT53_CONCAT(COMPAT53_PREFIX, L_execresult)
 COMPAT53_API int luaL_execresult (lua_State *L, int stat);
-
-#define luaL_typeerror COMPAT53_CONCAT(COMPAT53_PREFIX, L_typeerror)
-COMPAT53_API int (luaL_typeerror) (lua_State *L, int arg, const char *tname);
 
 #define lua_callk(L, na, nr, ctx, cont) \
   ((void)(ctx), (void)(cont), lua_call((L), (na), (nr)))
@@ -357,6 +359,9 @@ COMPAT53_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len);
 COMPAT53_API void luaL_requiref (lua_State *L, const char *modname,
                                  lua_CFunction openf, int glb );
 
+#define luaL_typeerror COMPAT53_CONCAT(COMPAT53_PREFIX, L_typeerror)
+COMPAT53_API int (luaL_typeerror) (lua_State *L, int arg, const char *tname);
+
 #endif /* Lua 5.1 and Lua 5.2 */
 
 
@@ -419,7 +424,7 @@ COMPAT53_API int lua_setiuservalue (lua_State* L, int idx, int n);
 
 
 /* LuaJIT missing implementations */
-#if LUA_JIT
+#ifdef LUA_JITLIBNAME
 #define lua_setlevel COMPAT53_CONCAT(COMPAT53_PREFIX, _setlevel)
 #endif
 

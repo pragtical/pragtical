@@ -1,8 +1,8 @@
 -- Use built-in bit operators for lua 5.3 and up
 
-local initialized = false
-if not bit or _VERSION:sub(-3) < "5.3" or initialized then return end
-initialized = true
+if bit then return end
+
+bit = {}
 
 bit.tobit = function(x)
   return math.tointeger(x)

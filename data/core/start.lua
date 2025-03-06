@@ -4,6 +4,7 @@ MOD_VERSION_MAJOR = tonumber("@MOD_VERSION_MAJOR@")
 MOD_VERSION_MINOR = tonumber("@MOD_VERSION_MINOR@")
 MOD_VERSION_PATCH = tonumber("@MOD_VERSION_PATCH@")
 MOD_VERSION_STRING = string.format("%d.%d.%d", MOD_VERSION_MAJOR, MOD_VERSION_MINOR, MOD_VERSION_PATCH)
+LUA_VERSION = tonumber(_VERSION:sub(-3))
 
 DEFAULT_SCALE = 1.0
 SCALE = 1.0
@@ -26,8 +27,8 @@ package.path = DATADIR .. '/?/init.lua;' .. package.path
 package.path = USERDIR .. '/?.lua;' .. package.path
 package.path = USERDIR .. '/?/init.lua;' .. package.path
 
--- load compatibility changes when running in luajit
-if LUAJIT then
+-- Load compatibility changes when running in LuaJIT or PUC Lua < 5.3
+if LUA_VERSION < 5.3 then
   require "core.jitsetup"
   COMPAT_DISABLE_FIX_PATTERN = true
   require "compat"
