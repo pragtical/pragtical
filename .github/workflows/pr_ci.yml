@@ -182,7 +182,7 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh -U --debug --forcefallback
+          bash scripts/build.sh --debug --forcefallback
       - name: Package
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
       - name: Upload Artifact
@@ -218,11 +218,6 @@ jobs:
           "INSTALL_NAME=pragtical-$($env:GITHUB_REF -replace ".*/")-windows-msvc-${{ matrix.arch.name }}" >> $env:GITHUB_ENV
           "INSTALL_REF=$($env:GITHUB_REF -replace ".*/")" >> $env:GITHUB_ENV
           "LUA_SUBPROJECT_PATH=subprojects/lua-5.4.6" >> $env:GITHUB_ENV
-      - name: Download and patch subprojects
-        shell: bash
-        run: |
-          meson subprojects download
-          cat resources/windows/001-lua-unicode.diff | patch -Np1 -d "$LUA_SUBPROJECT_PATH"
       - name: Configure
         run: |
           meson setup --wrap-mode=forcefallback -Dppm=false build

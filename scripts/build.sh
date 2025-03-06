@@ -46,7 +46,6 @@ main() {
   local bundle
   local portable
   local pgo
-  local patch_lua
   local cross
   local cross_platform
   local cross_arch
@@ -92,10 +91,6 @@ main() {
         ;;
       -O|--pgo)
         pgo="-Db_pgo=generate"
-        shift
-        ;;
-      -U|--windows-lua-utf)
-        patch_lua="true"
         shift
         ;;
       --cross-arch)
@@ -177,16 +172,9 @@ main() {
 
   rm -rf "${build_dir}"
 
-  # Download the subprojects so we can copy plugin manager or patch lua before
-  # configure, this will prevent reconfiguring the project.
+  # Download the subprojects so we can copy plugin manager,
+  # this will prevent reconfiguring the project.
   meson subprojects download
-
-  if [[ $patch_lua == "true" ]] && [[ ! -z $force_fallback ]]; then
-    lua_subproject_path=$(echo subprojects/lua-*/)
-    if [[ -d $lua_subproject_path ]]; then
-      patch -d $lua_subproject_path -p1 --forward < resources/windows/001-lua-unicode.diff
-    fi
-  fi
 
   # Enable ppm only for windows 32 Bits which binary download is not available
   local ppm="-Dppm=false"
