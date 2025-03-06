@@ -1537,6 +1537,28 @@ local run_threads = coroutine.wrap(function()
 end)
 
 
+-- Override default collectgarbage function to prevent users from performing
+-- a system stalling garbage collection, instead a new forcecollect option
+-- can be used.
+local collectgarbage_lua = collectgarbage
+
+---This function is a generic interface to the garbage collector.
+---It performs different functions according to its first argument, `opt`.
+---@param opt? gcoptions | "forcecollect"
+---@param ... any
+---@return any
+function collectgarbage(opt, ...)
+  local ret
+  if not opt or opt == "collect" then
+    ret = collectgarbage_lua("step", 10*1024)
+  elseif opt == "forcecollect" then
+    ret = collectgarbage_lua("collect")
+  else
+    ret = collectgarbage_lua(opt, ...)
+  end
+  return ret
+end
+
 function core.run()
   scale = require "plugins.scale"
   local next_step
