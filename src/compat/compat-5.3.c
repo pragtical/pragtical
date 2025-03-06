@@ -227,6 +227,14 @@ COMPAT53_API lua_Number lua_tonumberx (lua_State *L, int i, int *isnum) {
 }
 
 
+#ifndef LUA_JITLIBNAME
+COMPAT53_API const lua_Number *lua_version (lua_State *L) {
+  static const lua_Number version = LUA_VERSION_NUM;
+  return &version;
+}
+#endif
+
+
 COMPAT53_API void luaL_checkversion (lua_State *L) {
   (void)L;
 }
@@ -675,20 +683,6 @@ COMPAT53_API int luaL_execresult (lua_State *L, int stat) {
 }
 
 
-COMPAT53_API int luaL_typeerror (lua_State *L, int arg, const char *tname) {
-  const char *msg;
-  const char *typearg;  /* name for the type of the actual argument */
-  if (luaL_getmetafield(L, arg, "__name") == LUA_TSTRING)
-    typearg = lua_tostring(L, -1);  /* use the given type name */
-  else if (lua_type(L, arg) == LUA_TLIGHTUSERDATA)
-    typearg = "light userdata";  /* special name for messages */
-  else
-    typearg = luaL_typename(L, arg);  /* standard name */
-  msg = lua_pushfstring(L, "%s expected, got %s", tname, typearg);
-  return luaL_argerror(L, arg, msg);
-}
-
-
 COMPAT53_API void luaL_buffinit (lua_State *L, luaL_Buffer_53 *B) {
   /* make it crash if used via pointer to a 5.1-style luaL_Buffer */
   B->b.p = NULL;
@@ -1009,6 +1003,20 @@ COMPAT53_API void luaL_requiref (lua_State *L, const char *modname,
 }
 
 
+COMPAT53_API int luaL_typeerror (lua_State *L, int arg, const char *tname) {
+  const char *msg;
+  const char *typearg;  /* name for the type of the actual argument */
+  if (luaL_getmetafield(L, arg, "__name") == LUA_TSTRING)
+    typearg = lua_tostring(L, -1);  /* use the given type name */
+  else if (lua_type(L, arg) == LUA_TLIGHTUSERDATA)
+    typearg = "light userdata";  /* special name for messages */
+  else
+    typearg = luaL_typename(L, arg);  /* standard name */
+  msg = lua_pushfstring(L, "%s expected, got %s", tname, typearg);
+  return luaL_argerror(L, arg, msg);
+}
+
+
 #endif /* Lua 5.1 and 5.2 */
 
 
@@ -1111,7 +1119,7 @@ COMPAT53_API int lua_setiuservalue(lua_State* L, int idx, int n)
 
 
 /* LuaJIT missing implementations */
-#if LUA_JIT
+#ifdef LUA_JITLIBNAME
 COMPAT53_API void lua_setlevel (lua_State *from, lua_State *to) {}
 #endif
 

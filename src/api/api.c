@@ -11,17 +11,25 @@ int luaopen_shmem(lua_State* L);
 int luaopen_utf8extra(lua_State* L);
 int luaopen_encoding(lua_State* L);
 
-#ifdef LUA_JIT
+#if LUA_VERSION_NUM < 503
+  int luaopen_compat53_io(lua_State *L);
   int luaopen_compat53_string(lua_State *L);
   int luaopen_compat53_table(lua_State *L);
   int luaopen_compat53_utf8(lua_State *L);
-  #define LUAJIT_COMPATIBILITY \
+  #ifndef LUA_JITLIBNAME
+    int luaopen_bit(lua_State *L);
+    #define LUABIT_COMPATIBILITY { "bit", luaopen_bit },
+  #else
+    #define LUABIT_COMPATIBILITY
+  #endif
+  #define LUA53_COMPATIBILITY \
+    { "compat53.io", luaopen_compat53_io }, \
     { "compat53.string", luaopen_compat53_string }, \
     { "compat53.table", luaopen_compat53_table }, \
-    { "compat53.utf8", luaopen_compat53_utf8 },
+    { "compat53.utf8", luaopen_compat53_utf8 }, \
+    LUABIT_COMPATIBILITY
 #else
-  int luaopen_bit(lua_State *L);
-  #define LUAJIT_COMPATIBILITY { "bit", luaopen_bit },
+  #define LUA53_COMPATIBILITY
 #endif
 
 static const luaL_Reg libs[] = {
@@ -35,10 +43,12 @@ static const luaL_Reg libs[] = {
   { "utf8extra",  luaopen_utf8extra  },
   { "encoding",   luaopen_encoding   },
   { "shmem",      luaopen_shmem      },
-  LUAJIT_COMPATIBILITY
+  LUA53_COMPATIBILITY
   { NULL, NULL }
 };
 
+#undef LUA53_COMPATIBILITY
+#undef LUABIT_COMPATIBILITY
 
 void api_load_libs(lua_State *L) {
   for (int i = 0; libs[i].name; i++)

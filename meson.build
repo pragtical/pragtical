@@ -123,12 +123,16 @@ if not get_option('source-only')
             'lua5.4', # Debian
             'lua-5.4', # FreeBSD
             'lua',    # Fedora
+            'lua5.3', # Debian
+            'lua-5.3', # FreeBSD
+            'lua5.2', # Debian
+            'lua-5.2', # FreeBSD
         ]
 
         foreach lua : lua_names
             last_lua = (lua == lua_names[-1] or get_option('wrap_mode') == 'forcefallback')
             lua_dep = dependency(lua, fallback: last_lua ? ['lua', 'lua_dep'] : [], required : false,
-                version: '>= 5.4',
+                version: '>= 5.2',
                 default_options: default_fallback_options + ['default_library=static', 'line_editing=false', 'interpreter=false']
             )
             if lua_dep.found()
@@ -220,6 +224,8 @@ if not get_option('source-only')
     pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
+lua_compat_needed = lua_dep.version() < '5.3.0'
+
 #===============================================================================
 # Check for X11 existence to detect scale factor when video driver is x11
 #===============================================================================
@@ -282,7 +288,7 @@ install_subdir('data/core' , install_dir : pragtical_datadir, exclude_files : 's
 fs = import('fs')
 
 data_dirs = ['fonts', 'plugins', 'colors', 'widget']
-if lua_jit_found
+if lua_compat_needed
     data_dirs += ['compat']
 endif
 foreach data_module : data_dirs

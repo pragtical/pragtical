@@ -62,16 +62,20 @@ endif
 message('dirmonitor_backend: @0@'.format(dirmonitor_backend))
 
 # luajit compatibility files
-if lua_jit_found
+if lua_compat_needed
     pragtical_sources += [
-        'compat/lbitlib.c',
+        'compat/liolib.c',
         'compat/lstrlib.c',
         'compat/ltablib.c',
         'compat/lutf8lib.c'
     ]
-else
-    pragtical_sources += 'compat/ljbitlib.c'
+
+    if not lua_jit_found
+        pragtical_sources += 'compat/ljbitlib.c'
+    endif
 endif
+
+message('lua-compat-5.3 needed: @0@'.format(lua_compat_needed))
 
 pragtical_rc = []
 if host_machine.system() == 'windows'
