@@ -809,9 +809,10 @@ static int f_chdir(lua_State *L) {
 static int f_getcwd(lua_State* L) {
   #ifdef _WIN32
     wchar_t buffer[MAX_PATH];
-    if (!_wgetcwd(buffer, sizeof(buffer)))
+    if (!_wgetcwd(buffer, MAX_PATH))
       return luaL_error(L, "error getcwd: %s", strerror(errno));
     char *utf8_buffer = utfconv_wctoutf8(buffer);
+    if (utf8_buffer == NULL) { return luaL_error(L, UTFCONV_ERROR_INVALID_CONVERSION ); }
     lua_pushstring(L, utf8_buffer);
     free(utf8_buffer);
   #else
