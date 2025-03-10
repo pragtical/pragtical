@@ -142,7 +142,7 @@ void executeCommand(const char *command, DWORD *exit_code) {
 
 int main(int argc, char *argv[]) {
     // Allocate initial memory for the command
-    size_t commandSize = 1024;
+    size_t commandSize = 3072;
     char *command = (char *)malloc(commandSize);
     if (command == NULL) {
         fprintf(stderr, "Memory allocation failed\n");
