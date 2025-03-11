@@ -877,7 +877,10 @@ if lua_version < "5.3" then
          end
       end -- not luajit
 
-      if is_luajit then
+      -- NOTICE:
+      -- Disable this compatibility override because it overwrites the file
+      -- meta type from FILE* to userdata, and does not seems to be needed.
+      if false and is_luajit then
          local compat_file_meta = {}
          local compat_file_meta_loaded = 0
 
