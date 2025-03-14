@@ -1,6 +1,6 @@
 project('pragtical',
     ['c'],
-    version : '3.5.1',
+    version : '3.5.2',
     license : 'MIT',
     meson_version : '>= 0.63',
     default_options : [

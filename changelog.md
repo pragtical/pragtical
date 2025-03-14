@@ -1,5 +1,110 @@
 # Changes Log
 
+## [3.5.2] - 2025-03-14
+
+### Fixes
+
+* Respect multi-byte sequences on SHIFT_JIS ¥ handling
+  ([#202](https://github.com/pragtical/pragtical/pull/202))
+
+* Explicitly include limits.h on utf8 lib
+  ([#207](https://github.com/pragtical/pragtical/pull/207))
+
+* Fix treeview new dir/folder path suggestions
+  ([#208](https://github.com/pragtical/pragtical/pull/208))
+
+* Explicitly added missing headers
+  ([#209](https://github.com/pragtical/pragtical/pull/209))
+
+* Also redirect stdin to console on windows
+  ([#206](https://github.com/pragtical/pragtical/pull/206))
+
+* Fix handling of documents Bytes Order Mark (BOM)
+  ([#218](https://github.com/pragtical/pragtical/pull/218))
+
+* Silence shmem API compiler warnings
+  ([#223](https://github.com/pragtical/pragtical/pull/223))
+
+* Fix invalid size given to \_wgetcwd
+  ([#227](https://github.com/pragtical/pragtical/pull/227))
+
+* Disable a compatibility io overwrite on LuaJIT
+  ([#229](https://github.com/pragtical/pragtical/pull/229))
+
+### Build System
+
+* Bump minimum required meson version
+  ([#217](https://github.com/pragtical/pragtical/pull/217))
+
+* Disabled addition of open_ext plugin on CI
+  ([#219](https://github.com/pragtical/pragtical/pull/219))
+
+* Fix msys CI build
+  ([#221](https://github.com/pragtical/pragtical/pull/221))
+
+* Perform Lua unicode patching directly on Meson
+  ([#225](https://github.com/pragtical/pragtical/pull/225))
+
+### Enhancements
+
+* Added more annotation subtypes
+  ([#220](https://github.com/pragtical/pragtical/pull/220))
+
+* Sync lua-compat-5.3 with upstream
+  ([#224](https://github.com/pragtical/pragtical/pull/224))
+
+### Performance
+
+* Perform collectgarbage step instead of collect
+  ([#226](https://github.com/pragtical/pragtical/pull/226))
+
+### Lite XL Inherited Changes
+
+* Implement logic for tracking target window
+  ([#1891](https://github.com/lite-xl/lite-xl/pull/1891))
+
+* allocator: add arena_allocator
+
+* utfconv: add functions that use arena_allocator
+
+* process: migrate arg validation and checking to Lua
+
+* Additional small fixes for windows as part of the process API move to lua.
+
+* Add support for relative requires
+  ([#1634](https://github.com/lite-xl/lite-xl/pull/1634))
+
+* Fix multi-type usage in delimited patterns
+  ([#1740](https://github.com/lite-xl/lite-xl/pull/1740))
+
+* Add inclusive parameter to Doc:get_text
+  ([#1586](https://github.com/lite-xl/lite-xl/pull/1586))
+
+* Add minimum_thumb_size and {contracted,expanded}_scrollbar_margin to `Scrollbar`
+  ([#1589](https://github.com/lite-xl/lite-xl/pull/1589))
+
+* Format renderer font scale code to be actually readable
+
+* check item type before creating input text
+  ([#1904](https://github.com/lite-xl/lite-xl/pull/1904))
+
+* docview: prevent overscroll when DocView size is less than lh * 2
+  ([#1971](https://github.com/lite-xl/lite-xl/pull/1971))
+
+* process: do not return nil until process exited
+  ([#1973](https://github.com/lite-xl/lite-xl/pull/1973))
+
+* process: call poll_process when getting returncode
+
+* feat: add support for tab stops
+  ([#1945](https://github.com/lite-xl/lite-xl/pull/1945))
+
+* Update CSS plugin to support more units
+  ([#2010](https://github.com/lite-xl/lite-xl/pull/2010))
+
+* Added in stdlib
+  ([#2017](https://github.com/lite-xl/lite-xl/pull/2017))
+
 ## [3.5.1] - 2024-10-09
 
 ### Fixes
@@ -2282,6 +2387,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.5.2]: https://github.com/pragtical/pragtical/releases/tag/v3.5.2
 [3.5.1]: https://github.com/pragtical/pragtical/releases/tag/v3.5.1
 [3.5.0]: https://github.com/pragtical/pragtical/releases/tag/v3.5.0
 [3.4.4]: https://github.com/pragtical/pragtical/releases/tag/v3.4.4
