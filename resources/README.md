@@ -21,5 +21,9 @@ This folder contains resources that is used for building or packaging the projec
 of `pragtical_plugin_api.h` for more details. (TODO: to be dropped in favor of
 dynamic linking)
 
+### Other Files
+
+- `shell.html`: A shell file for use with WASM builds.
+
 
 [1]: https://mesonbuild.com/Cross-compilation.html
