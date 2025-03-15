@@ -40,6 +40,8 @@ local threaded_replace_id = 0
 ---@overload fun(path?:string,text:string,type:'"plain"'|'"regex"',insensitive?:boolean,whole_word?:boolean,replacement?:string):plugins.projectsearch.resultsview
 local ResultsView = Widget:extend()
 
+function ResultsView:__tostring() return "ResultsView" end
+
 ResultsView.context = "session"
 
 ---Constructor

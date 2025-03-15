@@ -11,6 +11,8 @@ local ListBox = require "widget.listbox"
 ---@field super widget
 local EmptyView = Widget:extend()
 
+function EmptyView:__tostring() return "EmptyView" end
+
 ---Font used to render the logo
 ---@type renderer.font
 local icon_huge_font

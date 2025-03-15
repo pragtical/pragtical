@@ -10,6 +10,7 @@ local tokenizer = require "core.tokenizer"
 ---@class core.doc : core.object
 local Doc = Object:extend()
 
+function Doc:__tostring() return "Doc" end
 
 local function split_lines(text)
   local res = {}

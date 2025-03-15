@@ -50,6 +50,8 @@ end
 
 local TreeView = View:extend()
 
+function TreeView:__tostring() return "TreeView" end
+
 function TreeView:new()
   TreeView.super.new(self)
   self.scrollable = true
@@ -530,7 +532,6 @@ end
 function TreeView:open_doc(filename)
   core.root_view:open_doc(core.open_doc(filename))
 end
-
 
 -- init
 local view = TreeView()
