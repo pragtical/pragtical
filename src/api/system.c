@@ -189,6 +189,7 @@ top:
     case SDL_WINDOWEVENT:
       if (e.window.event == SDL_WINDOWEVENT_RESIZED) {
         RenWindow* window_renderer = ren_find_window_from_id(e.window.windowID);
+        if(!window_renderer) return 0;
         ren_resize_window(window_renderer);
         lua_pushstring(L, "resized");
         /* The size below will be in points. */
@@ -297,8 +298,8 @@ top:
         RenWindow* window_renderer = ren_find_window_from_id(e.button.windowID);
         lua_pushstring(L, "mousepressed");
         lua_pushstring(L, button_name(e.button.button));
-        lua_pushinteger(L, e.button.x * window_renderer->scale_x);
-        lua_pushinteger(L, e.button.y * window_renderer->scale_y);
+        lua_pushnumber(L, e.button.x * (window_renderer ? window_renderer->scale_x :0));
+        lua_pushnumber(L, e.button.y * (window_renderer ? window_renderer->scale_y :0));
         lua_pushinteger(L, e.button.clicks);
         return 5;
       }
@@ -309,8 +310,8 @@ top:
         RenWindow* window_renderer = ren_find_window_from_id(e.button.windowID);
         lua_pushstring(L, "mousereleased");
         lua_pushstring(L, button_name(e.button.button));
-        lua_pushinteger(L, e.button.x * window_renderer->scale_x);
-        lua_pushinteger(L, e.button.y * window_renderer->scale_y);
+        lua_pushnumber(L, e.button.x * (window_renderer ? window_renderer->scale_x : 0));
+        lua_pushnumber(L, e.button.y * (window_renderer ? window_renderer->scale_y : 0));
         return 4;
       }
 
@@ -325,10 +326,10 @@ top:
         }
         RenWindow* window_renderer = ren_find_window_from_id(e.motion.windowID);
         lua_pushstring(L, "mousemoved");
-        lua_pushinteger(L, e.motion.x * window_renderer->scale_x);
-        lua_pushinteger(L, e.motion.y * window_renderer->scale_y);
-        lua_pushinteger(L, e.motion.xrel * window_renderer->scale_x);
-        lua_pushinteger(L, e.motion.yrel * window_renderer->scale_y);
+        lua_pushnumber(L, e.motion.x * (window_renderer ? window_renderer->scale_x : 0));
+        lua_pushnumber(L, e.motion.y * (window_renderer ? window_renderer->scale_y : 0));
+        lua_pushnumber(L, e.motion.xrel * (window_renderer ? window_renderer->scale_x : 0));
+        lua_pushnumber(L, e.motion.yrel * (window_renderer ? window_renderer->scale_y : 0));
         return 5;
       }
 
