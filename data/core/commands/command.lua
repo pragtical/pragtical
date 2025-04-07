@@ -1,4 +1,3 @@
-local core = require "core"
 local command = require "core.command"
 
 command.add("core.commandview", {

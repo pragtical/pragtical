@@ -79,7 +79,10 @@ endif
 cc = meson.get_compiler('c')
 
 pragtical_includes = []
-pragtical_cargs = ['-DSDL_MAIN_HANDLED', '-DPCRE2_STATIC']
+pragtical_cargs = [
+    '-DPCRE2_STATIC',
+    '-DPRAGTICAL_PROJECT_VERSION_STR="@0@"'.format(version)
+]
 if get_option('renderer')
     pragtical_cargs += '-DPRAGTICAL_USE_SDL_RENDERER'
 endif
@@ -163,65 +166,61 @@ if not get_option('source-only')
         default_options: default_fallback_options + ['default_library=static']
     )
 
-    sdl_options = ['default_library=static']
-
-    # we explicitly need these
-    sdl_options += 'use_loadso=enabled'
-    sdl_options += 'prefer_dlopen=true'
-    sdl_options += 'use_video=enabled'
-    sdl_options += 'use_atomic=enabled'
-    sdl_options += 'use_threads=enabled'
-    sdl_options += 'use_timers=enabled'
-    # investigate if this is truly needed
-    # Do not remove before https://github.com/libsdl-org/SDL/issues/5413 is released
-    sdl_options += 'use_events=enabled'
-
-    if host_machine.system() == 'darwin' or host_machine.system() == 'windows'
-        sdl_options += 'use_video_x11=disabled'
-        sdl_options += 'use_video_wayland=disabled'
+    if get_option('wrap_mode') != 'forcefallback'
+        sdl_dep = dependency('sdl3')
+        sdl_uclibc_dep = dependency('', required: false)
     else
-        sdl_options += 'use_render=enabled'
-        sdl_options += 'use_video_x11=auto'
-        sdl_options += 'use_video_wayland=auto'
-    endif
+        cmake = import('cmake')
 
-    # we leave this up to what the host system has except on windows
-    if host_machine.system() != 'windows'
-        sdl_options += 'use_video_opengl=auto'
-        sdl_options += 'use_video_openglesv2=auto'
-    else
-        sdl_options += 'use_video_opengl=disabled'
-        sdl_options += 'use_video_openglesv2=disabled'
-    endif
-
-    # we don't need these
-    sdl_options += 'test=false'
-    sdl_options += 'use_sensor=disabled'
-    sdl_options += 'use_haptic=disabled'
-    sdl_options += 'use_hidapi=disabled'
-    sdl_options += 'use_audio=disabled'
-    sdl_options += 'use_cpuinfo=disabled'
-    sdl_options += 'use_joystick=disabled'
-    sdl_options += 'use_joystick_xinput=disabled'
-    sdl_options += 'use_video_vulkan=disabled'
-    sdl_options += 'use_video_offscreen=disabled'
-    sdl_options += 'use_power=disabled'
-
-    sdl_dep = dependency('sdl2', fallback: ['sdl2', 'sdl2_dep'],
-        default_options: default_fallback_options + sdl_options
-    )
-
-    if host_machine.system() == 'windows'
-        if sdl_dep.type_name() == 'internal'
-            sdlmain_dep = dependency('sdl2main', fallback: ['sdl2main_dep'])
-        else
-            sdlmain_dep = cc.find_library('SDL2main')
+        sdl_build_type = 'Release'
+        if get_option('buildtype') == 'debug'
+            sdl_build_type = 'Debug'
         endif
-    else
-        sdlmain_dep = dependency('', required: false)
+
+        sdl_x11 = 'ON'
+        sdl_wayland = 'ON'
+        if host_machine.system() == 'windows' or host_machine.system() == 'darwin'
+            sdl_x11 = 'OFF'
+            sdl_wayland = 'OFF'
+        endif
+
+        sdl_opengl = 'ON'
+        sdl_opengles = 'ON'
+        if host_machine.system() == 'windows'
+            sdl_opengl = 'OFF'
+            sdl_opengles = 'OFF'
+        endif
+
+        sdl_osx_deploy_target = '10.11'
+        if host_machine.system() == 'darwin' and target_machine.cpu_family() == 'aarch64'
+            sdl_osx_deploy_target = '11.0'
+        endif
+
+        sdl_options = cmake.subproject_options()
+
+        sdl_options.add_cmake_defines({
+            'CMAKE_BUILD_TYPE': sdl_build_type,
+            'CMAKE_POSITION_INDEPENDENT_CODE': 'ON',
+            'CMAKE_OSX_DEPLOYMENT_TARGET': sdl_osx_deploy_target,
+            'SDL_DEPS_SHARED': 'ON', 'SDL_SHARED': 'OFF', 'SDL_STATIC': 'ON',
+            'SDL_DBUS': 'ON', 'SDL_IBUS': 'ON', 'SDL_AUDIO': 'OFF',
+            'SDL_GPU': 'OFF', 'SDL_RPATH': 'OFF', 'SDL_PIPEWIRE': 'OFF',
+            'SDL_CAMERA': 'OFF', 'SDL_JOYSTICK': 'OFF', 'SDL_HAPTIC': 'OFF',
+            'SDL_HIDAPI': 'OFF', 'SDL_DIALOG': 'OFF', 'SDL_POWER': 'OFF',
+            'SDL_SENSOR': 'OFF', 'SDL_VULKAN': 'OFF', 'SDL_LIBUDEV': 'ON',
+            'SDL_X11': sdl_x11, 'SDL_WAYLAND': sdl_wayland, 'SDL_TESTS': 'OFF',
+            'SDL_OPENGL': sdl_opengl, 'SDL_OPENGLES': sdl_opengles,
+            'SDL_DIRECTX': 'ON', 'SDL_EXAMPLES': 'OFF',
+            'SDL_VENDOR_INFO': 'pragtical'
+        })
+
+        sdl = cmake.subproject('sdl3', options: sdl_options)
+
+        sdl_dep = sdl.dependency('SDL3-static')
+        sdl_uclibc_dep = sdl.dependency('SDL_uclibc')
     endif
 
-    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdl_uclibc_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 lua_compat_needed = lua_dep.version() < '5.3.0'
@@ -276,10 +275,10 @@ else
             install_dir : 'share/icons/hicolor/scalable/apps',
             rename : 'pragtical.svg'
         )
-        install_data('resources/linux/org.pragtical.pragtical.desktop',
+        install_data('resources/linux/dev.pragtical.Pragtical.desktop',
             install_dir : 'share/applications'
         )
-        install_data('resources/linux/org.pragtical.pragtical.appdata.xml',
+        install_data('resources/linux/dev.pragtical.Pragtical.appdata.xml',
             install_dir : 'share/metainfo'
         )
     endif

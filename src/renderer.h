@@ -1,7 +1,7 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -26,7 +26,7 @@ typedef enum { FONT_FAMILY, FONT_SUBFAMILY, FONT_ID, FONT_FULLNAME, FONT_VERSION
 typedef struct { uint8_t b, g, r, a; } RenColor;
 typedef struct { RECT_TYPE x, y, width, height; } RenRect;
 typedef struct { double offset; } RenTab;
-typedef struct { SDL_Surface *surface; double scale_x, scale_y; } RenSurface;
+typedef struct { SDL_Surface *surface; float scale_x, scale_y; } RenSurface;
 typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
 
 struct RenWindow;
@@ -40,7 +40,7 @@ int ren_font_get_metadata(const char *path, FontMetaData **data, int *count, boo
 int ren_font_group_get_tab_size(RenFont **font);
 int ren_font_group_get_height(RenFont **font);
 float ren_font_group_get_size(RenFont **font);
-void ren_font_group_set_size(RenFont **font, float size, double surface_scale);
+void ren_font_group_set_size(RenFont **font, float size, float surface_scale);
 #ifdef PRAGTICAL_USE_SDL_RENDERER
 void update_font_scale(RenWindow *window_renderer, RenFont **fonts);
 #endif
@@ -58,7 +58,6 @@ void ren_resize_window(RenWindow *window_renderer);
 void ren_update_rects(RenWindow *window_renderer, RenRect *rects, int count);
 void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect);
 void ren_get_size(RenWindow *window_renderer, int *x, int *y); /* Reports the size in points. */
-float ren_get_scale_factor(SDL_Window *win);
 size_t ren_get_window_list(RenWindow ***window_list_dest);
 RenWindow* ren_find_window(SDL_Window *window);
 RenWindow* ren_find_window_from_id(uint32_t id);

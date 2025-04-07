@@ -4,7 +4,6 @@ local command = require "core.command"
 local config = require "core.config"
 local style = require "core.style"
 local DocView = require "core.docview"
-local CommandView = require "core.commandview"
 
 ---Configuration options for `lineguide` plugin.
 ---@class config.plugins.lineguide

@@ -1,5 +1,4 @@
 local config = require "core.config"
-local common = require "core.common"
 
 
 ---An abstraction over the standard input and outputs of a process

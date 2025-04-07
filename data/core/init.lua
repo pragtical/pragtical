@@ -336,7 +336,7 @@ end
 
 
 function core.configure_borderless_window()
-  system.set_window_bordered(not config.borderless)
+  system.set_window_bordered(core.window, not config.borderless)
   core.title_view:configure_hit_test(config.borderless)
   core.title_view.visible = config.borderless
 end
@@ -413,26 +413,28 @@ function core.init()
   local project_dir = core.recent_projects[1] or "."
   local project_dir_explicit = false
   local files = {}
-  for i = 2, #ARGS do
-    local arg_filename = strip_trailing_slash(ARGS[i])
-    local info = system.get_file_info(arg_filename) or {}
-    if info.type == "dir" then
-      project_dir = arg_filename
-      project_dir_explicit = true
-    else
-      -- on macOS we can get an argument like "-psn_0_52353" that we just ignore.
-      if not ARGS[i]:match("^-psn") then
-        local filename = common.normalize_path(arg_filename)
-        local abs_filename = system.absolute_path(filename or "")
-        local file_abs
-        if filename == abs_filename then
-          file_abs = abs_filename
-        else
-          file_abs = system.absolute_path(".") .. PATHSEP .. filename
-        end
-        if file_abs then
-          table.insert(files, file_abs)
-          project_dir = file_abs:match("^(.+)[/\\].+$")
+  if not RESTARTED then
+    for i = 2, #ARGS do
+      local arg_filename = strip_trailing_slash(ARGS[i])
+      local info = system.get_file_info(arg_filename) or {}
+      if info.type == "dir" then
+        project_dir = arg_filename
+        project_dir_explicit = true
+      else
+        -- on macOS we can get an argument like "-psn_0_52353" that we just ignore.
+        if not ARGS[i]:match("^-psn") then
+          local filename = common.normalize_path(arg_filename)
+          local abs_filename = system.absolute_path(filename or "")
+          local file_abs
+          if filename == abs_filename then
+            file_abs = abs_filename
+          else
+            file_abs = system.absolute_path(".") .. PATHSEP .. filename
+          end
+          if file_abs then
+            table.insert(files, file_abs)
+            project_dir = file_abs:match("^(.+)[/\\].+$")
+          end
         end
       end
     end
@@ -1047,7 +1049,7 @@ function core.set_active_view(view)
   -- Reset the IME even if the focus didn't change
   ime.stop()
   if view ~= core.active_view then
-    system.text_input(view:supports_text_input())
+    system.text_input(core.window, view:supports_text_input())
     if core.active_view and core.active_view.force_focus then
       core.next_active_view = view
       return
@@ -1258,8 +1260,9 @@ end
 
 ---This function rescales the interface to the system default scale
 ---by incrementing or decrementing current user scale.
-local function update_scale()
-  local new_scale, prev_default = system.get_scale(core.window), DEFAULT_SCALE
+---@param new_scale number
+local function update_scale(new_scale)
+  local prev_default = DEFAULT_SCALE
   DEFAULT_SCALE = new_scale
   if SCALE == prev_default or config.plugins.scale.autodetect then
     if new_scale == SCALE then return end
@@ -1311,14 +1314,6 @@ function core.on_event(type, ...)
   elseif type == "touchmoved" then
     core.root_view:on_touch_moved(...)
   elseif type == "resized" then
-    if not core.updating_scale then
-      core.updating_scale = true
-      core.add_thread(function()
-        coroutine.yield(1) -- don't call system.get_scale too frequently
-        update_scale()
-        core.updating_scale = nil
-      end)
-    end
     local window_mode = system.get_window_mode(core.window)
     if window_mode ~= "fullscreen" and window_mode ~= "maximized" then
       core.window_size = table.pack(system.get_window_size(core.window))
@@ -1425,8 +1420,8 @@ function core.step(next_frame_time)
       -- required to avoid flashing and refresh issues on mobile
       event_received = type
       break
-    elseif type == "displaychanged" then
-      update_scale()
+    elseif type == "scalechanged" then
+      update_scale(a)
     else
       local _, res = core.try(core.on_event, type, a, b, c, d)
       did_keymap = res or did_keymap

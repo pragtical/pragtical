@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -50,7 +51,7 @@ typedef struct {
   RenRect rect;
   RenColor color;
   RenFont *fonts[FONT_FALLBACK_MAX];
-  double text_x;
+  float text_x;
   size_t len;
   int8_t tab_size;
   RenTab tab;
