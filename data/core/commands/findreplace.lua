@@ -5,7 +5,6 @@ local search = require "core.doc.search"
 local keymap = require "core.keymap"
 local DocView = require "core.docview"
 local CommandView = require "core.commandview"
-local StatusView = require "core.statusview"
 
 local last_view, last_fn, last_text, last_sel
 
