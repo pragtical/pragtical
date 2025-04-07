@@ -234,7 +234,7 @@ main() {
 
   # These could be symlinks but it seems they doesn't work with AppimageLauncher
   cp resources/icons/logo.svg Pragtical.AppDir/pragtical.svg
-  cp resources/linux/org.pragtical.pragtical.desktop Pragtical.AppDir/
+  cp resources/linux/dev.pragtical.Pragtical.desktop Pragtical.AppDir/
 
   if [[ $addons == true ]]; then
     addons_download "${build_dir}"
