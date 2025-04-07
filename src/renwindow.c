@@ -1,15 +1,17 @@
+#include <math.h>
+#include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
 #include "renwindow.h"
 
 #ifdef PRAGTICAL_USE_SDL_RENDERER
-static void query_surface_scale(RenWindow *ren, double* scale_x, double* scale_y) {
+static void query_surface_scale(RenWindow *ren, float* scale_x, float* scale_y) {
   int w_pixels, h_pixels;
   int w_points, h_points;
-  SDL_GL_GetDrawableSize(ren->window, &w_pixels, &h_pixels);
+  SDL_GetWindowSizeInPixels(ren->window, &w_pixels, &h_pixels);
   SDL_GetWindowSize(ren->window, &w_points, &h_points);
-  double scaleX = (double) w_pixels / (double) w_points;
-  double scaleY = (double) h_pixels / (double) h_points;
+  float scaleX = (float) w_pixels / (float) w_points;
+  float scaleY = (float) h_pixels / (float) h_points;
   if(scale_x)
     *scale_x = round(scaleX * 100) / 100;
   if(scale_y)
@@ -18,14 +20,14 @@ static void query_surface_scale(RenWindow *ren, double* scale_x, double* scale_y
 
 static void setup_renderer(RenWindow *ren, int w, int h) {
   /* Note that w and h here should always be in pixels and obtained from
-     a call to SDL_GL_GetDrawableSize(). */
+     a call to SDL_GetWindowSizeInPixels(). */
   if (!ren->renderer) {
-    ren->renderer = SDL_CreateRenderer(ren->window, -1, 0);
+    ren->renderer = SDL_CreateRenderer(ren->window, NULL);
   }
   if (ren->texture) {
     SDL_DestroyTexture(ren->texture);
   }
-  ren->texture = SDL_CreateTexture(ren->renderer, SDL_PIXELFORMAT_BGRA32, SDL_TEXTUREACCESS_STREAMING, w, h);
+  ren->texture = SDL_CreateTexture(ren->renderer, ren->rensurface.surface->format, SDL_TEXTUREACCESS_STREAMING, w, h);
   query_surface_scale(ren, &ren->rensurface.scale_x, &ren->rensurface.scale_y);
 }
 #endif
@@ -35,11 +37,12 @@ void renwin_init_surface(RenWindow *ren) {
   ren->scale_x = ren->scale_y = 1;
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   if (ren->rensurface.surface) {
-    SDL_FreeSurface(ren->rensurface.surface);
+    SDL_DestroySurface(ren->rensurface.surface);
   }
   int w, h;
-  SDL_GL_GetDrawableSize(ren->window, &w, &h);
-  ren->rensurface.surface = SDL_CreateRGBSurfaceWithFormat(0, w, h, 32, SDL_PIXELFORMAT_BGRA32);
+  SDL_GetWindowSizeInPixels(ren->window, &w, &h);
+  SDL_PixelFormat format = SDL_GetWindowPixelFormat(ren->window);
+  ren->rensurface.surface = SDL_CreateSurface(w, h, format == SDL_PIXELFORMAT_UNKNOWN ? SDL_PIXELFORMAT_BGRA32 : format);
   if (!ren->rensurface.surface) {
     fprintf(stderr, "Error creating surface: %s", SDL_GetError());
     exit(1);
@@ -57,8 +60,8 @@ void renwin_init_command_buf(RenWindow *ren) {
 
 static RenRect scaled_rect(const RenRect rect, const RenSurface *rs) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
-  double scale_x = rs->scale_x;
-  double scale_y = rs->scale_y;
+  float scale_x = rs->scale_x;
+  float scale_y = rs->scale_y;
 #else
   int scale_x = 1;
   int scale_y = 1;
@@ -73,14 +76,14 @@ static RenRect scaled_rect(const RenRect rect, const RenSurface *rs) {
 
 
 void renwin_clip_to_surface(RenWindow *ren) {
-  SDL_SetClipRect(renwin_get_surface(ren).surface, NULL);
+  SDL_SetSurfaceClipRect(renwin_get_surface(ren).surface, NULL);
 }
 
 
 void renwin_set_clip_rect(RenWindow *ren, RenRect rect) {
   RenSurface rs = renwin_get_surface(ren);
   RenRect sr = scaled_rect(rect, &rs);
-  SDL_SetClipRect(rs.surface, &(SDL_Rect){.x = sr.x, .y = sr.y, .w = sr.width, .h = sr.height});
+  SDL_SetSurfaceClipRect(rs.surface, &(SDL_Rect){.x = sr.x, .y = sr.y, .w = sr.width, .h = sr.height});
 }
 
 
@@ -100,8 +103,8 @@ RenSurface renwin_get_surface(RenWindow *ren) {
 void renwin_resize_surface(UNUSED RenWindow *ren) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   int new_w, new_h;
-  double new_scale;
-  SDL_GL_GetDrawableSize(ren->window, &new_w, &new_h);
+  float new_scale;
+  SDL_GetWindowSizeInPixels(ren->window, &new_w, &new_h);
   query_surface_scale(ren, &new_scale, NULL);
   /* Note that (w, h) may differ from (new_w, new_h) on retina displays. */
   if (new_scale != ren->rensurface.scale_x ||
@@ -130,17 +133,17 @@ void renwin_show_window(RenWindow *ren) {
 
 void renwin_update_rects(RenWindow *ren, RenRect *rects, int count) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
-  const double scale_x = ren->rensurface.scale_x;
-  const double scale_y = ren->rensurface.scale_y;
+  const float scale_x = ren->rensurface.scale_x;
+  const float scale_y = ren->rensurface.scale_y;
   for (int i = 0; i < count; i++) {
     const RenRect *r = &rects[i];
     const int x = scale_x * r->x, y = scale_y * r->y;
     const int w = scale_x * r->width, h = scale_y * r->height;
     const SDL_Rect sr = {.x = x, .y = y, .w = w, .h = h};
-    int32_t *pixels = ((int32_t *) ren->rensurface.surface->pixels) + x + ren->rensurface.surface->w * y;
-    SDL_UpdateTexture(ren->texture, &sr, pixels, ren->rensurface.surface->w * 4);
+    uint8_t *pixels = ((uint8_t *) ren->rensurface.surface->pixels) + y * ren->rensurface.surface->pitch + x * SDL_BYTESPERPIXEL(ren->rensurface.surface->format);
+    SDL_UpdateTexture(ren->texture, &sr, pixels, ren->rensurface.surface->pitch);
   }
-  SDL_RenderCopy(ren->renderer, ren->texture, NULL, NULL);
+  SDL_RenderTexture(ren->renderer, ren->texture, NULL, NULL);
   SDL_RenderPresent(ren->renderer);
 #else
   SDL_UpdateWindowSurfaceRects(ren->window, (SDL_Rect*) rects, count);
@@ -151,7 +154,7 @@ void renwin_free(RenWindow *ren) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   SDL_DestroyTexture(ren->texture);
   SDL_DestroyRenderer(ren->renderer);
-  SDL_FreeSurface(ren->rensurface.surface);
+  SDL_DestroySurface(ren->rensurface.surface);
 #endif
   SDL_DestroyWindow(ren->window);
   ren->window = NULL;
