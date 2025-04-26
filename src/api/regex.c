@@ -2,6 +2,7 @@
 
 #define PCRE2_CODE_UNIT_WIDTH 8
 
+#include <SDL3/SDL.h>
 #include <string.h>
 #include <pcre2.h>
 #include <stdbool.h>
@@ -379,7 +380,7 @@ static int f_pcre_gsub(lua_State *L) {
   pcre2_match_data* match_data = pcre2_match_data_create_from_pattern(re, NULL);
 
   size_t buffer_size = 1024;
-  char *output = (char *)malloc(buffer_size);
+  char *output = (char *)SDL_malloc(buffer_size);
 
   uint32_t options = PCRE2_SUBSTITUTE_OVERFLOW_LENGTH | PCRE2_SUBSTITUTE_EXTENDED;
   if (limit == 0) options |= PCRE2_SUBSTITUTE_GLOBAL;
@@ -414,19 +415,19 @@ static int f_pcre_gsub(lua_State *L) {
           } else {
             offset = ovector[1] - (subject_len - outlen);
           }
-          if (limit_count > 1) free(subject);
+          if (limit_count > 1) SDL_free(subject);
           if (limit_count == limit || offset-1 == outlen) {
             done = true;
             results_count = limit_count;
           } else {
             subject = output;
             subject_len = outlen;
-            output = (char *)malloc(buffer_size);
+            output = (char *)SDL_malloc(buffer_size);
             outlen = buffer_size;
           }
         } else {
           if (limit_count > 1) {
-            free(subject);
+            SDL_free(subject);
           }
           done = true;
           results_count = limit_count;
@@ -434,7 +435,7 @@ static int f_pcre_gsub(lua_State *L) {
       }
     } else {
       buffer_size = outlen;
-      output = (char *)realloc(output, buffer_size);
+      output = (char *)SDL_realloc(output, buffer_size);
     }
   }
 
@@ -450,7 +451,7 @@ static int f_pcre_gsub(lua_State *L) {
     return_count = 2;
   }
 
-  free(output);
+  SDL_free(output);
   pcre2_match_data_free(match_data);
   if (regex_compiled)
     pcre2_code_free(re);

@@ -1,7 +1,9 @@
+#include <SDL3/SDL.h>
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
 #include <stdbool.h>
+
 #include "api.h"
 
 #define MAX_TOKENS 64
@@ -99,8 +101,8 @@ static Pair *build_lcs(lua_State *L, int Aidx, int Bidx, int *npairs, double thr
   int n = (int)lua_rawlen(L, Aidx);
   int m = (int)lua_rawlen(L, Bidx);
 
-  int **dp = malloc((n+1) * sizeof(int*));
-  for (int i = 0; i <= n; i++) dp[i] = calloc(m+1, sizeof(int));
+  int **dp = SDL_malloc((n+1) * sizeof(int*));
+  for (int i = 0; i <= n; i++) dp[i] = SDL_calloc(m+1, sizeof(int));
 
   for (int i = 1; i <= n; i++) {
     lua_rawgeti(L, Aidx, i);
@@ -117,7 +119,7 @@ static Pair *build_lcs(lua_State *L, int Aidx, int Bidx, int *npairs, double thr
     lua_pop(L, 1);
   }
 
-  Pair *pairs = malloc((n + m) * sizeof(Pair));
+  Pair *pairs = SDL_malloc((n + m) * sizeof(Pair));
   int count = 0;
   int i = n, j = m;
   while (i > 0 && j > 0) {
@@ -143,8 +145,8 @@ static Pair *build_lcs(lua_State *L, int Aidx, int Bidx, int *npairs, double thr
     pairs[count - k - 1] = tmp;
   }
 
-  for (int i = 0; i <= n; i++) free(dp[i]);
-  free(dp);
+  for (int i = 0; i <= n; i++) SDL_free(dp[i]);
+  SDL_free(dp);
 
   *npairs = count;
   return pairs;
@@ -237,9 +239,9 @@ static int f_inline_diff(lua_State *L) {
   }
 
   int m = strlen(a), n = strlen(b);
-  int **dp = malloc((m+1) * sizeof(int*));
+  int **dp = SDL_malloc((m+1) * sizeof(int*));
   for (int i = 0; i <= m; i++) {
-    dp[i] = calloc(n+1, sizeof(int));
+    dp[i] = SDL_calloc(n+1, sizeof(int));
   }
 
   for (int i = 1; i <= m; i++) {
@@ -313,8 +315,8 @@ static int f_inline_diff(lua_State *L) {
 
   lua_remove(L, -2); // remove un-reversed table
 
-  for (int k = 0; k <= m; k++) free(dp[k]);
-  free(dp);
+  for (int k = 0; k <= m; k++) SDL_free(dp[k]);
+  SDL_free(dp);
 
   return 1;
 }
@@ -402,7 +404,7 @@ static int f_diff(lua_State *L) {
     }
   }
 
-  free(pairs);
+  SDL_free(pairs);
   return 1;
 }
 
@@ -481,7 +483,7 @@ static int diff_iterator(lua_State *L) {
   }
 
   if (state->pairs) {
-    free(state->pairs);
+    SDL_free(state->pairs);
     state->pairs = NULL;
   }
 
@@ -503,7 +505,7 @@ static int f_diff_iter(lua_State *L) {
   luaL_checktype(L, 2, LUA_TTABLE);
   double threshold = luaL_optnumber(L, 3, 0.75);
 
-  DiffState *state = malloc(sizeof(DiffState));
+  DiffState *state = SDL_malloc(sizeof(DiffState));
   state->lenA = (int)lua_rawlen(L, 1);
   state->lenB = (int)lua_rawlen(L, 2);
   state->ai = 1;

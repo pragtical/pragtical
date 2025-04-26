@@ -124,7 +124,7 @@ static int f_dirmonitor_gc(lua_State* L) {
   monitor->backend->deinit(monitor->internal);
   SDL_UnlockMutex(monitor->mutex);
   SDL_WaitThread(monitor->thread, NULL);
-  free(monitor->internal);
+  SDL_free(monitor->internal);
   SDL_DestroyMutex(monitor->mutex);
   return 0;
 }

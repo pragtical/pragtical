@@ -53,7 +53,7 @@ static int writer(lua_State *L, const char *data, size_t sz, LoadState *state)
 
   for (i = 0; i < sz; ++i) {
     if (state->buffer.last_written + 1 >= state->buffer.size) {
-      if (!(state->buffer.data = realloc(state->buffer.data, state->buffer.size + 32))) {
+      if (!(state->buffer.data = SDL_realloc(state->buffer.data, state->buffer.size + 32))) {
         lua_pushstring(L, strerror(errno));
         return -1;
       } else {
@@ -88,7 +88,7 @@ static void destroy(LuaThread *t)
 
   if (SDL_GetAtomicInt(&t->ref) <= 0) {
     lua_close(t->L);
-    free(t);
+    SDL_free(t);
   }
 }
 
@@ -115,7 +115,7 @@ static int loadfunction(lua_State *owner, lua_State *thread, int index)
 
   memset(&state, 0, sizeof (LoadState));
 
-  if (!(state.buffer.data = malloc(32))) {
+  if (!(state.buffer.data = SDL_malloc(32))) {
     lua_pushnil(owner);
     lua_pushstring(owner, strerror(errno));
     ret = 2;
@@ -148,7 +148,7 @@ static int loadfunction(lua_State *owner, lua_State *thread, int index)
 
 cleanup:
   if (state.buffer.data) {
-    free(state.buffer.data);
+    SDL_free(state.buffer.data);
   }
 
   return ret;
@@ -348,7 +348,7 @@ static int f_thread_create(lua_State *L)
   int ret, iv;
   LuaThread *thread;
 
-  if ((thread = calloc(1, sizeof (LuaThread))) == NULL){
+  if ((thread = SDL_calloc(1, sizeof (LuaThread))) == NULL){
     luaL_error(L, "could not allocate a new thread");
     return 2;
   }
@@ -404,7 +404,7 @@ static int f_thread_create(lua_State *L)
 
 failure:
   lua_close(thread->L);
-  free(thread);
+  SDL_free(thread);
 
   return 2;
 }

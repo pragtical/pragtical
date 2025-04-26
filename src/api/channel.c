@@ -92,7 +92,7 @@ static void channelValueFree(ChannelValue *v)
 
   switch (v->type) {
     case LUA_TSTRING:
-      free(v->data.string.data);
+      SDL_free(v->data.string.data);
       break;
     case LUA_TTABLE:
       for (
@@ -102,12 +102,12 @@ static void channelValueFree(ChannelValue *v)
       ){
         channelValueFree(t->key);
         channelValueFree(t->value);
-        free(t);
+        SDL_free(t);
       }
       break;
   }
 
-  free(v);
+  SDL_free(v);
 }
 
 static ChannelValue* channelValueGet(lua_State *L, int index)
@@ -118,7 +118,7 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
   if ((type = lua_type(L, index)) == LUA_TNIL)
     return NULL;
 
-  if ((v = calloc(1, sizeof (ChannelValue))) == NULL)
+  if ((v = SDL_calloc(1, sizeof (ChannelValue))) == NULL)
     return NULL;
 
   v->type = type;
@@ -132,8 +132,8 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
       size_t length;
 
       str = lua_tolstring(L, index, &length);
-      if ((v->data.string.data = malloc(length)) == NULL) {
-        free(v);
+      if ((v->data.string.data = SDL_malloc(length)) == NULL) {
+        SDL_free(v);
         return NULL;
       }
 
@@ -155,7 +155,7 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
 
       lua_pushnil(L);
       while (lua_next(L, index)) {
-        ChannelValuePair* pair = malloc(sizeof (ChannelValuePair));
+        ChannelValuePair* pair = SDL_malloc(sizeof (ChannelValuePair));
 
         if (pair == NULL) {
           lua_pop(L, 1);
@@ -171,7 +171,7 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
           channelValueFree(pair->key);
           channelValueFree(pair->value);
           channelValueFree(v);
-          free(pair);
+          SDL_free(pair);
           break;
         }
 
@@ -403,8 +403,8 @@ static void channelFree(Channel* c)
   SDL_DestroyMutex(c->mutex);
   SDL_DestroyCondition(c->cond);
 
-  free(c->name);
-  free(c);
+  SDL_free(c->name);
+  SDL_free(c);
 }
 
 /* --------------------------------------------------------
@@ -440,11 +440,11 @@ int f_channel_get(lua_State *L)
   const char* error_message = NULL;
 
   if (!found) {
-    if ((c = calloc(1, sizeof (Channel))) == NULL) {
+    if ((c = SDL_calloc(1, sizeof (Channel))) == NULL) {
       error_message = strerror(errno);
       goto fail;
     }
-    if ((c->name = malloc(name_len+1)) == NULL) {
+    if ((c->name = SDL_malloc(name_len+1)) == NULL) {
       error_message = strerror(errno);
       goto fail;
     }
@@ -483,8 +483,8 @@ fail:
   if (c->cond)
     SDL_DestroyCondition(c->cond);
 
-  free(c->name);
-  free(c);
+  SDL_free(c->name);
+  SDL_free(c);
 
   SDL_UnlockMutex(ChannelsListMutex);
 

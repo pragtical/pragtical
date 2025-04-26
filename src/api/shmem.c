@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <SDL3/SDL.h>
 
 #ifdef _WIN32
   #include <windows.h>
@@ -102,7 +103,7 @@ static inline bool shmem_name_valid(const char* name) {
 }
 
 shmem_object* shmem_open(const char* name, size_t size) {
-  shmem_object* object = malloc(sizeof(shmem_object));
+  shmem_object* object = SDL_malloc(sizeof(shmem_object));
   strcpy(object->name, name);
   object->size = size;
 
@@ -144,7 +145,7 @@ shmem_object* shmem_open(const char* name, size_t size) {
   return object;
 
 shmem_open_error:
-  free(object);
+  SDL_free(object);
   return NULL;
 }
 
@@ -160,7 +161,7 @@ void shmem_close(shmem_object* object, bool unregister) {
     shm_unlink(object->name);
 #endif
 
-  free(object);
+  SDL_free(object);
 }
 
 shmem_object* shmem_resize(shmem_object** object, size_t new_size) {
@@ -175,7 +176,7 @@ shmem_object* shmem_resize(shmem_object** object, size_t new_size) {
 }
 
 shmem_mutex* shmem_mutex_open(const char* name) {
-  shmem_mutex* mutex = malloc(sizeof(shmem_mutex));
+  shmem_mutex* mutex = SDL_malloc(sizeof(shmem_mutex));
 
 #ifdef _WIN32
   mutex->handle = CreateMutexA(NULL, FALSE, name);
@@ -190,7 +191,7 @@ shmem_mutex* shmem_mutex_open(const char* name) {
   return mutex;
 
 shmem_mutex_open_error:
-  free(mutex);
+  SDL_free(mutex);
   return NULL;
 }
 
@@ -217,7 +218,7 @@ void shmem_mutex_close(shmem_mutex* mutex, bool unregister) {
   sem_close(mutex->handle);
   if (unregister) sem_unlink(mutex->name);
 #endif
-  free(mutex);
+  SDL_free(mutex);
 }
 
 void shmem_container_entry_clear(shmem_container* container, bool unregister) {
@@ -441,7 +442,7 @@ char* shmem_container_ns_entries_get(
       );
 
       if (object && container->namespace->entries[i].size > 0) {
-        data = malloc(container->namespace->entries[i].size);
+        data = SDL_malloc(container->namespace->entries[i].size);
         memcpy(data, object->map, container->namespace->entries[i].size);
         *data_len = container->namespace->entries[i].size;
       }
@@ -479,7 +480,7 @@ char* shmem_container_ns_entries_get_by_position(
   );
 
   if (object) {
-    data = malloc(size);
+    data = SDL_malloc(size);
     memcpy(data, object->map, size);
     *data_len = size;
   }
@@ -548,7 +549,7 @@ size_t shmem_container_ns_get_capacity(shmem_container* container) {
 }
 
 shmem_container* shmem_container_open(const char* namespace, size_t capacity) {
-  shmem_container* container = malloc(
+  shmem_container* container = SDL_malloc(
     sizeof(shmem_container)
     +
     (capacity * sizeof(shmem_object*))
@@ -595,7 +596,7 @@ shmem_container* shmem_container_open(const char* namespace, size_t capacity) {
   return container;
 
 shmem_container_open_error:
-  free(container);
+  SDL_free(container);
   return NULL;
 }
 
@@ -611,7 +612,7 @@ void shmem_container_close(shmem_container* container) {
 
   shmem_close(container->handle, unregister);
 
-  free(container);
+  SDL_free(container);
 }
 
 
@@ -651,7 +652,7 @@ static int l_shmem_pairs_iterator(lua_State *L) {
         lua_pushstring(L, name);
         lua_pushlstring(L, data, data_len);
 
-        free(data);
+        SDL_free(data);
 
         return 2;
       }
@@ -730,7 +731,7 @@ static int m_shmem_get(lua_State* L) {
 
   if (data) {
     lua_pushlstring(L, data, data_len);
-    free(data);
+    SDL_free(data);
   }
   else
     lua_pushnil(L);
