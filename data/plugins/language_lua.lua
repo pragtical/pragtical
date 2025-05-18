@@ -297,7 +297,7 @@ config.plugins.language_lua = common.merge({
 
 syntax.add {
   name = "Lua",
-  files = "%.lua$",
+  files = { "%.lua$", "%.rockspec$" },
   headers = "^#!.*[ /]lua",
   comment = "--",
   block_comment = { "--[[", "]]" },
