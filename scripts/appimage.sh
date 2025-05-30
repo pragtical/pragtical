@@ -30,7 +30,7 @@ show_help(){
 setup_appimagetool() {
   local arch=$1
   if [ ! -e "appimagetool.$arch" ]; then
-    if ! wget -O "appimagetool.$arch" "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${arch}.AppImage" ; then
+    if ! wget -O "appimagetool.$arch" "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${arch}.AppImage" ; then
       echo "Could not download the appimagetool for the arch '${arch}'."
       exit 1
     else
@@ -55,7 +55,7 @@ download_appimage_runtime() {
   local arch=$1
   local file="runtime-${arch}"
   if [ ! -e "$file" ]; then
-    if ! wget -O "$file" "https://github.com/AppImage/AppImageKit/releases/download/continuous/runtime-${arch}" ; then
+    if ! wget -O "$file" "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-${arch}" ; then
       echo "Could not download AppImage Runtime for the arch '${arch}'."
       exit 1
     else
@@ -222,6 +222,10 @@ main() {
 
   DESTDIR="$(realpath Pragtical.AppDir)" meson install $strip_flag \
     --skip-subprojects="freetype2,pcre2" -C "${build_dir}"
+
+  if [[ -z "$cross" ]]; then
+    polyfill_glibc Pragtical.AppDir/usr/bin/pragtical
+  fi
 
   cp "AppRun.$arch" Pragtical.AppDir/AppRun
   cp -av "subprojects/ppm/libraries" Pragtical.AppDir/usr/share/pragtical/

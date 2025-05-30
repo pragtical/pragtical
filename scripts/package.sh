@@ -280,6 +280,10 @@ main() {
     exe_file="$(pwd)/${dest_dir}/$prefix/bin/pragtical"
   fi
 
+  if [[ -z "$cross" ]]; then
+    polyfill_glibc "${exe_file}"
+  fi
+
   mkdir -p "${data_dir}"
 
   if [[ $addons == true ]]; then
