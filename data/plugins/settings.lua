@@ -168,14 +168,14 @@ settings.add("General",
       label = "User Module",
       description = "Open your init.lua for customizations.",
       type = settings.type.BUTTON,
-      icon = "P",
+      icon = "F",
       on_click = "core:open-user-module"
     },
     {
       label = "Clear Fonts Cache",
       description = "Delete current font cache and regenerate a fresh one.",
       type = settings.type.BUTTON,
-      icon = "C",
+      icon = "T",
       on_click = function()
         if Fonts.cache_is_building() then
           MessageBox.warning(
@@ -675,7 +675,7 @@ settings.add("Development",
       label = "Core Log",
       description = "Open the list of logged messages.",
       type = settings.type.BUTTON,
-      icon = "f",
+      icon = "l",
       on_click = "core:open-log"
     },
     {
@@ -1206,10 +1206,10 @@ function Settings:new()
   self.keybinds = self.notebook:add_pane("keybindings", "Keybindings")
   self.about = self.notebook:add_pane("about", "About")
 
-  self.notebook:set_pane_icon("core", "P")
-  self.notebook:set_pane_icon("colors", "W")
-  self.notebook:set_pane_icon("plugins", "B")
-  self.notebook:set_pane_icon("keybindings", "M")
+  self.notebook:set_pane_icon("core", "A")
+  self.notebook:set_pane_icon("colors", "E")
+  self.notebook:set_pane_icon("plugins", "p")
+  self.notebook:set_pane_icon("keybindings", "k")
   self.notebook:set_pane_icon("about", "i")
 
   self.core_sections = FoldingBook(self.core)
@@ -1842,8 +1842,9 @@ function Settings:setup_about()
 
   ---@type widget.button
   local button = Button(self.about, "Visit Website")
-  button:set_tooltip("Open https://pragtical.github.io/")
-  function button:on_click() open_link("https://pragtical.github.io/") end
+  button:set_icon("G")
+  button:set_tooltip("Open https://pragtical.dev/")
+  function button:on_click() open_link("https://pragtical.dev/") end
 
   ---@type widget.listbox
   local contributors = ListBox(self.about)
