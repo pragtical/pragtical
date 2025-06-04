@@ -16,12 +16,12 @@ local CommandView = require "core.commandview"
 local DocView = require "core.docview"
 local Widget = require "widget"
 local Button = require "widget.button"
-local CheckBox = require "widget.checkbox"
 local Line = require "widget.line"
 local Label = require "widget.label"
 local TextBox = require "widget.textbox"
 local SelectBox = require "widget.selectbox"
 local FilePicker = require "widget.filepicker"
+local ToggleButton = require "widget.togglebutton"
 
 ---The main user interface container.
 ---@class plugins.search_ui.ui : widget
@@ -80,6 +80,13 @@ ui.init_size = true
 local label = Label(ui, "Find and Replace")
 
 local line_separator = Line(ui)
+line_separator.border.color = { common.color "#00000000" }
+
+local close = Button(ui)
+close:set_icon("C")
+close.border.width = 0
+close.padding.x = close.padding.x / 2
+close.padding.y = close.padding.y / 5
 
 local findtext = TextBox(ui, "", "search...")
 findtext:set_tooltip("Text to search")
@@ -105,20 +112,19 @@ replace:set_tooltip("Replace all matching results")
 
 local line_options = Line(ui)
 
-local insensitive = CheckBox(ui, "Insensitive")
-insensitive:set_tooltip("Case insensitive search")
-insensitive:set_checked(true)
+local sensitive = ToggleButton(ui, false, nil, "o")
+sensitive:set_tooltip("Case sensitive search")
 
-local wholeword = CheckBox(ui, "Whole")
+local wholeword = ToggleButton(ui, false, nil, "O")
 wholeword:set_tooltip("Whole word search")
 
-local patterncheck = CheckBox(ui, "Pattern")
+local patterncheck = ToggleButton(ui, false, nil, "R")
 patterncheck:set_tooltip("Treat search text as a lua pattern")
 
-local regexcheck = CheckBox(ui, "Regex")
+local regexcheck = ToggleButton(ui, false, nil, "r")
 regexcheck:set_tooltip("Treat search text as a regular expression")
 
-local replaceinselection = CheckBox(ui, "Replace in Selection")
+local replaceinselection = ToggleButton(ui, false, nil, "*")
 replaceinselection:set_tooltip("Perform replace only on selected text")
 
 local scope = SelectBox(ui, "scope")
@@ -184,17 +190,17 @@ function Results:find(text, doc, force)
   self.doc = doc
 
   local search_func
-  local whole = wholeword:is_checked()
+  local whole = wholeword:is_toggled()
 
   -- regex search
-  if regexcheck:is_checked() then
+  if regexcheck:is_toggled() then
     local regex_find_offsets = regex.match
     if regex.find_offsets then
       regex_find_offsets = regex.find_offsets
     end
     local pattern = regex.compile(
       findtext:get_text(),
-      insensitive:is_checked() and "im" or "m"
+      not sensitive:is_toggled() and "im" or "m"
     )
     if not pattern then return end
     search_func = function(line_text)
@@ -215,8 +221,8 @@ function Results:find(text, doc, force)
     end
   -- plain or pattern search
   else
-    local no_case = insensitive:is_checked()
-    local is_plain = not patterncheck:is_checked()
+    local no_case = not sensitive:is_toggled()
+    local is_plain = not patterncheck:is_toggled()
     if is_plain and no_case then
       text = text:ulower()
     end
@@ -237,6 +243,7 @@ function Results:find(text, doc, force)
           if matches then table.insert(results, col1) end
         end
       until not col1
+      ui:schedule_update()
       return #results > 0 and results or nil
     end
   end
@@ -358,20 +365,20 @@ end
 
 local function project_search(replacement)
   if findtext:get_text() == "" then return end
-  if not regexcheck:is_checked() then
+  if not regexcheck:is_toggled() then
     projectsearch.search_plain(
       findtext:get_text(),
       filepicker:get_path(),
-      insensitive:is_checked(),
-      wholeword:is_checked(),
+      not sensitive:is_toggled(),
+      wholeword:is_toggled(),
       replacement
     )
   else
     projectsearch.search_regex(
       findtext:get_text(),
       filepicker:get_path(),
-      insensitive:is_checked(),
-      wholeword:is_checked(),
+      not sensitive:is_toggled(),
+      wholeword:is_toggled(),
       replacement
     )
   end
@@ -379,7 +386,7 @@ local function project_search(replacement)
 end
 
 local find_enabled = true
-local function find(reverse, not_scroll)
+local function find(reverse, not_scroll, unselect_first)
   if
     not view_is_open(doc_view) or findtext:get_text() == "" or not find_enabled
   then
@@ -393,6 +400,11 @@ local function find(reverse, not_scroll)
 
   local doc = doc_view.doc
   local cline1, ccol1, _, ccol2 = doc:get_selection()
+  if unselect_first then
+    cline1, ccol1, _, ccol2 = doc:get_selection(true)
+    ccol2 = ccol1
+    doc:set_selection(cline1, ccol1)
+  end
   local line, col = cline1, ccol1
   if reverse and ccol2 < ccol1 then
     col = ccol2
@@ -400,10 +412,10 @@ local function find(reverse, not_scroll)
 
   local opt = {
     wrap = true,
-    no_case = insensitive:is_checked(),
-    whole_word = wholeword:is_checked(),
-    pattern = patterncheck:is_checked(),
-    regex = regexcheck:is_checked(),
+    no_case = not sensitive:is_toggled(),
+    whole_word = wholeword:is_toggled(),
+    pattern = patterncheck:is_toggled(),
+    regex = regexcheck:is_toggled(),
     reverse = reverse
   }
 
@@ -452,11 +464,11 @@ local function find_replace()
   ---@type core.doc
   local doc = doc_view.doc
   local new = replacetext:get_text()
-  local in_selection = replaceinselection:is_checked()
+  local in_selection = replaceinselection:is_toggled()
   local selections = {}
 
   if not in_selection then
-    table.insert(selections, table.pack(1, 1, 1, 1))
+    table.insert(selections, {1, 1, 1, 1})
   else
     for _, l1, c1, l2, c2 in doc:get_selections(true) do
       table.insert(selections, {l1, c1, l2, c2})
@@ -467,6 +479,7 @@ local function find_replace()
   for _, s in ipairs(selections) do
     doc:set_selection(s[1], s[2])
 
+    local f1, fc1 -- save position of first replaced result
     local p1, pc1, p2, pc2
     local n1, nc1, n2, nc2
     repeat
@@ -474,20 +487,41 @@ local function find_replace()
       find(false, true)
       n1, nc1, n2, nc2 = doc:get_selection(true)
       if p1 ~= n1 or pc1 ~= nc1 or p2 ~= n2 or pc2 ~= nc2 then
-        if in_selection then
-          if n1 > s[3] or (n1 == s[3] and nc1 > s[4]) then break end
+        if f1 == n1 and fc1 == nc1 then -- prevent recursive replacement
+          doc:set_selection(p1, pc1)
+          break
         end
+        if in_selection then
+          if n1 > s[3] or (n1 == s[3] and nc1 > s[4]) then
+            doc:set_selection(p1, pc1)
+            break
+          end
+        end
+        if not f1 then f1, fc1 = n1, nc1 end
         n = n + 1
         doc:replace_cursor(0, n1, nc1, n2, nc2, function()
+          local new_len = #new
+          local old_len = nc2 - nc1
+          if old_len < new_len then
+            nc2 = nc2 + (new_len - old_len)
+          else
+            nc2 = nc2 - (old_len - new_len)
+          end
           return new
         end)
+        doc:set_selection(n2, nc2)
+        if in_selection then
+          if n2 > s[3] or (n2 == s[3] and nc2 > s[4]) then break end
+        end
       end
     until p1 == n1 and pc1 == nc1 and p2 == n2 and pc2 == nc2
   end
 
-  doc:set_selection(selections[1][1], selections[1][2])
-  for i=2, #selections do
-    doc:add_selection(selections[i][1], selections[i][2])
+  if #selections > 1 then
+    doc:set_selection(selections[1][1], selections[1][2])
+    for i=2, #selections do
+      doc:add_selection(selections[i][1], selections[i][2])
+    end
   end
 
   Results:clear()
@@ -553,9 +587,9 @@ local function show_find(av, toggle)
         local doc_text = doc_view.doc:get_text(
           table.unpack({ doc_view.doc:get_selection() })
         )
-        if insensitive:is_checked() then doc_text = doc_text:ulower() end
+        if not sensitive:is_toggled() then doc_text = doc_text:ulower() end
         local current_text = findtext:get_text()
-        if insensitive:is_checked() then current_text = current_text:ulower() end
+        if not sensitive:is_toggled() then current_text = current_text:ulower() end
         if doc_text and doc_text ~= "" and current_text ~= doc_text then
           local original_text = doc_view.doc:get_text(
             table.unpack({ doc_view.doc:get_selection() })
@@ -588,35 +622,46 @@ local function show_find(av, toggle)
   end
 end
 
+local function reset_search()
+  Results:clear()
+  if scope:get_selected() == 1 and not replaceinselection:is_toggled() then
+    find(false, false, true)
+  end
+end
+
 --------------------------------------------------------------------------------
 -- Widgets event overrides
 --------------------------------------------------------------------------------
+function close:on_click(button, x, y)
+  command.perform "search-replace:hide"
+end
+
 function findtext:on_change(text)
-  if scope:get_selected() == 1 and not replaceinselection:is_checked() then
-    find(false)
+  if scope:get_selected() == 1 and not replaceinselection:is_toggled() then
+    find(false, false, true)
   end
 end
 
-function insensitive:on_checked(checked)
-  Results:clear()
+function sensitive:on_change(checked)
+  reset_search()
 end
 
-function wholeword:on_checked(checked)
-  Results:clear()
+function wholeword:on_change(checked)
+  reset_search()
 end
 
-function patterncheck:on_checked(checked)
+function patterncheck:on_change(checked)
   if checked then
-    regexcheck:set_checked(false)
+    regexcheck:set_toggle(false)
   end
-  Results:clear()
+  reset_search()
 end
 
-function regexcheck:on_checked(checked)
+function regexcheck:on_change(checked)
   if checked then
-    patterncheck:set_checked(false)
+    patterncheck:set_toggle(false)
   end
-  Results:clear()
+  reset_search()
 end
 
 function scope:on_selected(idx)
@@ -660,51 +705,52 @@ function ui:update_right_positioning()
   line_options:show()
   label:set_label("Find and Replace")
 
-  label:set_position(10, 10)
-  line_separator:set_position(0, label:get_bottom() + 10)
-  findtext:set_position(10, line_separator:get_bottom() + 10)
-  findtext.size.x = self.size.x - 20
-  replacetext:set_position(10, findtext:get_bottom() + 10)
-  replacetext.size.x = self.size.x - 20
+  -- base padding to separate widgets
+  local p = 7 * SCALE
+
+  close:set_position(p, p)
+  label:set_position(close:get_right() + (p / 2), p)
+  line_separator:set_position(0, close:get_bottom() + p)
+  findtext:set_position(p, line_separator:get_bottom())
+  findtext.size.x = self.size.x - (p * 2)
+  replacetext:set_position(p, findtext:get_bottom() + p)
+  replacetext.size.x = self.size.x - (p * 2)
 
   if scope:get_selected() == 1 then
-    findprev:set_position(10, replacetext:get_bottom() + 10)
-    findnext:set_position(findprev:get_right() + 5, replacetext:get_bottom() + 10)
-    replace:set_position(findnext:get_right() + 5, replacetext:get_bottom() + 10)
-    line_options:set_position(0, replace:get_bottom() + 10)
+    findprev:set_position(p, replacetext:get_bottom() + p)
+    findnext:set_position(findprev:get_right() + (p / 2), replacetext:get_bottom() + p)
+    replace:set_position(findnext:get_right() + (p / 2), replacetext:get_bottom() + p)
+    line_options:set_position(0, replace:get_bottom() + p * 2)
   else
-    findproject:set_position(10, replacetext:get_bottom() + 10)
-    replace:set_position(findproject:get_right() + 5, replacetext:get_bottom() + 10)
-    line_options:set_position(0, findproject:get_bottom() + 10)
+    findproject:set_position(p, replacetext:get_bottom() + p)
+    replace:set_position(findproject:get_right() + 5, replacetext:get_bottom() + p)
+    line_options:set_position(0, findproject:get_bottom() + p * 2)
   end
 
-  insensitive:set_position(10, line_options:get_bottom() + 10)
-  wholeword:set_position(10, insensitive:get_bottom() + 10)
+  sensitive:set_position(p, line_options:get_bottom() + p * 2)
+  wholeword:set_position(sensitive:get_right() + p, line_options:get_bottom() + p * 2)
   if scope:get_selected() == 1 then
-    patterncheck:set_position(10, wholeword:get_bottom() + 10)
-    regexcheck:set_position(10, patterncheck:get_bottom() + 10)
-    replaceinselection:set_position(10, regexcheck:get_bottom() + 10)
-    scope:set_position(10, replaceinselection:get_bottom() + 10)
-  else
-    regexcheck:set_position(10, wholeword:get_bottom() + 10)
-    scope:set_position(10, regexcheck:get_bottom() + 10)
-  end
-
-  scope:set_size(self.size.x - 20)
-  if scope:get_selected() == 1 then
-    statusline:set_position(0, scope:get_bottom() + 30)
-  else
-    filepicker:set_position(10, scope:get_bottom() + 10)
-    filepicker:set_size(self.size.x - 20, nil)
-    statusline:set_position(0, filepicker:get_bottom() + 30)
-  end
-
-  status:set_position(10, statusline:get_bottom() + 10)
-  if status.label == "" then
-    statusline:hide()
-  else
+    patterncheck:set_position(wholeword:get_right() + p, line_options:get_bottom() + p * 2)
+    regexcheck:set_position(patterncheck:get_right() + p, line_options:get_bottom() + p * 2)
+    replaceinselection:set_position(regexcheck:get_right() + p, line_options:get_bottom() + p * 2)
+    scope:set_position(p, replaceinselection:get_bottom() + p)
     statusline:show()
+  else
+    regexcheck:set_position(wholeword:get_right() + p, line_options:get_bottom() + p * 2)
+    scope:set_position(p, regexcheck:get_bottom() + p)
+    statusline:hide()
   end
+
+  scope:set_size(self.size.x - (p * 2))
+  if scope:get_selected() == 1 then
+    statusline:set_position(0, scope:get_bottom() + (p * 3))
+  else
+    filepicker:set_position(p, scope:get_bottom() + p)
+    filepicker:set_size(self.size.x - (p * 2), nil)
+    statusline:set_position(0, filepicker:get_bottom() + (p * 3))
+  end
+
+  status:set_position(p, statusline:get_bottom() + p)
 
   if self.init_size then
     self:update_size()
@@ -716,51 +762,55 @@ function ui:update_right_positioning()
 end
 
 function ui:update_bottom_positioning()
+  -- base padding to separate widgets
+  local p = 7 * SCALE
+
   scope:hide()
   statusline:hide()
+  close:set_position(p, p)
 
   if scope:get_selected() == 1 then
     label:hide()
     status:show()
-    status:set_position(10, 10)
-    replaceinselection:set_position(self.size.x - replaceinselection:get_width() - 10, 10)
-    regexcheck:set_position(replaceinselection:get_position().x - 10 - regexcheck:get_width(), 10)
-    patterncheck:set_position(regexcheck:get_position().x - 10  - patterncheck:get_width(), 10)
-    wholeword:set_position(patterncheck:get_position().x - 10 - wholeword:get_width(), 10)
-    insensitive:set_position(wholeword:get_position().x - 10 - insensitive:get_width(), 10)
-    line_separator:set_position(0, status:get_bottom() + 10)
+    status:set_position(close:get_right() + (p / 2), p)
+    replaceinselection:set_position(self.size.x - replaceinselection:get_width() - p, p)
+    regexcheck:set_position(replaceinselection:get_position().x - p - regexcheck:get_width(), p)
+    patterncheck:set_position(regexcheck:get_position().x - p  - patterncheck:get_width(), p)
+    wholeword:set_position(patterncheck:get_position().x - p - wholeword:get_width(), p)
+    sensitive:set_position(wholeword:get_position().x - p - sensitive:get_width(), p)
+    line_separator:set_position(0, close:get_bottom() + p)
   else
     label:show()
     status:hide()
     label:set_label("Find in Directory")
-    label:set_position(10, 10)
-    regexcheck:set_position(self.size.x - regexcheck:get_width() - 10, 10)
-    wholeword:set_position(regexcheck:get_position().x - 10 - wholeword:get_width(), 10)
-    insensitive:set_position(wholeword:get_position().x - 10 - insensitive:get_width(), 10)
-    line_separator:set_position(0, label:get_bottom() + 10)
+    label:set_position(close:get_right() + (p / 2), p)
+    regexcheck:set_position(self.size.x - regexcheck:get_width() - p, p)
+    wholeword:set_position(regexcheck:get_position().x - p - wholeword:get_width(), p)
+    sensitive:set_position(wholeword:get_position().x - p - sensitive:get_width(), p)
+    line_separator:set_position(0, close:get_bottom() + p)
   end
 
   if scope:get_selected() == 1 then
-    findtext:set_position(10, line_separator:get_bottom() + 10)
-    findtext.size.x = self.size.x - 40 - findprev:get_width() - findnext:get_width()
-    findnext:set_position(self.size.x - 10 - findnext:get_width(), line_separator:get_bottom() + 10)
-    findprev:set_position(findnext:get_position().x - 10 - findprev:get_width(), line_separator:get_bottom() + 10)
-    replacetext:set_position(10, findtext:get_bottom() + 10)
+    findtext:set_position(p, line_separator:get_bottom())
+    findtext.size.x = self.size.x - (p * 4) - findprev:get_width() - findnext:get_width()
+    findnext:set_position(self.size.x - p - findnext:get_width(), line_separator:get_bottom())
+    findprev:set_position(findnext:get_position().x - p - findprev:get_width(), line_separator:get_bottom())
+    replacetext:set_position(p, findtext:get_bottom() + p)
     replacetext.size.x = findtext.size.x
-    replace:set_position(findprev:get_position().x, findtext:get_bottom() + 10)
-    replace.size.x = findprev:get_width() + findnext:get_width() + 10
+    replace:set_position(findprev:get_position().x, findtext:get_bottom() + p)
+    replace.size.x = findprev:get_width() + findnext:get_width() + p
     line_options:hide()
   else
-    findtext:set_position(10, line_separator:get_bottom() + 10)
-    findtext.size.x = self.size.x - 30 - findproject:get_width()
-    findproject:set_position(self.size.x - 10 - findproject:get_width(), line_separator:get_bottom() + 10)
-    replacetext:set_position(10, findtext:get_bottom() + 10)
+    findtext:set_position(p, line_separator:get_bottom())
+    findtext.size.x = self.size.x - (p * 3) - findproject:get_width()
+    findproject:set_position(self.size.x - p - findproject:get_width(), line_separator:get_bottom())
+    replacetext:set_position(p, findtext:get_bottom() + p)
     replacetext.size.x = findtext.size.x
-    replace:set_position(replacetext:get_right() + 5, findtext:get_bottom() + 10)
+    replace:set_position(replacetext:get_right() + (p / 2), findtext:get_bottom() + p)
     line_options:show()
-    line_options:set_position(0, replacetext:get_bottom() + 10)
-    filepicker:set_position(10, line_options:get_bottom() + 10)
-    filepicker:set_size(self.size.x - 20, nil)
+    line_options:set_position(0, replacetext:get_bottom() + p)
+    filepicker:set_position(p, line_options:get_bottom() + p)
+    filepicker:set_size(self.size.x - (p * 2), nil)
   end
 
   if self.init_size then
@@ -886,22 +936,19 @@ command.add(function() return ui:is_visible() and not core.active_view:is(Comman
   end,
 
   ["search-replace:toggle-sensitivity"] = function()
-    insensitive:set_checked(not insensitive:is_checked())
-    Results:clear()
+    sensitive:toggle()
   end,
 
   ["search-replace:toggle-whole-word"] = function()
-    wholeword:set_checked(not wholeword:is_checked())
-    Results:clear()
+    wholeword:toggle()
   end,
 
   ["search-replace:toggle-regex"] = function()
-    regexcheck:set_checked(not regexcheck:is_checked())
-    Results:clear()
+    regexcheck:toggle()
   end,
 
   ["search-replace:toggle-in-selection"] = function()
-    replaceinselection:set_checked(not replaceinselection:is_checked())
+    replaceinselection:toggle()
   end
 })
 
