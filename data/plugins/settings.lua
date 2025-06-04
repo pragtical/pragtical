@@ -1022,14 +1022,11 @@ local function apply_keybinding(cmd, bindings, skip_save)
         style.text, cmd, ListBox.COLEND, style.dim, bindings_list
       }
     end
-  elseif
-    not skip_save
-    and
-    settings.config.custom_keybindings
-    and
-    settings.config.custom_keybindings[cmd]
-  then
-    settings.config.custom_keybindings[cmd] = nil
+  elseif not skip_save then
+    if not settings.config.custom_keybindings then
+      settings.config.custom_keybindings = {}
+    end
+    settings.config.custom_keybindings[cmd] = {}
     changed = true
   end
 
@@ -1722,35 +1719,10 @@ function keymap_dialog:on_save(bindings)
 end
 
 function keymap_dialog:on_reset()
-  local default_keys = settings.default_keybindings[self.command]
-  local current_keys = { keymap.get_binding(self.command) }
-
-  for _, binding in ipairs(current_keys) do
-    keymap.unbind(binding, self.command)
-  end
-
-  if default_keys and #default_keys > 0 then
-    local cmd = self.command
-    if not settings.config.custom_keybindings then
-      settings.config.custom_keybindings = {}
-      settings.config.custom_keybindings[cmd] = {}
-    elseif not settings.config.custom_keybindings[cmd] then
-      settings.config.custom_keybindings[cmd] = {}
-    end
-    local shortcuts = ""
-    for _, binding in ipairs(default_keys) do
-      keymap.add({[binding] = cmd})
-      shortcuts = shortcuts .. binding .. "\n"
-      table.insert(settings.config.custom_keybindings[cmd], binding)
-    end
-    local bindings_list = shortcuts:gsub("\n$", "")
-    self.listbox:set_row(self.row_id, {
-      style.text, cmd, ListBox.COLEND, style.dim, bindings_list
-    })
-  else
-    self.listbox:set_row(self.row_id, {
-      style.text, self.command, ListBox.COLEND, style.dim, "none"
-    })
+  local default_bindings = settings.default_keybindings[self.command]
+  local row_value = apply_keybinding(self.command, default_bindings, true)
+  if row_value then
+    self.listbox:set_row(self.row_id, row_value)
   end
   if
     settings.config.custom_keybindings
