@@ -1502,11 +1502,13 @@ function Settings:load_color_settings()
 
   local colors = get_installed_colors()
 
+  ---@type widget.textbox
+  local textbox = TextBox(self.colors, "", "filter colors...")
+
   ---@type widget.listbox
   local listbox = ListBox(self.colors)
 
   listbox.border.width = 0
-  listbox:enable_expand(true)
 
   listbox:add_column("Theme")
   listbox:add_column("Colors")
@@ -1523,10 +1525,22 @@ function Settings:load_color_settings()
     }, {name = name, colors = details.colors})
   end
 
+  function textbox:on_change(value)
+    listbox:filter(value)
+  end
+
   function listbox:on_row_click(idx, data)
     core.reload_module("colors." .. data.name)
     settings.config.theme = data.name
     save_settings()
+  end
+
+  ---@param self widget
+  function self.colors:update_positions()
+    textbox:set_position(0, 0)
+    textbox:set_size(self:get_width() - self.border.width * 2)
+    listbox:set_position(0, textbox:get_bottom())
+    listbox:set_size(self:get_width() - self.border.width * 2, self:get_height() - textbox:get_height())
   end
 end
 
@@ -1969,6 +1983,10 @@ function Settings:update()
         end
       end
     end
+  end
+
+  if self.colors:is_visible() then
+    self.colors:update_positions()
   end
 
   if self.keybinds:is_visible() then
