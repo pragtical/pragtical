@@ -279,7 +279,7 @@ settings.add("Graphics",
     },
     {
       label = "Animation Rate",
-      description = "The amount of time it takes for a transition to finish.",
+      description = "The speed of transitions, higher value means faster.",
       path = "animation_rate",
       type = settings.type.NUMBER,
       default = 1.0,
@@ -1251,7 +1251,7 @@ local function add_control(pane, option, plugin_name)
 
   if option.type == settings.type.NUMBER then
     ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.numberbox
     local number = NumberBox(pane, option_value, option.min, option.max, option.step)
     widget = number
@@ -1265,7 +1265,7 @@ local function add_control(pane, option, plugin_name)
 
   elseif option.type == settings.type.STRING then
     ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.textbox
     local string = TextBox(pane, option_value or "")
     widget = string
@@ -1273,7 +1273,7 @@ local function add_control(pane, option, plugin_name)
 
   elseif option.type == settings.type.SELECTION then
     ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.selectbox
     local select = SelectBox(pane)
     for _, data in pairs(option.values) do
@@ -1309,7 +1309,7 @@ local function add_control(pane, option, plugin_name)
 
   elseif option.type == settings.type.LIST_STRINGS then
     ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.itemslist
     local list = ItemsList(pane)
     if type(option_value) == "table" then
@@ -1331,7 +1331,7 @@ local function add_control(pane, option, plugin_name)
       end
     end
      ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.fontslist
     local fonts = FontsList(pane)
     if type(option_value) == "table" then
@@ -1354,7 +1354,7 @@ local function add_control(pane, option, plugin_name)
 
   elseif option.type == settings.type.FILE then
     ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.filepicker
     local file = FilePicker(pane, option_value or "")
     if option.exists then
@@ -1368,7 +1368,7 @@ local function add_control(pane, option, plugin_name)
 
   elseif option.type == settings.type.DIRECTORY then
     ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.filepicker
     local file = FilePicker(pane, option_value or "")
     if option.exists then
@@ -1382,7 +1382,7 @@ local function add_control(pane, option, plugin_name)
 
   elseif option.type == settings.type.COLOR then
     ---@type widget.label
-    Label(pane, option.label .. ":")
+    Label(pane, option.label .. ":", true)
     ---@type widget.colorpicker
     local color = ColorPicker(pane, option_value)
     widget = color
@@ -1441,7 +1441,7 @@ local function add_control(pane, option, plugin_name)
       default = string.format("(default: %s)", option.default)
     end
      ---@type widget.label
-    local description = Label(pane, text .. default)
+    local description = Label(pane, text .. default, true)
     description.desc = true
   end
 end
@@ -1642,7 +1642,8 @@ function Settings:load_plugin_settings()
   -- requires earlier access to startup process
   Label(
     pane,
-    "Notice: disabling plugins will not take effect until next restart"
+    "Notice: disabling plugins will not take effect until next restart",
+    true
   )
 
   Line(pane, 2, 10)
@@ -1807,11 +1808,12 @@ function Settings:setup_about()
   local title = Label(self.about, "Pragtical")
   title.font = "big_font"
   ---@type widget.label
-  local version = Label(self.about, "version " .. VERSION)
+  local version = Label(self.about, "version " .. VERSION, true)
   ---@type widget.label
   local description = Label(
     self.about,
-    "A lightweight text editor written in Lua, adapted from lite."
+    "A lightweight text editor written in Lua, adapted from lite.",
+    true
   )
 
   local function open_link(link)
