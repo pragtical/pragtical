@@ -119,7 +119,7 @@ local wholeword = ToggleButton(ui, false, nil, "O")
 wholeword:set_tooltip("Whole word search")
 
 local patterncheck = ToggleButton(ui, false, nil, "R")
-patterncheck:set_tooltip("Treat search text as a lua pattern")
+patterncheck:set_tooltip("Treat search text as a lua pattern (ignores case toggle)")
 
 local regexcheck = ToggleButton(ui, false, nil, "r")
 regexcheck:set_tooltip("Treat search text as a regular expression")
@@ -152,11 +152,13 @@ local status = Label(ui, "")
 ---@field text string
 ---@field matches plugins.search_ui.result[]
 ---@field doc core.doc?
+---@field change_id integer
 ---@field prev_search_id integer
 local Results = {
   text = "",
   matches = {},
   doc = nil,
+  change_id = 0,
   prev_search_id = 0
 }
 
@@ -174,7 +176,11 @@ end
 ---@param text string
 ---@param doc core.doc
 function Results:find(text, doc, force)
-  if self.text == text and self.doc == doc and not force then
+  if
+    not force and self.text == text
+    and
+    self.doc == doc and self.change_id == doc:get_change_id()
+  then
     self:set_status()
     return
   end
@@ -188,16 +194,13 @@ function Results:find(text, doc, force)
 
   self.text = text
   self.doc = doc
+  self.change_id = doc:get_change_id()
 
   local search_func
   local whole = wholeword:is_toggled()
 
   -- regex search
   if regexcheck:is_toggled() then
-    local regex_find_offsets = regex.match
-    if regex.find_offsets then
-      regex_find_offsets = regex.find_offsets
-    end
     local pattern = regex.compile(
       findtext:get_text(),
       not sensitive:is_toggled() and "im" or "m"
@@ -206,7 +209,7 @@ function Results:find(text, doc, force)
     search_func = function(line_text)
       ---@cast line_text string
       local results = nil
-      local offsets = {regex_find_offsets(pattern, line_text)}
+      local offsets = {pattern:find_offsets(line_text)}
       if offsets[1] then
         results = {}
         for i=1, #offsets, 2 do
@@ -235,15 +238,14 @@ function Results:find(text, doc, force)
       local col1, col2 = 0, 0
       repeat
         col1, col2 = line_text:find(text, col2+1, is_plain)
-        if col1 and col2 then
+        if col1 and col2 and col2 > 0 then
           local matches = true
           if whole and not is_whole_match(line_text, col1, col2) then
             matches = false
           end
           if matches then table.insert(results, col1) end
         end
-      until not col1
-      ui:schedule_update()
+      until not col1 or not col2 or (col2 == 0)
       return #results > 0 and results or nil
     end
   end
@@ -263,6 +265,7 @@ function Results:find(text, doc, force)
       end
     end
     self:set_status()
+    ui:schedule_update()
   end)
 end
 
@@ -406,7 +409,7 @@ local function find(reverse, not_scroll, unselect_first)
     doc:set_selection(cline1, ccol1)
   end
   local line, col = cline1, ccol1
-  if reverse and ccol2 < ccol1 then
+  if (reverse and ccol2 < ccol1) or (not reverse and col < ccol2) then
     col = ccol2
   end
 
@@ -467,6 +470,17 @@ local function find_replace()
   local in_selection = replaceinselection:is_toggled()
   local selections = {}
 
+  local rexpr = regexcheck:is_toggled()
+    and regex.compile(
+      findtext:get_text(),
+      not sensitive:is_toggled() and "i" or ""
+    )
+    or false
+
+  local pattern = patterncheck:is_toggled()
+    and findtext:get_text()
+    or false
+
   if not in_selection then
     table.insert(selections, {1, 1, 1, 1})
   else
@@ -500,14 +514,22 @@ local function find_replace()
         if not f1 then f1, fc1 = n1, nc1 end
         n = n + 1
         doc:replace_cursor(0, n1, nc1, n2, nc2, function()
-          local new_len = #new
+          local replacement, subject = new, nil
+          if rexpr then
+            subject = doc:get_text(n1, nc1, n2, nc2)
+            replacement = rexpr:gsub(subject, replacement)
+          elseif pattern then
+            subject = doc:get_text(n1, nc1, n2, nc2)
+            replacement = subject:gsub(pattern, replacement)
+          end
+          local new_len = #replacement
           local old_len = nc2 - nc1
           if old_len < new_len then
             nc2 = nc2 + (new_len - old_len)
           else
             nc2 = nc2 - (old_len - new_len)
           end
-          return new
+          return replacement or subject
         end)
         doc:set_selection(n2, nc2)
         if in_selection then
@@ -584,13 +606,14 @@ local function show_find(av, toggle)
     if av then
       doc_view = av
       if view_is_open(doc_view) and doc_view.doc then
+        local is_pattern = regexcheck:is_toggled() or patterncheck:is_toggled()
         local doc_text = doc_view.doc:get_text(
           table.unpack({ doc_view.doc:get_selection() })
         )
         if not sensitive:is_toggled() then doc_text = doc_text:ulower() end
         local current_text = findtext:get_text()
         if not sensitive:is_toggled() then current_text = current_text:ulower() end
-        if doc_text and doc_text ~= "" and current_text ~= doc_text then
+        if not is_pattern and doc_text and doc_text ~= "" and current_text ~= doc_text then
           local original_text = doc_view.doc:get_text(
             table.unpack({ doc_view.doc:get_selection() })
           )
@@ -603,7 +626,9 @@ local function show_find(av, toggle)
           end
         end
         if findtext:get_text() ~= "" then
-          findtext.textview.doc:set_selection(1, math.huge, 1, 1)
+          if not is_pattern then
+            findtext.textview.doc:set_selection(1, math.huge, 1, 1)
+          end
           if scope:get_selected() == 1 then
             Results:find(findtext:get_text(), doc_view.doc)
           else
@@ -671,7 +696,7 @@ function scope:on_selected(idx)
   end
 end
 
-function findnext:on_click() find(false) end
+function findnext:on_click() find() end
 function findprev:on_click() find(true) end
 function findproject:on_click() project_search() end
 function replace:on_click()
