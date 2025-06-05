@@ -1,46 +1,82 @@
+---Provides the base in-place search functionality for documents.
+---@class core.doc.search
 local search = {}
 
+---Options used when performing a search.
+---@class core.doc.searchoptions
+---If the end of document is reached start again from the start.
+---@field wrap? boolean
+---Perform case insensitive matches (ignored with lua patterns).
+---@field no_case? boolean
+---Only match whole words.
+---@field whole_word? boolean
+---The text to find is a Lua pattern.
+---@field pattern? boolean
+---The text to find is a Regular expression.
+---@field regex? boolean
+---Execute the search backward instead of forward.
+---@field reverse? boolean
+
+---@type core.doc.searchoptions
 local default_opt = {}
 
-
-local function pattern_lower(str)
-  if str:sub(1, 1) == "%" then
-    return str
-  end
-  return str:lower()
-end
-
-
+---Helper to initialize search.find() parameters to sane defaults.
+---@param doc core.doc
+---@param line integer
+---@param col integer
+---@param text string
+---@param opt core.doc.searchoptions
+---@return core.doc doc
+---@return integer line
+---@return integer col
+---@return string text
+---@return core.doc.searchoptions opt
 local function init_args(doc, line, col, text, opt)
   opt = opt or default_opt
   line, col = doc:sanitize_position(line, col)
 
-  if opt.no_case and not opt.regex then
+  if opt.no_case and not opt.pattern and not opt.regex then
     text = text:lower()
   end
 
   return doc, line, col, text, opt
 end
 
--- This function is needed to uniform the behavior of
--- `regex:cmatch` and `string.find`.
+---This function is needed to uniform the behavior of
+---`regex:cmatch` and `string.find`.
+---@param text string
+---@param re regex
+---@param index integer
+---@return integer s
+---@return integer? e
 local function regex_func(text, re, index, _)
   local s, e = re:cmatch(text, index)
   return s, e and e - 1
 end
 
+---Perform a reverse/backward search.
+---@param func fun(s:string, pattern:string|regex, init:integer, plain:boolean)
+---@param text string
+---@param pattern string|regex
+---@param index integer
+---@param plain boolean
 local function rfind(func, text, pattern, index, plain)
   local s, e = func(text, pattern, 1, plain)
   local last_s, last_e
-  if index < 0 then index = #text - index + 1 end
+  if index < 0 then index = #text + index + 1 end
   while e and e <= index do
     last_s, last_e = s, e
-    s, e = func(text, pattern, s + 1, plain)
+    s, e = func(text, pattern, e + 1, plain)
   end
   return last_s, last_e
 end
 
-
+---Perform a search on a document with the given options.
+---@param doc core.doc
+---@param line integer
+---@param col integer
+---@param text string
+---@param opt core.doc.searchoptions
 function search.find(doc, line, col, text, opt)
   doc, line, col, text, opt = init_args(doc, line, col, text, opt)
   local plain = not opt.pattern
@@ -56,7 +92,7 @@ function search.find(doc, line, col, text, opt)
   end
   for line = start, finish, step do
     local line_text = doc.lines[line]
-    if opt.no_case and not opt.regex then
+    if opt.no_case and not opt.regex and not opt.pattern then
       line_text = line_text:lower()
     end
     local s, e = col, col
@@ -98,7 +134,7 @@ function search.find(doc, line, col, text, opt)
   end
 
   if opt.wrap then
-    opt = { no_case = opt.no_case, regex = opt.regex, reverse = opt.reverse }
+    opt.wrap = false -- wrap a single time, otherwise this would never end :P
     if opt.reverse then
       return search.find(doc, #doc.lines, #doc.lines[#doc.lines], text, opt)
     else
