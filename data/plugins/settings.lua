@@ -394,6 +394,13 @@ settings.add("User Interface",
       min = 1
     },
     {
+      label = "Hide Tabs",
+      description = "Always hide tabs even if multiple documents are open.",
+      path = "hide_tabs",
+      type = settings.type.TOGGLE,
+      default = false
+    },
+    {
       label = "Always Show Tabs",
       description = "Shows tabs even if a single document is opened.",
       path = "always_show_tabs",
