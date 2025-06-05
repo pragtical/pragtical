@@ -124,6 +124,12 @@ config.max_visible_commands = 10
 ---@type integer
 config.max_visited_files = 5
 
+---Always hide tabs even if multiple documents are open.
+---
+---The default is false.
+---@type boolean
+config.hide_tabs = false
+
 ---Shows/hides the tab bar when there is only one tab open.
 ---
 ---The tab bar is always shown by default.
