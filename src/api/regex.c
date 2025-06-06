@@ -296,6 +296,7 @@ static int f_pcre_find_offsets(lua_State *L) {
   /* options param */
   uint32_t opts = luaL_optinteger(L, 4, 0);
   int total_results = 0;
+  subject_len -= offset;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(re, NULL);
   int rc = pcre2_match(re, (PCRE2_SPTR)&subject[offset], subject_len, 0, opts, md, NULL);
   if (rc < 0) {
