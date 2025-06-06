@@ -119,7 +119,7 @@ local wholeword = ToggleButton(ui, false, nil, "O")
 wholeword:set_tooltip("Whole word search")
 
 local patterncheck = ToggleButton(ui, false, nil, "R")
-patterncheck:set_tooltip("Treat search text as a lua pattern (ignores case toggle)")
+patterncheck:set_tooltip("Treat search text as a lua pattern (always case sensitive)")
 
 local regexcheck = ToggleButton(ui, false, nil, "r")
 regexcheck:set_tooltip("Treat search text as a regular expression")
@@ -203,23 +203,30 @@ function Results:find(text, doc, force)
   if regexcheck:is_toggled() then
     local pattern = regex.compile(
       findtext:get_text(),
-      not sensitive:is_toggled() and "im" or "m"
+      not sensitive:is_toggled() and "i" or ""
     )
     if not pattern then return end
     search_func = function(line_text)
       ---@cast line_text string
       local results = nil
-      local offsets = {pattern:find_offsets(line_text)}
-      if offsets[1] then
-        results = {}
-        for i=1, #offsets, 2 do
-          local matches = true
-          if whole and not is_whole_match(line_text, offsets[i], offsets[i+1]-1) then
-            matches = false
+      local offsets = {}
+      local index = 1
+      repeat
+        offsets = { pattern:find_offsets(line_text, index) }
+        if offsets[1] then
+          if not results then results = {} end
+          for i = 1, #offsets, 2 do
+            local matches = true
+            if whole and not is_whole_match(line_text, offsets[i], offsets[i + 1] - 1) then
+              matches = false
+            end
+            if matches then
+              table.insert(results, offsets[i])
+            end
+            index = offsets[i + 1]
           end
-          if matches then table.insert(results, offsets[i]) end
         end
-      end
+      until not offsets[1] or index >= #line_text
       return results
     end
   -- plain or pattern search
@@ -234,6 +241,7 @@ function Results:find(text, doc, force)
       if is_plain and no_case then
         line_text = line_text:ulower()
       end
+      local line_len = #line_text
       local results = {}
       local col1, col2 = 0, 0
       repeat
@@ -245,7 +253,7 @@ function Results:find(text, doc, force)
           end
           if matches then table.insert(results, col1) end
         end
-      until not col1 or not col2 or (col2 == 0)
+      until not col1 or not col2 or col2 >= line_len or col1 > col2 or (col2 == 0)
       return #results > 0 and results or nil
     end
   end
@@ -254,10 +262,13 @@ function Results:find(text, doc, force)
     self.matches = {}
     local lines_count = #doc.lines
     for i=1, lines_count do
-      local offsets = search_func(doc.lines[i])
-      if offsets then
-        for _, col in ipairs(offsets) do
-          table.insert(self.matches, {line = i, col = col})
+      local line_text = doc.lines[i]
+      if #line_text > 1 then -- skip empty lines
+        local offsets = search_func(line_text)
+        if offsets then
+          for _, col in ipairs(offsets) do
+            table.insert(self.matches, {line = i, col = col})
+          end
         end
       end
       if i % 100 == 0 then
@@ -389,7 +400,7 @@ local function project_search(replacement)
 end
 
 local find_enabled = true
-local function find(reverse, not_scroll, unselect_first)
+local function find(reverse, not_scroll, unselect_first, no_wrap)
   if
     not view_is_open(doc_view) or findtext:get_text() == "" or not find_enabled
   then
@@ -414,7 +425,7 @@ local function find(reverse, not_scroll, unselect_first)
   end
 
   local opt = {
-    wrap = true,
+    wrap = not no_wrap and true or false,
     no_case = not sensitive:is_toggled(),
     whole_word = wholeword:is_toggled(),
     pattern = patterncheck:is_toggled(),
@@ -470,6 +481,12 @@ local function find_replace()
   local in_selection = replaceinselection:is_toggled()
   local selections = {}
 
+  -- allows repeatedly performing a replace
+  if in_selection and doc:get_text(doc:get_selection()) == "" then
+    find(false, true)
+    return
+  end
+
   local rexpr = regexcheck:is_toggled()
     and regex.compile(
       findtext:get_text(),
@@ -498,7 +515,7 @@ local function find_replace()
     local n1, nc1, n2, nc2
     repeat
       p1, pc1, p2, pc2 = doc:get_selection(true)
-      find(false, true)
+      find(false, true, false, true)
       n1, nc1, n2, nc2 = doc:get_selection(true)
       if p1 ~= n1 or pc1 ~= nc1 or p2 ~= n2 or pc2 ~= nc2 then
         if f1 == n1 and fc1 == nc1 then -- prevent recursive replacement
@@ -517,10 +534,10 @@ local function find_replace()
           local replacement, subject = new, nil
           if rexpr then
             subject = doc:get_text(n1, nc1, n2, nc2)
-            replacement = rexpr:gsub(subject, replacement)
+            replacement = rexpr:gsub(subject, replacement, 1)
           elseif pattern then
             subject = doc:get_text(n1, nc1, n2, nc2)
-            replacement = subject:gsub(pattern, replacement)
+            replacement = subject:gsub(pattern, replacement, 1)
           end
           local new_len = #replacement
           local old_len = nc2 - nc1
@@ -697,8 +714,11 @@ function scope:on_selected(idx)
 end
 
 function findnext:on_click() find() end
+
 function findprev:on_click() find(true) end
+
 function findproject:on_click() project_search() end
+
 function replace:on_click()
   if scope:get_selected() == 1 then
     find_replace()
@@ -800,7 +820,7 @@ function ui:update_bottom_positioning()
     status:set_position(close:get_right() + (p / 2), p)
     replaceinselection:set_position(self.size.x - replaceinselection:get_width() - p, p)
     regexcheck:set_position(replaceinselection:get_position().x - p - regexcheck:get_width(), p)
-    patterncheck:set_position(regexcheck:get_position().x - p  - patterncheck:get_width(), p)
+    patterncheck:set_position(regexcheck:get_position().x - p - patterncheck:get_width(), p)
     wholeword:set_position(patterncheck:get_position().x - p - wholeword:get_width(), p)
     sensitive:set_position(wholeword:get_position().x - p - sensitive:get_width(), p)
     line_separator:set_position(0, close:get_bottom() + p)
@@ -1034,9 +1054,9 @@ command.add(
   end,
   {
     ["search-replace:switch-input"] = function(next)
-        ui:swap_active_child(next)
-        next.textview.doc:set_selection(1, math.huge, 1, 1)
-        ui.prev_view = doc_view
+      ui:swap_active_child(next)
+      next.textview.doc:set_selection(1, math.huge, 1, 1)
+      ui.prev_view = doc_view
     end
   }
 )

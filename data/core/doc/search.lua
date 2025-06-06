@@ -47,11 +47,11 @@ end
 ---@param text string
 ---@param re regex
 ---@param index integer
----@return integer s
+---@return integer? s
 ---@return integer? e
 local function regex_func(text, re, index, _)
-  local s, e = re:cmatch(text, index)
-  return s, e and e - 1
+  local s, e = re:find(text, index)
+  return s, e
 end
 
 ---Perform a reverse/backward search.
@@ -61,10 +61,14 @@ end
 ---@param index integer
 ---@param plain boolean
 local function rfind(func, text, pattern, index, plain)
-  local s, e = func(text, pattern, 1, plain)
-  local last_s, last_e
   if index < 0 then index = #text + index + 1 end
-  while e and e <= index do
+  local s, e = func(text, pattern, 1, plain)
+  -- handles lua pattern full line matches
+  if e and e == #text and s == 1 and e - 1 <= index then
+    return s, e - 1
+  end
+  local last_s, last_e
+  while e and e <= index and e >= s do
     last_s, last_e = s, e
     s, e = func(text, pattern, e + 1, plain)
   end
@@ -92,6 +96,7 @@ function search.find(doc, line, col, text, opt)
   end
   for line = start, finish, step do
     local line_text = doc.lines[line]
+    local line_len = #line_text
     if opt.no_case and not opt.regex and not opt.pattern then
       line_text = line_text:lower()
     end
@@ -108,26 +113,17 @@ function search.find(doc, line, col, text, opt)
         if
           (s ~= 1 and line_text:sub(s - 1, s - 1):match("[%w_]"))
           or
-          (e ~= #line_text and line_text:sub(e + 1, e + 1):match("[%w_]"))
+          (e ~= line_len and line_text:sub(e + 1, e + 1):match("[%w_]"))
         then
           matches = false
           if opt.reverse then e = e - 1 else e = e + 1 end
-          if e == #line_text then s = nil e = nil break end
+          if e == line_len then s = nil e = nil break end
         end
       end
-    until matches == true or not e or e >= #line_text
+    until matches == true or not e or e < s or e >= line_len
     if s then
-      local line2 = line
-      -- If we've matched the newline too,
-      -- return until the initial character of the next line.
-      if e >= #doc.lines[line] then
-        line2 = line + 1
-        e = 0
-      end
-      -- Avoid returning matches that go beyond the last line.
-      -- This is needed to avoid selecting the "last" newline.
-      if line2 <= #doc.lines then
-        return line, s, line2, e + 1
+      if e >= s and (e ~= line_len or s ~= e) then
+        return line, s, line, e == line_len and e or e + 1
       end
     end
     col = opt.reverse and -1 or 1
