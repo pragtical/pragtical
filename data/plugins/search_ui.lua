@@ -515,7 +515,7 @@ local function find_replace()
     local n1, nc1, n2, nc2
     repeat
       p1, pc1, p2, pc2 = doc:get_selection(true)
-      find(false, true, false, true)
+      find(false, false, false, true)
       n1, nc1, n2, nc2 = doc:get_selection(true)
       if p1 ~= n1 or pc1 ~= nc1 or p2 ~= n2 or pc2 ~= nc2 then
         if f1 == n1 and fc1 == nc1 then -- prevent recursive replacement
