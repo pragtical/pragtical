@@ -105,8 +105,8 @@ end
 ---@param name core.command.command_name
 ---@return string
 function command.prettify_name(name)
-  ---@diagnostic disable-next-line: redundant-return-value
-  return name:gsub(":", ": "):gsub("-", " "):gsub("%S+", capitalize_first)
+  name = name:gsub(":", ": "):gsub("-", " "):gsub("%S+", capitalize_first)
+  return name
 end
 
 
