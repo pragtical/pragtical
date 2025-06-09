@@ -41,7 +41,7 @@ local buttons = {
     label = "Find File", tooltip = "Search for a file from current project"
   },
   { name = "run_command", icon = "B", cmd = "core:find-command",
-    label = "Run Command", tooltip = "Search for a command and run it"
+    label = "Run Command", tooltip = "Search for a command to run"
   },
   { name = "settings", icon = "P", cmd = "ui:settings",
     label = "Settings", tooltip = "Open the settings interface"
@@ -199,10 +199,8 @@ function EmptyView:draw()
   if not self.first_update then
     for _, button in ipairs(buttons) do
       self[button.name]:set_tooltip(
-        string.format(
-          "%s (%s)",
-          button.tooltip, keymap.get_binding(button.cmd) or ""
-        )
+        button.tooltip,
+        button.cmd
       )
     end
     self.plugin_manager_loaded = package.loaded["plugins.plugin_manager"]

@@ -84,6 +84,7 @@ line_separator.border.color = { common.color "#00000000" }
 
 local close = Button(ui)
 close:set_icon("C")
+close:set_tooltip(nil, "search-replace:hide")
 close.border.width = 0
 close.padding.x = close.padding.x / 2
 close.padding.y = close.padding.y / 5
@@ -96,36 +97,45 @@ replacetext:set_tooltip("Text to replace")
 
 local findprev = Button(ui, "")
 findprev:set_icon("<")
-findprev:set_tooltip("Find previous")
+findprev:set_tooltip("Find previous", "search-replace:perform-previous")
 
 local findnext = Button(ui, "")
 findnext:set_icon(">")
-findnext:set_tooltip("Find next")
+findnext:set_tooltip("Find next", "search-replace:perform")
 
 local findproject = Button(ui, "Find")
 findproject:set_icon("L")
-findproject:set_tooltip("Find in project")
+findproject:set_tooltip("Find in project", "search-replace:perform")
 findproject:hide()
 
 local replace = Button(ui, "Replace")
-replace:set_tooltip("Replace all matching results")
+replace:set_tooltip("Replace all matching results", "search-replace:perform-replace")
 
 local line_options = Line(ui)
 
 local sensitive = ToggleButton(ui, false, nil, "o")
-sensitive:set_tooltip("Case sensitive search")
+sensitive:set_tooltip(nil, "search-replace:toggle-case-sensitive")
 
 local wholeword = ToggleButton(ui, false, nil, "O")
-wholeword:set_tooltip("Whole word search")
+wholeword:set_tooltip(nil, "search-replace:toggle-whole-word")
 
 local patterncheck = ToggleButton(ui, false, nil, "R")
-patterncheck:set_tooltip("Treat search text as a lua pattern (always case sensitive)")
+patterncheck:set_tooltip(
+  "Treat search text as a lua pattern (always case sensitive)",
+  "search-replace:toggle-pattern"
+)
 
 local regexcheck = ToggleButton(ui, false, nil, "r")
-regexcheck:set_tooltip("Treat search text as a regular expression")
+regexcheck:set_tooltip(
+  "Treat search text as a regular expression",
+  "search-replace:toggle-regex"
+)
 
 local replaceinselection = ToggleButton(ui, false, nil, "*")
-replaceinselection:set_tooltip("Perform replace only on selected text")
+replaceinselection:set_tooltip(
+  "Replace only on selected text",
+  "search-replace:toggle-in-selection"
+)
 
 local scope = SelectBox(ui, "scope")
 scope:add_option("current file")
@@ -483,7 +493,7 @@ local function find_replace()
 
   -- allows repeatedly performing a replace
   if in_selection and doc:get_text(doc:get_selection()) == "" then
-    find(false, true)
+    find(false)
     return
   end
 
@@ -980,12 +990,16 @@ command.add(function() return ui:is_visible() and not core.active_view:is(Comman
     find(true)
   end,
 
-  ["search-replace:toggle-sensitivity"] = function()
+  ["search-replace:toggle-case-sensitive"] = function()
     sensitive:toggle()
   end,
 
   ["search-replace:toggle-whole-word"] = function()
     wholeword:toggle()
+  end,
+
+  ["search-replace:toggle-pattern"] = function()
+    patterncheck:toggle()
   end,
 
   ["search-replace:toggle-regex"] = function()
@@ -1013,23 +1027,19 @@ command.add(
   {
     ["search-replace:perform"] = function()
       if scope:get_selected() == 1 then
-        if ui.child_active == findtext then
-          ---@type core.doc
-          local doc = doc_view.doc
-          local line1, col1, line2, col2 = doc:get_selection()
-          -- correct cursor position to properly search next result
-          if line1 ~= line2 or col1 ~= col2 then
-            doc:set_selection(
-              line1,
-              math.max(col1, col2),
-              line2,
-              math.min(col1, col2)
-            )
-          end
-          find(false)
-        else
-          find_replace()
+        ---@type core.doc
+        local doc = doc_view.doc
+        local line1, col1, line2, col2 = doc:get_selection()
+        -- correct cursor position to properly search next result
+        if line1 ~= line2 or col1 ~= col2 then
+          doc:set_selection(
+            line1,
+            math.max(col1, col2),
+            line2,
+            math.min(col1, col2)
+          )
         end
+        find(false)
       else
         project_search(
           replacetext:get_text() ~= "" and replacetext:get_text() or nil
@@ -1038,6 +1048,13 @@ command.add(
     end,
     ["search-replace:perform-previous"] = function()
       find(true)
+    end,
+    ["search-replace:perform-replace"] = function()
+      if scope:get_selected() == 1 then
+        find_replace()
+      else
+        project_search(replacetext:get_text())
+      end
     end
   }
 )
@@ -1131,8 +1148,10 @@ keymap.add {
   ["shift+f3"] = "search-replace:previous",
   ["return"] = "search-replace:perform",
   ["shift+return"] = "search-replace:perform-previous",
-  ["ctrl+i"] = "search-replace:toggle-sensitivity",
+  ["ctrl+return"] = "search-replace:perform-replace",
+  ["ctrl+i"] = "search-replace:toggle-case-sensitive",
   ["ctrl+shift+w"] = "search-replace:toggle-whole-word",
+  ["ctrl+alt+w"] = "search-replace:toggle-pattern",
   ["ctrl+shift+i"] = "search-replace:toggle-regex",
   ["ctrl+alt+i"] = "search-replace:toggle-in-selection",
   ["ctrl+f"] = "search-replace:file-search",
