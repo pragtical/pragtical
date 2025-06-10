@@ -139,7 +139,7 @@ jobs:
 
   build_windows_msys2:
     name: Windows
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
         config:
@@ -193,7 +193,7 @@ jobs:
 
   build_windows_msvc:
     name: Windows (MSVC)
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
         arch:
