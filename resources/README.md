@@ -14,6 +14,7 @@ This folder contains resources that is used for building or packaging the projec
 - `macos/appdmg.png`: Background image for packaging MacOS DMGs.
 - `macos/Info.plist.in`: Template for generating `info.plist` on MacOS. See `macos/macos-retina-display.md` for details.
 - `windows/001-lua-unicode.diff`: Patch for allowing Lua to load files with UTF-8 filenames on Windows.
+- `portable/README.md`: Copied to the `user` directory of portable builds.
 
 ### Development
 

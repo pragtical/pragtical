@@ -240,10 +240,15 @@ if get_option('portable') or host_machine.system() == 'windows'
     pragtical_bindir = '/'
     pragtical_docdir = '/doc'
     pragtical_datadir = '/data'
-    configure_file(
-        input: 'resources/windows/pragtical.exe.manifest.in',
-        output: 'pragtical.exe.manifest',
-        configuration: conf_data
+    if host_machine.system() == 'windows'
+        configure_file(
+            input: 'resources/windows/pragtical.exe.manifest.in',
+            output: 'pragtical.exe.manifest',
+            configuration: conf_data
+        )
+    endif
+    install_data('resources/portable/README.md',
+        install_dir : pragtical_bindir / 'user'
     )
 elif get_option('bundle') and host_machine.system() == 'darwin'
     pragtical_cargs += '-DMACOS_USE_BUNDLE'
