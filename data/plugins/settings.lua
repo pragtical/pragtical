@@ -1068,6 +1068,11 @@ local function merge_font_settings(option, path, saved_value)
   local font_loaded = true
   for _, font in ipairs(saved_value.fonts) do
     local font_data = nil
+    if string.find(font.path, "{datadir}", 1, true) then
+      font.path = string.gsub(font.path, "{datadir}", DATADIR, 1)
+    elseif string.find(font.path, "{userdir}", 1, true) then
+      font.path = string.gsub(font.path, "{userdir}", USERDIR, 1)
+    end
     font_loaded = core.try(function()
       font_data = renderer.font.load(
         font.path, font_options.size * SCALE, font_options
@@ -1425,6 +1430,17 @@ local function add_control(pane, option, plugin_name)
         else
           set_config_value(config, path, renderer.font.group(fonts))
         end
+        fonts = {}
+        for _, font in ipairs(value.fonts) do
+          local font_path = font.path
+          if string.find(font.path, DATADIR, 1, true) then
+            font_path = string.gsub(font.path, DATADIR, "{datadir}", 1)
+          elseif string.find(font.path, USERDIR, 1, true) then
+            font_path = string.gsub(font.path, USERDIR, "{userdir}", 1)
+          end
+          table.insert(fonts, {name = font.name, path = font_path})
+        end
+        value.fonts = fonts
       else
         set_config_value(config, path, value)
       end
