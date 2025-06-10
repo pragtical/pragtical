@@ -80,10 +80,16 @@ main() {
     exit 1
   fi
 
-  output="Pragtical${version}-${arch_file}-setup"
+  # remove portable user settings directory since this is a fixed install
+  mv "pragtical/user" .
 
+  # generate setup
+  output="Pragtical${version}-${arch_file}-setup"
   "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" -dARCH=$arch //F"${output}" "${build_dir}/scripts/innosetup.iss"
   pushd "${build_dir}/scripts"; mv Pragtical*.exe "./../../"; popd
+
+  # recreate user settings directory after generating setup
+  mv user "pragtical/"
 }
 
 main "$@"
