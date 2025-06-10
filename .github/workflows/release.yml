@@ -42,7 +42,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.2
         with:
           tag_name: ${{ steps.tag.outputs.version }}
           name: Pragtical ${{ steps.tag.outputs.version }}
@@ -98,7 +98,7 @@ jobs:
       - name: Build AppImages
         run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release
       - name: Upload Files
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
@@ -151,7 +151,7 @@ jobs:
           path: |
             ${{ env.INSTALL_NAME }}.dmg
       - name: Upload Files
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
@@ -204,7 +204,7 @@ jobs:
           bash --version
           bash scripts/make-universal-binaries.sh dmgs-normal "$INSTALL_BASE-universal"
       - name: Upload Files
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
@@ -269,7 +269,7 @@ jobs:
       - name: Build Installer
         run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
       - name: Upload Files
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.2.2
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
