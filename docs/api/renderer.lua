@@ -7,13 +7,11 @@ renderer = {}
 
 ---
 ---Array of bytes that represents a color used by the rendering functions.
----Note: indexes for rgba are numerical 1 = r, 2 = g, 3 = b, 4 = a but for
----documentation purposes the letters r, g, b, a were used.
 ---@class renderer.color
----@field public r number Red
----@field public g number Green
----@field public b number Blue
----@field public a number Alpha
+---@field public [1] number Red
+---@field public [2] number Green
+---@field public [3] number Blue
+---@field public [4] number Alpha
 
 ---
 ---Represent options that affect a font's rendering.

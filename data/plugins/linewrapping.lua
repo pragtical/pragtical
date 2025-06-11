@@ -10,6 +10,20 @@ local keymap = require "core.keymap"
 local translate = require "core.doc.translate"
 
 
+---Configuration options for `linewrapping` plugin.
+---@class config.plugins.linewrapping
+---The type of wrapping to perform. Can be "letter" or "word".
+---@field mode "letter" | "word"
+---If nil, uses the DocView's size, otherwise, uses this exact width. Can be a function.
+---@field width_override? number | function():number
+---Whether or not to draw a guide
+---@field guide boolean
+---Whether or not we should indent ourselves like the first line of a wrapped block.
+---@field indent boolean
+---Whether or not to enable wrapping by default when opening files.
+---@field enable_by_default boolean
+---Requires tokenization
+---@field require_tokenization boolean
 config.plugins.linewrapping = common.merge({
 	-- The type of wrapping to perform. Can be "letter" or "word".
   mode = "letter",
@@ -68,6 +82,7 @@ config.plugins.linewrapping = common.merge({
   }
 }, config.plugins.linewrapping)
 
+---@class plugins.linewrapping
 local LineWrapping = {}
 
 -- Optimzation function. The tokenizer is relatively slow (at present), and
