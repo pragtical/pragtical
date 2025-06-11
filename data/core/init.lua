@@ -658,7 +658,7 @@ end
 
 
 local mod_version_regex =
-  regex.compile([[--.*mod-version:(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:$|\s)]])
+  regex.compile([[--.*mod-version:\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:$|\s)]])
 local function get_plugin_details(filename)
   local info = system.get_file_info(filename)
   if info ~= nil and info.type == "dir" then
