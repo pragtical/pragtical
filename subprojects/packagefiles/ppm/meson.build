@@ -64,50 +64,34 @@ elif get_option('wrap_mode') != 'forcefallback' and not is_msys
         endif
     endforeach
 
+    # Search the rest of dependencies
+    zlib_dep = dependency('zlib')
+    lzma_dep = dependency('liblzma')
+    libgit2_dep = dependency('libgit2')
+    libzip_dep = dependency('libzip')
+    mbedtls_dep = [
+        dependency('mbedtls'),
+        dependency('mbedx509'),
+        dependency('mbedcrypto'),
+    ]
+
     microtar_lib = static_library('microtar', files('lib/microtar/src/microtar.c'))
     microtar_dep = declare_dependency(
         link_whole: [microtar_lib],
         include_directories: ['lib/microtar/src']
     )
 
-    # Search the rest of dependencies
-    zlib_dep = dependency('zlib')
-    mbedtls_dep = dependency('mbedtls', version: '<3', required: false)
-    libgit2_dep = dependency('libgit2')
-    libzip_dep = dependency('libzip')
-
-    fs = import('fs')
-    mbedtls2_dirs_exists = fs.exists('/usr/include/mbedtls2') and fs.exists('/usr/lib/mbedtls2')
-
-    if not mbedtls_dep.found() or mbedtls2_dirs_exists
-        # Using has_headers to distinguish between mbedtls2 and mbedtls3
-        _mbedtls_dep = cc.find_library('mbedtls', has_headers: 'mbedtls/net.h', required: false)
-        if _mbedtls_dep.found()
-            message('Using find_library strategy for mbedtls')
-            mbedtls_dep = [
-                _mbedtls_dep,
-                cc.find_library('mbedx509'),
-                cc.find_library('mbedcrypto'),
-            ]
-        elif mbedtls2_dirs_exists
-            # In some cases we need to manually specify where to find mbedtls2
-            message('Using fallback mbedtls definition')
-            mbedtls_dep = declare_dependency(
-                include_directories: ['/usr/include/mbedtls2/'],
-                link_args: ['-L/usr/lib/mbedtls2', '-lmbedtls', '-lmbedx509', '-lmbedcrypto']
-            )
-        elif mbedtls_dep.found()
-            warning('Probability of using incorrect mbedtls version')
-        else
-            error('mbedtls version 2 not found')
-        endif
-    endif
-
     executable(
         'ppm.'+arch_tuple,
         files('src/ppm.c') + ppm_lua_c,
         dependencies: [
-            zlib_dep, mbedtls_dep, libgit2_dep, libzip_dep, lua_dep, microtar_dep
+            zlib_dep,
+            lzma_dep,
+            mbedtls_dep,
+            libgit2_dep,
+            libzip_dep,
+            lua_dep,
+            microtar_dep
         ],
         c_args: ['-DPPM_STATIC'],
         install: true,
