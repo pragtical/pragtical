@@ -1202,6 +1202,16 @@ command.add(nil, {
     projectsearch.toggle(path)
   end,
 
+  ["project-search:open-tab"] = function(path)
+    local rv = ResultsView(path, "", "plain")
+    rv:show()
+    core.root_view:get_active_node_default():add_view(rv)
+    core.add_thread(function()
+      core.set_active_view(rv)
+      rv:swap_active_child(rv.find_text)
+    end)
+  end,
+
   ["project-search:find-plain"] = function(path)
     core.command_view:enter("Find Text In " .. (path or "Project"), {
       text = get_selected_text(),
@@ -1378,6 +1388,7 @@ command.add(ResultsView, {
 
 keymap.add {
   ["ctrl+shift+f"]       = "project-search:find",
+  ["ctrl+shift+alt+f"]   = "project-search:open-tab",
   ["return"]             = "project-search:refresh",
   ["f5"]                 = "project-search:refresh",
   ["ctrl+return"]        = "project-search:replace",
