@@ -405,6 +405,12 @@
       "css": "angle-double-right",
       "code": 125,
       "src": "fontawesome"
+    },
+    {
+      "uid": "4109c474ff99cad28fd5a2c38af2ec6f",
+      "css": "filter",
+      "code": 38,
+      "src": "fontawesome"
     }
   ]
 }
