@@ -7,7 +7,18 @@ local config = require "core.config"
 local style = require "core.style"
 local Widget = require "widget"
 local Button = require "widget.button"
+local FilePicker = require "widget.filepicker"
+local MessageBox = require "widget.messagebox"
 local SearchReplaceList = require "widget.searchreplacelist"
+local TextBox = require "widget.textbox"
+local ToggleButton = require "widget.togglebutton"
+
+local treeview
+core.add_thread(function()
+  if config.plugins.treeview ~= false then
+    treeview = require "plugins.treeview"
+  end
+end)
 
 config.plugins.projectsearch = common.merge({
   threading = {
@@ -42,36 +53,209 @@ local ResultsView = Widget:extend()
 
 function ResultsView:__tostring() return "ResultsView" end
 
-ResultsView.context = "session"
+---Show a currently searching or replacing warning
+---@param status "Search" | "Replace"
+local function report_status(status)
+  MessageBox.warning(
+    string.format("%s in progress...", status),
+    string.format(
+      "A %s is still running, please wait for it to finish.",
+      status:lower()
+    )
+  )
+end
 
 ---Constructor
-function ResultsView:new(path, text, type, insensitive, whole_word, replacement)
-  ResultsView.super.new(self)
+---@param path? string
+---@param text string
+---@param search_type? "plain"|"regex"
+---@param insensitive? boolean
+---@param whole_word? boolean
+---@param replacement? string
+function ResultsView:new(path, text, search_type, insensitive, whole_word, replacement)
+  ResultsView.super.new(self, nil, false)
+  self.type_name = "plugins.projectsearch.resultsview"
+  self.is_global = false
   self.defer_draw = false
   self.scrollable = true
   self.brightness = 0
+  self.searching = false
+  self.replacing = false
   self.path = path
   self.query = text
-  self.search_type = type
-  self.insensitive = insensitive
-  self.whole_word = whole_word
+  self.search_type = search_type or "plain"
+  self.insensitive = insensitive or true
+  self.whole_word = whole_word or false
   self.replacement = replacement
 
-  self.results_list = SearchReplaceList(self, self.replacement)
+  self.close_button = Button(self)
+  self.close_button:set_icon("C")
+  self.close_button:set_tooltip("Close project search", "project-search:find")
+  self.close_button.border.width = 0
+  self.close_button.padding.x = self.close_button.padding.x / 2
+  self.close_button.padding.y = self.close_button.padding.y / 5
+  self.close_button:hide()
+
+  self.find_text = TextBox(self, text, "search...")
+  self.find_button = Button(self, "Find")
+  self.find_button:set_tooltip(nil, "project-search:refresh")
+
+  self.replace_text = TextBox(self, replacement or "", "replacement...")
+  self.replace_button = Button(self, "Replace")
+  self.replace_button:set_tooltip(nil, "project-search:replace")
+
+  self.includes_text = TextBox(self, "", "Include: src/**.ext, *.ext")
+  self.excludes_text = TextBox(self, "", "Exclude: vendor, src/extras")
+
+  self.file_picker = FilePicker(self, path)
+  self.file_picker:set_mode(FilePicker.mode.DIRECTORY)
+
+  self.sensitive_toggle = ToggleButton(self, not self.insensitive, nil, "o")
+  self.sensitive_toggle:set_tooltip(nil, "project-search:toggle-case-sensitive")
+
+  self.wholeword_toggle = ToggleButton(self, self.whole_word, nil, "O")
+  self.wholeword_toggle:set_tooltip(nil, "project-search:toggle-whole-words")
+
+  self.regex_toggle = ToggleButton(self, self.search_type == "regex", nil, "r")
+  self.regex_toggle:set_tooltip(nil, "project-search:toggle-regex")
+
+  self.replace_toggle = ToggleButton(self, type(replacement) == "string", nil, "s")
+  self.replace_toggle:set_tooltip(nil, "project-search:toggle-replace-mode")
+
+  self.filters_toggle = ToggleButton(self, false, nil, "&")
+  self.filters_toggle:set_tooltip(nil, "project-search:toggle-file-filters")
+
+  self.results_list = SearchReplaceList(
+    self,
+    self.replacement,
+    (self.replacement and self.regex_toggle:is_toggled())
+      and self.find_text:get_text()
+      or nil,
+    self.sensitive_toggle:is_toggled()
+  )
   self.results_list.border.width = 0
   self.results_list.on_item_click = function(this, item, clicks)
     self:open_selected_result()
   end
 
-  if replacement then
-    self.apply_button = Button(self, "Apply Replacement")
-    self.apply_button:hide()
-    self.apply_button.on_click = function(this, button, x, y)
-      self:begin_replace()
+  local function toggle_filters(enabled)
+    if enabled then
+      self.includes_text:show()
+      self.excludes_text:show()
+    else
+      self.includes_text:hide()
+      self.excludes_text:hide()
+    end
+    self:update_replacement()
+  end
+
+  local function toggle_replace(enabled)
+    if enabled then
+      self.replace_text:show()
+      self.replace_button:show()
+    else
+      self.replace_text:hide()
+      self.replace_button:hide()
+    end
+    self:update_replacement()
+  end
+
+  local function update_replacement() self:update_replacement() end
+  self.sensitive_toggle.on_change = update_replacement
+  self.regex_toggle.on_change = update_replacement
+  self.replace_text.on_change = update_replacement
+
+  self.close_button.on_click = function()
+    command.perform "project-search:find"
+  end
+
+  self.find_button.on_click = function()
+    if self.find_button.label == "" then
+      if not self.searching or self.replacing then
+        self.replaced = true
+        self.results_list:clear()
+        self.total_files_processed = nil
+        self.find_button:set_label("Find")
+        self.find_button:set_icon()
+        self.find_button:set_tooltip(nil, "project-search:refresh")
+      else
+        report_status(self.searching and "Search" or "Replace")
+      end
+    else
+      self:refresh()
+    end
+    self:swap_active_child(self.find_text)
+  end
+
+  self.filters_toggle.on_change = function(_, enabled)
+    toggle_filters(enabled)
+  end
+
+  self.replace_toggle.on_change = function(_, enabled)
+    toggle_replace(enabled)
+  end
+
+  self.replace_button.on_click = function()
+    if not self.replace_toggle:is_toggled() then return end
+    if self.replaced or self.results_list.total_results == 0 then
+      MessageBox.info(
+        "No Valid Search",
+        "Perform a search before trying a replace operation."
+      )
+      return
+    end
+    if not self.searching and not self.replacing then
+      update_replacement()
+      MessageBox.alert(
+        "Confirm Replacement",
+        "Do you want to perform the previewed replacement?",
+        "?", style.text,
+        function(_, button_id)
+          if button_id == 1 then
+            self:begin_replace()
+          end
+        end,
+        MessageBox.BUTTONS_YES_NO
+      )
+    else
+      report_status(self.searching and "Search" or "Replace")
     end
   end
 
-  self:begin_search(path, text, type, insensitive, whole_word)
+  self.file_picker.on_change = function(_, value)
+    self.path = value
+  end
+
+  toggle_filters(false)
+  toggle_replace(type(replacement) == "string")
+
+  if text and text ~= "" then
+    self:begin_search(
+      path, text, self.search_type, self.insensitive, self.whole_word
+    )
+  end
+end
+
+
+---Sets the replacement text depending on currently toggled options
+function ResultsView:update_replacement()
+  if not self.searching and not self.replacing then
+    self.replaced = false
+    local replace = self.replace_toggle:is_toggled()
+    local regex = self.regex_toggle:is_toggled()
+    self.replacement = replace
+      and self.replace_text:get_text()
+      or nil
+    self.results_list.replacement = self.replacement
+    -- we also check for #self.replacement > 0 because an empty string
+    -- on a regex will replace by the same value of find text
+    self.results_list:set_search_regex(
+      (replace and regex and #self.replacement > 0)
+        and self.find_text:get_text()
+        or nil,
+      self.sensitive_toggle:is_toggled()
+    )
+  end
 end
 
 
@@ -99,6 +283,51 @@ local function files_search_thread(tid, options)
   local ignore_files = options.ignore_files or {}
   local workers = options.workers or 2
   local file_size_limit = options.file_size_limit or (10 * 1e6)
+  local includes = options.includes
+  local excludes = options.excludes
+
+  ---Check if the given file path matches against the given list of patterns.
+  ---@param file_path string
+  ---@param patterns? table<integer,string>
+  ---@param info system.fileinfo
+  ---@param negate? boolean
+  ---@return boolean matches
+  local function path_match(file_path, patterns, info, negate)
+    if not patterns then return false end
+    for _, pattern in ipairs(patterns) do
+      if file_path:find(pattern, 1, false) then
+        return true
+      elseif info.type == "dir" then
+        if pattern:find("^%.%*", 2, false) then
+          return true
+        elseif not negate then
+          local paths = {}
+          for p in file_path:gmatch("[^"..PATHSEP.."]+") do
+            table.insert(paths, p)
+          end
+          for i, _ in ipairs(paths) do
+            local pre_path = table.concat(paths, PATHSEP, 1, i)
+            if
+              pattern:find(
+                "^"..pre_path..PATHSEP,
+                2,
+                false
+              )
+              or
+              pattern:find(
+                "^"..pre_path.."%$",
+                2,
+                false
+              )
+            then
+              return true
+            end
+          end
+        end
+      end
+    end
+    return false
+  end
 
   ---A thread that waits for filenames to search the given text. If the given
   ---filename is "{{stop}}" then the thread will finish and exit.
@@ -151,16 +380,20 @@ local function files_search_thread(tid, options)
           local positions = {}
           local s, e = nil, 1
           if search_type == "regex" then
-            repeat
-              s, e = regex.cmatch(re, line, e)
-              local matches = true
-              if s and whole and not is_whole_match(line, s, e - 1) then
-                matches = false
-              end
-              if s and matches then
-                table.insert(positions, {col1=s, col2=e - 1})
-              end
-            until not s
+            local success = pcall(function()
+              repeat
+                s, e = regex.cmatch(re, line, e)
+                local matches = true
+                if s and whole and not is_whole_match(line, s, e - 1) then
+                  matches = false
+                end
+                if s and matches then
+                  table.insert(positions, {col1=s, col2=e - 1})
+                end
+              until not s
+            end)
+            -- skip lines where regex.cmatch failed
+            if not success then positions = {} end
           else
             local l = insensitive and line:lower() or line
             repeat
@@ -274,6 +507,10 @@ local function files_search_thread(tid, options)
           if
             info and not commons.match_ignore_rule(
               directory..file, info, ignore_files
+            ) and (
+              not includes or path_match(directory..file, includes, info)
+            ) and (
+              not excludes or not path_match(directory..file, excludes, info, true)
             )
           then
             if info.type == "dir" then
@@ -337,6 +574,39 @@ local function worker_threads_add_results(self, result_channels)
 end
 
 
+---Convert a filter into a table of lua patterns.
+---@param self plugins.projectsearch.resultsview
+---@param filters string
+---@return table? lua_patterns
+local function parse_filters(self, filters)
+  if not self.filters_toggle:is_toggled() then return nil end
+  filters = filters:match("^%s*(.-)%s*$")
+  if filters == "" then return nil end
+  local list = {}
+  for filter in filters:gmatch("[^,]+") do
+    filter = filter:match("^%s*(.-)%s*$") -- trim
+    filter = filter:gsub("[/\\]", PATHSEP) -- use proper path separator
+    filter = filter:match("^["..PATHSEP.."]*(.-)["..PATHSEP.."]*$") -- trim path separator
+      :gsub("%.", "%%.") -- escape dots
+      :gsub("%?", ".") -- replace question marks to any char
+    if filter ~= "" then
+      filter = filter:gsub("%*", "[^"..PATHSEP.."]*") -- single glob
+        :gsub("%[%^"..PATHSEP.."%]%*%[%^"..PATHSEP.."%]%*", ".*") -- double glob
+        :gsub(PATHSEP.."%.%*", PATHSEP.."?.*")
+        :gsub("%.%*"..PATHSEP, ".*"..PATHSEP.."?")
+      -- treat non glob filter as a directory match pattern
+      if filter:umatch("^[%w"..PATHSEP.."]+$") then
+        filter = filter .. "/[^"..PATHSEP.."]+"
+      end
+      filter = "^" .. filter .. "$"
+      if pcall(string.match, "a", filter) then
+        table.insert(list, filter)
+      end
+    end
+  end
+  return list
+end
+
 ---Start the search procedure and worker threads.
 ---@param path? string
 ---@param text string
@@ -344,6 +614,19 @@ end
 ---@param insensitive? boolean
 ---@param whole_word? boolean
 function ResultsView:begin_search(path, text, search_type, insensitive, whole_word)
+  if search_type == "regex" then
+    local rerr
+    local compiled = pcall(function()
+      local r, rerr = regex.compile(text, insensitive and "i" or "")
+    end)
+    if not compiled then
+      MessageBox.error(
+        "Syntax error on regular expression",
+        rerr
+      )
+      return
+    end
+  end
   path = path or core.root_project().path
 
   self.results_list:clear()
@@ -371,7 +654,9 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
         pathsep = PATHSEP,
         ignore_files = core.get_ignore_file_rules(),
         workers = workers,
-        file_size_limit = config.file_size_limit * 1e6
+        file_size_limit = config.file_size_limit * 1e6,
+        includes = parse_filters(self, self.includes_text:get_text()),
+        excludes = parse_filters(self, self.excludes_text:get_text())
       }
     )
     ---@type thread.Channel[]
@@ -415,7 +700,7 @@ end
 ---@param tid integer
 ---@param id integer
 ---@param replacement string
-local function files_replace_thread(tid, id, replacement)
+local function files_replace_thread(tid, id, replacement, search_regex, case_sensitive)
   local replace_channel = thread.get_channel("projectsearch_replace"..tid..id)
   local status_channel = thread.get_channel("projectsearch_replace_status"..tid..id)
   local replacement_len = #replacement
@@ -425,9 +710,21 @@ local function files_replace_thread(tid, id, replacement)
     return
   end
 
+  local regex_replace
+  pcall(function()
+    regex_replace = search_regex and regex.compile(
+      search_regex, case_sensitive and "" or "i"
+    )
+  end)
+
   local replace_substring = function(str, s, e, rep)
     local head = s <= 1 and "" or string.sub(str, 1, s - 1)
     local tail = e >= #str and "" or string.sub(str, e + 1)
+    if regex_replace then
+      local target = string.sub(str, s, e)
+      rep = regex_replace:gsub(target, replacement, 1)
+      replacement_len = #rep
+    end
     return head .. rep .. tail
   end
 
@@ -524,7 +821,11 @@ function ResultsView:begin_replace()
         thread.get_channel("projectsearch_replace_status"..tid..id)
       )
       thread.create(
-        "psrpool"..tid..id, files_replace_thread, tid, id, self.replacement
+        "psrpool"..tid..id, files_replace_thread,
+        tid, id,
+        self.replace_text:get_text(),
+        self.regex_toggle:is_toggled() and self.find_text:get_text(),
+        self.sensitive_toggle:is_toggled()
       )
     end
 
@@ -592,9 +893,21 @@ end
 
 ---Re-perform the search procedure using previous search options.
 function ResultsView:refresh()
-  self:begin_search(
-    self.path, self.query, self.search_type, self.insensitive, self.whole_word
-  )
+  local text = self.find_text:get_text()
+  if #text > 0 and not self.replacing and not self.searching then
+    self.replaced = false
+    self.path = self.file_picker:get_path()
+    self.query = self.find_text:get_text()
+    self.search_type = self.regex_toggle:is_toggled() and "regex" or "plain"
+    self.insensitive = not self.sensitive_toggle:is_toggled()
+    self.whole_word = self.wholeword_toggle:is_toggled()
+    self:update_replacement()
+    self:begin_search(
+      self.path, self.query, self.search_type, self.insensitive, self.whole_word
+    )
+  elseif self.searching or self.replacing then
+    report_status(self.searching and "Search" or "Replace")
+  end
 end
 
 
@@ -608,6 +921,7 @@ function ResultsView:open_selected_result()
     local l, c1, c2 = item.line.line, item.position.col1, item.position.col2+1
     dv.doc:set_selection(l, c2, l, c1)
     dv:scroll_to_line(l, false, true)
+    if self.is_global then core.set_active_view(self) end
   end)
   return true
 end
@@ -616,26 +930,95 @@ end
 function ResultsView:update()
   if not ResultsView.super.update(self) then return false end
   self:move_towards("brightness", 0, 0.1)
-  -- results
-  local yoffset = style.font:get_height() + style.padding.y * 3
-  self.results_list:set_position(0, yoffset)
-  self.results_list:set_size(self.size.x, self.size.y - yoffset)
-  -- apply button
-  if self.apply_button and not self.replacing then
-    self.apply_button:show()
-    self.apply_button:set_position(
-      self.results_list:get_right() - self.apply_button:get_width() - style.padding.x,
-      self.results_list:get_position().y
+
+  local px = style.padding.x
+  local py = style.padding.y
+
+  if self.is_global then
+    self.close_button:show()
+    self.close_button:set_position(px, py)
+  end
+
+  self.replace_toggle:set_position(self.size.x - self.replace_toggle:get_width() - px, py)
+  self.filters_toggle:set_position(self.replace_toggle:get_position().x - (px / 2) - self.filters_toggle:get_width(), py)
+  self.regex_toggle:set_position(self.filters_toggle:get_position().x - (px / 2) - self.regex_toggle:get_width(), py)
+  self.wholeword_toggle:set_position(self.regex_toggle:get_position().x - (px / 2) - self.wholeword_toggle:get_width(), py)
+  self.sensitive_toggle:set_position(self.wholeword_toggle:get_position().x - (px / 2) - self.sensitive_toggle:get_width(), py)
+
+  self.find_text:set_position(px, self.regex_toggle:get_bottom() + py)
+  self.find_text:set_size(self:get_width() - self.find_button:get_size().x - px * 3)
+  if
+    (
+      self.find_text:get_text() == self.query
+      and
+      self.results_list.total_results > 0
     )
-  elseif self.apply_button and self.replacing then
-    self:remove_child(self.apply_button)
-    self.apply_button = nil
+    or
+    (
+      self.find_text:get_text() == ""
+      and
+      self.results_list.total_results > 0
+    )
+  then
+    self.find_button:set_label("")
+    self.find_button:set_icon("T")
+    self.find_button:set_tooltip("Clear results")
+  else
+    self.find_button:set_label("Find")
+    self.find_button:set_icon()
+    self.find_button:set_tooltip(nil, "project-search:refresh")
+  end
+  self.find_button:set_position(self.find_text:get_size().x + px * 2, self.regex_toggle:get_bottom() + py)
+
+  if self.replace_text:is_visible() then
+    self.replace_text:set_position(px, self.find_text:get_bottom() + py)
+    self.replace_text:set_size(self:get_width() - self.replace_button:get_size().x - px * 3)
+    self.replace_button:set_position(self.replace_text:get_size().x + px * 2, self.find_button:get_bottom() + py)
+  end
+
+  self.file_picker:set_size(self:get_width() - px * 2)
+  if self.filters_toggle:is_toggled() then
+    if self.replace_text:is_visible() then
+      self.includes_text:set_position(px, self.replace_text:get_bottom() + py)
+    else
+      self.includes_text:set_position(px, self.find_text:get_bottom() + py)
+    end
+    if (self.size.x) > (650 * SCALE) then
+      self.includes_text:set_size((self:get_width() / 2) - (px * 2 / 1.5))
+      self.excludes_text:set_position(
+        self.includes_text:get_right() + px / 2, self.includes_text:get_position().y
+      )
+      self.excludes_text:set_size((self:get_width() / 2) - (px * 2 / 1.5))
+      self.file_picker:set_position(px, self.excludes_text:get_bottom() + py)
+    else
+      self.includes_text:set_size(self:get_width() - px * 2)
+      self.excludes_text:set_position(px, self.includes_text:get_bottom() + py)
+      self.excludes_text:set_size(self:get_width() - px * 2)
+      self.file_picker:set_position(px, self.excludes_text:get_bottom() + py)
+    end
+  elseif self.replace_text:is_visible() then
+    self.file_picker:set_position(px, self.replace_text:get_bottom() + py)
+  else
+    self.file_picker:set_position(px, self.find_text:get_bottom() + py)
+  end
+
+  -- results
+  if self.total_files_processed then
+    self.results_list:show()
+    local yoffset = self.file_picker:get_bottom()
+      + style.font:get_height()
+      + py * 3
+    self.results_list:set_position(0, yoffset)
+    self.results_list:set_size(self.size.x, self.size.y - yoffset)
+  else
+    self.results_list:hide()
   end
 end
 
 
 function ResultsView:draw()
   if not ResultsView.super.draw(self) then return false end
+  if not self.total_files_processed then return true end
 
   -- status
   local ox, oy = self:get_content_offset()
@@ -668,10 +1051,10 @@ function ResultsView:draw()
     )
   end
   local color = common.lerp(style.text, style.accent, self.brightness / 100)
-  renderer.draw_text(style.font, text, x, y, color)
+  renderer.draw_text(style.font, text, x, self.file_picker:get_bottom() + y, color)
 
   -- horizontal line
-  local yoffset = style.font:get_height() + style.padding.y * 3
+  local yoffset = self.file_picker:get_bottom() + style.font:get_height() + style.padding.y * 3
   local w = self.size.x - style.padding.x * 2
   local h = style.divider_size
   x = ox + style.padding.x
@@ -700,6 +1083,7 @@ local function begin_search(path, text, search_type, insensitive, whole_word, re
   )
   rv:show()
   core.root_view:get_active_node_default():add_view(rv)
+  core.add_thread(function() core.set_active_view(rv) end)
   return rv
 end
 
@@ -751,9 +1135,74 @@ function projectsearch.search_regex(text, path, insensitive, whole_word, replace
   return begin_search(path, text, "regex", insensitive, whole_word, replacement)
 end
 
+---@type plugins.projectsearch.resultsview?
+local global_project_search
+
+---@type boolean?
+local previous_treeview_hidden
+
+---@param path? string
+function projectsearch.toggle(path)
+  local visible = true
+  local toggle = true
+  if not global_project_search then
+    global_project_search = ResultsView(path, "", "plain")
+    global_project_search.is_global = true
+    global_project_search:set_size(400 * SCALE)
+    global_project_search:show()
+    local node, split_direction = nil, "left"
+    if treeview then
+      -- when treeview enabled split to the right of it for consistent position
+      node = core.root_view.root_node:get_node_for_view(treeview)
+      if not node then node = core.root_view:get_primary_node() end
+      split_direction = "right"
+    else
+      node = core.root_view:get_active_node()
+    end
+    global_project_search.node = node:split(
+      split_direction, global_project_search, {x = true}, true
+    )
+  else
+    if path then global_project_search.file_picker:set_path(path) end
+    if not path or not global_project_search:is_visible() then
+      visible = not global_project_search:is_visible()
+      global_project_search:toggle_visible(true, false, true)
+    elseif global_project_search:is_visible() then
+      toggle = false
+    end
+    if not visible and treeview.visible then
+      toggle = false
+    end
+  end
+
+  if treeview and toggle then
+    if type(previous_treeview_hidden) ~= "boolean" then
+      previous_treeview_hidden = treeview.visible
+    end
+
+    if visible then
+      previous_treeview_hidden = not treeview.visible
+    else
+      if previous_treeview_hidden then visible = true end
+    end
+    treeview.visible = not visible
+  end
+
+  core.add_thread(function()
+    if visible then
+      core.set_active_view(global_project_search)
+      global_project_search:swap_active_child()
+      global_project_search:swap_active_child(global_project_search.find_text)
+    end
+  end)
+end
 
 command.add(nil, {
   ["project-search:find"] = function(path)
+    projectsearch.toggle(path)
+  end,
+
+  ["project-search:find-plain"] = function(path)
     core.command_view:enter("Find Text In " .. (path or "Project"), {
       text = get_selected_text(),
       select_text = true,
@@ -772,6 +1221,122 @@ command.add(nil, {
   end,
 })
 
+---@return boolean is_project_search
+---@return plugins.projectsearch.resultsview view
+local function active_view_is_project_search()
+  local is_results_view = false
+  local view
+  if
+    core.active_view:extends(Widget)
+    or
+    core.last_active_view and core.last_active_view:extends(Widget)
+  then
+    local element = core.active_view:extends(Widget)
+      and core.active_view
+      or core.last_active_view
+    while element.parent do
+      element = core.active_view.parent
+    end
+    if element.type_name == "plugins.projectsearch.resultsview" then
+      is_results_view = true
+      view = element
+    end
+  end
+  return is_results_view, view
+end
+
+command.add(
+  function()
+    local is_project_search, view = active_view_is_project_search()
+    if is_project_search and view.child_active and view.child_active.textview then
+      return true, view
+    end
+    return false
+  end,
+  {
+    ["project-search:refresh"] = function(view)
+      view:refresh()
+    end,
+  }
+)
+
+---Focus the next or previous input text
+---@param view plugins.projectsearch.resultsview
+---@param reverse? boolean
+local function cycle_input_text(view, reverse)
+  if not view.child_active then
+    view:swap_active_child(view.find_text)
+  else
+    local current_active = view.child_active
+    local active_pos = nil
+    local first_textbox = nil
+    local start = reverse and 1 or #view.childs
+    local ending = reverse and #view.childs or 1
+    local increment = reverse and 1 or -1
+    for i=start, ending, increment do
+      local child = view.childs[i]
+      if child == current_active then
+        active_pos = i
+      elseif child.type_name == "widget.textbox" and child:is_visible() then
+        if not first_textbox then first_textbox = child end
+        if
+          (not reverse and active_pos and i < active_pos)
+          or
+          (reverse and active_pos and i > active_pos)
+        then
+          view:swap_active_child(child)
+          core.last_active_view = view
+          return
+        end
+      end
+    end
+    view:swap_active_child(first_textbox or current_active)
+    core.last_active_view = view
+  end
+end
+
+command.add(
+  function()
+    return active_view_is_project_search()
+  end,
+  {
+    ["project-search:replace"] = function(view)
+      view.replace_button:on_click()
+    end,
+
+    ["project-search:toggle-regex"] = function(view)
+      view.regex_toggle:toggle()
+    end,
+
+    ["project-search:toggle-case-sensitive"] = function(view)
+      view.sensitive_toggle:toggle()
+    end,
+
+    ["project-search:toggle-whole-words"] = function(view)
+      view.wholeword_toggle:toggle()
+    end,
+
+    ["project-search:toggle-file-filters"] = function(view)
+      view.filters_toggle:toggle()
+    end,
+
+    ["project-search:toggle-replace-mode"] = function(view)
+      view.replace_toggle:toggle()
+    end,
+
+    ["project-search:focus-next-input"] = function(view)
+      cycle_input_text(view)
+    end,
+
+    ["project-search:focus-previous-input"] = function(view)
+      cycle_input_text(view, true)
+    end,
+
+    ["project-search:unfocus-input"] = function(view)
+      view:swap_active_child()
+    end
+  }
+)
 
 command.add(ResultsView, {
   ["project-search:select-previous"] = function(view)
@@ -794,10 +1359,6 @@ command.add(ResultsView, {
     view:open_selected_result()
   end,
 
-  ["project-search:refresh"] = function(view)
-    view:refresh()
-  end,
-
   ["project-search:move-to-previous-page"] = function(view)
     view.results_list.scroll.to.y = view.results_list.scroll.to.y - view.results_list.size.y
   end,
@@ -816,14 +1377,23 @@ command.add(ResultsView, {
 })
 
 keymap.add {
-  ["f5"]                 = "project-search:refresh",
   ["ctrl+shift+f"]       = "project-search:find",
+  ["return"]             = "project-search:refresh",
+  ["f5"]                 = "project-search:refresh",
+  ["ctrl+return"]        = "project-search:replace",
+  ["tab"]                = "project-search:focus-next-input",
+  ["shift+tab"]          = "project-search:focus-previous-input",
+  ["escape"]             = "project-search:unfocus-input",
+  ["alt+r"]              = "project-search:toggle-regex",
+  ["alt+c"]              = "project-search:toggle-case-sensitive",
+  ["alt+w"]              = "project-search:toggle-whole-words",
+  ["alt+f"]              = "project-search:toggle-file-filters",
+  ["ctrl+r"]             = "project-search:toggle-replace-mode",
   ["up"]                 = "project-search:select-previous",
   ["down"]               = "project-search:select-next",
   ["left"]               = "project-search:toggle-expand",
   ["right"]              = "project-search:toggle-expand",
   ["space"]              = "project-search:toggle-checkbox",
-  ["return"]             = "project-search:open-selected",
   ["pageup"]             = "project-search:move-to-previous-page",
   ["pagedown"]           = "project-search:move-to-next-page",
   ["ctrl+home"]          = "project-search:move-to-start-of-doc",
@@ -832,5 +1402,8 @@ keymap.add {
   ["end"]                = "project-search:move-to-end-of-doc"
 }
 
+keymap.add {
+  ["return"]             = "project-search:open-selected"
+}
 
 return projectsearch
