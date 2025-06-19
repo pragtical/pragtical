@@ -126,6 +126,9 @@ else
 
     env.set('BIN', bin)
 
+    # enforce cmake version to prevent issues.
+    env.set('CMAKE_DEFAULT_FLAGS', '-DCMAKE_POLICY_VERSION_MINIMUM=3.5')
+
     clean_command = [bash_exe, 'build.sh', 'clean']
     run_command(clean_command, check: false)
 
