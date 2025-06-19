@@ -1,3 +1,4 @@
+local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local Object = require "core.object"
@@ -26,7 +27,12 @@ function DirWatch:new()
   self.watched = {}
   self.reverse_watched = {}
   self.last_modified = {}
-  self.monitor = dirmonitor.new()
+  local ok, monitor = pcall(dirmonitor.new, config.dirmonitor_backend)
+  if not ok then
+    monitor = dirmonitor.new()
+    core.error("Couldn't initialize directory watch with %s backend", config.dirmonitor_backend)
+  end
+  self.monitor = monitor
   self.single_watch_top = nil
   self.single_watch_count = 0
 end
