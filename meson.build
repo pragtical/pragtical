@@ -159,6 +159,16 @@ if not get_option('source-only')
         default_options: default_fallback_options + ['default_library=static', 'zlib=disabled', 'bzip2=disabled', 'png=disabled', 'harfbuzz=disabled', 'brotli=disabled']
     )
 
+    if host_machine.system() == 'linux'
+        fontconfig_dep = dependency('fontconfig', required : false)
+    else
+        fontconfig_dep = dependency('', required : false)
+    endif
+
+    if fontconfig_dep.found()
+        pragtical_cargs += '-DHAVE_FONTCONFIG'
+    endif
+
     uchardet_dep = dependency('uchardet', fallback: ['uchardet', 'uchardet_dep'],
         default_options: default_fallback_options + ['default_library=static']
     )
@@ -221,7 +231,7 @@ if not get_option('source-only')
         sdlmain_dep = dependency('', required: false)
     endif
 
-    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdlmain_dep, freetype_dep, fontconfig_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 lua_compat_needed = lua_dep.version() < '5.3.0'
