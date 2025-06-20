@@ -5,6 +5,7 @@ local keymap = require "core.keymap"
 local command = require "core.command"
 local config = require "core.config"
 local style = require "core.style"
+local DocView = require "core.docview"
 local Widget = require "widget"
 local Button = require "widget.button"
 local FilePicker = require "widget.filepicker"
@@ -1145,6 +1146,19 @@ local previous_treeview_hidden
 function projectsearch.toggle(path)
   local visible = true
   local toggle = true
+
+  ---@type core.docview?
+  local doc_view = (core.active_view and core.active_view:is(DocView))
+    and core.active_view
+
+  local selection = ""
+  if doc_view then
+    local doc = doc_view.doc
+    selection = doc:get_text(
+      table.unpack({ doc:get_selection() })
+    )
+  end
+
   if not global_project_search then
     global_project_search = ResultsView(path, "", "plain")
     global_project_search.is_global = true
@@ -1164,11 +1178,16 @@ function projectsearch.toggle(path)
     )
   else
     if path then global_project_search.file_picker:set_path(path) end
-    if not path or not global_project_search:is_visible() then
+    if selection ~= "" then
+      visible = true
+      if not global_project_search:is_visible() then
+        global_project_search:toggle_visible(true, false, true)
+      else
+        toggle = false
+      end
+    elseif not path or not global_project_search:is_visible() then
       visible = not global_project_search:is_visible()
       global_project_search:toggle_visible(true, false, true)
-    elseif global_project_search:is_visible() then
-      toggle = false
     end
     if not visible and treeview.visible then
       toggle = false
@@ -1193,6 +1212,12 @@ function projectsearch.toggle(path)
       core.set_active_view(global_project_search)
       global_project_search:swap_active_child()
       global_project_search:swap_active_child(global_project_search.find_text)
+      if selection ~= "" then
+        global_project_search.find_text:set_text(selection)
+        global_project_search.find_text.textview.doc:set_selection(
+          1, 1, 1, #selection + 1
+        )
+      end
     end
   end)
 end
