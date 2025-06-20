@@ -252,6 +252,9 @@ local function compare_score(a, b)
 end
 
 local function fuzzy_match_items(items, needle, files)
+  if needle == "" then
+    return items
+  end
   local res = {}
   needle = (PLATFORM == "Windows" and files) and needle:gsub('/', PATHSEP) or needle
   for _, item in ipairs(items) do
