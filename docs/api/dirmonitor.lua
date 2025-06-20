@@ -66,5 +66,11 @@ function dirmonitor:check(callback, error_callback) end
 ---@return "single" | "multiple"
 function dirmonitor:mode() end
 
+---
+---List all available dirmonitor backends
+---
+---@return table.
+function dirmonitor.backends() end
+
 
 return dirmonitor

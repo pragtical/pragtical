@@ -187,6 +187,18 @@ static int f_dirmonitor_mode(lua_State* L) {
   return 1;
 }
 
+static int f_dirmonitor_backends(lua_State* L) {
+  const size_t s = (sizeof(backends) / sizeof(backends[0])) - 1;
+
+  lua_createtable(L, 0, s);
+  for (size_t i = 0; i < s; ++i) {
+    lua_pushnumber(L, i);
+    lua_pushstring(L, backends[i]->name);
+    lua_settable(L, -3);
+  }
+
+  return 1;
+}
 
 static const luaL_Reg dirmonitor_lib[] = {
   { "new",      f_dirmonitor_new         },
@@ -195,6 +207,7 @@ static const luaL_Reg dirmonitor_lib[] = {
   { "unwatch",  f_dirmonitor_unwatch     },
   { "check",    f_dirmonitor_check       },
   { "mode",     f_dirmonitor_mode        },
+  { "backends", f_dirmonitor_backends    },
   {NULL, NULL}
 };
 
