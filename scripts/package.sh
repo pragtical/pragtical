@@ -221,7 +221,7 @@ main() {
   fi
 
   DESTDIR="$(pwd)/${dest_dir}" meson install $strip_flag \
-    --skip-subprojects="freetype2,pcre2" \
+    --skip-subprojects \
     -C "${build_dir}"
 
   local data_dir="$(pwd)/${dest_dir}/data"
