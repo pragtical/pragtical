@@ -285,6 +285,12 @@ config.lower_input_latency = true
 ---@type boolean | { font: renderer.font, icon: string } | nil
 config.stonks = true
 
+---Specifies the dirmonitor backend to be used or nil
+---to use the first available one.
+---
+---Defaults to nil
+config.dirmonitor_backend = nil
+
 -- holds the plugins real config table
 local plugins_config = {}
 
