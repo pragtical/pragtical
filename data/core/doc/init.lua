@@ -773,12 +773,12 @@ end
 function Doc:select_to(...) return self:select_to_cursor(nil, ...) end
 
 
-function Doc:get_indent_string()
+function Doc:get_indent_string(col)
   local indent_type, indent_size = self:get_indent_info()
   if indent_type == "hard" then
     return "\t"
   end
-  return string.rep(" ", indent_size)
+  return string.rep(" ", indent_size - ((col-1) % indent_size))
 end
 
 -- returns the size of the original indent, and the indent
@@ -809,7 +809,7 @@ end
 -- * if you are unindenting, the cursor will jump to the start of the line,
 --   and remove the appropriate amount of spaces (or a tab).
 function Doc:indent_text(unindent, line1, col1, line2, col2)
-  local text = self:get_indent_string()
+  local text = self:get_indent_string(col1)
   local _, se = self.lines[line1]:find("^[ \t]+")
   local in_beginning_whitespace = col1 == 1 or (se and col1 <= se + 1)
   local has_selection = line1 ~= line2 or col1 ~= col2
