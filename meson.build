@@ -162,7 +162,7 @@ if not get_option('source-only')
     if host_machine.system() == 'linux'
         fontconfig_dep = dependency('fontconfig',
             fallback: ['fontconfig', 'fontconfig_dep'],
-            default_options: default_fallback_options + ['default_library=static', 'doc=disabled', 'nls=disabled', 'tests=disabled', 'tools=disabled', 'cache-build=disabled'],
+            default_options: default_fallback_options + ['default_library=static', 'xml-backend=expat', 'doc=disabled', 'nls=disabled', 'tests=disabled', 'tools=disabled', 'cache-build=disabled'],
             required : false
         )
     else
