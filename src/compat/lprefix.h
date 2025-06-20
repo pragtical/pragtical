@@ -214,6 +214,8 @@ typedef struct COMPAT53_luaL_Stream {
 
 #define COMPAT53_LUA_PFILEHANDLE "PFILE*"
 
+#if defined(LUA_VERSION_NUM) && LUA_VERSION_NUM == 501 && !defined(LUA_JITLIBNAME)
+
 static int io_ptype (lua_State *L) {
   luaL_Stream *p;
   luaL_checkany(L, 1);
@@ -238,6 +240,8 @@ static int io_ptype (lua_State *L) {
     return 1;
   }
 }
+
+#endif
 
 static int io_popen (lua_State *L);
 static void createmeta (lua_State *L);

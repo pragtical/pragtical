@@ -2,7 +2,12 @@
 # Linux, Windows and Darwin build support taken from:
 # https://github.com/arch1t3cht/Aegisub/tree/feature/subprojects/packagefiles/luajit
 #
-project('luajit', 'c', version: '2.1.0', license: 'MIT')
+project('luajit',
+    'c',
+    version: '2.1.0',
+    license: 'MIT',
+    default_options : ['warning_level=0', 'werror=false']
+)
 
 cc = meson.get_compiler('c')
 

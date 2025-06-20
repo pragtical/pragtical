@@ -468,7 +468,7 @@ static void string_to_nfc (lua_State *L, luaL_Buffer *buff, const char *s, const
 
   utfint starter = -1, ch; /* 'starter' is last starter codepoint seen */
   const char *to_copy = s; /* pointer to next bytes we might need to memcpy into output buffer */
-  unsigned int prev_canon_cls = 0, canon_cls = 0;
+  unsigned int prev_canon_cls = 0; /*, canon_cls = 0; */
   int fixedup = 0; /* has the sequence currently under consideration been modified to make it NFC? */
 
   /* Temporary storage for a sequence of consecutive combining marks
@@ -2058,7 +2058,7 @@ next_iteration: ;
 
 static int Lutf8_grapheme_indices(lua_State *L) {
   size_t len;
-  const char *s = luaL_checklstring(L, 1, &len);
+  luaL_checklstring(L, 1, &len);
   lua_Integer start = byte_relat(luaL_optinteger(L, 2, 1), len);
   lua_Integer end = byte_relat(luaL_optinteger(L, 3, len), len);
   luaL_argcheck(L, start >= 1, 2, "out of range");
