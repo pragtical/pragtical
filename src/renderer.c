@@ -11,6 +11,9 @@
 #include FT_TRUETYPE_IDS_H
 #include FT_SFNT_NAMES_H
 #include FT_SYSTEM_H
+#ifdef HAVE_FONTCONFIG
+#include <fontconfig/fontconfig.h>
+#endif
 
 #include "renderer.h"
 #include "renwindow.h"
@@ -25,6 +28,9 @@ static size_t window_count = 0;
 // draw_rect_surface is used as a 1x1 surface to simplify ren_draw_rect with blending
 static SDL_Surface *draw_rect_surface = NULL;
 static FT_Library library = NULL;
+
+static ERenFontAntialiasing default_antialiasing = FONT_ANTIALIASING_SUBPIXEL;
+static ERenFontHinting default_hinting = FONT_HINTING_SLIGHT;
 
 #define check_alloc(P) _check_alloc(P, __FILE__, __LINE__)
 static void* _check_alloc(void *ptr, const char *const file, size_t ln) {
@@ -453,6 +459,76 @@ static int font_set_face_metrics(RenFont *font, FT_Face face) {
   return 0;
 }
 
+#ifdef HAVE_FONTCONFIG
+static void fontconfig_load_config(void) {
+
+  FcPattern *blank_pattern = FcPatternCreate();
+  FcResult result;
+
+  // Need to fetch the first font to get config values
+  FcPattern *pattern = FcFontMatch(NULL, blank_pattern, &result);
+  FcPatternDestroy(blank_pattern);
+
+  if (result == FcResultNoMatch)
+    return;
+
+  FcBool antialias = true;
+  FcPatternGetBool(pattern, FC_ANTIALIAS, 0, &antialias);
+
+  if (antialias) {      
+    int rgba = FC_RGBA_UNKNOWN;
+    FcPatternGetInteger(pattern, FC_RGBA, 0, &rgba);
+    switch (rgba) {
+      case FC_RGBA_RGB:
+        default_antialiasing = FONT_ANTIALIASING_SUBPIXEL;
+        break;
+
+      case FC_RGBA_BGR: // BGR subpixel (unsupported)
+      case FC_RGBA_VRGB: // VRGB subpixel (unsupported)
+      case FC_RGBA_VBGR: // VBGR subpixel (unsupported)
+      case FC_RGBA_NONE: // grayscale
+        default_antialiasing = FONT_ANTIALIASING_GRAYSCALE;
+        break;
+
+      default:
+      case FC_RGBA_UNKNOWN: // unknown aliasing
+        break;
+    }
+  } else {
+    default_antialiasing = FONT_ANTIALIASING_NONE;
+  }
+
+  FcBool hinting = true;
+  FcPatternGetBool(pattern, FC_HINTING, 0, &hinting);
+  if (hinting) {
+    int hintstyle;
+    if (FcPatternGetInteger(pattern, FC_HINT_STYLE, 0, &hintstyle) == FcResultMatch) {
+      switch (hintstyle) {
+        case FC_HINT_NONE: // no hinting
+          default_hinting = FONT_HINTING_NONE;
+          break;
+
+        case FC_HINT_SLIGHT: // slight hinting
+          default_hinting = FONT_HINTING_SLIGHT;
+          break;
+
+        case FC_HINT_FULL: // full hinting
+          default_hinting = FONT_HINTING_FULL;
+          break;
+
+        default:
+        case FC_HINT_MEDIUM: // medium hinting (unsupported)
+          break;
+      }
+    }
+
+  } else {
+    default_hinting = FONT_HINTING_NONE;
+  }
+
+}
+#endif
+
 RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style) {
   FT_Error err = FT_Err_Ok;
   SDL_RWops *file = NULL; RenFont *font = NULL;
@@ -462,7 +538,10 @@ RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antial
 
   file = SDL_RWFromFile(path, "rb");
   if (!file) return NULL; // error set by SDL_RWFromFile
-  
+
+  if (antialiasing == FONT_ANTIALIASING_UNDEFINED)
+    antialiasing = default_antialiasing;
+
   int len = strlen(path);
   font = check_alloc(calloc(1, sizeof(RenFont) + len + 1));
   strcpy(font->path, path);
@@ -972,6 +1051,10 @@ int ren_init(void) {
 
   if ((err = FT_Init_FreeType(&library)) != 0)
     return SDL_SetError("%s", get_ft_error(err));
+
+#ifdef HAVE_FONTCONFIG
+  fontconfig_load_config();
+#endif
 
   return 0;
 }
