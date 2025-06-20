@@ -749,8 +749,25 @@ settings.add("Status Bar",
   }
 )
 
+local dirmonitor_backends = {{"Auto", "auto"}}
+for _, backend in ipairs(dirmonitor.backends()) do
+  table.insert(dirmonitor_backends, {backend, backend})
+end
+
 settings.add("Advanced",
   {
+    {
+      label = "Directory Monitoring Backend",
+      description = "The backend to monitor for file changes (restart required).",
+      path = "dirmonitor_backend",
+      type = settings.type.SELECTION,
+      default = "auto",
+      values = dirmonitor_backends,
+      set_value = function(backend)
+        if backend == "auto" then return nil end
+        return backend
+      end
+    },
     {
       label = "Garbage Collector Pause",
       description = "How many times ram has to increase after last clean in order to reclean. Lower value makes GC more aggressive but may cause stuttering.",
@@ -965,6 +982,11 @@ end
 local function load_settings()
   local ok, t = pcall(dofile, USERDIR .. "/user_settings.lua")
   settings.config = ok and t.config or {}
+  -- do not wait for settings plugin to merge user settings and
+  -- prioritize this option to prevent plugins from using wrong backend
+  if settings.config.dirmonitor_backend then
+    config.dirmonitor_backend = settings.config.dirmonitor_backend
+  end
 end
 
 ---Save current config options into the USERDIR user_settings.lua
