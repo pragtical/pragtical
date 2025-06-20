@@ -12,8 +12,10 @@ dirmonitor = {}
 ---
 ---Creates a new dirmonitor object.
 ---
+---@param backend? string Name of the dirmonitor backend to be used
+---
 ---@return dirmonitor
-function dirmonitor.new() end
+function dirmonitor.new(backend) end
 
 ---
 ---Monitors a directory or file for changes.
