@@ -3,7 +3,7 @@ project('ppm',
     version : 'GIT',
     license : 'PPM',
     meson_version : '>= 0.60',
-    default_options : ['c_std=gnu11']
+    default_options : ['c_std=gnu11', 'warning_level=0', 'werror=false']
 )
 
 if get_option('arch_tuple') != ''
