@@ -192,7 +192,7 @@ static int f_dirmonitor_backends(lua_State* L) {
 
   lua_createtable(L, 0, s);
   for (size_t i = 0; i < s; ++i) {
-    lua_pushnumber(L, i);
+    lua_pushnumber(L, i+1);
     lua_pushstring(L, backends[i]->name);
     lua_settable(L, -3);
   }
