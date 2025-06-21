@@ -26,8 +26,8 @@
 typedef struct thread {
   lua_State *L;
   SDL_Thread *ptr;
-  SDL_atomic_t ref;
-  int joined;
+  SDL_AtomicInt ref;
+  int clean;
 } LuaThread;
 
 typedef struct thread_container {
@@ -86,7 +86,7 @@ static void destroy(LuaThread *t)
 {
   (void)SDL_AtomicDecRef(&t->ref);
 
-  if (SDL_AtomicGet(&t->ref) == 0) {
+  if (SDL_GetAtomicInt(&t->ref) <= 0) {
     lua_close(t->L);
     free(t);
   }
@@ -419,7 +419,7 @@ failure:
  */
 static int f_thread_get_cpu_count(lua_State *L)
 {
-  lua_pushinteger(L, SDL_GetCPUCount());
+  lua_pushinteger(L, SDL_GetNumLogicalCPUCores());
   return 1;
 }
 
@@ -475,7 +475,7 @@ static int m_thread_wait(lua_State *L)
   int status;
 
   SDL_WaitThread(self->ptr, &status);
-  self->joined = 1;
+  self->clean = 1;
 
   lua_pushinteger(L, status);
 
@@ -513,10 +513,9 @@ static int mm_thread_gc(lua_State *L)
     L, 1, API_TYPE_THREAD
   ))->thread;
 
-#if SDL_VERSION_ATLEAST(2, 0, 2)
-  if (!self->joined)
+  /* allow self clean */
+  if (!self->clean)
     SDL_DetachThread(self->ptr);
-#endif
 
   /* this can take place before or after the thread callback ends
    * which is why ref counting is needed */
