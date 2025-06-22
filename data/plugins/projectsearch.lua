@@ -1265,22 +1265,22 @@ command.add(nil, {
 })
 
 ---@return boolean is_project_search
----@return plugins.projectsearch.resultsview view
+---@return plugins.projectsearch.resultsview? view
 local function active_view_is_project_search()
   local is_results_view = false
   local view
   if
-    core.active_view:extends(Widget)
-    or
-    core.last_active_view and core.last_active_view:extends(Widget)
+    core.active_view
+    and
+    core.active_view:get_name() == "Project Search and Replace"
+    and
+    core.active_view.type_name ~= "widget.filepicker"
   then
-    local element = core.active_view:extends(Widget)
-      and core.active_view
-      or core.last_active_view
+    local element = core.active_view
     while element.parent do
       element = core.active_view.parent
     end
-    if element.type_name == "plugins.projectsearch.resultsview" then
+    if element:is_visible() then
       is_results_view = true
       view = element
     end
