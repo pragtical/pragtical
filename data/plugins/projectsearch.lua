@@ -912,12 +912,16 @@ function ResultsView:refresh()
 end
 
 
+---@type core.docview?
+local previous_docview
+
 ---Opens a DocView of the user selected match.
 function ResultsView:open_selected_result()
   local item = self.results_list:get_selected()
   if not item or not item.position then return end
   core.try(function()
     local dv = core.root_view:open_doc(core.open_doc(item.parent.file.path))
+    previous_docview = dv
     core.root_view.root_node:update_layout()
     local l, c1, c2 = item.line.line, item.position.col1, item.position.col2+1
     dv.doc:set_selection(l, c2, l, c1)
@@ -1157,6 +1161,7 @@ function projectsearch.toggle(path)
     selection = doc:get_text(
       table.unpack({ doc:get_selection() })
     )
+    previous_docview = doc_view
   end
 
   if not global_project_search then
@@ -1218,6 +1223,9 @@ function projectsearch.toggle(path)
           1, 1, 1, #selection + 1
         )
       end
+    elseif previous_docview then
+      core.set_active_view(previous_docview)
+      previous_docview = nil
     end
   end)
 end
