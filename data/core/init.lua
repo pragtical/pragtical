@@ -1486,9 +1486,14 @@ local run_threads = coroutine.wrap(function()
               thread.calls = 1
               thread.avg_time = end_time
             else
-              thread.time = thread.time + end_time
-              thread.calls = thread.calls + 1
-              thread.avg_time = thread.time / thread.calls
+              -- keep numbers small
+              thread.time = thread.calls < 1000
+                and thread.time + end_time
+                or end_time
+              thread.calls = thread.calls < 1000 and thread.calls + 1 or 1
+              thread.avg_time = thread.calls > 1
+                and thread.time / thread.calls
+                or thread.avg_time
             end
             -- penalize slow coroutines by setting their wait time to the
             -- same time it took to execute them.
