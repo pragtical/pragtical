@@ -252,7 +252,7 @@ local function compare_score(a, b)
 end
 
 local function compare_text(a, b)
-  return a.text < b.text
+  return tostring(a.text) < tostring(b.text)
 end
 
 local function fuzzy_match_items(items, needle, files)
