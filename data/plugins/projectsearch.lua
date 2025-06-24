@@ -912,8 +912,8 @@ function ResultsView:refresh()
 end
 
 
----@type core.docview?
-local previous_docview
+---@type core.view?
+local previous_view
 
 ---Opens a DocView of the user selected match.
 function ResultsView:open_selected_result()
@@ -921,7 +921,7 @@ function ResultsView:open_selected_result()
   if not item or not item.position then return end
   core.try(function()
     local dv = core.root_view:open_doc(core.open_doc(item.parent.file.path))
-    previous_docview = dv
+    previous_view = dv
     core.root_view.root_node:update_layout()
     local l, c1, c2 = item.line.line, item.position.col1, item.position.col2+1
     dv.doc:set_selection(l, c2, l, c1)
@@ -1147,7 +1147,8 @@ local global_project_search
 local previous_treeview_hidden
 
 ---@param path? string
-function projectsearch.toggle(path)
+---@param has_focus? boolean
+function projectsearch.toggle(path, has_focus)
   local visible = true
   local toggle = true
 
@@ -1161,7 +1162,10 @@ function projectsearch.toggle(path)
     selection = doc:get_text(
       table.unpack({ doc:get_selection() })
     )
-    previous_docview = doc_view
+  end
+
+  if not has_focus and not previous_view then
+    previous_view = core.active_view
   end
 
   if not global_project_search then
@@ -1182,19 +1186,20 @@ function projectsearch.toggle(path)
       split_direction, global_project_search, {x = true}, true
     )
   else
+    local gvisible = global_project_search:is_visible()
     if path then global_project_search.file_picker:set_path(path) end
     if selection ~= "" then
-      visible = true
-      if not global_project_search:is_visible() then
+      if not gvisible then
         global_project_search:toggle_visible(true, false, true)
       else
         toggle = false
       end
-    elseif not path or not global_project_search:is_visible() then
-      visible = not global_project_search:is_visible()
+    elseif not has_focus and gvisible then
+      toggle = false
+    elseif not path or not gvisible then
+      visible = not gvisible
       global_project_search:toggle_visible(true, false, true)
-    end
-    if not visible and treeview.visible then
+    else
       toggle = false
     end
   end
@@ -1223,16 +1228,41 @@ function projectsearch.toggle(path)
           1, 1, 1, #selection + 1
         )
       end
-    elseif previous_docview then
-      core.set_active_view(previous_docview)
-      previous_docview = nil
+    elseif previous_view then
+      core.set_active_view(previous_view)
+      previous_view = nil
     end
   end)
 end
 
+---@return boolean is_project_search
+---@return plugins.projectsearch.resultsview? view
+local function active_view_is_project_search()
+  local is_results_view = false
+  local view
+  if
+    core.active_view
+    and
+    core.active_view:get_name() == "Project Search and Replace"
+    and
+    core.active_view.type_name ~= "widget.filepicker"
+  then
+    local element = core.active_view
+    while element.parent do
+      element = core.active_view.parent
+    end
+    if element:is_visible() then
+      is_results_view = true
+      view = element
+    end
+  end
+  return is_results_view, view
+end
+
 command.add(nil, {
   ["project-search:find"] = function(path)
-    projectsearch.toggle(path)
+    local has_focus = active_view_is_project_search()
+    projectsearch.toggle(path, has_focus)
   end,
 
   ["project-search:open-tab"] = function(path)
@@ -1263,30 +1293,6 @@ command.add(nil, {
     })
   end,
 })
-
----@return boolean is_project_search
----@return plugins.projectsearch.resultsview? view
-local function active_view_is_project_search()
-  local is_results_view = false
-  local view
-  if
-    core.active_view
-    and
-    core.active_view:get_name() == "Project Search and Replace"
-    and
-    core.active_view.type_name ~= "widget.filepicker"
-  then
-    local element = core.active_view
-    while element.parent do
-      element = core.active_view.parent
-    end
-    if element:is_visible() then
-      is_results_view = true
-      view = element
-    end
-  end
-  return is_results_view, view
-end
 
 command.add(
   function()
