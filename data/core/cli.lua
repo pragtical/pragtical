@@ -200,6 +200,21 @@ local function print_command_help(command)
   end
 end
 
+---@class core.cli.sortedcommand
+---@field name string
+---@field data core.cli.command
+
+---@param commands table<string,core.cli.command>
+---@return core.cli.sortedcommand[]
+local function sort_commands_by_name(commands)
+  local sorted_commands = {}
+  for cmdname, command_data in pairs(commands) do
+    table.insert(sorted_commands, {name = cmdname, data = command_data})
+  end
+  table.sort(sorted_commands, function(a, b) return a.name < b.name end)
+  return sorted_commands
+end
+
 ---Display the generated application help or a specific command help.
 ---@param command? core.cli.command
 function cli.print_help(command)
@@ -230,7 +245,8 @@ function cli.print_help(command)
       if cli.commands_count > 0 then
         print ""
         print(cli.colorize("Available commands:", "yellow"))
-        for cmdname, command_data in pairs(cli.commands) do
+        for _, cmd in ipairs(sort_commands_by_name(cli.commands)) do
+          local cmdname, command_data = cmd.name, cmd.data
           if cmdname ~= "default" then
             local text = cli.colorize("  " .. cmdname, "green")
               .. "  " .. (command_data.description or "")
@@ -538,7 +554,8 @@ cli.register {
   execute = function()
     print(cli.colorize("Available commands:", "yellow"))
     print ""
-    for cmdname, command_data in pairs(cli.commands) do
+    for _, cmd in ipairs(sort_commands_by_name(cli.commands)) do
+      local cmdname, command_data = cmd.name, cmd.data
       if cmdname ~= "default" then
         local text = cli.colorize(cmdname, "green")
           .. "  " .. (command_data.description or "")
