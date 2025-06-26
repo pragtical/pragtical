@@ -4,6 +4,7 @@
 local json_found, json = pcall(require, "libraries.json")
 if not json_found then return end
 
+local core = require "core"
 local cli = require "core.cli"
 local common = require "core.common"
 
@@ -262,10 +263,9 @@ local lib_position = 2
 ---@param path string
 ---@param output_dir
 local function parse_docs(path, output_dir)
-  print "================================="
-  print "Parsing files on:"
-  print ("  " .. path)
-  print "================================="
+  print ""
+  print(cli.colorize("Parsing files on:", "green") .. "\n\n  " .. path)
+  print ""
   local lls = io.popen(
     "lua-language-server "
       .. "--doc="..path .. " "
@@ -278,8 +278,10 @@ local function parse_docs(path, output_dir)
         .. " "
         .. "could not properly run lua-language-server"
     )
+    os.exit(1)
   end
-  print(lls:read("*a"))
+  print(cli.colorize("Language Server Output:", "green") .. "\n")
+  print(cli.colorize(lls:read("*a"), "liteblue"))
   local success, exitcode, code = lls:close()
 
   local output = io.open(output_dir..PATHSEP.."doc.json", "r")
@@ -404,10 +406,11 @@ local function parse_docs(path, output_dir)
         end
       end
     elseif not define then
-      print ""
-      print "No defines on symbol or invalid entry:"
+      print(
+        cli.colorize("Warning: ", "yellow")
+          .. "No defines on symbol or invalid entry:"
+      )
       print(common.serialize(symbol, {pretty = true}))
-      print ""
     end
   end
 end
@@ -484,6 +487,17 @@ local function generate_docs(library, output, show_require)
   local file, errmsg = io.open(output .. PATHSEP .. library .. ".md", "w")
   if file then
     local lib = libraries[library]
+    if not lib then
+      print ""
+      print(string.format(
+        cli.colorize("Warning:", "yellow")
+          .. " "
+          .. "library '%s' not found.",
+        library
+      ))
+      return
+    end
+
     file:write(
       "---\n"
       .. "sidebar_position: " .. lib_position .. "\n"
@@ -630,6 +644,10 @@ cli.register({
     }
   },
   execute = function(flags, arguments)
+    -- revert to the initial working directory since the output flag
+    -- can get interpreted as a project directory and we may need initial.
+    system.chdir(core.init_working_dir)
+
     local output_dir = "output"
     local keep = false
 
@@ -648,15 +666,15 @@ cli.register({
 
     -- change output directory to absolute format and print it
     output_dir = system.absolute_path(output_dir)
-    print("Output Directory:", output_dir)
+    print(cli.colorize("\nOutput Directory:", "green") .. "\n\n  " .. output_dir)
 
     if not command_exists("lua-language-server") then
       print(
-        cli.colorize("Error:", "red")
+        cli.colorize("\nError:", "red")
         .. " "
         .. "lua-language-server not found in path"
       )
-      return
+      os.exit(1)
     end
 
     local system_libs = {}
@@ -694,11 +712,20 @@ cli.register({
       -- we need to parse C Lua libs first to prevent issues
       -- so we copy them to output, parse and then delete
       for _, name in ipairs(system_libs) do
-        os.execute(
+        local succ, exitcode = os.execute(
           "cp "
           .. "\""..DATADIR..PATHSEP..name..".lua".."\" "
           .. "\""..output_dir..PATHSEP..name..".lua".."\""
         )
+        if not succ or exitcode > 0 then
+          print ""
+          print(
+            cli.colorize("Error: ", "red")
+              .. "Could not copy "
+              .. DATADIR..PATHSEP..name
+          )
+          os.exit(1)
+        end
       end
       parse_docs(output_dir, output_dir)
       for _, name in ipairs(system_libs) do
@@ -771,7 +798,6 @@ cli.register({
       common.rm(output_dir .. PATHSEP .. "doc.json")
     end
 
-    print "================================="
-    print "Documentation generated!"
+    print("\n" .. cli.colorize("Documentation generated!", "green"))
   end
 })
