@@ -5,6 +5,7 @@
 -- @license MIT
 --
 local core = require "core"
+local cli = require "core.cli"
 local config = require "core.config"
 local common = require "core.common"
 local command = require "core.command"
@@ -871,12 +872,16 @@ system.get_time = function()
     system.get_time = system_get_time
 
     local primary_instance = ipc:get_primary_instance()
-    if primary_instance and ARGS[2] then
+    if
+      primary_instance
+      and
+      cli.last_command == "default" and cli.unhandled_arguments[1]
+    then
       local open_directory = false
-      for i=2, #ARGS do
+      for i=1, #cli.unhandled_arguments do
         -- chdir to initial working directory to properly resolve absolute path
         system.chdir(core.init_working_dir)
-        local path = system.absolute_path(ARGS[i])
+        local path = system.absolute_path(cli.unhandled_arguments[i])
 
         if path then
           local path_info = system.get_file_info(path)
@@ -889,7 +894,7 @@ system.get_time = function()
               elseif config.plugins.ipc.dirs_instance == "change" then
                 ipc:call_async(primary_instance, "core.change_directory", nil, path)
               else
-                if #ARGS > 2 then
+                if #cli.unhandled_arguments > 1 then
                   system.exec(string.format("%q %q", EXEFILE, path))
                 else
                   open_directory = true

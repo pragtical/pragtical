@@ -57,12 +57,18 @@ local core = require "core"
 ---@field app_description string
 ---List of registered commands
 ---@field commands table<string,core.cli.command>
+---The command that was executed on last parse.
+---@field last_command string
+---List of arguments that weren't handled on last parse.
+---@field unhandled_arguments table<integer,string>
 local cli = {
   app_name = "Pragtical",
   app_version = VERSION,
   app_description = "The practical and pragmatic code editor.",
   commands = {},
-  commands_count = 0
+  commands_count = 0,
+  last_command = "",
+  unhandled_arguments = {},
 }
 
 ---Add a new command to the cli parser.
@@ -131,9 +137,85 @@ function cli.colorize(text, color)
   return text
 end
 
+---@class core.cli.sortedcommand
+---@field name string
+---@field data core.cli.command
+
+---@param commands table<string,core.cli.command>
+---@return core.cli.sortedcommand[]
+local function sort_commands_by_name(commands)
+  local sorted_commands = {}
+  for cmdname, command_data in pairs(commands) do
+    table.insert(sorted_commands, {name = cmdname, data = command_data})
+  end
+  table.sort(sorted_commands, function(a, b) return a.name < b.name end)
+  return sorted_commands
+end
+
+---Get the width of current user terminal.
+---
+---Defaults to 80 if the current width can not be determined.
+---@return integer
+local function get_terminal_width()
+  if PLATFORM == "Windows" then
+    -- Try using `mode con` (works in CMD)
+    local handle = io.popen("mode con")
+    if handle then
+      local output = handle:read("*a")
+      handle:close()
+      local cols = output:match("Columns:%s+(%d+)")
+      if cols then return tonumber(cols) end
+    end
+    -- Fallback: use PowerShell
+    handle = io.popen("powershell -command \"$Host.UI.RawUI.WindowSize.Width\"")
+    if handle then
+      local output = handle:read("*a")
+      handle:close()
+      local cols = tonumber(output:match("(%d+)"))
+      if cols then return cols end
+    end
+  else
+    -- Unix-like: use `stty size`
+    local handle = io.popen("stty size 2>/dev/null")
+    if handle then
+      local output = handle:read("*a")
+      handle:close()
+      local rows, cols = output:match("(%d+)%s+(%d+)")
+      if cols then return tonumber(cols) end
+    end
+  end
+  return 80
+end
+
+---Pad and wrap the given text.
+---@param text string
+---@param padding integer
+---@param initial_padding? integer
+---@param columns? integer Defaults: 80
+local function pad_text(text, padding, initial_padding, columns)
+  local lines = {}
+  local line = ""
+  padding = padding or 0
+  columns = columns or 70
+  for word in text:gmatch("(%S+)") do
+    if #line + #word + 1 < columns - padding then
+      line = line == "" and word or (line .. " " .. word)
+    else
+      table.insert(lines, line)
+      line = word
+    end
+  end
+  table.insert(lines, line)
+  local ipadding = string.rep(" ", initial_padding or 0)
+  return #lines > 0
+    and (ipadding .. table.concat(lines, "\n" .. string.rep(" ", padding)))
+    or text
+end
+
 ---Print the help message for a given command name.
 ---@param command core.cli.command
 local function print_command_help(command)
+  local columns = get_terminal_width()
   if command.command ~= "default" then
     if command.description then
       print ""
@@ -147,9 +229,9 @@ local function print_command_help(command)
       print ("  " .. command.command .. " " .. command.usage)
     else
       print (
-        "  " .. command.command .. " [options] "
+        "  " .. command.command .. (command.flags and " [options] " or " ")
         .. (
-          (not command.max_arguments or command.max_arguments > 0)
+          (not command.max_arguments or command.max_arguments < 0 or command.max_arguments > 0)
           and
           "[<arguments>]" or ""
         )
@@ -168,27 +250,82 @@ local function print_command_help(command)
   if command.flags and #command.flags > 0 then
     print ""
     print(cli.colorize("Options:", "yellow"))
+    local flags_padding = 0
     for _, flag in ipairs(command.flags) do
+      flags_padding = math.max(flags_padding, 10 + #flag.name)
+    end
+    for _, flag in ipairs(command.flags) do
+      local flag_len = 10 + #flag.name
+      local init_padding = math.max(flags_padding, flag_len)
+        - math.min(flags_padding, flag_len)
+        + 2
+      local flag_info = ""
+      if flag.type and flag.type ~= "empty" then
+        local value = flag.value
+        if type(value) == "table" then
+          value = table.concat(value, ",")
+        elseif type(value) ~= "nil" then
+          value = tostring(value)
+        end
+        if flag.value then
+          flag_info = " ("
+            .. "type: "..flag.type..", "
+            .. "default: " .. tostring(value)
+            .. ")"
+        else
+          flag_info = "(type: "..flag.type..")"
+        end
+      else
+        flag_info = "(type: flag)"
+      end
       local text = cli.colorize(
           "  -" .. flag.short_name .. ", " .. "--" .. flag.name, "green"
-        ) .. "  " .. (flag.description or "")
+        ) .. pad_text(
+          flag.description or "",
+          flags_padding,
+          init_padding,
+          columns
+        )
+      if flag_info ~= "" then
+        text = text .. "\n" .. cli.colorize(pad_text(
+          flag_info, flags_padding, flags_padding, columns
+        ), "liteblue")
+      end
       print(text)
     end
     if command.command == "default" then
-      print(
-        cli.colorize("  --", "green")
-        .. "  Always treat argument as command even if a file/dir"
+      print(cli.colorize("  --", "green")
+        .. pad_text(
+          "Always treat argument as command even if a file or directory "
+            .. "exists with the same name, eg: pragtical -- help",
+          flags_padding,
+          flags_padding - 4,
+          columns
+        )
       )
-      print "      exists with the same name, eg: pragtical -- help"
     end
   end
 
   if command.subcommands then
     print ""
     print(cli.colorize("Available subcommands:", "yellow"))
+    local commands_padding = 0
     for _, subcommand in pairs(command.subcommands) do
+      commands_padding = math.max(commands_padding, 4 + #subcommand.command)
+    end
+    for _, cmd in ipairs(sort_commands_by_name(command.subcommands)) do
+      local subcommand = cmd.data
+      local command_len = 4 + #subcommand.command
+      local init_padding = math.max(commands_padding, command_len)
+        - math.min(commands_padding, command_len)
+        + 2
       local text = cli.colorize("  " .. subcommand.command, "green")
-        .. "  " .. (subcommand.description or "")
+        .. pad_text(
+          subcommand.description or "",
+          commands_padding,
+          init_padding,
+          columns
+        )
       print(text)
     end
   end
@@ -198,21 +335,6 @@ local function print_command_help(command)
     print(cli.colorize("Help:", "yellow"))
     print("  " .. command.long_description:gsub("\n", "\n  "))
   end
-end
-
----@class core.cli.sortedcommand
----@field name string
----@field data core.cli.command
-
----@param commands table<string,core.cli.command>
----@return core.cli.sortedcommand[]
-local function sort_commands_by_name(commands)
-  local sorted_commands = {}
-  for cmdname, command_data in pairs(commands) do
-    table.insert(sorted_commands, {name = cmdname, data = command_data})
-  end
-  table.sort(sorted_commands, function(a, b) return a.name < b.name end)
-  return sorted_commands
 end
 
 ---Display the generated application help or a specific command help.
@@ -243,13 +365,26 @@ function cli.print_help(command)
       print_command_help(cli.commands.default)
 
       if cli.commands_count > 0 then
+        local columns = get_terminal_width()
         print ""
         print(cli.colorize("Available commands:", "yellow"))
+        local commands_padding = 0
+        for _, cmd in pairs(cli.commands) do
+          commands_padding = math.max(commands_padding, 4 + #cmd.command)
+        end
         for _, cmd in ipairs(sort_commands_by_name(cli.commands)) do
           local cmdname, command_data = cmd.name, cmd.data
+          local command_len = 4 + #cmdname
+          local init_padding = math.max(commands_padding, command_len)
+            - math.min(commands_padding, command_len)
+            + 2
           if cmdname ~= "default" then
-            local text = cli.colorize("  " .. cmdname, "green")
-              .. "  " .. (command_data.description or "")
+            local text = cli.colorize("  " .. cmdname, "green") .. pad_text(
+              command_data.description or "",
+              commands_padding,
+              init_padding,
+              columns
+            )
             print(text)
           end
         end
@@ -277,7 +412,13 @@ local function execute_command(command, flags, arguments)
         "red"
       ))
       os.exit(1)
-    elseif command.max_arguments and command.max_arguments < #arguments then
+    elseif
+      command.max_arguments
+      and
+      command.max_arguments > -1
+      and
+      command.max_arguments < #arguments
+    then
       print(cli.colorize(
         string.format(
           "Given amount of arguments for '%s' is larger than required.",
@@ -287,6 +428,7 @@ local function execute_command(command, flags, arguments)
       ))
       os.exit(1)
     end
+    cli.last_command = command.command
     if command.execute then command.execute(flags, arguments) end
     if command.exit_editor or type(command.exit_editor) == "nil" then
       os.exit()
@@ -296,9 +438,26 @@ local function execute_command(command, flags, arguments)
   return false
 end
 
+---Update the cli unhandled arguments from given command and arguments list.
+---@param cmd core.cli.command
+---@param arguments table<integer,string>
+local function update_unhandled_commands(cmd, arguments)
+  if not cmd.max_arguments or cmd.max_arguments == 0 then
+    for _, argument in ipairs(arguments) do
+      table.insert(cli.unhandled_arguments, argument)
+    end
+  elseif cmd.max_arguments > -1 and #arguments > cmd.max_arguments then
+    for i=cmd.max_arguments+1, #arguments do
+      table.insert(cli.unhandled_arguments, arguments[i])
+    end
+  end
+end
+
 ---Parse the command line arguments and execute the applicable commands.
 ---@param args string[]
 function cli.parse(args)
+  cli.last_command = "default"
+  cli.unhandled_arguments = {}
   args = table.pack(table.unpack(args))
 
   -- on macOS we can get an argument like "-psn_0_52353" so we strip it.
@@ -330,8 +489,11 @@ function cli.parse(args)
       local flag_found, flag_value
       if cmd.flags then
         for _, flag_data in ipairs(cmd.flags) do
-          if #flag_type == 1 and flag == flag_data.short_name then
+          if #flag_type == 1 and flag:match("^"..flag_data.short_name) then
             flag_found = flag_data
+            if #flag > 1 then
+              flag_value = string.sub(flag, 2)
+            end
             break
           elseif #flag_type == 2 then
             if flag:match(".*=.*") then
@@ -362,9 +524,9 @@ function cli.parse(args)
           elseif flag_found.type == "boolean" then
             if flag_value:match("^[0-1]$") then
               flag_found.value = tonumber(flag_value) > 0 and true or false
-            elseif flag_value:match("^true$") then
+            elseif flag_value:lower():match("^true$") then
               flag_found.value = true
-            elseif flag_value:match("^false$") then
+            elseif flag_value:lower():match("^false$") then
               flag_found.value = false
             else
               flag_error = "Invalid boolean value provided\n"
@@ -415,6 +577,7 @@ function cli.parse(args)
               and
               execute_command(cmd, flags_list, arguments_list)
             then
+              update_unhandled_commands(cmd, arguments_list)
               flags_list = {}
               arguments_list = {}
             end
@@ -443,7 +606,185 @@ function cli.parse(args)
     end
   end
 
+  update_unhandled_commands(cmd, arguments_list)
   execute_command(cmd, flags_list, arguments_list)
+end
+
+---A basic REPL with multi-line and expression evaluation for the repl command.
+local function repl()
+  setmetatable(_G, nil) -- disable strict global
+
+  print("Pragtical REPL. Type 'exit' or Ctrl+D to quit.")
+  print("Enter \".help\" for usage hints.")
+
+  local buffer = ""
+
+  -- Custom REPL commands
+  local function handle_command(cmd)
+    local args = {}
+    for word in cmd:gmatch("%S+") do table.insert(args, word) end
+    local command = args[1]
+
+    if command == ".help" then
+      print(
+        "Available REPL commands:\n"
+        .. "  .help              Show this help message\n"
+        .. "  .dump              Print current global variables\n"
+        .. "  .load <file>       Run a Lua file in current REPL environment\n"
+        .. "  .time <code>       Time how long it takes to run a line of code\n"
+        .. "  .edit              Open editor to write a Lua snippet interactively\n"
+        .. "  .exit              Exit the REPL"
+      )
+      return true
+
+    elseif command == ".dump" then
+      print("Current globals:")
+      for k, v in pairs(_G) do
+        if type(k) == "string" and not k:match("^_") and k ~= "_G" then
+          local valtype = type(v)
+          if valtype == "string" then
+            print(k .. ' = "' .. v .. '"')
+          elseif valtype == "number" or valtype == "boolean" then
+            print(k .. " = " .. tostring(v))
+          elseif valtype == "function" then
+            print(k .. " = function(...) end")
+          else
+            print(k .. " = [" .. valtype .. "]")
+          end
+        end
+      end
+      return true
+
+    elseif command == ".load" and args[2] then
+      local path = cmd:match("^%.load%s+(.+)$")
+      local chunk, err = loadfile(path)
+      if chunk then
+        local ok, result = pcall(chunk)
+        if not ok then
+          print("Error running file:", result)
+        end
+      else
+        print("Failed to load file:", err)
+      end
+      return true
+
+    elseif command == ".time" and args[2] then
+      local code = cmd:match("^%.time%s+(.+)$")
+      local chunk = load("return " .. code, "repl")
+      if not chunk then
+        chunk = load(code, "repl")
+      end
+      if chunk then
+        local start = os.clock()
+        local ok, result = pcall(chunk)
+        local finish = os.clock()
+        if ok and result ~= nil then
+          print(result)
+        elseif not ok then
+          print("Error:", result)
+        end
+        print(string.format("Time: %.6f seconds", finish - start))
+      else
+        print("Invalid code passed to .time")
+      end
+      return true
+
+    elseif command == ".edit" then
+      local tempfile = core.temp_filename(".lua")
+      -- local editor = os.getenv("EDITOR")
+      -- local path = ""
+      -- if not editor then
+      --   editor = EXEFILE
+      -- end
+      local editor, path = EXEFILE, core.init_working_dir
+      local file = io.open(tempfile, "w+")
+      if file then
+        file:write("")
+        file:close()
+      end
+
+      -- Run editor
+      os.execute(string.format('"%s" edit "%s"', editor, tempfile))
+
+      -- Read edited contents
+      local file = io.open(tempfile, "r")
+      if file then
+        local code = file:read("*a")
+        file:close()
+        os.remove(tempfile)
+
+        local chunk, err = load(code, "edited_snippet")
+        if chunk then
+          local ok, result = pcall(chunk)
+          if ok and result ~= nil then
+            print(result)
+          elseif not ok then
+            print("Error:", result)
+          end
+        else
+          print("Syntax error in edited code:", err)
+        end
+      else
+        print("Failed to read temporary file.")
+      end
+
+      return true
+
+    elseif command == ".exit" then
+      os.exit()
+    end
+
+    return false
+  end
+
+  while true do
+    local prompt = buffer == "" and "> " or ">> "
+    io.write(prompt)
+    local line = io.read()
+    if not line then
+      print("\nBye!")
+      break
+    end
+
+    if line:match("^%.") and buffer == "" then
+      if handle_command(line) then
+        buffer = ""
+        goto continue
+      end
+    elseif line == "exit" and buffer == "" then
+      break
+    end
+
+    buffer = buffer .. line .. "\n"
+
+    local expr_chunk = load("return " .. buffer, "repl")
+    if expr_chunk then
+      local ok, result = pcall(expr_chunk)
+      if ok and result ~= nil then
+        print(result)
+      elseif not ok then
+        print("Error:", result)
+      end
+      buffer = ""
+    else
+      local chunk, err = load(buffer, "repl")
+      if chunk then
+        local ok, result = pcall(chunk)
+        if ok and result ~= nil then
+          print(result)
+        elseif not ok then
+          print("Error:", result)
+        end
+        buffer = ""
+      elseif err:match("<eof>") then
+        -- Waiting for more input
+      else
+        print("Syntax error:", err)
+        buffer = ""
+      end
+    end
+    ::continue::
+  end
 end
 
 -- Register default command
@@ -486,6 +827,14 @@ cli.set_default {
   end
 }
 
+-- Register edit command
+cli.register {
+  command = "edit",
+  description = "Explicitly open files for editing on a new instance skipping the IPC system.",
+  usage = "[<file_to_open_1>] [<file_to_open_2>] ...",
+  exit_editor = false
+}
+
 -- Register help command
 cli.register {
   command = "help",
@@ -501,6 +850,7 @@ cli.register {
   arguments = {
     command_name = "Name of specific command to print its help"
   },
+  max_arguments = -1,
   execute = function(_, arguments)
     if #arguments > 0 then
       local cmd = cli.commands[arguments[1]]
@@ -552,16 +902,98 @@ cli.register {
   usage = "",
   max_arguments = 0,
   execute = function()
+    local columns = get_terminal_width()
     print(cli.colorize("Available commands:", "yellow"))
-    print ""
+    local commands_padding = 0
+    for _, cmd in pairs(cli.commands) do
+      commands_padding = math.max(commands_padding, 4 + #cmd.command)
+    end
     for _, cmd in ipairs(sort_commands_by_name(cli.commands)) do
       local cmdname, command_data = cmd.name, cmd.data
+      local command_len = 4 + #cmdname
+      local init_padding = math.max(commands_padding, command_len)
+        - math.min(commands_padding, command_len)
+        + 2
       if cmdname ~= "default" then
-        local text = cli.colorize(cmdname, "green")
-          .. "  " .. (command_data.description or "")
+        local text = cli.colorize("  " .. cmdname, "green") .. pad_text(
+          command_data.description or "",
+          commands_padding,
+          init_padding,
+          columns
+        )
         print(text)
       end
     end
+  end
+}
+
+-- Register repl command
+cli.register {
+  command = "repl",
+  description = "Starts a basic Read–Eval–Print Loop.",
+  min_arguments = 0,
+  max_arguments = 0,
+  execute = function()
+    -- ensure we operate from initial directory
+    system.chdir(core.init_working_dir)
+    repl()
+  end
+}
+
+-- Register run command
+cli.register {
+  command = "run",
+  description = "Run a Lua script against the Pragtical runtime.",
+  usage = "[options] <lua_file|lua_code>",
+  exit_editor = false,
+  min_arguments = 1,
+  max_arguments = -1,
+  flags = {
+    {
+      name = "eval",
+      short_name = "e",
+      description = "Evaluate the given arguments as strings of Lua code",
+      type = "empty"
+    },
+    {
+      name = "no-quit",
+      short_name = "n",
+      description = "Do not quit the editor after execution",
+      type = "empty"
+    }
+  },
+  execute = function(flags, arguments)
+    -- ensure we operate from initial directory
+    system.chdir(core.init_working_dir)
+
+    local eval, quit = loadfile, true
+    for _, flag in ipairs(flags) do
+      if flag.name == "eval" then
+        eval = load
+      elseif flag.name == "no-quit" then
+        quit = false
+      end
+    end
+
+    for aidx, argument in ipairs(arguments) do
+      local f, errmsg = eval(argument)
+      if f then
+        f, errmsg = core.try(f)
+      end
+      if errmsg then
+        if aidx > 1 then print "" end
+        print(
+          cli.colorize("Error executing code:", "red")
+            .. "\n\n"
+            .. errmsg
+        )
+      end
+    end
+
+    if quit then os.exit() end
+
+    -- return back to main project directory
+    system.chdir(core.projects[1].path)
   end
 }
 
