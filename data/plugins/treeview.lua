@@ -12,6 +12,22 @@ local CommandView = require "core.commandview"
 local DocView = require "core.docview"
 local DirWatch = require "core.dirwatch"
 
+---Configuration options for `treeview` plugin.
+---@class config.plugins.treeview
+---Default treeview width.
+---@field size number
+---Selects the file you are editing on the treeview.
+---@field highlight_focused_file boolean
+---Automatically expands directories to select focused file.
+---@field expand_dirs_to_focused_file boolean
+---Automatically scrolls the treeview to focused file.
+---@field scroll_to_focused_file boolean
+---Smoothly scroll to focused file.
+---@field animate_scroll_to_focused_file boolean
+---Show hidden files and directories.
+---@field show_hidden boolean
+---Show ignored files and directories.
+---@field show_ignored boolean
 config.plugins.treeview = common.merge({
   -- Default treeview width
   size = 200 * SCALE,
@@ -47,7 +63,7 @@ local function replace_alpha(color, alpha)
   return { r, g, b, alpha }
 end
 
-
+---@class plugins.treeview
 local TreeView = View:extend()
 
 function TreeView:__tostring() return "TreeView" end

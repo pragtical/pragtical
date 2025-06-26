@@ -27,8 +27,12 @@ while [[ "$#" -gt 0 ]]; do
     option_global=on
     ;;
     -*)
-    echo "error: unknown option \"$1\""
-    exit 1
+    if [ "${#pargs[@]}" = "0" ]; then
+      echo "error: unknown option \"$1\""
+      exit 1
+    else
+      pargs+=("$1")
+    fi
     ;;
     *)
     pargs+=("$1")

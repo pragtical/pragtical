@@ -1,6 +1,8 @@
 local core = require "core"
 local common = require "core.common"
 
+---Helper functions to change a document encoding.
+---@class core.doc.encodings
 local encodings = {}
 
 ---@class encodings.encoding
@@ -114,14 +116,14 @@ function encodings.get_group(label)
   end
 end
 
----Get the list of encodings associated to a region.
+---Get a list of all encodings.
 ---@return encodings.encoding[] | nil
 function encodings.get_all()
   local all = {}
   for idx, _ in ipairs(encodings.groups) do
-      for _, item in ipairs(encodings.list[idx]) do
-        table.insert(all, item)
-      end
+    for _, item in ipairs(encodings.list[idx]) do
+      table.insert(all, item)
+    end
   end
   return all
 end

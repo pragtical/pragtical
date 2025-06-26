@@ -17,7 +17,10 @@ local DocView
 local Doc
 local Project
 
+---Core functionality.
+---@class core
 local core = {}
+
 local map_new_syntax_colors
 
 local function load_session()
