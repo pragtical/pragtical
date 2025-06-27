@@ -223,6 +223,7 @@ init_lua:
     "local core\n"
     "local os_exit = os.exit\n"
     "os.exit = function(code, close)\n"
+    "  if LUAJIT then getmetatable(process).__gc() end\n"
     "  os_exit(code, close == nil and true or close)\n"
     "end\n"
     "xpcall(function()\n"
