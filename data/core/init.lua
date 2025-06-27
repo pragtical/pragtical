@@ -520,6 +520,29 @@ function core.init()
   -- Parse commandline arguments
   cli.parse(ARGS)
 
+  -- Update the files to open
+  if cli.last_command ~= "default" then
+    files = {}
+    system.chdir(core.init_working_dir)
+    for _, argument in ipairs(cli.unhandled_arguments) do
+      local arg_filename = strip_trailing_slash(argument)
+      local info = system.get_file_info(arg_filename) or {}
+      if info.type ~= "dir" then
+        local filename = common.normalize_path(arg_filename)
+        local abs_filename = system.absolute_path(filename or "")
+        local file_abs
+        if filename == abs_filename then
+          file_abs = abs_filename
+        else
+          file_abs = system.absolute_path(".") .. PATHSEP .. filename
+        end
+        if file_abs then
+          table.insert(files, file_abs)
+        end
+      end
+    end
+  end
+
   -- Maximizing the window makes it lose the hidden attribute on Windows
   -- so we delay this to keep window hidden until args parsed. Also, on
   -- Wayland we have issues applying the mode before showing the window
