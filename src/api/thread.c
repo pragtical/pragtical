@@ -87,7 +87,6 @@ static void destroy(LuaThread *t)
   (void)SDL_AtomicDecRef(&t->ref);
 
   if (SDL_AtomicGet(&t->ref) == 0) {
-    luaL_dostring(t->L, "if LUAJIT then getmetatable(process).__gc() end");
     lua_close(t->L);
     free(t);
   }

@@ -786,6 +786,18 @@ static int process_gc(lua_State *L) {
   return 0;
 }
 
+#ifdef LUA_JITLIBNAME
+static void luajit_register_process_gc(lua_State *L) {
+  lua_newuserdata(L, sizeof(void *));
+  if (luaL_newmetatable(L, "luajit_process_gc_mt")) {
+      lua_pushcfunction(L, process_gc);
+      lua_setfield(L, -2, "__gc");
+  }
+  lua_setmetatable(L, -2);
+  lua_setfield(L, LUA_REGISTRYINDEX, "luajit_process_gc");
+}
+#endif
+
 static const struct luaL_Reg process_metatable[] = {
   {"__gc", f_gc},
   {"__tostring", f_tostring},
@@ -842,6 +854,10 @@ int luaopen_process(lua_State *L) {
   API_CONSTANT_DEFINE(L, -1, "REDIRECT_STDERR", STDERR_FD);
   API_CONSTANT_DEFINE(L, -1, "REDIRECT_PARENT", REDIRECT_PARENT); // Redirects to parent's STDOUT/STDERR
   API_CONSTANT_DEFINE(L, -1, "REDIRECT_DISCARD", REDIRECT_DISCARD); // Closes the filehandle, discarding it.
+
+#ifdef LUA_JITLIBNAME
+  luajit_register_process_gc(L);
+#endif
 
   return 1;
 }
