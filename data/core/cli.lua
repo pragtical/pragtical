@@ -976,11 +976,13 @@ cli.register {
     end
 
     for aidx, argument in ipairs(arguments) do
+      local ok = false
       local f, errmsg = eval(argument)
       if f then
         f, errmsg = core.try(f)
+        if f then ok = true end
       end
-      if errmsg then
+      if not ok then
         if aidx > 1 then print "" end
         print(
           cli.colorize("Error executing code:", "red")
