@@ -788,7 +788,7 @@ static int process_gc(lua_State *L) {
 
 #ifdef LUA_JITLIBNAME
 static void luajit_register_process_gc(lua_State *L) {
-  lua_newuserdata(L, sizeof(void *));
+  lua_newuserdata(L, 1);
   if (luaL_newmetatable(L, "luajit_process_gc_mt")) {
       lua_pushcfunction(L, process_gc);
       lua_setfield(L, -2, "__gc");
