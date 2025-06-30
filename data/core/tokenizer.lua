@@ -1,6 +1,5 @@
 local core = require "core"
 local syntax = require "core.syntax"
-local config = require "core.config"
 
 ---Functionality to tokenize source code using syntax definitions.
 ---@class core.tokenizer

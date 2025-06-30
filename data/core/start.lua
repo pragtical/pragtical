@@ -139,6 +139,9 @@ if os.getenv("APPIMAGE") and appimage_owd then
   system.chdir(appimage_owd)
 end
 
+-- Temporary SDL3 compatibility PLATFORM correction on macOS
+if PLATFORM == "macOS"  then PLATFORM = "Mac OS X" end
+
 -- Manually add /usr/local/bin to the PATH environment variable if needed.
 -- On Mac OS X package managers like brew install binaries into /usr/local/bin
 -- but this location is not globally added to the PATH environment variable.
