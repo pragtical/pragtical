@@ -221,7 +221,7 @@ main() {
   fi
 
   DESTDIR="$(realpath Pragtical.AppDir)" meson install $strip_flag \
-    --skip-subprojects="freetype2,pcre2" -C "${build_dir}"
+    --skip-subprojects -C "${build_dir}"
 
   if [[ -z "$cross" ]]; then
     polyfill_glibc Pragtical.AppDir/usr/bin/pragtical

@@ -1,6 +1,7 @@
 build*/
 .build*/
 submodules/
+subprojects/expat.wrap
 subprojects/*/
 !subprojects/packagefiles
 /appimage*
