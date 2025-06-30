@@ -609,7 +609,7 @@ settings.add("Editor",
       description = "Highlight the current line.",
       path = "highlight_current_line",
       type = settings.type.SELECTION,
-      default = true,
+      default = "no_selection",
       values = {
         {"Yes", true},
         {"No", false},
