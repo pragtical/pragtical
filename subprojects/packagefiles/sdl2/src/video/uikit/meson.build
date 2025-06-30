@@ -1,0 +1,15 @@
+objc_sources += files(
+    'SDL_uikitappdelegate.m',
+    'SDL_uikitclipboard.m',
+    'SDL_uikitevents.m',
+    'SDL_uikitmessagebox.m',
+    'SDL_uikitmetalview.m',
+    'SDL_uikitmodes.m',
+    'SDL_uikitopengles.m',
+    'SDL_uikitopenglview.m',
+    'SDL_uikitvideo.m',
+    'SDL_uikitview.m',
+    'SDL_uikitviewcontroller.m',
+    'SDL_uikitvulkan.m',
+    'SDL_uikitwindow.m',
+)
