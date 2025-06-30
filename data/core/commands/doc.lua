@@ -4,7 +4,6 @@ local common = require "core.common"
 local config = require "core.config"
 local encodings = require "core.doc.encodings"
 local translate = require "core.doc.translate"
-local style = require "core.style"
 local DocView = require "core.docview"
 local tokenizer = require "core.tokenizer"
 
