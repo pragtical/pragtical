@@ -395,17 +395,20 @@ local suggestions = {}
 local last_line, last_col
 
 
-local function reset_suggestions()
+local function reset_suggestions(skip_close)
   suggestions_offset = 1
   suggestions_idx = 1
   suggestions = {}
 
   triggered_manually = false
 
-  local doc = core.active_view.doc
-  if autocomplete.on_close then
-    autocomplete.on_close(doc, suggestions[suggestions_idx])
-    autocomplete.on_close = nil
+  if not skip_close then
+    local doc = core.active_view.doc
+    if autocomplete.on_close then
+      autocomplete.on_close(doc, suggestions[suggestions_idx])
+      autocomplete.on_close = nil
+    end
+    autocomplete.map_manually = {}
   end
 end
 
@@ -413,21 +416,26 @@ local function update_suggestions()
   local doc = core.active_view.doc
   local filename = doc and doc.filename or ""
 
-  local map = autocomplete.map
-
-  if triggered_manually then
-    map = autocomplete.map_manually
-  end
-
   local assigned_sym = {}
 
   -- get all relevant suggestions for given filename
   local items = {}
-  for _, v in pairs(map) do
+  for _, v in pairs(autocomplete.map) do
     if common.match_pattern(filename, v.files) then
       for _, item in pairs(v.items) do
         table.insert(items, item)
         assigned_sym[item.text] = true
+      end
+    end
+  end
+
+  local manual_items = {}
+  if triggered_manually then
+    for _, v in pairs(autocomplete.map_manually) do
+      if common.match_pattern(filename, v.files) then
+        for _, item in pairs(v.items) do
+          table.insert(manual_items, item)
+        end
       end
     end
   end
@@ -472,16 +480,33 @@ local function update_suggestions()
   -- we remove the punctuations to ensure results with plugins like lsp
   if triggered_manually then partial = partial:gsub("^%p+", "") end
 
+  local si = 0 -- suggestions index
+  local max_items = config.plugins.autocomplete.max_suggestions
+
+  -- we prioritize the manually added symbols
+  if #manual_items > 0 then
+    manual_items = common.fuzzy_match(manual_items, partial, false)
+    for i = 1, max_items do
+      suggestions[i] = manual_items[i]
+    end
+    max_items = #suggestions >= max_items and 0 or max_items - #suggestions
+    si = #suggestions
+  end
+
   -- fuzzy match, remove duplicates and store
-  items = common.fuzzy_match(items, partial, false)
-  local j = 1
-  for i = 1, config.plugins.autocomplete.max_suggestions do
-    suggestions[i] = items[j]
-    while items[j] and items[i].text == items[j].text do
-      items[i].info = items[i].info or items[j].info
+  if max_items > 0 then
+    items = common.fuzzy_match(items, partial, false)
+    local j = 1
+    for i = 1, max_items do
+      suggestions[si+i] = items[j]
       j = j + 1
+      while items[j] and items[i].text == items[j].text do
+        items[i].info = items[i].info or items[j].info
+        j = j + 1
+      end
     end
   end
+
   suggestions_idx = 1
   suggestions_offset = 1
 end
@@ -895,7 +920,15 @@ function autocomplete.open(on_close)
   triggered_manually = true
 
   if on_close then
-    autocomplete.on_close = on_close
+    if autocomplete.on_close then
+      local current_on_close = autocomplete.on_close
+      autocomplete.on_close = function (doc, item)
+        current_on_close(doc, item)
+        on_close(doc, item)
+      end
+    else
+      autocomplete.on_close = on_close
+    end
   end
 
   local av = get_active_view()
@@ -921,9 +954,8 @@ end
 ---@param completions plugins.autocomplete.symbols
 ---@param on_close? plugins.autocomplete.onclose
 function autocomplete.complete(completions, on_close)
-  reset_suggestions()
+  reset_suggestions(true)
 
-  autocomplete.map_manually = {}
   autocomplete.add(completions, true)
 
   autocomplete.open(on_close)
