@@ -9,8 +9,8 @@ syntax.add {
   patterns = {
     { pattern = { "<!%-%-", "%-%->" },     type = "comment"  },
     { pattern = { '%f[^>][^<]', '%f[<]' }, type = "normal"   },
-    { pattern = { '"', '"', '\\' },        type = "string"   },
-    { pattern = { "'", "'", '\\' },        type = "string"   },
+    { pattern = { '"', '"' },              type = "string"   },
+    { pattern = { "'", "'" },              type = "string"   },
     { pattern = "0x[%da-fA-F]+",           type = "number"   },
     { pattern = "-?%d+[%d%.]*f?",          type = "number"   },
     { pattern = "-?%.?%d+f?",              type = "number"   },
