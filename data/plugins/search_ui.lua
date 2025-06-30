@@ -59,7 +59,7 @@ config.plugins.search_ui = common.merge({
         { "Bottom", "bottom" },
       },
       set_value = function(value)
-        -- we have to show it if alreadu inside a node to prevent issues
+        -- we have to show it if already inside a node to prevent issues
         if not ui:is_visible() and inside_node then
           ui:show()
         end
@@ -131,6 +131,12 @@ local replaceinselection = ToggleButton(ui, false, nil, "*")
 replaceinselection:set_tooltip(
   "Replace only on selected text",
   "search-replace:toggle-in-selection"
+)
+
+local replacetoggle = ToggleButton(ui, false, nil, "s")
+replacetoggle:set_tooltip(
+  "Toggle between search only or search and replace",
+  "find-replace:replace"
 )
 
 local filepicker = FilePicker(ui)
@@ -318,7 +324,7 @@ function Results:set_status()
     status:set_label(
       "Result: " .. tostring(current .. " of " .. tostring(total))
     )
-  else
+  elseif not status.label:match("Total") then
     status:set_label("")
   end
 end
@@ -550,6 +556,13 @@ local function show_find(av, toggle)
     if toggle then
       ui:toggle_visible(true, false, true)
     elseif not ui:is_visible() then
+      -- keep bottom/top ui properly sized due to replace toggle
+      if config.plugins.search_ui.position ~= "right" then
+        ui:show()
+        ui:update_bottom_positioning()
+        ui:update_size()
+        ui:hide()
+      end
       ui:show_animated(true, false)
     end
   else
@@ -557,7 +570,6 @@ local function show_find(av, toggle)
   end
 
   if ui:is_visible() then
-    status:set_label("")
     ui:swap_active_child(findtext)
     if av then
       doc_view = av
@@ -639,6 +651,14 @@ function regexcheck:on_change(checked)
   reset_search()
 end
 
+function replacetoggle:on_change()
+  if ui:is_visible() and config.plugins.search_ui.position ~= "right" then
+    ui:update_bottom_positioning()
+    ui:update_size()
+    ui:swap_active_child(findtext)
+  end
+end
+
 function findnext:on_click() find() end
 
 function findprev:on_click() find(true) end
@@ -653,12 +673,15 @@ function ui:update_size()
       self.size.x = replace:get_right() + replace:get_width() / 2
     end
   else
-    self:set_size(nil, self:get_real_height() + 10)
+    self:set_size(nil, self:get_real_height() +  (7 * SCALE))
   end
 end
 
 function ui:update_right_positioning()
+  replacetoggle:hide()
   label:show()
+  replacetext:show()
+  replace:show()
   status:show()
   line_options:show()
   label:set_label("Find and Replace")
@@ -707,8 +730,10 @@ function ui:update_bottom_positioning()
 
   label:hide()
   status:show()
+  replacetoggle:show()
   status:set_position(close:get_right() + (p / 2), p)
-  replaceinselection:set_position(self.size.x - replaceinselection:get_width() - p, p)
+  replacetoggle:set_position(self.size.x - replacetoggle:get_width() - p, p)
+  replaceinselection:set_position(replacetoggle:get_position().x - p - replaceinselection:get_width(), p)
   regexcheck:set_position(replaceinselection:get_position().x - p - regexcheck:get_width(), p)
   patterncheck:set_position(regexcheck:get_position().x - p - patterncheck:get_width(), p)
   wholeword:set_position(patterncheck:get_position().x - p - wholeword:get_width(), p)
@@ -719,10 +744,19 @@ function ui:update_bottom_positioning()
   findtext.size.x = self.size.x - (p * 4) - findprev:get_width() - findnext:get_width()
   findnext:set_position(self.size.x - p - findnext:get_width(), line_separator:get_bottom())
   findprev:set_position(findnext:get_position().x - p - findprev:get_width(), line_separator:get_bottom())
-  replacetext:set_position(p, findtext:get_bottom() + p)
-  replacetext.size.x = findtext.size.x
-  replace:set_position(findprev:get_position().x, findtext:get_bottom() + p)
-  replace.size.x = findprev:get_width() + findnext:get_width() + p
+
+  if replacetoggle:is_toggled() then
+    replacetext:show()
+    replace:show()
+    replacetext:set_position(p, findtext:get_bottom() + p)
+    replacetext.size.x = findtext.size.x
+    replace:set_position(findprev:get_position().x, findtext:get_bottom() + p)
+    replace.size.x = findprev:get_width() + findnext:get_width() + p
+  else
+    replacetext:hide()
+    replace:hide()
+  end
+
   line_options:hide()
 
   if self.init_size then
@@ -901,7 +935,15 @@ command.add(
 
 command.add(
   function()
-    if not ui:is_visible() then return false end
+    if
+      not ui:is_visible() or (
+        config.plugins.search_ui.position ~= "right"
+        and
+        not replacetoggle:is_toggled()
+      )
+    then
+      return false
+    end
     if core.active_view == findtext.textview then
       return true, replacetext
     elseif core.active_view == replacetext.textview then
@@ -924,15 +966,36 @@ command.add(
 local find_replace_find = command.map["find-replace:find"].perform
 command.map["find-replace:find"].perform = function(...)
   if config.plugins.search_ui.replace_core_find then
+    if config.plugins.search_ui.position ~= "right" then
+      if not ui:is_visible() then
+        if replacetoggle:is_toggled() then replacetoggle:set_toggle(false) end
+      end
+    end
     command.perform "search-replace:show"
   else
     find_replace_find(...)
   end
 end
 
+local find_replace_replace_predicate = command.map["find-replace:replace"].predicate
+command.map["find-replace:replace"].predicate = function(...)
+  if config.plugins.search_ui.replace_core_find then
+    local valid_view = find_replace_replace_predicate()
+    return (valid_view or ui:is_visible()), ...
+  end
+  return find_replace_replace_predicate(...)
+end
+
 local find_replace_replace = command.map["find-replace:replace"].perform
 command.map["find-replace:replace"].perform = function(...)
   if config.plugins.search_ui.replace_core_find then
+    if config.plugins.search_ui.position ~= "right" then
+      if not ui:is_visible() then
+        if not replacetoggle:is_toggled() then replacetoggle:set_toggle(true) end
+      else
+        replacetoggle:toggle()
+      end
+    end
     command.perform "search-replace:show"
   else
     find_replace_replace(...)
