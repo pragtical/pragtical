@@ -145,9 +145,9 @@ config.always_show_tabs = true
 
 ---Highlights the current line.
 ---
----The default is true.
+---The default is "no_selection".
 ---@type config.highlightlinetype
-config.highlight_current_line = true
+config.highlight_current_line = "no_selection"
 
 ---The spacing between each line of text.
 ---
