@@ -1,0 +1,36 @@
+c_sources += files(
+    'SDL.c',
+    'SDL_assert.c',
+    'SDL_dataqueue.c',
+    'SDL_error.c',
+    'SDL_guid.c',
+    'SDL_hints.c',
+    'SDL_list.c',
+    'SDL_log.c',
+    'SDL_utils.c',
+)
+
+subdir('atomic')
+subdir('audio')
+subdir('core')
+subdir('cpuinfo')
+subdir('dynapi')
+subdir('events')
+subdir('file')
+subdir('filesystem')
+subdir('haptic')
+subdir('hidapi')
+subdir('joystick')
+subdir('libm')
+subdir('loadso')
+subdir('locale')
+subdir('main')
+subdir('misc')
+subdir('power')
+subdir('render')
+subdir('sensor')
+subdir('stdlib')
+subdir('test')
+subdir('thread')
+subdir('timer')
+subdir('video')

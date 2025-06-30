@@ -1,0 +1,10 @@
+c_sources += files(
+    'SDL_render_d3d11.c',
+    'SDL_shaders_d3d11.c',
+)
+
+if platform_is_winrt
+    cxx_sources += files(
+        'SDL_render_winrt.cpp',
+    )
+endif
