@@ -88,7 +88,7 @@ static int f_font_load(lua_State *L) {
   float size = luaL_checknumber(L, 2);
   int style = 0;
   ERenFontHinting hinting = FONT_HINTING_SLIGHT;
-  ERenFontAntialiasing antialiasing = FONT_ANTIALIASING_SUBPIXEL;
+  ERenFontAntialiasing antialiasing = FONT_ANTIALIASING_UNDEFINED;
 
   int ret_code = font_get_options(L, &antialiasing, &hinting, &style);
   if (ret_code > 0)
