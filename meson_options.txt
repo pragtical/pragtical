@@ -9,3 +9,4 @@ option('extra_colors', type : 'boolean', value : true, description: 'Include add
 option('extra_languages', type : 'boolean', value : true, description: 'Include additional language plugins')
 option('ppm', type : 'boolean', value : true, description: 'Include the plugin manager')
 option('jit', type : 'boolean', value : true, description: 'Use luajit')
+option('repl_history', type : 'boolean', value : true, description: 'Enable history and completion support on REPL')

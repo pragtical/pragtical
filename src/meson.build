@@ -118,6 +118,19 @@ endif
 
 pragtical_includes += include_directories('.')
 
+# load and configure linenoise
+if get_option('repl_history')
+    if lua_jit_found
+        linenoise_jit = 'jit=true'
+    else
+        linenoise_jit = 'jit=false'
+    endif
+    pragtical_deps += subproject('linenoise',
+        default_options: [linenoise_jit]
+    ).get_variable('linenoise_dep')
+    pragtical_cargs += '-DPRAGTICAL_REPL_HISTORY'
+endif
+
 executable('pragtical',
     pragtical_sources + pragtical_rc,
     include_directories: pragtical_includes,
