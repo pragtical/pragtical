@@ -74,6 +74,9 @@
 * Capture replacements on regex/patterns search ui
   ([#244](https://github.com/pragtical/pragtical/pull/244))
 
+* Make DATADIR and USERDIR fonts path portable
+  ([#249](https://github.com/pragtical/pragtical/pull/249))
+
 * Allow spaces in plugins mod-version
   ([#253](https://github.com/pragtical/pragtical/pull/253))
 
@@ -206,9 +209,6 @@
 
 * language_lua: add files with rockspec extenstion
   ([#2083](https://github.com/lite-xl/lite-xl/pull/2083))
-
-* Make DATADIR and USERDIR fonts path portable
-  ([#249](https://github.com/lite-xl/lite-xl/pull/249))
 
 * Coroutine Process Fix
   ([#2099](https://github.com/lite-xl/lite-xl/pull/2099))
