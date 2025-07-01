@@ -1,5 +1,218 @@
 # Changes Log
 
+## [3.6.0] - 2025-06-30
+
+### New Features
+
+* Add REPL and run commands to the CLI
+  ([#280](https://github.com/pragtical/pragtical/pull/280))
+
+### Fixes
+
+* Fix crash on out of window mouse events
+  ([#231](https://github.com/pragtical/pragtical/pull/231))
+
+* Fix possible on doc close crash when highlighting
+  ([#232](https://github.com/pragtical/pragtical/pull/232))
+
+* Properly saves a cleared binding from settings ui
+  ([#240](https://github.com/pragtical/pragtical/pull/240))
+
+* Doc search fixes and types documentation.
+  ([#243](https://github.com/pragtical/pragtical/pull/243))
+
+* Fix regex find_offsets not substracting offset
+  ([#245](https://github.com/pragtical/pragtical/pull/245))
+
+* "Properly" handle whole line matches on doc search
+  ([#246](https://github.com/pragtical/pragtical/pull/246))
+
+* Return single value on command.prettify_name
+  ([#247](https://github.com/pragtical/pragtical/pull/247))
+
+* Node: skip hidden tab events
+  ([#256](https://github.com/pragtical/pragtical/pull/256))
+
+* Corrections to language_python
+  ([#278](https://github.com/pragtical/pragtical/pull/278))
+
+* Avoid process thread leak on LuaJIT and better solution to call
+  process \__gc on LuaJIT
+  ([7c4c1f2c](https://github.com/pragtical/pragtical/commit/7c4c1f2c8eb7bdaf33ee97b7df030bc26371ed50))
+
+* language_xml: remove escape chars from strings (#286)
+  ([#286](https://github.com/pragtical/pragtical/pull/286))
+
+### Build System
+
+* Bump CI ubuntu containers
+  ([#233](https://github.com/pragtical/pragtical/pull/233))
+
+* CI: Polyfill GLIBC for backward compatibility
+  ([#234](https://github.com/pragtical/pragtical/pull/234))
+
+* Include 'user' directory on portable installs
+  ([#250](https://github.com/pragtical/pragtical/pull/250))
+
+* CI: update Windows to more recent version
+  ([#252](https://github.com/pragtical/pragtical/pull/252))
+
+* Updates for latest plugin manager changes
+  ([#255](https://github.com/pragtical/pragtical/pull/255))
+
+* Silence thirdparty library compiler warnings
+  ([#271](https://github.com/pragtical/pragtical/pull/271))
+
+* Update SDL2 to latest fixes from master
+  ([#282](https://github.com/pragtical/pragtical/pull/282))
+
+### Enhancements
+
+* Include additional glyphs on icons.ttf
+  ([#236](https://github.com/pragtical/pragtical/pull/236))
+
+* Capture replacements on regex/patterns search ui
+  ([#244](https://github.com/pragtical/pragtical/pull/244))
+
+* Allow spaces in plugins mod-version
+  ([#253](https://github.com/pragtical/pragtical/pull/253))
+
+* projectsearch: add open tab command
+  ([#258](https://github.com/pragtical/pragtical/pull/258))
+
+* restore light lcd filter for slight hinting
+  ([#265](https://github.com/pragtical/pragtical/pull/265))
+
+* align soft indention to indention size
+  ([#267](https://github.com/pragtical/pragtical/pull/267))
+
+* rework dirmonitors to be able to support multiple backends
+  ([#266](https://github.com/pragtical/pragtical/pull/266))
+
+* projectsearch: find current doc selection
+  ([#268](https://github.com/pragtical/pragtical/pull/268))
+
+* projectsearch: on hide focus previous docview
+  ([#275](https://github.com/pragtical/pragtical/pull/275))
+
+* Do not sort fuzzy results on empty needle
+  ([#276](https://github.com/pragtical/pragtical/pull/276))
+
+* Lua doc comment improvements for better API reference generation
+  ([#185](https://github.com/pragtical/pragtical/pull/185))
+
+* cli: always display commands sorted by name
+  ([#279](https://github.com/pragtical/pragtical/pull/279))
+
+* autocomplete: keep previous items on re-trigger
+  ([#283](https://github.com/pragtical/pragtical/pull/283))
+
+* highlight_current_line "no_selection" now default
+  ([#284](https://github.com/pragtical/pragtical/pull/284))
+
+### GUI and Widgets
+
+* Updated default color scheme.
+  ([#237](https://github.com/pragtical/pragtical/pull/237))
+
+* Settings: allow filtering colors
+  ([#238](https://github.com/pragtical/pragtical/pull/238))
+
+* Search UI fixes and usage of new icons
+  ([#239](https://github.com/pragtical/pragtical/pull/239))
+
+* Enabled word wrap on settings ui labels
+  ([#241](https://github.com/pragtical/pragtical/pull/241))
+
+* Allow always hiding tabs, great for zen mode!
+  ([#242](https://github.com/pragtical/pragtical/pull/242))
+
+* Show bindings on search ui and empty view tooltips
+  ([#248](https://github.com/pragtical/pragtical/pull/248))
+
+* projectsearch: added built-in controls
+  ([#257](https://github.com/pragtical/pragtical/pull/257))
+
+* settings gui: option to select dirmonitor backend
+  ([#270](https://github.com/pragtical/pragtical/pull/270))
+
+* search_ui: hide replace by default, add toggle
+  ([#285](https://github.com/pragtical/pragtical/pull/285))
+
+* foldingbook: keep tabs updated
+
+* textbox: added customized highlighter without coroutine
+
+* colorpicker: update sliders color on every update
+
+* Fix show animation on strange Node size changes
+
+* Set textview name same as parent
+
+* SearchReplaceList: add regex replacing support
+
+* Allow showing a command binding on tooltip
+
+* Improved FoldingBook expand calculations
+
+* Add word wrap support to Label widget
+
+* Fix on draw_styled_text elements checking
+
+* Added ToggleButton widget
+
+* Use new pragtical icons on various widgets
+
+* Allow customization of line widget color
+
+* Fix possible endless loop on animations
+
+### Performance
+
+* Wait thread avg time when it exceeds max time
+  ([#264](https://github.com/pragtical/pragtical/pull/264))
+
+### Lite XL Inherited Changes
+
+* add a \__tostring method to every object
+  ([#1534](https://github.com/lite-xl/lite-xl/pull/1534))
+
+* Better wasm support again
+  ([#1779](https://github.com/lite-xl/lite-xl/pull/1779))
+
+* renderer: defer bitmap rendering when possible
+  ([#1856](https://github.com/lite-xl/lite-xl/pull/1856))
+
+* renderer: pass errors via SDL_SetError
+  ([#1919](https://github.com/lite-xl/lite-xl/pull/1919))
+
+* fix: use current char to determine col in DocView:get_x_offset_col
+  ([#1946](https://github.com/lite-xl/lite-xl/pull/1946))
+
+* common: allow / and \ as PATHSEP on Windows when fuzzy matching files
+  ([#1992](https://github.com/lite-xl/lite-xl/pull/1992))
+
+* fix: use correct charmap and glyphmap sizes
+  ([#1999](https://github.com/lite-xl/lite-xl/pull/1999))
+
+* language_cpp: add back digit separators
+  ([#2026](https://github.com/lite-xl/lite-xl/pull/2026))
+
+* syntax: warn against malformed patterns and disable them
+  ([#2029](https://github.com/lite-xl/lite-xl/pull/2029))
+
+* balance computed directory list, remove recursive function invocation
+  ([#1991](https://github.com/lite-xl/lite-xl/pull/1991))
+
+* language_lua: add files with rockspec extenstion
+  ([#2083](https://github.com/lite-xl/lite-xl/pull/2083))
+
+* Make DATADIR and USERDIR fonts path portable
+  ([#249](https://github.com/lite-xl/lite-xl/pull/249))
+
+* Coroutine Process Fix
+  ([#2099](https://github.com/lite-xl/lite-xl/pull/2099))
+
 ## [3.5.2] - 2025-03-14
 
 ### Fixes
@@ -2387,6 +2600,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.6.0]: https://github.com/pragtical/pragtical/releases/tag/v3.6.0
 [3.5.2]: https://github.com/pragtical/pragtical/releases/tag/v3.5.2
 [3.5.1]: https://github.com/pragtical/pragtical/releases/tag/v3.5.1
 [3.5.0]: https://github.com/pragtical/pragtical/releases/tag/v3.5.0
