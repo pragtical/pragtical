@@ -1,8 +1,7 @@
 [wrap-git]
-url = https://github.com/hoelzro/lua-linenoise
-revision = 03acd87f16c8a6777425f0040e99ba56e6858c91
+url = https://github.com/pragtical/lua-linenoise
+revision = master
 depth = 1
-patch_directory = linenoise
 
 [provide]
 linenoise = linenoise_dep

@@ -126,7 +126,9 @@ if get_option('repl_history')
         linenoise_jit = 'jit=false'
     endif
     pragtical_deps += subproject('linenoise',
-        default_options: [linenoise_jit]
+        default_options: default_fallback_options + [
+            'default_library=static', linenoise_jit
+        ]
     ).get_variable('linenoise_dep')
     pragtical_cargs += '-DPRAGTICAL_REPL_HISTORY'
 endif

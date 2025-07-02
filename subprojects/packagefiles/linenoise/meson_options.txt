@@ -1,1 +1,0 @@
-option('jit', type : 'boolean', value : true, description: 'Use luajit')
