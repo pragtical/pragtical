@@ -279,11 +279,7 @@ register_default_commands = function(self)
       local core = require "core"
       local tempfile = core.temp_filename(".lua")
 
-      local editor = "\""..EXEFILE.."\" edit"
-      if PLATFORM == "Windows" then
-        editor = "\""..(EXEFILE:gsub("%.com$", ".exe")).."\" edit"
-      end
-
+      local editor = {EXEFILE, "edit"}
       local answer
       local prompt = "Use the editor on EDITOR envar? [y/N]: "
       if repl_loaded then
@@ -294,9 +290,9 @@ register_default_commands = function(self)
       if regex.match("(y|Y|yes)", answer or "") then
         local ed = os.getenv("EDITOR")
         if ed then
-          editor = ed
+          editor = {ed}
         elseif PLATFORM == "Windows" then
-          editor = "notepad"
+          editor = {"notepad"}
         end
       end
 
@@ -308,7 +304,13 @@ register_default_commands = function(self)
       end
 
       -- Run editor
-      os.execute(string.format('%s "%s"', editor, tempfile))
+      table.insert(editor, tempfile)
+      local p, perr = process.start(editor)
+      if p then
+        p:wait(process.WAIT_INFINITE)
+      else
+        print("Error executing editor: " .. (perr or ""))
+      end
 
       -- Read edited contents
       file = io.open(tempfile, "r")
