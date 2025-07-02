@@ -106,7 +106,7 @@ function REPL:start()
       end
     end)
 
-    linenoise.enableutf8()
+    -- linenoise.enableutf8()
     linenoise.historyload(self.history_file)
     linenoise.historysetmaxlen(self.max_history)
   end

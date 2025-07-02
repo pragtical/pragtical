@@ -1,21 +1,18 @@
 project('linenoise',
-    'c',
-    version: '0.9',
+    ['c', 'cpp'],
+    version: 'GIT',
     license: 'MIT',
-    default_options : ['warning_level=0', 'werror=false']
+    default_options : ['cpp_std=c++11', 'warning_level=0', 'werror=false']
 )
 
 linenoise_src = files(
+    'linenoise/ConvertUTF.cpp',
+    'linenoise/wcwidth.cpp',
+    'linenoise/linenoise.cpp',
     'linenoise.c',
-    'linenoiselib.c',
-    'encodings/utf8.c'
 )
 
-if host_machine.system() == 'windows'
-    linenoise_src += 'win32fixes.c'
-endif
-
-linenoise_include = include_directories('.')
+linenoise_include = include_directories('linenoise')
 
 if get_option('jit')
     lua_dep = dependency('luajit', required : true,
