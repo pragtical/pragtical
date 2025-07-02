@@ -2,34 +2,33 @@
 
 ---
 ---Cross-platform readline like functionality.
----Upstream URL: https://github.com/hoelzro/lua-linenoise
 ---
 ---Usage Example:
 ---```lua
----local line, err = linenoise.linenoise(prompt)
+---local line, err = repl.input(prompt)
 ---while line do
 ---  if #line > 0 then
----    linenoise.historyadd(line)
----    linenoise.historysave(history) -- save every new line
+---    repl.add_history(line)
+---    repl.save_history(history) -- save every new line
 ---  end
----  line, err = linenoise.linenoise(prompt)
+---  line, err = repl.input(prompt)
 ---end
 ---if err then
 ---  print('An error occurred: ' .. err)
 ---end
 ---```
----@class linenoise
-linenoise = {}
+---@class repl
+repl = {}
 
 ---
----A linenoise completions list object
----@class linenoise.completion
-linenoise.completion = {}
+---A repl completions list object
+---@class repl.completion
+repl.completion = {}
 
 ---
 ---Add a new string to the completions list.
 ---@param str string
-function linenoise.completion:add(str) end
+function repl.completion:add(str) end
 
 ---
 ---Prompts for a line of input, using prompt as the prompt string.
@@ -37,62 +36,62 @@ function linenoise.completion:add(str) end
 ---Returns nil and an error string if an error occurred.
 ---@return string? line
 ---@return string? errmsg
-function linenoise.linenoise(prompt) end
+function repl.input(prompt) end
 
 ---
 ---Adds line to the history list.
 ---@param line string
-function linenoise.historyadd(line) end
+function repl.add_history(line) end
 
 ---
 ---Sets the history list size to length.
 ---@param length integer
-function linenoise.historysetmaxlen(length) end
+function repl.set_history_max_len(length) end
 
 ---
 ---Saves the history list to filename.
 ---@param filename string
-function linenoise.historysave(filename) end
+function repl.save_history(filename) end
 
 ---
 ---Loads the history list from filename.
 ---@param filename string
-function linenoise.historyload(filename) end
+function repl.load_history(filename) end
 
 ---
 ---Clears the screen.
-function linenoise.clearscreen() end
+function repl.clear_screen() end
 
 ---
 ---Sets the completion callback. This callback is called with two arguments:
 ---
---- * A completions object. Use object:add or linenpise.addcompletion to add a
+--- * A completions object. Use object:add or repl.add_completion to add a
 ---   completion to this object.
 --- * The current line of input.
 ---
 ---Example:
 ---```lua
----setcompletion(function(completion,str)
+---set_completion(function(completion,str)
 ---  if str == 'h' then
 ---    completion:add('help')
 ---    completion:add('halt')
 ---  end
 ---end)
 ---```
----@param callback fun(completion:linenoise.completion,str:string)
-function linenoise.setcompletion(callback) end
+---@param callback fun(completion:repl.completion,str:string)
+function repl.set_completion(callback) end
 
 ---
 ---Adds string to the list of completions.
 ---All functions return nil on error; functions that don't have an obvious
 ---return value return true on success.
----@param completions linenoise.completion
+---@param completions repl.completion
 ---@param str string
-function linenoise.addcompletion(completions, str) end
+function repl.add_completion(completions, str) end
 
 ---Enables multi-line mode if multiline is true, disables otherwise.
 ---@param multiline boolean
-function linenoise.setmultiline(multiline) end
+function repl.set_multiline(multiline) end
 
----Prints linenoise key codes. Primarly used for debugging.
-function linenoise.printkeycodes() end
+---Prints repl key codes. Primarly used for debugging.
+function repl.print_keycodes() end

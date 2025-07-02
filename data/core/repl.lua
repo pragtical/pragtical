@@ -1,5 +1,5 @@
 local Object = require "core.object"
-local linenoise_loaded, linenoise = pcall(require, "linenoise")
+local repl_loaded, repl = pcall(require, "repl")
 
 ---@class core.repl.command
 ---Name of the command that user can inkove.
@@ -15,7 +15,7 @@ local linenoise_loaded, linenoise = pcall(require, "linenoise")
 ---A lua pattern to match against the current user input.
 ---@field pattern string
 ---The function to execute if the completion pattern matches.
----@field execute fun(completions:linenoise.completion,str:string)
+---@field execute fun(completions:repl.completion,str:string)
 
 ---An extensible REPL with multi-line and expressions evaluation.
 ---@class core.repl:core.object
@@ -95,9 +95,9 @@ function REPL:start()
     return false
   end
 
-  if linenoise_loaded then
+  if repl_loaded then
     -- Completions handler
-    linenoise.setcompletion(function(completion, str)
+    repl.set_completion(function(completion, str)
       for _, comp in ipairs(self.completions) do
         if str:ufind(comp.pattern) then
           comp.execute(completion, str)
@@ -106,15 +106,15 @@ function REPL:start()
       end
     end)
 
-    linenoise.historyload(self.history_file)
-    linenoise.historysetmaxlen(self.max_history)
+    repl.load_history(self.history_file)
+    repl.set_history_max_len(self.max_history)
   end
 
   while true do
     local prompt = buffer == "" and "> " or ">> "
     local line
-    if linenoise_loaded then
-      line = linenoise.linenoise(prompt)
+    if repl_loaded then
+      line = repl.input(prompt)
     else
       io.write(prompt) line = io.read()
     end
@@ -122,9 +122,9 @@ function REPL:start()
       print("\nBye!")
       break
     end
-    if linenoise_loaded then
-      linenoise.historyadd(line)
-      linenoise.historysave(self.history_file)
+    if repl_loaded then
+      repl.add_history(line)
+      repl.save_history(self.history_file)
     end
     if line:match("^%.") and buffer == "" then
       if handle_command(line) then
@@ -188,12 +188,12 @@ register_default_commands = function(self)
     end
   }
 
-  if linenoise_loaded then
+  if repl_loaded then
     self:register_command {
       name = "clear",
       description = "Clean the screen",
       execute = function()
-        linenoise.clearscreen()
+        repl.clear_screen()
       end
     }
   end
@@ -286,8 +286,8 @@ register_default_commands = function(self)
 
       local answer
       local prompt = "Use the editor on EDITOR envar? [y/N]: "
-      if linenoise_loaded then
-        answer = linenoise.linenoise(prompt)
+      if repl_loaded then
+        answer = repl.input(prompt)
       else
         io.write(prompt) answer = io.read()
       end
