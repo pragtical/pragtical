@@ -12,10 +12,10 @@ int luaopen_utf8extra(lua_State* L);
 int luaopen_encoding(lua_State* L);
 
 #ifdef PRAGTICAL_REPL_HISTORY
-  #define LUA_LINENOISE { "linenoise",  luaopen_linenoise  },
+  #define LUA_REPL { "repl",  luaopen_linenoise  },
   int luaopen_linenoise(lua_State *L);
 #else
-  #define LUA_LINENOISE
+  #define LUA_REPL
 #endif
 
 #if LUA_VERSION_NUM < 503
@@ -50,7 +50,7 @@ static const luaL_Reg libs[] = {
   { "utf8extra",  luaopen_utf8extra  },
   { "encoding",   luaopen_encoding   },
   { "shmem",      luaopen_shmem      },
-  LUA_LINENOISE
+  LUA_REPL
   LUA53_COMPATIBILITY
   { NULL, NULL }
 };
