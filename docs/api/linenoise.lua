@@ -6,7 +6,6 @@
 ---
 ---Usage Example:
 ---```lua
----linenoise.enableutf8()
 ---local line, err = linenoise.linenoise(prompt)
 ---while line do
 ---  if #line > 0 then
@@ -95,32 +94,5 @@ function linenoise.addcompletion(completions, str) end
 ---@param multiline boolean
 function linenoise.setmultiline(multiline) end
 
----@class linenoise.hint
----@field color string
----@field bold boolean
-
----Sets a hints callback to provide hint information on the right hand side
----of the prompt. calback should be a function that takes a single parameter
----(a string, the line entered so far) and returns zero, one, or two values.
----Zero values means no hint. The first value may be nil for no hint, or a
----string value for a hint. If the first value is a string, the second value
----may be a table with the color and bold keys - color is an ANSI terminal
----color code (such as those provided by the lua-term colors module), whereas
----bold is a boolean indicating whether or not the hint should be printed as bold.
----
----Example:
----```lua
----linenoise.sethints(function(str)
----  if str == 'h' then
----    return ' bold hints in red', { color = colors.red, bold = true }
----  end
----end)
----```
----@param callback fun(str:string):string,linenoise.hint
-function linenoise.sethints(callback) end
-
 ---Prints linenoise key codes. Primarly used for debugging.
 function linenoise.printkeycodes() end
-
----Enables UTF-8 handling.
-function linenoise.enableutf8() end
