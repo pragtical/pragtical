@@ -147,10 +147,15 @@ executable('pragtical',
 
 if host_machine.system() == 'windows'
     executable('pragtical',
-        'main_com.c',
+        pragtical_sources + pragtical_rc,
+        include_directories: pragtical_includes,
+        dependencies: pragtical_deps,
+        c_args: pragtical_cargs,
+        objc_args: pragtical_cargs,
+        link_args: pragtical_link_args,
         name_suffix: 'com',
         install_dir: pragtical_bindir,
         install: true,
-        win_subsystem: 'console'
+        win_subsystem: 'console',
     )
 endif
