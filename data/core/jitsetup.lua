@@ -83,7 +83,7 @@ ffi.cdef [[
   void rencache_end_frame_ffi();
   double system_get_time_ffi();
   bool system_wait_event_ffi(double n);
-  void SDL_Delay(unsigned int);
+  void system_sleep_ffi(unsigned int s);
 ]]
 
 renderer.draw_rect_lua = renderer.draw_rect
@@ -140,9 +140,7 @@ function renderer.set_clip_rect(x, y, w, h)
 end
 
 system.sleep_lua = system.sleep
-function system.sleep(n)
-  ffi.C.SDL_Delay(n * 1000);
-end
+system.sleep = ffi.C.system_sleep_ffi
 
 system.get_time_lua = system.get_time
 system.get_time = ffi.C.system_get_time_ffi

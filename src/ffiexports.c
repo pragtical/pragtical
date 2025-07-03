@@ -89,6 +89,11 @@ EXPORT double system_get_time_ffi()
   return SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();
 }
 
+EXPORT void system_sleep_ffi(unsigned int ms)
+{
+  SDL_Delay(ms * 1000);
+}
+
 EXPORT bool system_wait_event_ffi(double n) {
   if (n != -1)
     return SDL_WaitEventTimeout(NULL, (n < 0 ? 0 : n) * 1000);
