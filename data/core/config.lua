@@ -12,6 +12,14 @@ local config = {}
 ---@type number
 config.fps = 60
 
+---Draw the current FPS, the rendering speed in FPS possible and the maximum
+---time that a coroutine has to run without affecting the rendering
+---process plus the total amount of running coroutines.
+---
+---Defaults to false.
+---@type boolean
+config.draw_stats = false
+
 ---Maximum number of log items that will be stored.
 ---When the number of log items exceed this value, old items will be discarded.
 ---

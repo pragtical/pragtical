@@ -707,6 +707,15 @@ settings.add("Development",
       path = "log_slow_threads",
       type = settings.type.TOGGLE,
       default = false
+    },
+    {
+      label = "Draw Stats",
+      description = "Draw the current FPS, the rendering speed in FPS possible "
+        .. "and the maximum time that a coroutine has to run without affecting "
+        .. "the rendering process plus the total amount of running coroutines.",
+      path = "draw_stats",
+      type = settings.type.TOGGLE,
+      default = false
     }
   }
 )
