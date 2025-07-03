@@ -127,10 +127,10 @@ function common.color(str)
     a = tonumber(a, 16) or 0xff
   elseif str:match("rgba?%s*%([%d%s%.,]+%)") then
     local f = str:gmatch("[%d.]+")
-    r = (f() or 0)
-    g = (f() or 0)
-    b = (f() or 0)
-    a = (f() or 1) * 0xff
+    r = tonumber(f() or 0)
+    g = tonumber(f() or 0)
+    b = tonumber(f() or 0)
+    a = tonumber(f() or 1) * 0xff
   else
     error(string.format("bad color string '%s'", str))
   end
