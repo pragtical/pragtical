@@ -11,14 +11,6 @@
 #define UNUSED
 #endif
 
-#if defined(_WIN32)
-  #define EXPORT __declspec(dllexport)
-#elif defined(__GNUC__) || defined(__clang__)
-  #define EXPORT __attribute__((visibility("default")))
-#else
-  #define EXPORT
-#endif
-
 #ifdef PRAGTICAL_USE_SDL_RENDERER
 #define RECT_TYPE double
 #else
@@ -70,7 +62,7 @@ float ren_get_scale_factor(SDL_Window *win);
 size_t ren_get_window_list(RenWindow ***window_list_dest);
 RenWindow* ren_find_window(SDL_Window *window);
 RenWindow* ren_find_window_from_id(uint32_t id);
-EXPORT RenWindow* ren_get_target_window(void);
+RenWindow* ren_get_target_window(void);
 void ren_set_target_window(RenWindow *window);
 
 #endif

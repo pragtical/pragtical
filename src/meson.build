@@ -18,6 +18,16 @@ pragtical_sources = [
     'main.c',
 ]
 
+if lua_jit_found
+    pragtical_sources += 'ffiexports.c'
+
+    # Export all local symbols for LuaJIT FFI Access
+    compiler = meson.get_compiler('c')
+    if compiler.get_id() != 'msvc' and host_machine.system() != 'darwin'
+        pragtical_link_args += '-Wl,--export-dynamic'
+    endif
+endif
+
 dirmonitor_backends = get_option('dirmonitor_backends')
 
 if dirmonitor_backends.length() == 0
@@ -105,12 +115,6 @@ if host_machine.system() == 'windows'
     pragtical_deps += cc.find_library('dwmapi', required : true)
 elif host_machine.system() == 'darwin'
     pragtical_sources += 'bundle_open.m'
-endif
-
-# Export all local symbols for LuaJIT FFI Access
-compiler = meson.get_compiler('c')
-if compiler.get_id() != 'msvc' and host_machine.system() != 'darwin'
-    pragtical_link_args += '-Wl,--export-dynamic'
 endif
 
 pragtical_includes += include_directories('.')

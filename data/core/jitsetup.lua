@@ -75,27 +75,30 @@ end
 local ffi = require("ffi")
 
 ffi.cdef [[
-  void* ren_get_target_window(void);
+  void* ren_get_target_window_ffi(void);
   void rencache_set_clip_rect_ffi(void *window_renderer, float x, float y, float w, float h);
   void rencache_draw_rect_ffi(void *window_renderer, float x, float y, float w, float h, unsigned char r, unsigned char g, unsigned char b, unsigned char a);
   double rencache_draw_text_ffi(void *window_renderer, void **font, const char *text, size_t len, double x, double y, unsigned char r, unsigned char g, unsigned char b, unsigned char a, double tab_offset);
   void rencache_begin_frame_ffi(void *window_renderer);
   void rencache_end_frame_ffi();
+  double system_get_time_ffi();
+  bool system_wait_event_ffi(double n);
+  void SDL_Delay(unsigned int);
 ]]
 
 renderer.draw_rect_lua = renderer.draw_rect
 function renderer.draw_rect(x, y, w, h, color, tab)
   ffi.C.rencache_draw_rect_ffi(
-    ffi.C.ren_get_target_window(),
+    ffi.C.ren_get_target_window_ffi(),
     x, y, w, h,
     color[1], color[2], color[3], color[4]
   )
 end
 
 renderer.draw_text_lua = renderer.draw_text
-local fonts_native_cache = setmetatable({}, { __mode = "k" })
+local fonts_pointer_cache = setmetatable({}, { __mode = "k" })
 function renderer.draw_text(font, text, x, y, color, tab)
-  if not fonts_native_cache[font] then
+  if not fonts_pointer_cache[font] then
     local fonts_list = font
     if type(font) ~= "table" then
       fonts_list = {font}
@@ -105,25 +108,25 @@ function renderer.draw_text(font, text, x, y, color, tab)
       fonts[i-1] = ffi.cast("void**", f)[0]
     end
     fonts[#fonts_list] = nil
-    fonts_native_cache[font] = fonts
+    fonts_pointer_cache[font] = fonts
   end
   local text = type(text) == "string" and text or tostring(text)
   if not color then color = {255, 255, 255, 255} end
   return ffi.C.rencache_draw_text_ffi(
-    ffi.C.ren_get_target_window(),
-    fonts_native_cache[font], text, #text, x, y,
+    ffi.C.ren_get_target_window_ffi(),
+    fonts_pointer_cache[font], text, #text, x, y,
     color[1], color[2], color[3], color[4] or 255,
     tab and tab.tab_offset or -1
   );
 end
 
 renderer.begin_frame_lua = renderer.begin_frame
-local windows_native_cache = setmetatable({}, { __mode = "k" })
+local windows_pointer_cache = setmetatable({}, { __mode = "k" })
 function renderer.begin_frame(window)
-  if not windows_native_cache[window] then
-    windows_native_cache[window] = ffi.cast("void**", window)[0]
+  if not windows_pointer_cache[window] then
+    windows_pointer_cache[window] = ffi.cast("void**", window)[0]
   end
-  ffi.C.rencache_begin_frame_ffi(windows_native_cache[window])
+  ffi.C.rencache_begin_frame_ffi(windows_pointer_cache[window])
 end
 
 renderer.end_frame_lua = renderer.end_frame
@@ -133,5 +136,18 @@ end
 
 renderer.set_clip_rect_lua = renderer.set_clip_rect
 function renderer.set_clip_rect(x, y, w, h)
-  ffi.C.rencache_set_clip_rect_ffi(ffi.C.ren_get_target_window(), x, y, w, h)
+  ffi.C.rencache_set_clip_rect_ffi(ffi.C.ren_get_target_window_ffi(), x, y, w, h)
+end
+
+system.sleep_lua = system.sleep
+function system.sleep(n)
+  ffi.C.SDL_Delay(n * 1000);
+end
+
+system.get_time_lua = system.get_time
+system.get_time = ffi.C.system_get_time_ffi
+
+system.get_wait_event_lua = system.wait_event
+function system.wait_event(timeout)
+  return ffi.C.system_wait_event_ffi(timeout or 0)
 end
