@@ -1354,6 +1354,33 @@ function core.compose_window_title(title)
   return (title == "" or title == nil) and "Pragtical" or title .. " - Pragtical"
 end
 
+local draw_stats_fps = "0"
+local draw_stats_max = "0"
+local draw_stats_co_max = "0"
+local draw_stats_last_time = system.get_time()
+local draw_stats_co_count = 0
+local draw_stats_bgcolor = {common.color "rgba(0, 0, 0, 0.3)"}
+
+---Draw some stats useful for troubleshooting.
+---Called when config.draw_stats is enabled.
+local function draw_stats()
+  local x, y = 20 * SCALE, 30 * SCALE
+  local font = style.font
+  local c1, c2 = style.syntax.keyword, style.syntax.string
+  local h = font:get_height()
+  renderer.draw_rect(0, y - (10*SCALE), 180 * SCALE, h * 4 + y, draw_stats_bgcolor)
+  local x2 = renderer.draw_text(font, "FPS: ", x, y, c1)
+  renderer.draw_text(font, draw_stats_fps, x2, y, c2)
+  y = y + h + 3 * SCALE
+  x2 = renderer.draw_text(font, "MAXFPS: ", x, y, c1)
+  renderer.draw_text(font, draw_stats_max, x2, y, c2)
+  y = y + h
+  x2 = renderer.draw_text(font, "COTIME: ", x, y, c1)
+  renderer.draw_text(font, draw_stats_co_max, x2, y, c2)
+  y = y + h + 3 * SCALE
+  x2 = renderer.draw_text(font, "COCOUNT: ", x, y, c1)
+  renderer.draw_text(font, draw_stats_co_count, x2, y, c2)
+end
 
 ---Time it takes to render a single frame (value will be cap to 1000fps).
 ---@type number
@@ -1450,6 +1477,21 @@ function core.step()
 
     -- reset cycle end time
     cycle_end_time = 0
+  end
+
+  if config.draw_stats then
+    if system.get_time() - draw_stats_last_time >= 0.2 then
+      draw_stats_fps = string.format("%d", core.fps)
+      draw_stats_max = string.format("%d", 1 / rendering_speed)
+      draw_stats_co_max = string.format("%f", core.co_max_time)
+      draw_stats_co_count = 0
+      for _, _ in pairs(core.threads) do
+        draw_stats_co_count = draw_stats_co_count + 1
+      end
+      draw_stats_last_time = system.get_time()
+    end
+    core.root_view:defer_draw(draw_stats)
+    core.redraw = true
   end
 
   return true
