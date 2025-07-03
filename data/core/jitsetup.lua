@@ -149,5 +149,5 @@ system.get_time = ffi.C.system_get_time_ffi
 
 system.get_wait_event_lua = system.wait_event
 function system.wait_event(timeout)
-  return ffi.C.system_wait_event_ffi(timeout or 0)
+  return ffi.C.system_wait_event_ffi(timeout or -1)
 end

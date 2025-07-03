@@ -90,7 +90,7 @@ EXPORT double system_get_time_ffi()
 }
 
 EXPORT bool system_wait_event_ffi(double n) {
-  if (n > 0)
-    return SDL_WaitEventTimeout(NULL, n * 1000);
+  if (n != -1)
+    return SDL_WaitEventTimeout(NULL, (n < 0 ? 0 : n) * 1000);
   return SDL_WaitEvent(NULL);
 }
