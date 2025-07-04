@@ -1354,12 +1354,14 @@ function core.compose_window_title(title)
   return (title == "" or title == nil) and "Pragtical" or title .. " - Pragtical"
 end
 
-local draw_stats_fps = "0"
-local draw_stats_max = "0"
+local draw_stats_fps = 0
+local draw_stats_avg = "0"
 local draw_stats_co_max = "0"
-local draw_stats_last_time = system.get_time()
 local draw_stats_co_count = 0
-local draw_stats_bgcolor = {common.color "rgba(0, 0, 0, 0.3)"}
+local draw_stats_frames = {}
+local draw_stats_cotimes = {}
+local draw_stats_last_time = system.get_time()
+local draw_stats_overlay_width = 0
 
 ---Draw some stats useful for troubleshooting.
 ---Called when config.draw_stats is enabled.
@@ -1368,16 +1370,18 @@ local function draw_stats()
   local font = style.font
   local c1, c2 = style.syntax.keyword, style.syntax.string
   local h = font:get_height()
-  renderer.draw_rect(0, y - (10*SCALE), 180 * SCALE, h * 4 + y, draw_stats_bgcolor)
+  local color = {table.unpack(style.background)} color[4] = 200
+  renderer.draw_rect(0, y - (10*SCALE), draw_stats_overlay_width, h * 4 + y, color)
   local x2 = renderer.draw_text(font, "FPS: ", x, y, c1)
   renderer.draw_text(font, draw_stats_fps, x2, y, c2)
   y = y + h + 3 * SCALE
-  x2 = renderer.draw_text(font, "MAXFPS: ", x, y, c1)
-  renderer.draw_text(font, draw_stats_max, x2, y, c2)
+  x2 = renderer.draw_text(font, "AVG: ", x, y, c1)
+  renderer.draw_text(font, draw_stats_avg, x2, y, c2)
   y = y + h
   x2 = renderer.draw_text(font, "COTIME: ", x, y, c1)
-  renderer.draw_text(font, draw_stats_co_max, x2, y, c2)
+  x2 = renderer.draw_text(font, draw_stats_co_max, x2, y, c2)
   y = y + h + 3 * SCALE
+  draw_stats_overlay_width = x2 + x
   x2 = renderer.draw_text(font, "COCOUNT: ", x, y, c1)
   renderer.draw_text(font, draw_stats_co_count, x2, y, c2)
 end
@@ -1397,10 +1401,11 @@ local cycle_end_time = 0
 ---@type number
 local main_loop_time = 0
 
-function core.step()
+function core.step(next_frame_time)
   -- handle events
   local did_keymap = false
 
+  local event_received = false
   for type, a,b,c,d in system.poll_event do
     if type == "textinput" and did_keymap then
       did_keymap = false
@@ -1409,7 +1414,7 @@ function core.step()
     elseif type == "enteringforeground" then
       -- to break our frame refresh in two if we get entering/entered at the same time.
       -- required to avoid flashing and refresh issues on mobile
-      core.redraw = true
+      event_received = true
       break
     elseif type == "displaychanged" then
       update_scale()
@@ -1417,15 +1422,33 @@ function core.step()
       local _, res = core.try(core.on_event, type, a, b, c, d)
       did_keymap = res or did_keymap
     end
-    core.redraw = true
+    event_received = true
   end
 
   local width, height = core.window:get_size()
 
   -- update
+  local stats_config = config.draw_stats
+  local prev_redraw = core.redraw -- check if redraw request is from update
   core.root_view.size.x, core.root_view.size.y = width, height
   core.root_view:update()
-  if not core.redraw then return false end
+
+  -- Skip drawing if there is time left before next frame, unless, an event is
+  -- received, benchmarking or core.redraw was enabled from update call.
+  -- Skipping helps keep FPS near to the value set on config.fps when
+  -- core.redraw is set from a coroutine and not by user interaction. Otherwise,
+  -- rendering is prioritized on user events and config.fps not obeyed.
+  if
+     not event_received and stats_config ~= "uncapped" and (not core.redraw or (
+      -- time left before next frame so we can skip
+      next_frame_time > system.get_time()
+      and
+      -- redraw not requested from update() so we can skip
+      prev_redraw == core.redraw
+    ))
+  then
+    return false
+  end
   core.redraw = false
 
   -- close unreferenced docs
@@ -1456,7 +1479,8 @@ function core.step()
   core.root_view:draw()
   renderer.end_frame()
 
-  rendering_speed = math.max(0.001, system.get_time() - start_time)
+  local frame_time = system.get_time() - start_time
+  rendering_speed = math.max(0.001, frame_time)
 
   if rendering_speed * config.fps < 1 then
     -- Calculate max allowed coroutines run time based on rendering speed.
@@ -1479,19 +1503,35 @@ function core.step()
     cycle_end_time = 0
   end
 
-  if config.draw_stats then
-    if system.get_time() - draw_stats_last_time >= 0.2 then
-      draw_stats_fps = string.format("%d", core.fps)
-      draw_stats_max = string.format("%d", 1 / rendering_speed)
-      draw_stats_co_max = string.format("%f", core.co_max_time)
+  if stats_config then
+    table.insert(draw_stats_frames, frame_time)
+    table.insert(draw_stats_cotimes, core.co_max_time)
+    if system.get_time() - draw_stats_last_time >= 1 then
+      draw_stats_fps = #draw_stats_frames
+      local sumftime = 0
+      local sumctime = 0
+      for i, time in ipairs(draw_stats_frames) do
+        sumftime = sumftime + time
+        sumctime = sumctime + draw_stats_cotimes[i]
+      end
+      local average = sumftime / draw_stats_fps
+      local average_co = sumctime / draw_stats_fps
+      draw_stats_avg = tostring(math.floor(
+        (average * 1000) * 100 + 0.5) / 100
+      ) .. "ms"
+      draw_stats_co_max = tostring(math.floor(
+        (average_co * 1000) * 100 + 0.5) / 100
+      ) .. "ms"
       draw_stats_co_count = 0
       for _, _ in pairs(core.threads) do
         draw_stats_co_count = draw_stats_co_count + 1
       end
       draw_stats_last_time = system.get_time()
+      draw_stats_frames = {}
+      draw_stats_cotimes = {}
     end
     core.root_view:defer_draw(draw_stats)
-    core.redraw = true
+    if stats_config == "uncapped" then core.redraw = true end
   end
 
   return true
@@ -1655,6 +1695,7 @@ function core.run()
   local skip_no_focus = 0
   local burst_events = 0
   local has_focus = true
+  local next_frame_time = 0
   while true do
     core.frame_start = system.get_time()
 
@@ -1695,7 +1736,7 @@ function core.run()
       -- run all threads, listen events and perform drawing as needed
       local did_redraw = false
       if not next_step or system.get_time() >= next_step then
-        did_redraw = core.step()
+        did_redraw = core.step(next_frame_time)
         next_step = nil
       end
       if core.restart_request or core.quit_request then break end
@@ -1727,6 +1768,7 @@ function core.run()
         local now = system.get_time()
         local elapsed = now - core.frame_start
         local next_frame = math.max(0, 1 / core.fps - elapsed)
+        next_frame_time = now + next_frame
         next_step = next_step or (now + next_frame)
         system.sleep(math.min(next_frame, time_to_wake))
       end

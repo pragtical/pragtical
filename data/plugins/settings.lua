@@ -710,12 +710,19 @@ settings.add("Development",
     },
     {
       label = "Draw Stats",
-      description = "Draw the current FPS, the rendering speed in FPS possible "
-        .. "and the maximum time that a coroutine has to run without affecting "
-        .. "the rendering process plus the total amount of running coroutines.",
+      description = "Draw the current FPS, the average frame time, and the "
+        .. "maximum time that coroutines have to run per frame without "
+        .. "affecting the rendering process plus the total amount of running "
+        .. "coroutines. If set to 'uncapped' the system will draw at the "
+        .. "maximum speed per second for benchmarking purposes.",
       path = "draw_stats",
-      type = settings.type.TOGGLE,
-      default = false
+      type = settings.type.SELECTION,
+      default = false,
+      values = {
+        {"Off", false},
+        {"On", true},
+        {"Uncapped", "uncapped"}
+      }
     }
   }
 )
@@ -2024,6 +2031,12 @@ function Settings:update()
   if self.about:is_visible() then
     self.about:update_positions()
   end
+end
+
+---Hide the widget when the node is removed.
+function Settings:try_close(do_close)
+  self.super.try_close(self, do_close)
+  self:hide()
 end
 
 --------------------------------------------------------------------------------
