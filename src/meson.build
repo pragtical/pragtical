@@ -20,10 +20,9 @@ pragtical_sources = [
 
 if lua_jit_found
     pragtical_sources += 'ffiexports.c'
-
     # Export all local symbols for LuaJIT FFI Access
-    compiler = meson.get_compiler('c')
-    if compiler.get_id() != 'msvc' and host_machine.system() != 'darwin'
+    if host_machine.system() != 'windows' and host_machine.system() != 'darwin'
+        # reminder: on mingw the valid flag is -Wl,--export-all-symbols
         pragtical_link_args += '-Wl,--export-dynamic'
     endif
 endif
