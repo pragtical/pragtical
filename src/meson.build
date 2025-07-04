@@ -18,6 +18,15 @@ pragtical_sources = [
     'main.c',
 ]
 
+if lua_jit_found
+    pragtical_sources += 'ffiexports.c'
+    # Export all local symbols for LuaJIT FFI Access
+    if host_machine.system() != 'windows' and host_machine.system() != 'darwin'
+        # reminder: on mingw the valid flag is -Wl,--export-all-symbols
+        pragtical_link_args += '-Wl,--export-dynamic'
+    endif
+endif
+
 dirmonitor_backends = get_option('dirmonitor_backends')
 
 if dirmonitor_backends.length() == 0

@@ -462,7 +462,7 @@ RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antial
 
   file = SDL_RWFromFile(path, "rb");
   if (!file) return NULL; // error set by SDL_RWFromFile
-  
+
   int len = strlen(path);
   font = check_alloc(calloc(1, sizeof(RenFont) + len + 1));
   strcpy(font->path, path);
