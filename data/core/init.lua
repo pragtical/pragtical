@@ -1439,7 +1439,7 @@ function core.step(next_frame_time)
   -- core.redraw is set from a coroutine and not by user interaction. Otherwise,
   -- rendering is prioritized on user events and config.fps not obeyed.
   if
-     not event_received and stats_config ~= "uncapped" and (not core.redraw or (
+    not event_received and stats_config ~= "uncapped" and (not core.redraw or (
       -- time left before next frame so we can skip
       next_frame_time > system.get_time()
       and
@@ -1531,7 +1531,6 @@ function core.step(next_frame_time)
       draw_stats_cotimes = {}
     end
     core.root_view:defer_draw(draw_stats)
-    if stats_config == "uncapped" then core.redraw = true end
   end
 
   return true
