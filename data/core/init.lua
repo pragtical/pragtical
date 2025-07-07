@@ -1414,7 +1414,7 @@ function core.step(next_frame_time)
     elseif type == "enteringforeground" then
       -- to break our frame refresh in two if we get entering/entered at the same time.
       -- required to avoid flashing and refresh issues on mobile
-      event_received = true
+      event_received = type
       break
     elseif type == "displaychanged" then
       update_scale()
@@ -1422,29 +1422,36 @@ function core.step(next_frame_time)
       local _, res = core.try(core.on_event, type, a, b, c, d)
       did_keymap = res or did_keymap
     end
-    event_received = true
+    event_received = type
   end
 
   local width, height = core.window:get_size()
 
   -- update
   local stats_config = config.draw_stats
-  local prev_redraw = core.redraw -- check if redraw request is from update
+  local lower_latency = config.lower_input_latency
+  local uncapped = stats_config == "uncapped"
+  local force = uncapped or lower_latency
+  local priority_event = event_received
+    and event_received:match("^[tk][e]") -- key event reduce input latency
+    or event_received == "mousewheel"    -- scroll event keep smooth
   core.root_view.size.x, core.root_view.size.y = width, height
-  core.root_view:update()
+  if force or priority_event or next_frame_time < system.get_time() then
+      core.root_view:update()
+  end
 
   -- Skip drawing if there is time left before next frame, unless, an event is
-  -- received, benchmarking or core.redraw was enabled from update call.
-  -- Skipping helps keep FPS near to the value set on config.fps when
-  -- core.redraw is set from a coroutine and not by user interaction. Otherwise,
-  -- rendering is prioritized on user events and config.fps not obeyed.
+  -- received or benchmarking. Skipping helps keep FPS near to the value set on
+  ---config.fps when core.redraw is set from a coroutine and not by user
+  ---interaction. Otherwise, rendering is prioritized on user events and
+  ---config.fps not obeyed.
   if
-    not event_received and stats_config ~= "uncapped" and (not core.redraw or (
+    not uncapped and ((not event_received and not core.redraw) or (
       -- time left before next frame so we can skip
       next_frame_time > system.get_time()
       and
-      -- redraw not requested from update() so we can skip
-      prev_redraw == core.redraw
+      -- do not skip if low latency enabled
+      not lower_latency
     ))
   then
     return false
@@ -1605,7 +1612,7 @@ local run_threads = coroutine.wrap(function()
             -- penalize slow coroutines by setting their wait time to the
             -- same time it took to execute them.
             if not wait or wait < 0 then
-              wait = math.max(end_time, 0.001)
+              wait = math.max(end_time, 0.005)
             elseif end_time > wait or end_time > core.co_max_time then
               wait = end_time
             end
@@ -1694,7 +1701,7 @@ function core.run()
   local skip_no_focus = 0
   local burst_events = 0
   local has_focus = true
-  local next_frame_time = 0
+  local next_frame_time = 1 / config.fps
   while true do
     core.frame_start = system.get_time()
 
@@ -1749,7 +1756,13 @@ function core.run()
             local cursor_time_to_wake = dt + 1 / core.fps
             next_step = now + cursor_time_to_wake
           end
-          local b = (config.lower_input_latency and burst_events > now) and rendering_speed or 1
+          local nframe = next_frame_time - now
+          nframe = nframe > 0 and nframe or 1
+          local b = (
+            (config.lower_input_latency or config.draw_stats == "uncapped")
+            and
+            burst_events > now
+          ) and rendering_speed or nframe
           if system.wait_event(math.min(next_step - now, time_to_wake, b)) then
             next_step = nil
             -- burst event processing speed to reduce input lag

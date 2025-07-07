@@ -286,8 +286,8 @@ config.log_slow_threads = false
 ---less for system events when events are received. Disable this option to
 ---reduce CPU usage.
 ---
----Defaults to true.
-config.lower_input_latency = true
+---Defaults to false.
+config.lower_input_latency = false
 
 ---Increases the performance of the editor and its user.
 ---Do not change this unless you know what you are doing.
