@@ -305,7 +305,7 @@ core.add_thread(function()
     local s = {}
     local syntax_symbols = load_syntax_symbols(doc)
     local max_symbols = config.plugins.autocomplete.max_symbols
-    if doc.disable_symbols then return s end
+    if doc.disable_symbols then return syntax_symbols end
     local i = 1
     local symbols_count = 0
     local symbol_pattern = doc:get_symbol_pattern()
