@@ -89,9 +89,9 @@ EXPORT double system_get_time_ffi()
   return SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();
 }
 
-EXPORT void system_sleep_ffi(unsigned int ms)
+EXPORT void system_sleep_ffi(double ms)
 {
-  SDL_Delay(ms * 1000);
+  SDL_Delay((ms < 0 ? 0 : ms) * 1000);
 }
 
 EXPORT bool system_wait_event_ffi(double n) {

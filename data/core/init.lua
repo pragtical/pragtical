@@ -1612,7 +1612,7 @@ local run_threads = coroutine.wrap(function()
             -- penalize slow coroutines by setting their wait time to the
             -- same time it took to execute them.
             if not wait or wait < 0 then
-              wait = math.max(end_time, 0.005)
+              wait = math.max(end_time, 0.002)
             elseif end_time > wait or end_time > core.co_max_time then
               wait = end_time
             end
@@ -1703,6 +1703,7 @@ function core.run()
   local has_focus = true
   local next_frame_time = 1 / config.fps
   while true do
+    local uncapped = config.draw_stats == "uncapped"
     core.frame_start = system.get_time()
 
     -- start a new 1s cycle
@@ -1759,7 +1760,7 @@ function core.run()
           local nframe = next_frame_time - now
           nframe = nframe > 0 and nframe or 1
           local b = (
-            (config.lower_input_latency or config.draw_stats == "uncapped")
+            (config.lower_input_latency or uncapped)
             and
             burst_events > now
           ) and rendering_speed or nframe
@@ -1782,7 +1783,7 @@ function core.run()
         local next_frame = math.max(0, 1 / core.fps - elapsed)
         next_frame_time = now + next_frame
         next_step = next_step or (now + next_frame)
-        system.sleep(math.min(next_frame, time_to_wake))
+        system.sleep(math.min(uncapped and 0 or 1, next_frame, time_to_wake))
       end
     end
 
