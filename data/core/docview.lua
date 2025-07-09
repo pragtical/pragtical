@@ -518,7 +518,7 @@ function DocView:draw_line_text(line, x, y)
   local _, indent_size = self.doc:get_indent_info()
   local start_tx = tx
   for tidx, type, text in self.doc.highlighter:each_token(line) do
-    local color = style.syntax[type]
+    local color = style.syntax[type] or style.syntax["normal"]
     local font = style.syntax_fonts[type] or default_font
     if font ~= default_font then font:set_tab_size(indent_size) end
     -- do not render newline, fixes issue #1164
