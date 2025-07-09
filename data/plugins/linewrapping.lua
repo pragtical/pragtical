@@ -480,7 +480,7 @@ function DocView:draw_line_text(line, x, y)
   local idx, _, count = get_line_idx_col_count(self, line)
   local total_offset = 1
   for _, type, text in self.doc.highlighter:each_token(line) do
-    local color = style.syntax[type]
+    local color = style.syntax[type] or style.syntax["normal"]
     local font = style.syntax_fonts[type] or default_font
     local token_offset = 1
     -- Split tokens if we're at the end of the document.

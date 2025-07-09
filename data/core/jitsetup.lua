@@ -88,6 +88,11 @@ ffi.cdef [[
 
 renderer.draw_rect_lua = renderer.draw_rect
 function renderer.draw_rect(x, y, w, h, color, tab)
+  if not color then
+    local core = require "core"
+    core.error("renderer.draw_rect: color not provided")
+    color = {255, 255, 255, 255}
+  end
   ffi.C.rencache_draw_rect_ffi(
     ffi.C.ren_get_target_window_ffi(),
     x, y, w, h,
@@ -98,6 +103,11 @@ end
 renderer.draw_text_lua = renderer.draw_text
 local fonts_pointer_cache = setmetatable({}, { __mode = "k" })
 function renderer.draw_text(font, text, x, y, color, tab)
+  if not color then
+    local core = require "core"
+    core.error("renderer.draw_text: color not provided")
+    color = {255, 255, 255, 255}
+  end
   if not fonts_pointer_cache[font] then
     local fonts_list = font
     if type(font) ~= "table" then
