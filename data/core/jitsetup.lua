@@ -83,7 +83,7 @@ ffi.cdef [[
   void rencache_end_frame_ffi();
   double system_get_time_ffi();
   bool system_wait_event_ffi(double n);
-  void system_sleep_ffi(unsigned int s);
+  void system_sleep_ffi(double s);
 ]]
 
 renderer.draw_rect_lua = renderer.draw_rect
