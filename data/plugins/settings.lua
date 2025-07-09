@@ -600,7 +600,7 @@ settings.add("Editor",
       path = "line_height",
       type = settings.type.NUMBER,
       default = 1.2,
-      min = 1.0,
+      min = 0.8,
       max = 3.0,
       step = 0.1
     },
