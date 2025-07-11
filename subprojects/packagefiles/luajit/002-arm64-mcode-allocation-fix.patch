@@ -1,0 +1,376 @@
+From b82b4ee14fa98a6f00d5f61d372d33372007f99a Mon Sep 17 00:00:00 2001
+From: Peter Cawley <corsix@corsix.org>
+Date: Thu, 29 Feb 2024 19:34:20 +0000
+Subject: [PATCH] ARM64: Support mcode allocation more than 127MB away from
+ lj_vm_exit_handler
+
+ Ref: https://github.com/LuaJIT/LuaJIT/issues/285#issuecomment-1971854441
+ Source: https://github.com/corsix/LuaJIT/commits/arm64-jump-range/
+
+ Had to adjust the following for compilation in other platforms:
+
+  if (LJ_TARGET_ARM64) {
+    /* Start a new hub anywhere in the address space. */
+    void *p = mcode_alloc_at(J, 0, sz, MCPROT_GEN);
+    if (mcode_validptr(p)) {
+      J->mchub = (uintptr_t)p & ~(uintptr_t)0xffff;
+      return p;
+    }
+  }
+
+  to
+
+  #ifdef LJ_TARGET_ARM64
+  { /* Start a new hub anywhere in the address space. */
+    void *p = mcode_alloc_at(J, 0, sz, MCPROT_GEN);
+    if (mcode_validptr(p)) {
+      J->mchub = (uintptr_t)p & ~(uintptr_t)0xffff;
+      return p;
+  }}
+  #endif
+
+---
+ src/lj_asm_arm64.h    | 76 ++++++++++++++++++++++++++++++++++---------
+ src/lj_jit.h          |  6 +++-
+ src/lj_mcode.c        | 20 ++++++------
+ src/lj_target_arm64.h |  3 +-
+ src/lj_trace.c        | 24 ++++++++++++--
+ src/vm_arm64.dasc     | 39 +++++++++++++++-------
+ 6 files changed, 125 insertions(+), 43 deletions(-)
+
+diff --git a/src/lj_asm_arm64.h b/src/lj_asm_arm64.h
+index 5b40f4cc10..66b842a680 100644
+--- a/src/lj_asm_arm64.h
++++ b/src/lj_asm_arm64.h
+@@ -52,22 +52,35 @@ static void asm_exitstub_setup(ASMState *as, ExitNo nexits)
+ {
+   ExitNo i;
+   MCode *mxp = as->mctop;
+-  if (mxp - (nexits + 3 + MCLIM_REDZONE) < as->mclim)
++  ptrdiff_t delta;
++  if (mxp - (nexits * 2ull + 4 + MCLIM_REDZONE) < as->mclim)
+     asm_mclimit(as);
+-  /* 1: str lr,[sp]; bl ->vm_exit_handler; movz w0,traceno; bl <1; bl <1; ... */
+-  for (i = nexits-1; (int32_t)i >= 0; i--)
+-    *--mxp = A64I_LE(A64I_BL | A64F_S26(-3-i));
+-  *--mxp = A64I_LE(A64I_MOVZw | A64F_U16(as->T->traceno));
+-  mxp--;
+-  *mxp = A64I_LE(A64I_BL | A64F_S26(((MCode *)(void *)lj_vm_exit_handler-mxp)));
+-  *--mxp = A64I_LE(A64I_STRx | A64F_D(RID_LR) | A64F_N(RID_SP));
++  for (i = nexits-1; (int32_t)i >= 0; i--) {
++    /* movz lr, #exitno, lsl #32; b <1 */
++    *--mxp = A64I_LE(A64I_B | A64F_S26(-5-i*2));
++    *--mxp = A64I_LE(A64I_MOVZx | A64F_U16(i) | A64F_LSL16(32) | A64F_D(RID_LR));
++  }
++  /* 1: movk lr, #traceno; str lr, [J->parent,J->exitno]; b ->vm_exit_handler */
++  delta = (MCode *)(void *)lj_vm_exit_handler - (mxp-2);
++  if (A64F_S_OK(delta, 26)) {
++    *--mxp = A64I_LE(A64I_NOP);
++    *--mxp = A64I_LE(A64I_B | A64F_S26(delta));
++  } else {
++    *--mxp = A64I_LE(A64I_BR_AUTH | A64F_N(RID_LR));
++    *--mxp = A64I_LE(A64I_LDRx | A64F_D(RID_LR) | A64F_N(RID_GL) |
++                A64F_U12(glofs(as, &as->J->k64[LJ_K64_VM_EXIT_HANDLER]) >> 3));
++  }
++  LJ_STATIC_ASSERT((offsetof(jit_State, parent) | 4) == offsetof(jit_State, exitno));
++  *--mxp = A64I_LE(A64I_STRx | A64F_D(RID_LR) | A64F_N(RID_GL) |
++                   A64F_U12(glofs(as, &as->J->parent) >> 3));
++  *--mxp = A64I_LE(A64I_MOVKx | A64F_U16(as->T->traceno) | A64F_D(RID_LR));
+   as->mctop = mxp;
+ }
+
+ static MCode *asm_exitstub_addr(ASMState *as, ExitNo exitno)
+ {
+   /* Keep this in-sync with exitstub_trace_addr(). */
+-  return as->mctop + exitno + 3;
++  return as->mctop + exitno * 2ull + 4;
+ }
+
+ /* Emit conditional branch to exit for guard. */
+@@ -1932,7 +1945,13 @@ static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+   }
+   /* Patch exit branch. */
+   target = lnk ? traceref(as->J, lnk)->mcode : (MCode *)lj_vm_exit_interp;
+-  p[-1] = A64I_B | A64F_S26((target-p)+1);
++  --p;
++  if (A64F_S_OK(target-p, 26)) {
++    *p = A64I_B | A64F_S26(target-p);
++  } else {
++    *p = A64I_MOVNx | A64F_U16(lnk ^ 0xffff) | A64F_LSL16(32) | A64F_D(RID_LR);
++    /* Subsequent instructions are common part of exit stub. */
++  }
+ }
+
+ /* Prepare tail of code. */
+@@ -2041,9 +2060,10 @@ void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+     } else if ((ins & 0xfc000000u) == 0x14000000u &&
+ 	       ((ins ^ (px-p)) & 0x03ffffffu) == 0) {
+       /* Patch b. */
+-      lj_assertJ(A64F_S_OK(delta, 26), "branch target out of range");
+-      *p = A64I_LE((ins & 0xfc000000u) | A64F_S26(delta));
+-      if (!cstart) cstart = p;
++      if (A64F_S_OK(delta, 26)) {
++        *p = A64I_LE((ins & 0xfc000000u) | A64F_S26(delta));
++        if (!cstart) cstart = p;
++      }
+     } else if ((ins & 0x7e000000u) == 0x34000000u &&
+ 	       ((ins ^ ((px-p)<<5)) & 0x00ffffe0u) == 0) {
+       /* Patch cbz/cbnz, if within range. */
+@@ -2065,11 +2085,35 @@ void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+   /* Always patch long-range branch in exit stub itself. Except, if we can't. */
+   if (patchlong) {
+     ptrdiff_t delta = target - px;
+-    lj_assertJ(A64F_S_OK(delta, 26), "branch target out of range");
+-    *px = A64I_B | A64F_S26(delta);
++    if (A64F_S_OK(delta, 26)) {
++      *px = A64I_LE(A64I_B | A64F_S26(delta));
++    } else if (target == J->cur.mcode) {
++      MCode* addr;
++#if LJ_ABI_PAUTH
++      addr = (MCode*)&J->curfinal->mcauth;
++#else
++      addr = (MCode*)&J->curfinal->mcode;
++#endif
++      if (A64F_S_OK(addr-px, 19)) {
++        /* Load from the mcode pointer then do an indirect branch. */
++        *px = A64I_LE(A64I_LDRLx | A64F_S19(addr-px) | A64F_D(RID_LR));
++#if LJ_ABI_PAUTH
++        px[1] = A64I_LE(A64I_BRAA | A64F_N(RID_LR) | A64F_D(RID_GL));
++#else
++        px[1] = A64I_LE(A64I_BR | A64F_N(RID_LR));
++#endif
++      } else {
++        /* Pass the target trace number to vm_exit_handler. */
++        *px = A64I_LE(A64I_MOVNx | A64F_U16(J->cur.traceno ^ 0xffff) | A64F_LSL16(32) | A64F_D(RID_LR));
++        delta = (MCode *)(void *)lj_vm_exit_handler - (px+1);
++        if (A64F_S_OK(delta, 26)) {
++          px[1] = A64I_LE(A64I_B | A64F_S26(delta));
++        }
++      }
++    }
+     if (!cstart) cstart = px;
+   }
+-  if (cstart) lj_mcode_sync(cstart, px+1);
++  if (cstart) lj_mcode_sync(cstart, px+2);
+   lj_mcode_patch(J, mcarea, 1);
+ }
+
+diff --git a/src/lj_jit.h b/src/lj_jit.h
+index 6902fba333..f436758b6e 100644
+--- a/src/lj_jit.h
++++ b/src/lj_jit.h
+@@ -374,10 +374,13 @@ enum {
+   LJ_K64_2P63,		/* 2^63 */
+   LJ_K64_M2P64,		/* -2^64 */
+ #endif
++#endif
++#if LJ_TARGET_ARM64
++  LJ_K64_VM_EXIT_HANDLER,
+ #endif
+   LJ_K64__MAX,
+ };
+-#define LJ_K64__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_MIPS)
++#define LJ_K64__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_MIPS || LJ_TARGET_ARM64)
+
+ enum {
+ #if LJ_TARGET_X86ORX64
+@@ -513,6 +516,7 @@ typedef struct jit_State {
+   MCode *mcbot;		/* Bottom of current mcode area. */
+   size_t szmcarea;	/* Size of current mcode area. */
+   size_t szallmcarea;	/* Total size of all allocated mcode areas. */
++  uintptr_t mchub;	/* Somewhere in the middle of all mcode areas. */
+
+   TValue errinfo;	/* Additional info element for trace errors. */
+
+diff --git a/src/lj_mcode.c b/src/lj_mcode.c
+index 8a4851dd65..f220e22d62 100644
+--- a/src/lj_mcode.c
++++ b/src/lj_mcode.c
+@@ -208,17 +208,10 @@ static void mcode_protect(jit_State *J, int prot)
+ /* Get memory within relative jump distance of our code in 64 bit mode. */
+ static void *mcode_alloc(jit_State *J, size_t sz)
+ {
+-  /* Target an address in the static assembler code (64K aligned).
+-  ** Try addresses within a distance of target-range/2+1MB..target+range/2-1MB.
++  /* Try addresses within a distance of target-range/2+1MB..target+range/2-1MB.
+   ** Use half the jump range so every address in the range can reach any other.
+   */
+-#if LJ_TARGET_MIPS
+-  /* Use the middle of the 256MB-aligned region. */
+-  uintptr_t target = ((uintptr_t)(void *)lj_vm_exit_handler &
+-		      ~(uintptr_t)0x0fffffffu) + 0x08000000u;
+-#else
+-  uintptr_t target = (uintptr_t)(void *)lj_vm_exit_handler & ~(uintptr_t)0xffff;
+-#endif
++  uintptr_t target = J->mchub;
+   const uintptr_t range = (1u << (LJ_TARGET_JUMPRANGE-1)) - (1u << 21);
+   /* First try a contiguous area below the last one. */
+   uintptr_t hint = J->mcarea ? (uintptr_t)J->mcarea - sz : 0;
+@@ -227,7 +220,6 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+   for (i = 0; i < LJ_TARGET_JUMPRANGE; i++) {
+     if (mcode_validptr(hint)) {
+       void *p = mcode_alloc_at(J, hint, sz, MCPROT_GEN);
+-
+       if (mcode_validptr(p) &&
+ 	  ((uintptr_t)p + sz - target < range || target - (uintptr_t)p < range))
+ 	return p;
+@@ -239,6 +231,14 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+     } while (!(hint + sz < range+range));
+     hint = target + hint - range;
+   }
++  #ifdef LJ_TARGET_ARM64
++  { /* Start a new hub anywhere in the address space. */
++    void *p = mcode_alloc_at(J, 0, sz, MCPROT_GEN);
++    if (mcode_validptr(p)) {
++      J->mchub = (uintptr_t)p & ~(uintptr_t)0xffff;
++      return p;
++  }}
++  #endif
+   lj_trace_err(J, LJ_TRERR_MCODEAL);  /* Give up. OS probably ignores hints? */
+   return NULL;
+ }
+diff --git a/src/lj_target_arm64.h b/src/lj_target_arm64.h
+index c34f1e59c7..dc6a1e4d30 100644
+--- a/src/lj_target_arm64.h
++++ b/src/lj_target_arm64.h
+@@ -110,7 +110,7 @@ typedef struct {
+ static LJ_AINLINE uint32_t *exitstub_trace_addr_(uint32_t *p, uint32_t exitno)
+ {
+   while (*p == (LJ_LE ? 0xd503201f : 0x1f2003d5)) p++;  /* Skip A64I_NOP. */
+-  return p + 3 + exitno;
++  return p + 4 + exitno * 2ull;
+ }
+ /* Avoid dependence on lj_jit.h if only including lj_target.h. */
+ #define exitstub_trace_addr(T, exitno) \
+@@ -262,6 +262,7 @@ typedef enum A64Ins {
+   A64I_CBZ = 0x34000000,
+   A64I_CBNZ = 0x35000000,
+
++  A64I_BRAA = 0xd71f0800,
+   A64I_BRAAZ = 0xd61f081f,
+   A64I_BLRAAZ = 0xd63f081f,
+
+diff --git a/src/lj_trace.c b/src/lj_trace.c
+index a5e316e1a2..8d8fd05ae1 100644
+--- a/src/lj_trace.c
++++ b/src/lj_trace.c
+@@ -154,7 +154,7 @@ static void trace_save(jit_State *J, GCtrace *T)
+   T->gct = ~LJ_TTRACE;
+   T->ir = (IRIns *)p - J->cur.nk;  /* The IR has already been copied above. */
+ #if LJ_ABI_PAUTH
+-  T->mcauth = lj_ptr_sign((ASMFunction)T->mcode, T);
++  T->mcauth = lj_ptr_sign((ASMFunction)T->mcode, J2G(J));
+ #endif
+   p += szins;
+   TRACE_APPENDVEC(snap, nsnap, SnapShot)
+@@ -350,6 +350,18 @@ void lj_trace_initstate(global_State *g)
+   J->k32[LJ_K32_M2P64] = 0xdf800000;
+ #endif
+ #endif
++#if LJ_TARGET_ARM64
++  J->k64[LJ_K64_VM_EXIT_HANDLER].u64 = (uintptr_t)lj_ptr_sign((ASMFunction)(lj_vm_exit_handler - 4), 0);
++#endif
++
++#if LJ_TARGET_MIPS
++  /* Use the middle of the 256MB-aligned region. */
++  J->mchub = ((uintptr_t)(void *)lj_vm_exit_handler &
++		          ~(uintptr_t)0x0fffffffu) + 0x08000000u;
++#else
++  /* Target an address in the static assembler code (64K aligned). */
++  J->mchub = (uintptr_t)(void *)lj_vm_exit_handler & ~(uintptr_t)0xffff;
++#endif
+ }
+
+ /* Free everything associated with the JIT compiler state. */
+@@ -644,10 +656,16 @@ static int trace_abort(jit_State *J)
+     J->cur.traceno = 0;
+   }
+   L->top--;  /* Remove error object */
+-  if (e == LJ_TRERR_DOWNREC)
++  if (e == LJ_TRERR_DOWNREC) {
+     return trace_downrec(J);
+-  else if (e == LJ_TRERR_MCODEAL)
++  } else if (e == LJ_TRERR_MCODEAL) {
++    if (!J->mcarea) {
++      /* Failed to allocate even the first trace. Disable JIT. */
++      J->flags &= ~(uint32_t)JIT_F_ON;
++      lj_dispatch_update(J2G(J));
++    }
+     lj_trace_flushall(L);
++  }
+   return 0;
+ }
+
+diff --git a/src/vm_arm64.dasc b/src/vm_arm64.dasc
+index a6ce050789..b7a29ff88e 100644
+--- a/src/vm_arm64.dasc
++++ b/src/vm_arm64.dasc
+@@ -1985,8 +1985,34 @@ static void build_subroutines(BuildCtx *ctx)
+   |  stp x..a, x..b, [sp, #32*8+a*8]
+   |.endmacro
+   |
++  |
++  |.if JIT
++  |  // Prelude to vm_exit_handler, used when the exit stub had to trash lr
++  |  // so that it could form the address of ->vm_exit_handler.
++  |  ldr lr, [GL, #GL_J(parent)]
++  |.endif
+   |->vm_exit_handler:
++  |  // If doing a regular side exit, then low 32 bits of lr contain J->parent,
++  |  // and high 32 bits contain J->exitno. Both fields only contain 16 bits of
++  |  // data, so high 16 bits of each are zero. If instead doing a jump to a
++  |  // side trace, the high 16 bits of each are 0xffff, and exitno contains
++  |  // the target trace number (or 0 for vm_exit_interp).
+   |.if JIT
++  |  tbz lr, #16, >1  // Regular side exit?
++  |  ubfx lr, lr, #32, #16
++  |  cbz lr, ->vm_exit_interp
++  |  str CARG1, [sp]  // Spill
++  |  ldr CARG1, [GL, #GL_J(trace)]
++  |  ldr TRACE:lr, [CARG1, w30, uxtw #3]
++  |  ldr CARG1, [sp]  // Reload
++  |.if PAUTH
++  |  ldr lr, TRACE:lr->mcauth
++  |  braa lr, GL
++  |.else
++  |  ldr lr, TRACE:lr->mcode
++  |  br lr
++  |.endif
++  |1:
+   |  sub     sp, sp, #(64*8)
+   |  savex_, 0, 1
+   |  savex_, 2, 3
+@@ -2004,24 +2030,13 @@ static void build_subroutines(BuildCtx *ctx)
+   |  savex_, 26, 27
+   |  savex_, 28, 29
+   |  stp d30, d31, [sp, #30*8]
+-  |  ldr CARG1, [sp, #64*8]	// Load original value of lr.
+   |   add CARG3, sp, #64*8	// Recompute original value of sp.
+   |    mv_vmstate CARG4w, EXIT
+   |   stp xzr, CARG3, [sp, #62*8]	// Store 0/sp in RID_LR/RID_SP.
+-  |  sub CARG1, CARG1, lr
+   |   ldr L, GL->cur_L
+-  |  lsr CARG1, CARG1, #2
+   |   ldr BASE, GL->jit_base
+-  |  sub CARG1, CARG1, #2
+-  |   ldr CARG2w, [lr]		// Load trace number.
+   |    st_vmstate CARG4w
+-  |.if ENDIAN_BE
+-  |   rev32 CARG2, CARG2
+-  |.endif
+   |   str BASE, L->base
+-  |  ubfx CARG2w, CARG2w, #5, #16
+-  |  str CARG1w, [GL, #GL_J(exitno)]
+-  |   str CARG2w, [GL, #GL_J(parent)]
+   |   str L, [GL, #GL_J(L)]
+   |  str xzr, GL->jit_base
+   |  add CARG1, GL, #GG_G2J
+@@ -3857,7 +3872,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+     |   str L, GL->tmpbuf.L
+     |  sub sp, sp, #16	// See SPS_FIXED. Avoids sp adjust in every root trace.
+     |.if PAUTH
+-    |  braa RA, RC
++    |  braa RA, GL
+     |.else
+     |  br RA
+     |.endif
