@@ -93,9 +93,9 @@ settings.type = {
 ---@field public default string | number | boolean | table<integer, string> | table<integer, integer>
 ---Used for NUMBER to indicate the minimum number allowed
 ---@field public min number
----Used for NUMBER to indiciate the maximum number allowed
+---Used for NUMBER to indicate the maximum number allowed
 ---@field public max number
----Used for NUMBER to indiciate the increment/decrement amount
+---Used for NUMBER to indicate the increment/decrement amount
 ---@field public step number
 ---Used in a SELECTION to provide the list of valid options
 ---@field public values table
