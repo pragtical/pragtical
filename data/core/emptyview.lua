@@ -6,6 +6,7 @@ local keymap = require "core.keymap"
 local Widget = require "widget"
 local Button = require "widget.button"
 local ListBox = require "widget.listbox"
+local Container = require "widget.container"
 
 ---@class core.emptyview : widget
 ---@field super widget
@@ -76,7 +77,6 @@ function EmptyView:new()
   self.background_color = style.background
   self.border.width = 0
   self.scrollable = true
-  self.first_draw = true
 
   self.title = "Pragtical"
   self.version = "version " .. VERSION
@@ -84,16 +84,19 @@ function EmptyView:new()
   self.version_width = style.font:get_width(self.title)
   self.text_x = 0
   self.text_y = 0
+  self.logo_width = 0
 
-  -- we use this to flag to check if plugin manager loaded as set buttons
-  -- tooltip when the view is draw for the first time, this way we ensure
-  -- the system is properly loaded with the things we need
-  self.first_update = false
+  self.top_container = Container(
+    self,
+    Container.direction.HORIZONTAL,
+    Container.alignment.CENTER
+  )
 
   for _, button in ipairs(buttons) do
-    self[button.name] = Button(self, button.label)
+    self[button.name] = Button(self.top_container, button.label)
     self[button.name]:set_icon(button.icon)
     self[button.name].border.width = 0
+    self[button.name]:set_tooltip(button.tooltip, button.cmd)
     self[button.name].on_click = function(_, pressed)
       if pressed == "left" then
         command.perform(button.cmd)
@@ -101,23 +104,30 @@ function EmptyView:new()
     end
   end
 
-  self.website = Button(self, "Website")
+  self.center_container = Container(self)
+
+  self.website = Button(self.center_container, "Website")
   self.website:set_icon("G")
   self.website:set_tooltip("Visit the editor website")
   self.website.on_click = function(_, pressed)
     open_link("https://pragtical.dev")
   end
 
-  self.docs = Button(self, "Documentation")
+  self.docs = Button(self.center_container, "Documentation")
   self.docs:set_icon("?")
   self.docs:set_tooltip("Visit the editor documentation")
   self.docs.on_click = function(_, pressed)
     open_link("https://pragtical.dev/docs/intro")
   end
 
-  self.force_update = false
+  self.first_draw = true
   self.plugin_manager_loaded = false
-  self.plugins = Button(self, "Plugins")
+  self.plugins = Button(self.center_container, "Plugins")
+  self.plugins:set_icon("p")
+  self.plugins:set_tooltip("Open the plugin manager")
+  self.plugins.on_click = function(_, pressed)
+    command.perform("plugin-manager:show")
+  end
   self.plugins:hide()
 
   self.recent_projects = ListBox(self)
@@ -165,11 +175,16 @@ local function draw_text(self, x, y, calc_only)
   end
 
   if not calc_only then
-    x = renderer.draw_text(style.big_font, self.title, x1, y1, style.dim)
-    renderer.draw_text(style.font, self.version, xv, y1 + th, style.dim)
-    x = x + style.padding.x
-    renderer.draw_rect(x, y, math.ceil(1 * SCALE), dh, style.dim)
-    x = x + style.padding.x
+    if self.logo_width < self.size.x then
+      x = renderer.draw_text(style.big_font, self.title, x1, y1, style.dim)
+      renderer.draw_text(style.font, self.version, xv, y1 + th, style.dim)
+      x = x + style.padding.x
+      renderer.draw_rect(x, y, math.ceil(1 * SCALE), dh, style.dim)
+      x = x + style.padding.x
+      renderer.draw_text(icon_huge_font, "5", x, y, style.background2)
+    else
+      x = x + (self.size.x / 2) - (icon_huge_font:get_width("9") / 2) - style.padding.x
+    end
 
     renderer.draw_text(icon_huge_font, "5", x, y, style.background2)
     renderer.draw_text(icon_huge_font, "6", x, y, style.text)
@@ -187,70 +202,33 @@ local function draw_text(self, x, y, calc_only)
 end
 
 function EmptyView:draw()
-  if not self:is_visible() or self.first_draw then
-    self.first_draw = false
-    return false
-  end
+  if not EmptyView.super.draw(self) then return end
 
-  EmptyView.super.draw(self)
+  if self.first_draw then
+    self.first_draw = false
+    local plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
+    if plugin_manager_loaded then
+      self.plugins:show()
+      self.prev_size.x = -1
+      self.center_container.size.x = -1
+    end
+  end
   local _, oy = self:get_content_offset()
   draw_text(self, self.text_x, self.text_y + oy)
-
-  if not self.first_update then
-    for _, button in ipairs(buttons) do
-      self[button.name]:set_tooltip(
-        button.tooltip,
-        button.cmd
-      )
-    end
-    self.plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
-    if self.plugin_manager_loaded then
-      self.plugins:show()
-      self.plugins:set_icon("p")
-      self.plugins:set_tooltip("Open the plugin manager")
-      self.plugins.on_click = function(_, pressed)
-        command.perform("plugin-manager:show")
-      end
-      self.force_update = true
-      self:schedule_update()
-    end
-    self.first_update = true
-  end
-
-  return true
+  self:draw_scrollbar()
 end
 
 function EmptyView:update()
-  if not EmptyView.super.update(self) then return false end
+  if not EmptyView.super.update(self) then return end
 
   self.background_color = style.background
 
-  if
-    self.force_update
-    or
-    self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y
-  then
-    self.force_update = false
+  if self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y then
     self.recent_projects:update_position()
 
-    -- calculate all buttons width
-    local buttons_w = 0
-    for _, button in ipairs(buttons) do
-      buttons_w = buttons_w + self[button.name]:get_width()
-    end
-
-    -- set the first button position
-    local y = style.padding.y
-    if buttons_w < self.size.x then
-      self[buttons[1].name]:set_position((self.size.x / 2) - buttons_w / 2, y)
-    else
-      self[buttons[1].name]:set_position(0, y)
-    end
-
-    -- reposition remaining buttons
-    for i=2, #buttons do
-      self[buttons[i].name]:set_position(self[buttons[i-1].name]:get_right(), y)
-    end
+    self.top_container:set_position(0, 0)
+    self.top_container:set_size(self:get_width())
+    self.top_container:update()
 
     self.title = "Pragtical"
     self.version = "version " .. VERSION
@@ -259,6 +237,7 @@ function EmptyView:update()
 
     -- calculate logo and version positioning
     local tw, th = draw_text(self, 0, 0, true)
+    self.logo_width = tw
 
     local tx = self.position.x + math.max(style.padding.x, (self:get_width() - tw) / 2)
     local ty = self.position.y + (self.size.y - th) / 2
@@ -272,8 +251,8 @@ function EmptyView:update()
         self.recent_projects:show()
       end
 
-      items_h = th + self[buttons[1].name]:get_height()
-        + self.website:get_height()
+      items_h = th + self.top_container:get_height()
+        + self.center_container:get_height()
         + self.recent_projects:get_height()
         + style.padding.y * 8
 
@@ -281,10 +260,14 @@ function EmptyView:update()
         ty = ty - self.recent_projects:get_height() / 2
       else
         ty = common.clamp(ty,
-          self[buttons[1].name]:get_bottom() + style.padding.y * 4,
+          self.top_container:get_bottom() + style.padding.y * 4,
           ty - self.recent_projects:get_height()
         )
       end
+    end
+
+    if ty < self.top_container:get_bottom() + style.padding.y * 4 then
+      ty = self.top_container:get_bottom() + style.padding.y * 4
     end
 
     self.text_x = tx
@@ -293,49 +276,26 @@ function EmptyView:update()
     -- reposition web buttons and recent projects
     local web_buttons_y = ty + th + style.padding.y * 2
 
-    if not self.plugin_manager_loaded then
-      local web_buttons_w = self.website:get_width()
-        + self.docs:get_width() + style.padding.x
-
-      self.website:set_position(
-        self.size.x / 2 - web_buttons_w / 2, web_buttons_y
-      )
-      self.docs:set_position(
-        self.website:get_right() + style.padding.x, web_buttons_y
-      )
-    else
-      local web_buttons_w = self.website:get_width()
-        + self.docs:get_width() + self.plugins:get_width() + style.padding.x * 2
-
-      self.website:set_position(
-        self.size.x / 2 - web_buttons_w / 2, web_buttons_y
-      )
-      self.docs:set_position(
-        self.website:get_right() + style.padding.x, web_buttons_y
-      )
-      self.plugins:set_position(
-        self.docs:get_right() + style.padding.x, web_buttons_y
-      )
-    end
+    self.center_container:set_position(0, web_buttons_y)
+    self.center_container:set_size(self:get_width())
+    self.center_container:update()
 
     if #self.recent_projects.rows > 0 then
       if items_h < self:get_height() then
         self.recent_projects:set_size(
           nil,
-          self:get_height() - self.website:get_bottom() - style.padding.y * 8
+          self:get_height() - self.center_container:get_bottom() - style.padding.y * 8
         )
       end
       self.recent_projects:set_position(
         style.padding.x,
-        self.website:get_bottom() + style.padding.y * 6
+        self.center_container:get_bottom() + style.padding.y * 6
       )
     end
 
     self.prev_size.x = self.size.x
     self.prev_size.y = self.size.y
   end
-
-  return true
 end
 
 return EmptyView
