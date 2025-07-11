@@ -1,33 +1,8 @@
-From b82b4ee14fa98a6f00d5f61d372d33372007f99a Mon Sep 17 00:00:00 2001
+From ca33f8a12b241510a8646b4475777001c75539ef Mon Sep 17 00:00:00 2001
 From: Peter Cawley <corsix@corsix.org>
 Date: Thu, 29 Feb 2024 19:34:20 +0000
-Subject: [PATCH] ARM64: Support mcode allocation more than 127MB away from
+Subject: [PATCH 1/2] ARM64: Support mcode allocation more than 127MB away from
  lj_vm_exit_handler
-
- Ref: https://github.com/LuaJIT/LuaJIT/issues/285#issuecomment-1971854441
- Source: https://github.com/corsix/LuaJIT/commits/arm64-jump-range/
-
- Had to adjust the following for compilation in other platforms:
-
-  if (LJ_TARGET_ARM64) {
-    /* Start a new hub anywhere in the address space. */
-    void *p = mcode_alloc_at(J, 0, sz, MCPROT_GEN);
-    if (mcode_validptr(p)) {
-      J->mchub = (uintptr_t)p & ~(uintptr_t)0xffff;
-      return p;
-    }
-  }
-
-  to
-
-  #ifdef LJ_TARGET_ARM64
-  { /* Start a new hub anywhere in the address space. */
-    void *p = mcode_alloc_at(J, 0, sz, MCPROT_GEN);
-    if (mcode_validptr(p)) {
-      J->mchub = (uintptr_t)p & ~(uintptr_t)0xffff;
-      return p;
-  }}
-  #endif
 
 ---
  src/lj_asm_arm64.h    | 76 ++++++++++++++++++++++++++++++++++---------
@@ -39,7 +14,7 @@ Subject: [PATCH] ARM64: Support mcode allocation more than 127MB away from
  6 files changed, 125 insertions(+), 43 deletions(-)
 
 diff --git a/src/lj_asm_arm64.h b/src/lj_asm_arm64.h
-index 5b40f4cc10..66b842a680 100644
+index 5b40f4cc..66b842a6 100644
 --- a/src/lj_asm_arm64.h
 +++ b/src/lj_asm_arm64.h
 @@ -52,22 +52,35 @@ static void asm_exitstub_setup(ASMState *as, ExitNo nexits)
@@ -78,14 +53,14 @@ index 5b40f4cc10..66b842a680 100644
 +  *--mxp = A64I_LE(A64I_MOVKx | A64F_U16(as->T->traceno) | A64F_D(RID_LR));
    as->mctop = mxp;
  }
-
+ 
  static MCode *asm_exitstub_addr(ASMState *as, ExitNo exitno)
  {
    /* Keep this in-sync with exitstub_trace_addr(). */
 -  return as->mctop + exitno + 3;
 +  return as->mctop + exitno * 2ull + 4;
  }
-
+ 
  /* Emit conditional branch to exit for guard. */
 @@ -1932,7 +1945,13 @@ static void asm_tail_fixup(ASMState *as, TraceNo lnk)
    }
@@ -100,7 +75,7 @@ index 5b40f4cc10..66b842a680 100644
 +    /* Subsequent instructions are common part of exit stub. */
 +  }
  }
-
+ 
  /* Prepare tail of code. */
 @@ -2041,9 +2060,10 @@ void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
      } else if ((ins & 0xfc000000u) == 0x14000000u &&
@@ -154,9 +129,9 @@ index 5b40f4cc10..66b842a680 100644
 +  if (cstart) lj_mcode_sync(cstart, px+2);
    lj_mcode_patch(J, mcarea, 1);
  }
-
+ 
 diff --git a/src/lj_jit.h b/src/lj_jit.h
-index 6902fba333..f436758b6e 100644
+index 6902fba3..f436758b 100644
 --- a/src/lj_jit.h
 +++ b/src/lj_jit.h
 @@ -374,10 +374,13 @@ enum {
@@ -171,7 +146,7 @@ index 6902fba333..f436758b6e 100644
  };
 -#define LJ_K64__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_MIPS)
 +#define LJ_K64__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_MIPS || LJ_TARGET_ARM64)
-
+ 
  enum {
  #if LJ_TARGET_X86ORX64
 @@ -513,6 +516,7 @@ typedef struct jit_State {
@@ -179,11 +154,11 @@ index 6902fba333..f436758b6e 100644
    size_t szmcarea;	/* Size of current mcode area. */
    size_t szallmcarea;	/* Total size of all allocated mcode areas. */
 +  uintptr_t mchub;	/* Somewhere in the middle of all mcode areas. */
-
+ 
    TValue errinfo;	/* Additional info element for trace errors. */
-
+ 
 diff --git a/src/lj_mcode.c b/src/lj_mcode.c
-index 8a4851dd65..f220e22d62 100644
+index 8a4851dd..ffdcbc3f 100644
 --- a/src/lj_mcode.c
 +++ b/src/lj_mcode.c
 @@ -208,17 +208,10 @@ static void mcode_protect(jit_State *J, int prot)
@@ -218,19 +193,19 @@ index 8a4851dd65..f220e22d62 100644
      } while (!(hint + sz < range+range));
      hint = target + hint - range;
    }
-+  #ifdef LJ_TARGET_ARM64
-+  { /* Start a new hub anywhere in the address space. */
-+    void *p = mcode_alloc_at(J, 0, sz, MCPROT_GEN);
-+    if (mcode_validptr(p)) {
-+      J->mchub = (uintptr_t)p & ~(uintptr_t)0xffff;
-+      return p;
-+  }}
-+  #endif
++#if LJ_TARGET_ARM64
++  /* Start a new hub anywhere in the address space. */
++  void *p = mcode_alloc_at(J, 0, sz, MCPROT_GEN);
++  if (mcode_validptr(p)) {
++    J->mchub = (uintptr_t)p & ~(uintptr_t)0xffff;
++    return p;
++  }
++#endif
    lj_trace_err(J, LJ_TRERR_MCODEAL);  /* Give up. OS probably ignores hints? */
    return NULL;
  }
 diff --git a/src/lj_target_arm64.h b/src/lj_target_arm64.h
-index c34f1e59c7..dc6a1e4d30 100644
+index c34f1e59..dc6a1e4d 100644
 --- a/src/lj_target_arm64.h
 +++ b/src/lj_target_arm64.h
 @@ -110,7 +110,7 @@ typedef struct {
@@ -245,13 +220,13 @@ index c34f1e59c7..dc6a1e4d30 100644
 @@ -262,6 +262,7 @@ typedef enum A64Ins {
    A64I_CBZ = 0x34000000,
    A64I_CBNZ = 0x35000000,
-
+ 
 +  A64I_BRAA = 0xd71f0800,
    A64I_BRAAZ = 0xd61f081f,
    A64I_BLRAAZ = 0xd63f081f,
-
+ 
 diff --git a/src/lj_trace.c b/src/lj_trace.c
-index a5e316e1a2..8d8fd05ae1 100644
+index a5e316e1..8d8fd05a 100644
 --- a/src/lj_trace.c
 +++ b/src/lj_trace.c
 @@ -154,7 +154,7 @@ static void trace_save(jit_State *J, GCtrace *T)
@@ -280,7 +255,7 @@ index a5e316e1a2..8d8fd05ae1 100644
 +  J->mchub = (uintptr_t)(void *)lj_vm_exit_handler & ~(uintptr_t)0xffff;
 +#endif
  }
-
+ 
  /* Free everything associated with the JIT compiler state. */
 @@ -644,10 +656,16 @@ static int trace_abort(jit_State *J)
      J->cur.traceno = 0;
@@ -300,9 +275,9 @@ index a5e316e1a2..8d8fd05ae1 100644
 +  }
    return 0;
  }
-
+ 
 diff --git a/src/vm_arm64.dasc b/src/vm_arm64.dasc
-index a6ce050789..b7a29ff88e 100644
+index a6ce0507..b7a29ff8 100644
 --- a/src/vm_arm64.dasc
 +++ b/src/vm_arm64.dasc
 @@ -1985,8 +1985,34 @@ static void build_subroutines(BuildCtx *ctx)
@@ -374,3 +349,6 @@ index a6ce050789..b7a29ff88e 100644
      |.else
      |  br RA
      |.endif
+-- 
+2.50.1
+
