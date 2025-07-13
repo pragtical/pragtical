@@ -64,6 +64,7 @@ function DocView:new(doc)
   self.scrollable = true
   self.doc = assert(doc)
   self.doc.cache.col_x = {}
+  self.doc.cache.ulen = {}
   self.font = "code_font"
   self.last_x_offset = {}
   self.ime_selection = { from = 0, size = 0 }
@@ -178,23 +179,45 @@ end
 ---@param extra_cols? integer Amount of columns to deduce on col1 and include on col2 (default: 100)
 ---@return integer col1
 ---@return integer col2
+---@return integer ucol1
+---@return integer ucol2
 function DocView:get_visible_cols_range(line, extra_cols)
   extra_cols = extra_cols or 100
+
+  local text = self.doc.lines[line]
+  local line_len = #text
+  if line_len == 1 then return 1, 1, 1, 1 end
+
   local gw = self:get_gutter_width()
   local line_x = self.position.x + gw
   local x = -self.scroll.x + self.position.x + gw
-
-  local non_visible_x = common.clamp(line_x - x, 0, math.huge)
   local char_width = self:get_font():get_width("W")
+  local non_visible_x = common.clamp(line_x - x, 0, math.huge)
+
   local non_visible_chars_left = math.floor(non_visible_x / char_width)
   local visible_chars_right = math.floor((self.size.x - gw) / char_width)
-  local line_len = #self.doc.lines[line]
 
-  if non_visible_chars_left > line_len then return 0, 0 end
+  if non_visible_chars_left > line_len then return 0, 0, 0, 0 end
 
-  return
-    math.max(1, non_visible_chars_left - extra_cols),
-    math.min(line_len, non_visible_chars_left + visible_chars_right + extra_cols)
+  local col1 = math.max(1, non_visible_chars_left - extra_cols)
+  local col2 = math.min(line_len, non_visible_chars_left + (visible_chars_right*2) + extra_cols)
+  local ucol1, ucol2 = col1, col2
+
+  -- if line shorter than estimate then handle utf8 stuff
+  local cache = self.doc.cache.ulen
+  local ulen = cache[line]
+  if not ulen then
+    ulen = text:ulen(nil, nil, true)
+    cache[line] = ulen
+  end
+  if ulen < line_len then
+    ucol1 = text:ulen(1, col1, true)
+    ucol2 = text:ulen(1, col2, true)
+    col1 = text:ucharpos(ucol1)
+    col2 = text:ucharpos(ucol2)
+  end
+
+  return col1, col2, ucol1, ucol2
 end
 
 
