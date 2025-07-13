@@ -7,7 +7,6 @@ local DocView = require "core.docview"
 local common = require "core.common"
 local command = require "core.command"
 local config = require "core.config"
-local Highlighter = require "core.doc.highlighter"
 
 ---Base configuration options.
 ---@class config.plugins.drawwhitespace.options
@@ -150,91 +149,66 @@ config.plugins.drawwhitespace = common.merge({
 }, config.plugins.drawwhitespace)
 
 
-local ws_cache
-local cached_settings
-local function reset_cache()
-  ws_cache = setmetatable({}, { __mode = "k" })
-  local settings = config.plugins.drawwhitespace
-  cached_settings = {
-    show_leading = settings.show_leading,
-    show_trailing = settings.show_trailing,
-    show_middle = settings.show_middle,
-    show_middle_min = settings.show_middle_min,
-    color = settings.color,
-    leading_color = settings.leading_color,
-    middle_color = settings.middle_color,
-    trailing_color = settings.trailing_color,
-    substitutions = settings.substitutions,
-  }
-end
-reset_cache()
-
-local function reset_cache_if_needed()
-  local settings = config.plugins.drawwhitespace
-  if
-    not ws_cache or
-    cached_settings.show_leading       ~= settings.show_leading
-    or cached_settings.show_trailing   ~= settings.show_trailing
-    or cached_settings.show_middle     ~= settings.show_middle
-    or cached_settings.show_middle_min ~= settings.show_middle_min
-    or cached_settings.color           ~= settings.color
-    or cached_settings.leading_color   ~= settings.leading_color
-    or cached_settings.middle_color    ~= settings.middle_color
-    or cached_settings.trailing_color  ~= settings.trailing_color
-    -- we assume that the entire table changes
-    or cached_settings.substitutions   ~= settings.substitutions
-  then
-    reset_cache()
-  end
-end
-
--- Move cache to make space for new lines
-local prev_insert_notify = Highlighter.insert_notify
-function Highlighter:insert_notify(line, n, ...)
-  prev_insert_notify(self, line, n, ...)
-  if not ws_cache[self] then
-    ws_cache[self] = {}
-  end
-  local to = math.min(line + n, #self.doc.lines)
-  for i=#self.doc.lines+n,to,-1 do
-    ws_cache[self][i] = ws_cache[self][i - n]
-  end
-  for i=line,to do
-    ws_cache[self][i] = nil
-  end
-end
-
--- Close the cache gap created by removed lines
-local prev_remove_notify = Highlighter.remove_notify
-function Highlighter:remove_notify(line, n, ...)
-  prev_remove_notify(self, line, n, ...)
-  if not ws_cache[self] then
-    ws_cache[self] = {}
-  end
-  local to = math.max(line + n, #self.doc.lines)
-  for i=line,to do
-    ws_cache[self][i] = ws_cache[self][i + n]
-  end
-end
-
--- Remove changed lines from the cache
-local prev_update_notify = Highlighter.update_notify
-function Highlighter:update_notify(line, n, ...)
-  prev_update_notify(self, line, n, ...)
-  if not ws_cache[self] then
-    ws_cache[self] = {}
-  end
-  for i=line,line+n do
-    ws_cache[self][i] = nil
-  end
-end
-
-
 local function get_option(substitution, option)
   if substitution[option] == nil then
     return config.plugins.drawwhitespace[option]
   end
   return substitution[option]
+end
+
+local update = DocView.update
+function DocView:update()
+  update(self)
+  if
+    config.plugins.drawwhitespace.enabled
+    and
+    config.plugins.drawwhitespace.show_selected_only
+  then
+    local selections = {}
+    local col1, col2
+    local vl1, vl2 = self:get_visible_line_range()
+    for _, l1, c1, l2, c2 in self.doc:get_selections(true) do
+      -- everything selected treat as not show_selected_only
+      if l1 < vl1 and l2 > vl2 then
+        selections.all = true
+        goto out_of_loop
+      end
+      -- nothing selected so skip
+      if l1 == l2 and c1 == c2 then goto skip end
+      -- handle single line selection
+      if l1 == l2 and l1 >= vl1 and l1 <= vl2 then
+        col1, col2 = self:get_visible_cols_range(l1, 20)
+        c1, c2 = math.max(col1, c1), math.min(col2, c2)
+        selections[l1] = {c1, c2, self.doc.lines[l1]:sub(c1, c2)}
+      -- multiple lines selection
+      elseif l1 ~= l2 then
+        -- first line
+        if l1 >= vl1 and l1 <= vl2 then
+          col1, col2 = self:get_visible_cols_range(l1, 20)
+          col1 = math.max(c1, col1)
+          selections[l1] = {col1, col2, self.doc.lines[l1]:sub(col1, col2)}
+        end
+        -- lines in between
+        if l2 - l1 > 1 then
+          for idx=l1+1, l2-1 do
+            col1, col2 = self:get_visible_cols_range(idx, 20)
+            selections[idx] = {col1, col2, self.doc.lines[idx]:sub(col1, col2)}
+          end
+        end
+        -- last line
+        if l2 >= vl1 and l2 <= vl2 then
+          col1, col2 = self:get_visible_cols_range(l2, 20)
+          col2 = math.min(c2, col2)
+          selections[l2] = {col1, col2, self.doc.lines[l2]:sub(col1, col2)}
+        end
+      end
+      ::skip::
+    end
+    ::out_of_loop::
+    self.drawwhitespace_selections = selections
+  elseif self.drawwhitespace_selections then
+    self.drawwhitespace_selections = nil
+  end
 end
 
 local draw_line_text = DocView.draw_line_text
@@ -248,154 +222,87 @@ function DocView:draw_line_text(idx, x, y)
   end
 
   local font = (self:get_font() or style.syntax_fonts["whitespace"] or style.syntax_fonts["comment"])
-  local font_size = font:get_size()
-  local _, indent_size = self.doc:get_indent_info()
-
-  reset_cache_if_needed()
-  if
-    not ws_cache[self.doc.highlighter]
-    or ws_cache[self.doc.highlighter].font ~= font
-    or ws_cache[self.doc.highlighter].font_size ~= font_size
-    or ws_cache[self.doc.highlighter].indent_size ~= indent_size
-  then
-    ws_cache[self.doc.highlighter] =
-      setmetatable(
-        { font = font, font_size = font_size, indent_size = indent_size },
-        { __mode = "k" }
-      )
-  end
-
-  if not ws_cache[self.doc.highlighter][idx] then -- need to cache line
-    local cache = {}
-
-    local tx
-    local text = self.doc:get_utf8_line(idx)
-
-    for _, substitution in pairs(config.plugins.drawwhitespace.substitutions) do
-      if substitution.binary_only and not self.doc.binary then
-        goto continue
-      end
-
-      local char = substitution.char
-      local sub = substitution.sub
-      local offset = 1
-
-      local show_leading = get_option(substitution, "show_leading")
-      local show_middle = get_option(substitution, "show_middle")
-      local show_trailing = get_option(substitution, "show_trailing")
-
-      local show_middle_min = get_option(substitution, "show_middle_min")
-
-      local base_color = get_option(substitution, "color")
-      local leading_color = get_option(substitution, "leading_color") or base_color
-      local middle_color = get_option(substitution, "middle_color") or base_color
-      local trailing_color = get_option(substitution, "trailing_color") or base_color
-
-      local pattern = char.."+"
-      while true do
-        local s, e = text:find(pattern, offset)
-        if not s then break end
-
-        tx = self:get_col_x_offset(idx, s)
-
-        local color = base_color
-        local draw = false
-
-        if e >= #text - 1 then
-          draw = show_trailing
-          color = trailing_color
-        elseif s == 1 then
-          draw = show_leading
-          color = leading_color
-        else
-          draw = show_middle and (e - s + 1 >= show_middle_min)
-          color = middle_color
-        end
-
-        if draw then
-          local last_cache_idx = #cache
-          -- We need to draw tabs one at a time because they might have a
-          -- different size than the substituting character.
-          -- This also applies to any other char if we use non-monospace fonts
-          -- but we ignore this case for now.
-          if char == "\t" then
-            for i = s,e do
-              tx = self:get_col_x_offset(idx, i)
-              cache[last_cache_idx + 1] = sub
-              cache[last_cache_idx + 2] = tx
-              cache[last_cache_idx + 3] = font:get_width(sub)
-              cache[last_cache_idx + 4] = color
-              last_cache_idx = last_cache_idx + 4
-            end
-          else
-            cache[last_cache_idx + 1] = string.rep(sub, e - s + 1)
-            cache[last_cache_idx + 2] = tx
-            cache[last_cache_idx + 3] = font:get_width(cache[last_cache_idx + 1])
-            cache[last_cache_idx + 4] = color
-          end
-        end
-        offset = e + 1
-      end
-      ::continue::
-    end
-    ws_cache[self.doc.highlighter][idx] = cache
-  end
-
-  -- draw from cache
-  local x1, _, x2, _ = self:get_content_bounds()
-  x1 = x1 + x
-  x2 = x2 + x
   local ty = y + self:get_line_text_y_offset()
-  local cache = ws_cache[self.doc.highlighter][idx]
-  for i=1,#cache,4 do
-    local tx = cache[i + 1] + x
-    local tw = cache[i + 2]
-    local sub = cache[i]
-    local color = cache[i + 3]
-    local partials = {}
-    if config.plugins.drawwhitespace.show_selected_only and self.doc:has_any_selection() then
-      for _, l1, c1, l2, c2 in self.doc:get_selections(true) do
-        if idx > l1 and idx < l2 then
-          -- Between selection lines, so everything is selected
-          table.insert(partials, false)
-        elseif idx == l1 and idx == l2 then
-          -- Both ends of the selection are on the same line
-          local _x1 = math.max(cache[i + 1], self:get_col_x_offset(idx, c1))
-          local _x2 = math.min((cache[i + 1] + tw), self:get_col_x_offset(idx, c2))
-          if _x1 < _x2 then
-            table.insert(partials, {_x1 + x, 0, _x2 - _x1, math.huge})
-          end
-        elseif idx >= l1 and idx <= l2 then
-          -- On one of the selection ends
-          if idx == l1 then -- Start of the selection
-            local _x = math.max(cache[i + 1], self:get_col_x_offset(idx, c1))
-            table.insert(partials, {_x + x, 0, math.huge, math.huge})
-          else -- End of the selection
-            local _x = math.min((cache[i + 1] + tw), self:get_col_x_offset(idx, c2))
-            table.insert(partials, {0, 0, _x + x, math.huge})
-          end
-        end
-      end
-    end
+  local tx
+  local col1, col2
+  local text, offset
+  local s, e
+  local line_len = #self.doc.lines[idx]
+  local l1, c1, l2, c2
+  if
+    not config.plugins.drawwhitespace.show_selected_only
+    or
+    self.drawwhitespace_selections.all
+  then
+    col1, col2 = self:get_visible_cols_range(idx, 20)
+    if col1 == 0 or col2 == 1 then goto not_selected end -- skip empty line
+    text = self.doc.lines[idx]:sub(col1, col2)
+  else
+    if not self.drawwhitespace_selections[idx] then goto not_selected end
+    col1, col2, text = table.unpack(self.drawwhitespace_selections[idx])
+  end
 
-    if #partials == 0 and not config.plugins.drawwhitespace.show_selected_only then
-      renderer.draw_text(font, sub, tx, ty, color)
-    else
-      for _, p in pairs(partials) do
-        if p then core.push_clip_rect(table.unpack(p)) end
-        renderer.draw_text(font, sub, tx, ty, color)
-        if p then core.pop_clip_rect() end
+  for _, substitution in pairs(config.plugins.drawwhitespace.substitutions) do
+    local char = substitution.char
+    local sub = substitution.sub
+    offset = 1
+
+    local show_leading = get_option(substitution, "show_leading")
+    local show_middle = get_option(substitution, "show_middle")
+    local show_trailing = get_option(substitution, "show_trailing")
+
+    local show_middle_min = get_option(substitution, "show_middle_min")
+
+    local base_color = get_option(substitution, "color")
+    local leading_color = get_option(substitution, "leading_color") or base_color
+    local middle_color = get_option(substitution, "middle_color") or base_color
+    local trailing_color = get_option(substitution, "trailing_color") or base_color
+
+    local pattern = char.."+"
+    while true do
+      s, e = text:find(pattern, offset)
+      if not s then break end
+
+      local as, ae = col1 + s - 1, col1 + e
+
+      tx = self:get_col_x_offset(idx, as) + x
+
+      local color = base_color
+      local draw = false
+
+      if ae >= line_len then
+        draw = show_trailing
+        color = trailing_color
+      elseif as == 1 then
+        draw = show_leading
+        color = leading_color
+      else
+        draw = show_middle and (ae - as >= show_middle_min)
+        color = middle_color
       end
+
+      if draw then
+        -- We need to draw tabs one at a time because they might have a
+        -- different size than the substituting character.
+        -- This also applies to any other char if we use non-monospace fonts
+        -- but we ignore this case for now.
+        if char == "\t" then
+          for i = as,ae-1 do
+            tx = self:get_col_x_offset(idx, i) + x
+            tx = renderer.draw_text(font, sub, tx, ty, color)
+          end
+        else
+          tx = renderer.draw_text(font, string.rep(sub, ae - as), tx, ty, color)
+        end
+
+        end
+
+      offset = e + 1
     end
   end
 
+  ::not_selected::
   return draw_line_text(self, idx, x, y)
-end
-
-local doc_on_close = Doc.on_close
-function Doc:on_close()
-  doc_on_close(self)
-  if ws_cache[self.highlighter] then ws_cache[self.highlighter] = nil end
 end
 
 
