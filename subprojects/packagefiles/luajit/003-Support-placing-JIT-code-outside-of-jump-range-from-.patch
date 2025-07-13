@@ -1,0 +1,226 @@
+From 9d021f2fa09addd957d62e09fc8126ad4e54a463 Mon Sep 17 00:00:00 2001
+From: Vyacheslav Egorov <vegorov@google.com>
+Date: Thu, 2 Mar 2023 10:33:35 +0100
+Subject: [PATCH 2/2] Support placing JIT code outside of jump range from
+ lj_vm_exit_*
+
+If we fail to allocate the first mcarea within the jump distance
+from lj_vm_exit_handler then instead allocate anywhere
+and generate trampolines to lj_vm_exit_{handler,interp} into
+this first mcarea.
+
+This allows this and subsequent mcarea to target lj_vm_exit_*
+helpers through these trampolines.
+
+This trampoline based mode is also forced if we ever fail to allocate
+mcarea. In this case all traces are flushed and the next recorded
+trace will use trampoline based mcarea.
+
+Additionally disable JIT altogether if it can't allocate space for
+the first trace. This keeps JIT from death spiralling.
+---
+ src/lj_asm.h     |  8 ++++++++
+ src/lj_asm_x86.h | 38 ++++++++++++++++++++++++++++++++++++--
+ src/lj_jit.h     |  4 ++++
+ src/lj_mcode.c   | 48 +++++++++++++++++++++++++++++++++++++++++++++++-
+ src/lj_trace.c   |  1 +
+ 5 files changed, 96 insertions(+), 3 deletions(-)
+
+diff --git a/src/lj_asm.h b/src/lj_asm.h
+index 5eb396b1..76f4e7bf 100644
+--- a/src/lj_asm.h
++++ b/src/lj_asm.h
+@@ -12,6 +12,14 @@
+ LJ_FUNC void lj_asm_trace(jit_State *J, GCtrace *T);
+ LJ_FUNC void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno,
+ 			      MCode *target);
++
++#if LJ_TARGET_X64
++/*
++** Emit trampolines for lj_vm_exit_handler and lj_vm_exit_interp into
++** area starting at addr. Returns the next free address.
++*/
++LJ_FUNC MCode *lj_asm_emit_exit_trampolines(jit_State *J, MCode *addr);
++#endif
+ #endif
+ 
+ #endif
+diff --git a/src/lj_asm_x86.h b/src/lj_asm_x86.h
+index aee33716..8af95db8 100644
+--- a/src/lj_asm_x86.h
++++ b/src/lj_asm_x86.h
+@@ -31,7 +31,7 @@ static MCode *asm_exitstub_gen(ASMState *as, ExitNo group)
+ #endif
+   /* Jump to exit handler which fills in the ExitState. */
+   *mxp++ = XI_JMP; mxp += 4;
+-  *((int32_t *)(mxp-4)) = jmprel(as->J, mxp, (MCode *)(void *)lj_vm_exit_handler);
++  *((int32_t *)(mxp-4)) = jmprel(as->J, mxp, as->J->exit_handler);
+   /* Commit the code for this group (even if assembly fails later on). */
+   lj_mcode_commitbot(as->J, mxp);
+   as->mcbot = mxp;
+@@ -2941,7 +2941,7 @@ static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+     p1[-1] = MODRM(XM_REG, XOg_ADD, RID_ESP);
+   }
+   /* Patch exit branch. */
+-  target = lnk ? traceref(as->J, lnk)->mcode : (MCode *)lj_vm_exit_interp;
++  target = lnk ? traceref(as->J, lnk)->mcode : as->J->exit_interp;
+   *(int32_t *)(p-4) = jmprel(as->J, p, target);
+   p[-5] = XI_JMP;
+   /* Drop unused mcode tail. Fill with NOPs to make the prefetcher happy. */
+@@ -3137,3 +3137,37 @@ void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+   lj_mcode_patch(J, mcarea, 1);
+ }
+ 
++/* -- Exit trampolines ---------------------------------------------------- */
++
++#if LJ_64
++static MCode *emit_trampoline_to(MCode *p, MCode* target_slot) {
++  /* jmp [rip+offset to target_slot] */
++  *p++ = XI_GROUP5; *p++ = XM_OFS0 + (XOg_JMP<<3) + 5 /* RIP */;
++  *(int32_t *)p = (int32_t)(target_slot-(p+4)); p += 4;
++  return p;
++}
++
++MCode *lj_asm_emit_exit_trampolines(jit_State *J, MCode *addr) {
++  /* We emit the following chunk of code starting at addr:
++  **
++  **     +0: &lj_vm_exit_handler
++  **     +8: &lj_vm_exit_interp
++  ** exit_handler:
++  **    +16: JMP [RIP-22]
++  ** exit_interp:
++  **    +22: JMP [RIP-20]
++  **
++  */
++
++  MCode *slots = addr;
++  *(void**)addr = &lj_vm_exit_handler;
++  addr += 8;
++  *(void**)addr = &lj_vm_exit_interp;
++  addr += 8;
++  J->exit_handler = addr;
++  addr = emit_trampoline_to(addr, slots);
++  J->exit_interp = addr;
++  addr = emit_trampoline_to(addr, slots + 8);
++  return addr;
++}
++#endif
+diff --git a/src/lj_jit.h b/src/lj_jit.h
+index f436758b..6aa78ef9 100644
+--- a/src/lj_jit.h
++++ b/src/lj_jit.h
+@@ -510,6 +510,10 @@ typedef struct jit_State {
+   BCIns *patchpc;	/* PC for pending re-patch. */
+   BCIns patchins;	/* Instruction for pending re-patch. */
+ 
++  int usetrampolines; /* Set to 1 if we ever had TRERR_MCODEAL. */
++  MCode* exit_handler;
++  MCode* exit_interp;
++
+   int mcprot;		/* Protection of current mcode area. */
+   MCode *mcarea;	/* Base of current mcode area. */
+   MCode *mctop;		/* Top of current mcode area. */
+diff --git a/src/lj_mcode.c b/src/lj_mcode.c
+index ffdcbc3f..7a25c286 100644
+--- a/src/lj_mcode.c
++++ b/src/lj_mcode.c
+@@ -16,6 +16,9 @@
+ #include "lj_dispatch.h"
+ #include "lj_prng.h"
+ #endif
++#if LJ_HASJIT
++#include "lj_asm.h"
++#endif
+ #if LJ_HASJIT || LJ_HASFFI
+ #include "lj_vm.h"
+ #endif
+@@ -211,7 +214,15 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+   /* Try addresses within a distance of target-range/2+1MB..target+range/2-1MB.
+   ** Use half the jump range so every address in the range can reach any other.
+   */
++#if LJ_TARGET_MIPS
++  /* Use the middle of the 256MB-aligned region. */
++  uintptr_t target = ((uintptr_t)(void *)J->exit_handler &
++		      ~(uintptr_t)0x0fffffffu) + 0x08000000u;
++#elif LJ_TARGET_ARM64
+   uintptr_t target = J->mchub;
++#else
++  uintptr_t target = (uintptr_t)(void *)J->exit_handler & ~(uintptr_t)0xffff;
++#endif
+   const uintptr_t range = (1u << (LJ_TARGET_JUMPRANGE-1)) - (1u << 21);
+   /* First try a contiguous area below the last one. */
+   uintptr_t hint = J->mcarea ? (uintptr_t)J->mcarea - sz : 0;
+@@ -269,9 +280,35 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+ static void mcode_allocarea(jit_State *J)
+ {
+   MCode *oldarea = J->mcarea;
++#if LJ_TARGET_X64
++  int need_trampoline = 0;
++#endif
+   size_t sz = (size_t)J->param[JIT_P_sizemcode] << 10;
+   sz = (sz + LJ_PAGESIZE-1) & ~(size_t)(LJ_PAGESIZE - 1);
+-  J->mcarea = (MCode *)mcode_alloc(J, sz);
++
++  if (!J->exit_handler) {
++    /* Initialize default targets for exit helpers. mcode_alloc needs them. */
++    J->exit_handler = (MCode*)&lj_vm_exit_handler;
++    J->exit_interp = (MCode*)&lj_vm_exit_interp;
++  }
++
++  /* Don't try to allocate close to lj_vm_exit_handler if failed before. */
++  J->mcarea = !oldarea && J->usetrampolines ? 0 : (MCode *)mcode_alloc(J, sz);
++#if LJ_TARGET_X64
++  if (!J->mcarea && !oldarea) {
++    /* We failed to find an executable memory within the jump range of
++    ** lj_vm_exit_handler. Allocate memory anywhere and assemble a
++    ** a trampoline to lj_vm_exit_handler instead.
++    ** We can only do it for the very first mcarea because all code
++    ** areas need to be within jump distance from each other.
++    */
++    J->mcarea = (MCode *)mcode_alloc_at(J, 0, sz, MCPROT_GEN);
++    need_trampoline = 1;
++  }
++#endif
++  if (!J->mcarea) {
++    lj_trace_err(J, LJ_TRERR_MCODEAL);
++  }
+   J->szmcarea = sz;
+   J->mcprot = MCPROT_GEN;
+   J->mctop = (MCode *)((char *)J->mcarea + J->szmcarea);
+@@ -280,12 +317,21 @@ static void mcode_allocarea(jit_State *J)
+   ((MCLink *)J->mcarea)->size = sz;
+   J->szallmcarea += sz;
+   J->mcbot = (MCode *)lj_err_register_mcode(J->mcarea, sz, (uint8_t *)J->mcbot);
++#if LJ_TARGET_X64
++  if (need_trampoline) {
++    /* Assemble trampolines at the bottom of the mcarea. */
++    J->mcbot = lj_asm_emit_exit_trampolines(J, J->mcbot);
++  }
++#endif
+ }
+ 
+ /* Free all MCode areas. */
+ void lj_mcode_free(jit_State *J)
+ {
+   MCode *mc = J->mcarea;
++#if LJ_TARGET_X64
++  J->exit_handler = J->exit_interp = NULL;
++#endif
+   J->mcarea = NULL;
+   J->szallmcarea = 0;
+   while (mc) {
+diff --git a/src/lj_trace.c b/src/lj_trace.c
+index 8d8fd05a..624e1372 100644
+--- a/src/lj_trace.c
++++ b/src/lj_trace.c
+@@ -664,6 +664,7 @@ static int trace_abort(jit_State *J)
+       J->flags &= ~(uint32_t)JIT_F_ON;
+       lj_dispatch_update(J2G(J));
+     }
++    J->usetrampolines = 1;
+     lj_trace_flushall(L);
+   }
+   return 0;
+-- 
+2.50.1
+

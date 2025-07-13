@@ -3,7 +3,7 @@ url = https://github.com/LuaJIT/LuaJIT
 revision = v2.1
 depth = 1
 patch_directory = luajit
-diff_files = luajit/001-luajit-unicode.diff
+diff_files = luajit/001-luajit-unicode.diff, luajit/002-ARM64-Support-mcode-allocation-more-than-127MB-away-.patch, luajit/003-Support-placing-JIT-code-outside-of-jump-range-from-.patch
 
 [provide]
 luajit = luajit_dep
