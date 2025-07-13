@@ -96,7 +96,7 @@ function renderer.draw_rect(x, y, w, h, color, tab)
   ffi.C.rencache_draw_rect_ffi(
     ffi.C.ren_get_target_window_ffi(),
     x, y, w, h,
-    color[1], color[2], color[3], color[4]
+    color[1], color[2], color[3], color[4] or 255
   )
 end
 
