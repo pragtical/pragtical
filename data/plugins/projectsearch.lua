@@ -931,6 +931,15 @@ function ResultsView:open_selected_result()
   return true
 end
 
+function ResultsView:on_scale_change(new_scale, prev_scale)
+  ResultsView.super.on_scale_change(self, new_scale, prev_scale)
+  if self.is_global then
+    local size = self:get_size()
+    size.x = size.x / prev_scale
+    size.x = size.x * new_scale
+    self:set_size(size.x)
+  end
+end
 
 function ResultsView:update()
   if not ResultsView.super.update(self) then return false end

@@ -96,6 +96,11 @@ function TreeView:set_target_size(axis, value)
 end
 
 
+function TreeView:on_scale_change(new_scale, prev_scale)
+  self.target_size = self.target_size / prev_scale
+  self.target_size = self.target_size * new_scale
+end
+
 
 function TreeView:get_cached(project, path)
   local t = self.cache[path]
