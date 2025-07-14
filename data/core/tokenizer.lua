@@ -74,7 +74,7 @@ end
 
 local function retrieve_syntax_state(incoming_syntax, state)
   local current_syntax, subsyntax_info, current_pattern_idx, current_level =
-    incoming_syntax, nil, state:byte(1) or 0, 1
+    incoming_syntax, nil, (state and state:byte(1)) or 0, 1
   if
     current_pattern_idx > 0
     and
@@ -114,7 +114,7 @@ function tokenizer.extract_subsyntaxes(base_syntax, state)
   repeat
     current_syntax = retrieve_syntax_state(base_syntax, state)
     table.insert(t, current_syntax)
-    state = string.sub(state, 2)
+    state = string.sub(state or "", 2)
   until #state == 0
   return t
 end
