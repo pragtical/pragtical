@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <stdbool.h>
 #include "api.h"
 
 
@@ -16,27 +17,85 @@ typedef struct {
 } DiffState;
 
 
+static bool is_token_char(char c) {
+  return ((unsigned char)c >= 0x80) || // UTF-8 lead/continuation byte
+         ((c >= 'a' && c <= 'z') ||
+          (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') ||
+          c == '_');
+}
+
+
+static int tokenize(const char *src, int len, const char **tokens, int max_tokens, char *scratch, int scratch_len) {
+  int count = 0, si = 0, ti = 0;
+
+  while (si < len && count < max_tokens && ti < scratch_len - 1) {
+    // Skip non-token chars
+    while (si < len && !is_token_char(src[si])) si++;
+
+    int start = si;
+    while (si < len && is_token_char(src[si])) si++;
+
+    int token_len = si - start;
+    if (token_len > 0 && count < max_tokens) {
+      if (ti + token_len + 1 >= scratch_len) break;
+      memcpy(&scratch[ti], &src[start], token_len);
+      scratch[ti + token_len] = '\0';
+      tokens[count++] = &scratch[ti];
+      ti += token_len + 1;
+    }
+  }
+
+  return count;
+}
+
+
+static double token_similarity(const char *a, const char *b, int len_a, int len_b) {
+  const int MAX_TOKENS = 64;
+  const int SCRATCH_SIZE = 1024;
+
+  const char *tokensA[MAX_TOKENS], *tokensB[MAX_TOKENS];
+  char scratchA[SCRATCH_SIZE], scratchB[SCRATCH_SIZE];
+
+  int countA = tokenize(a, len_a, tokensA, MAX_TOKENS, scratchA, SCRATCH_SIZE);
+  int countB = tokenize(b, len_b, tokensB, MAX_TOKENS, scratchB, SCRATCH_SIZE);
+
+  if (countA == 0 || countB == 0) return 0.0;
+
+  int matches = 0;
+  for (int i = 0; i < countA; i++) {
+    for (int j = 0; j < countB; j++) {
+      if (strcmp(tokensA[i], tokensB[j]) == 0) {
+        matches++;
+        break;
+      }
+    }
+  }
+
+  return 2.0 * matches / (countA + countB);
+}
+
+
 static double similarity(const char *a, const char *b) {
   if (strcmp(a, b) == 0) return 1.0;
-  int m = (int)strlen(a), n = (int)strlen(b);
-  if (m == 0 || n == 0) return 0.0;
 
-  int *prev = calloc(n+1, sizeof(int));
-  int *curr = calloc(n+1, sizeof(int));
+  int la = (int)strlen(a);
+  int lb = (int)strlen(b);
+  if (la == 0 || lb == 0) return 0.0;
 
-  for (int i = 1; i <= m; i++) {
-    for (int j = 1; j <= n; j++) {
-      if (a[i-1] == b[j-1])
-        curr[j] = prev[j-1] + 1;
-      else
-        curr[j] = (prev[j] > curr[j-1]) ? prev[j] : curr[j-1];
-    }
-    int *tmp = prev; prev = curr; curr = tmp;
-  }
-  int lcs_len = prev[n];
-  free(prev);
-  free(curr);
-  return (double)lcs_len / (m > n ? m : n);
+  // Fast prefix/suffix heuristic
+  int prefix = 0;
+  while (prefix < la && prefix < lb && a[prefix] == b[prefix]) prefix++;
+
+  int suffix = 0;
+  while (suffix < la && suffix < lb && a[la - 1 - suffix] == b[lb - 1 - suffix]) suffix++;
+
+  double fast_score = (double)(prefix + suffix) / (la > lb ? la : lb);
+  if (fast_score >= 0.8 || la < 20 || lb < 20)
+    return fast_score;
+
+  // Fast whitespace-token-based fallback
+  return token_similarity(a, b, la, lb);
 }
 
 
