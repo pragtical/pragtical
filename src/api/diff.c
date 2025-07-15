@@ -4,6 +4,8 @@
 #include <stdbool.h>
 #include "api.h"
 
+#define MAX_TOKENS 64
+#define SCRATCH_SIZE 1024
 
 typedef struct {
   int i, j;
@@ -16,7 +18,6 @@ typedef struct {
   int lenA, lenB;
 } DiffState;
 
-
 static bool is_token_char(char c) {
   return ((unsigned char)c >= 0x80) || // UTF-8 lead/continuation byte
          ((c >= 'a' && c <= 'z') ||
@@ -24,7 +25,6 @@ static bool is_token_char(char c) {
           (c >= '0' && c <= '9') ||
           c == '_');
 }
-
 
 static int tokenize(const char *src, int len, const char **tokens, int max_tokens, char *scratch, int scratch_len) {
   int count = 0, si = 0, ti = 0;
@@ -49,11 +49,7 @@ static int tokenize(const char *src, int len, const char **tokens, int max_token
   return count;
 }
 
-
 static double token_similarity(const char *a, const char *b, int len_a, int len_b) {
-  const int MAX_TOKENS = 64;
-  const int SCRATCH_SIZE = 1024;
-
   const char *tokensA[MAX_TOKENS], *tokensB[MAX_TOKENS];
   char scratchA[SCRATCH_SIZE], scratchB[SCRATCH_SIZE];
 
