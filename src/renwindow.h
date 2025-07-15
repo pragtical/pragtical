@@ -1,6 +1,13 @@
 #include <SDL.h>
 #include "renderer.h"
 
+struct HitTestInfo {
+  int title_height;
+  int controls_width;
+  int resize_border;
+};
+typedef struct HitTestInfo HitTestInfo;
+
 struct RenWindow {
   SDL_Window *window;
   uint8_t *command_buf;
@@ -8,6 +15,7 @@ struct RenWindow {
   size_t command_buf_size;
   float scale_x;
   float scale_y;
+  HitTestInfo hit_test_info;
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   SDL_Renderer *renderer;
   SDL_Texture *texture;

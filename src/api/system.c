@@ -48,29 +48,20 @@ static void str_tolower(char *p) {
   }
 }
 
-struct HitTestInfo {
-  int title_height;
-  int controls_width;
-  int resize_border;
-};
-typedef struct HitTestInfo HitTestInfo;
-
-static HitTestInfo window_hit_info[1] = {{0, 0, 0}};
-
 #define RESIZE_FROM_TOP 0
 #define RESIZE_FROM_RIGHT 0
 
 static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *pt, void *data) {
-  const HitTestInfo *hit_info = (HitTestInfo *) data;
-  const int resize_border = hit_info->resize_border;
-  const int controls_width = hit_info->controls_width;
+  const HitTestInfo hit_info = ((RenWindow *)data)->hit_test_info;
+  const int resize_border = hit_info.resize_border;
+  const int controls_width = hit_info.controls_width;
   int w, h;
 
   SDL_GetWindowSize(window, &w, &h);
 
-  if (pt->y < hit_info->title_height &&
+  if (pt->y < hit_info.title_height &&
     #if RESIZE_FROM_TOP
-    pt->y > hit_info->resize_border &&
+    pt->y > resize_border &&
     #endif
     pt->x > resize_border && pt->x < w - controls_width) {
     return SDL_HITTEST_DRAGGABLE;
@@ -657,11 +648,13 @@ static int f_set_window_hit_test(lua_State *L) {
     }
     return 0;
   }
-  window_hit_info->title_height = luaL_checknumber(L, 1);
-  window_hit_info->controls_width = luaL_checknumber(L, 2);
-  window_hit_info->resize_border = luaL_checknumber(L, 3);
   while (window_count) {
-    SDL_SetWindowHitTest(window_list[--window_count]->window, hit_test, window_hit_info);
+    int i = --window_count;
+    float scale = window_list[i]->scale_x;
+    window_list[i]->hit_test_info.title_height = luaL_checkinteger(L, 1) / scale;
+    window_list[i]->hit_test_info.controls_width = luaL_checkinteger(L, 2) / scale;
+    window_list[i]->hit_test_info.resize_border = luaL_checkinteger(L, 3) / scale;
+    SDL_SetWindowHitTest(window_list[i]->window, hit_test, window_list[i]);
   }
   return 0;
 }
