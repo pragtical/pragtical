@@ -99,12 +99,8 @@ static Pair *build_lcs(lua_State *L, int Aidx, int Bidx, int *npairs, double thr
   int n = (int)lua_rawlen(L, Aidx);
   int m = (int)lua_rawlen(L, Bidx);
 
-  double **sim = malloc((n+1) * sizeof(double*));
-  double **dp = malloc((n+1) * sizeof(double*));
-  for (int i = 0; i <= n; i++) {
-    sim[i] = calloc(m+1, sizeof(double));
-    dp[i] = calloc(m+1, sizeof(double));
-  }
+  int **dp = malloc((n+1) * sizeof(int*));
+  for (int i = 0; i <= n; i++) dp[i] = calloc(m+1, sizeof(int));
 
   for (int i = 1; i <= n; i++) {
     lua_rawgeti(L, Aidx, i);
@@ -112,27 +108,24 @@ static Pair *build_lcs(lua_State *L, int Aidx, int Bidx, int *npairs, double thr
     for (int j = 1; j <= m; j++) {
       lua_rawgeti(L, Bidx, j);
       const char *b = lua_tostring(L, -1);
-      double s = similarity(a, b);
-      sim[i][j] = (s >= threshold) ? s : 0.0;
+      if (strcmp(a, b) == 0)
+        dp[i][j] = dp[i-1][j-1] + 1;
+      else
+        dp[i][j] = (dp[i-1][j] >= dp[i][j-1]) ? dp[i-1][j] : dp[i][j-1];
       lua_pop(L, 1);
     }
     lua_pop(L, 1);
-  }
-
-  for (int i = 1; i <= n; i++) {
-    for (int j = 1; j <= m; j++) {
-      if (sim[i][j] > 0)
-        dp[i][j] = dp[i-1][j-1] + sim[i][j];
-      else
-        dp[i][j] = fmax(dp[i-1][j], dp[i][j-1]);
-    }
   }
 
   Pair *pairs = malloc((n + m) * sizeof(Pair));
   int count = 0;
   int i = n, j = m;
   while (i > 0 && j > 0) {
-    if (sim[i][j] > 0 && fabs(dp[i][j] - (dp[i-1][j-1] + sim[i][j])) < 1e-9) {
+    lua_rawgeti(L, Aidx, i);
+    const char *a = lua_tostring(L, -1);
+    lua_rawgeti(L, Bidx, j);
+    const char *b = lua_tostring(L, -1);
+    if (strcmp(a, b) == 0) {
       pairs[count++] = (Pair){i, j};
       i--; j--;
     } else if (dp[i-1][j] >= dp[i][j-1]) {
@@ -140,19 +133,18 @@ static Pair *build_lcs(lua_State *L, int Aidx, int Bidx, int *npairs, double thr
     } else {
       j--;
     }
+    lua_pop(L, 2);
   }
 
-  // Reverse pairs
+  // Reverse pairs to ascending order
   for (int k = 0; k < count / 2; k++) {
     Pair tmp = pairs[k];
     pairs[k] = pairs[count - k - 1];
     pairs[count - k - 1] = tmp;
   }
 
-  for (int i = 0; i <= n; i++) {
-    free(sim[i]); free(dp[i]);
-  }
-  free(sim); free(dp);
+  for (int i = 0; i <= n; i++) free(dp[i]);
+  free(dp);
 
   *npairs = count;
   return pairs;
@@ -341,7 +333,7 @@ static int f_inline_diff(lua_State *L) {
 static int f_diff(lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   luaL_checktype(L, 2, LUA_TTABLE);
-  double threshold = luaL_optnumber(L, 3, 0.4);
+  double threshold = luaL_optnumber(L, 3, 0.75);
 
   int Aidx = 1, Bidx = 2;
   int lenA = (int)lua_rawlen(L, Aidx);
@@ -365,16 +357,16 @@ static int f_diff(lua_State *L) {
       lua_rawgeti(L, Bidx, bi);
       const char *b = lua_tostring(L, -1);
 
-      push_edit(L, strcmp(a, b) == 0 ? "equal" : "modify", "a", a);
+      push_edit(L, "equal", "a", a);
       lua_pushstring(L, b);
       lua_setfield(L, -2, "b");
       lua_rawseti(L, result_idx, out_i++);
-      lua_pop(L, 2);
 
+      lua_pop(L, 2);
       ai++; bi++; pi++;
     }
     else if (mi > ai && mj > bi) {
-      // Try fallback similarity on unmatched lines
+      // fallback similarity check for modifications
       lua_rawgeti(L, Aidx, ai);
       const char *a = lua_tostring(L, -1);
       lua_rawgeti(L, Bidx, bi);
@@ -387,6 +379,7 @@ static int f_diff(lua_State *L) {
         lua_pushstring(L, b);
         lua_setfield(L, -2, "b");
         lua_rawseti(L, result_idx, out_i++);
+
         ai++; bi++;
         continue;
       }
@@ -438,7 +431,7 @@ static int diff_iterator(lua_State *L) {
       const char *b = lua_tostring(L, -1);
       lua_pop(L, 1);
 
-      push_edit(L, strcmp(a, b) == 0 ? "equal" : "modify", "a", a);
+      push_edit(L, "equal", "a", a);
       lua_pushstring(L, b);
       lua_setfield(L, -2, "b");
 
@@ -487,7 +480,6 @@ static int diff_iterator(lua_State *L) {
     }
   }
 
-  // Free memory when done
   if (state->pairs) {
     free(state->pairs);
     state->pairs = NULL;
@@ -509,7 +501,7 @@ static int diff_iterator(lua_State *L) {
 static int f_diff_iter(lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   luaL_checktype(L, 2, LUA_TTABLE);
-  double threshold = luaL_optnumber(L, 3, 0.4);
+  double threshold = luaL_optnumber(L, 3, 0.75);
 
   DiffState *state = malloc(sizeof(DiffState));
   state->lenA = (int)lua_rawlen(L, 1);
