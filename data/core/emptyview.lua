@@ -212,6 +212,7 @@ function EmptyView:draw()
       self.prev_size.x = -1
       self.center_container.size.x = -1
     end
+    core.redraw = true
   end
   local _, oy = self:get_content_offset()
   draw_text(self, self.text_x, self.text_y + oy)
