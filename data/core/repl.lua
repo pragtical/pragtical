@@ -30,16 +30,13 @@ local repl_loaded, repl = pcall(require, "repl")
 ---@overload fun():core.repl
 local REPL = Object:extend()
 
-local register_default_commands
-local register_default_completions
-
 function REPL:new()
   self.commands = {}
   self.completions = {}
   self.history_file = USERDIR .. PATHSEP .. "repl_history"
   self.max_history = 1000
-  register_default_commands(self)
-  register_default_completions(self)
+  self:register_default_commands()
+  self:register_default_completions()
 end
 
 ---Register a new command provider.
@@ -69,6 +66,16 @@ function REPL:register_completion(completion)
   end
   table.insert(self.completions, completion)
   return true
+end
+
+local function repl_pcall(chunk)
+  local out = {pcall(chunk)}
+  local ok = out[1]
+  local result = {}
+  for i=2, #out do
+    table.insert(result, out[i])
+  end
+  return ok, result
 end
 
 ---A basic REPL with multi-line and expression evaluation for the repl command.
@@ -139,21 +146,21 @@ function REPL:start()
 
     local expr_chunk = load("return " .. buffer, "repl")
     if expr_chunk then
-      local ok, result = pcall(expr_chunk)
-      if ok and result ~= nil then
-        print(result)
+      local ok, result = repl_pcall(expr_chunk)
+      if ok and #result > 0 then
+        print(table.unpack(result))
       elseif not ok then
-        print("Error:", result)
+        print("Error:", result[1])
       end
       buffer = ""
     else
       local chunk, err = load(buffer, "repl")
       if chunk then
-        local ok, result = pcall(chunk)
-        if ok and result ~= nil then
-          print(result)
+        local ok, result = repl_pcall(chunk)
+        if ok and #result > 0 then
+          print(table.unpack(result))
         elseif not ok then
-          print("Error:", result)
+          print("Error:", result[1])
         end
         buffer = ""
       elseif err and err:match("<eof>") then
@@ -170,8 +177,12 @@ function REPL:start()
 end
 
 ---Register a set of default commands.
----@param self core.repl
-register_default_commands = function(self)
+---This is automatically called from the constructor,
+---override to add your own commands.
+function REPL:register_default_commands()
+  assert(not self.default_commands_called, "default commands already registered")
+  self.default_commands_called = true
+
   self:register_command {
     name = "help",
     description = "Show this help message",
@@ -346,8 +357,12 @@ register_default_commands = function(self)
 end
 
 ---Register default completion providers.
----@param self core.repl
-register_default_completions = function(self)
+---This is automatically called from the constructor,
+---override to add your own completions.
+function REPL:register_default_completions()
+  assert(not self.default_completions_called, "default completions already registered")
+  self.default_completions_called = true
+
   -- built-in command
   self:register_completion {
     pattern = "^%.[%w]*",
