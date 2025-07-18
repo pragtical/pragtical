@@ -246,6 +246,7 @@ local commands = {
       l1, c1 = dv.doc:get_selection_idx(1)
     end
     dv.doc:set_selection(l1, c1)
+    dv.doc:clear_search_selections()
   end,
 
   ["doc:cut"] = function()

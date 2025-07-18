@@ -576,15 +576,59 @@ function DocView:draw_line_text(line, x, y)
     last_token = tokens_count - 1
   end
   local _, indent_size = self.doc:get_indent_info()
+
+  local search_selections = {}
+  for _, line1, col1, line2, col2 in self.doc:get_selections(true) do
+    if line == line1 and line <= line2 then
+      if self.doc:is_search_selection(line1, col1, line2, col2) then
+        table.insert(search_selections, {start = col1, stop = col2})
+      end
+    end
+  end
+
+  local col = 1
   local start_tx = tx
   for tidx, type, text in self.doc.highlighter:each_token(line) do
-    local color = style.syntax[type] or style.syntax["normal"]
-    local font = style.syntax_fonts[type] or default_font
-    if font ~= default_font then font:set_tab_size(indent_size) end
-    -- do not render newline, fixes issue #1164
-    if tidx == last_token then text = text:sub(1, -2) end
-    tx = renderer.draw_text(font, text, tx, ty, color, {tab_offset = tx - start_tx})
-    if tx > self.position.x + self.size.x then break end
+    if #search_selections == 0 then
+      local color = style.syntax[type] or style.syntax["normal"]
+      local font = style.syntax_fonts[type] or default_font
+      if font ~= default_font then font:set_tab_size(indent_size) end
+      -- do not render newline, fixes issue #1164
+      if tidx == last_token then text = text:sub(1, -2) end
+      tx = renderer.draw_text(font, text, tx, ty, color, {tab_offset = tx - start_tx})
+      if tx > self.position.x + self.size.x then break end
+    else
+      local font = style.syntax_fonts[type] or default_font
+      if font ~= default_font then font:set_tab_size(indent_size) end
+      if tidx == last_token then text = text:sub(1, -2) end
+      local i = 1
+      local len = #text
+
+      local function is_selected(c)
+        for _, sel in ipairs(search_selections) do
+          if c >= sel.start and c < sel.stop then
+            return true
+          end
+        end
+        return false
+      end
+
+      while i <= len do
+        local chunk_start = i
+        local c = col
+        local selected = is_selected(c)
+        -- advance through contiguous characters with the same selection status
+        while i <= len and is_selected(col) == selected do
+          i = i + 1
+          col = col + 1
+        end
+        local chunk = text:sub(chunk_start, i - 1)
+        local color = selected and (style.search_selection_text or style.background)
+          or (style.syntax[type] or style.syntax["normal"])
+        tx = renderer.draw_text(font, chunk, tx, ty, color, {tab_offset = tx - start_tx})
+        if tx > self.position.x + self.size.x then break end
+      end
+    end
   end
   return self:get_line_height()
 end
@@ -631,7 +675,11 @@ function DocView:draw_line_body(line, x, y)
       local x1 = x + self:get_col_x_offset(line, col1)
       local x2 = x + self:get_col_x_offset(line, col2)
       if x1 ~= x2 then
-        renderer.draw_rect(x1, y, x2 - x1, lh, style.selection)
+        local selection_color = style.selection
+        if self.doc:is_search_selection(line1, col1, line, col2) then
+          selection_color = style.search_selection or style.caret
+        end
+        renderer.draw_rect(x1, y, x2 - x1, lh, selection_color)
       end
     end
   end

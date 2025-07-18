@@ -123,7 +123,9 @@ function search.find(doc, line, col, text, opt)
     until matches == true or not e or e < s or e >= line_len
     if s then
       if e >= s and (e ~= line_len or s ~= e) then
-        return line, s, line, e == line_len and e or e + 1
+        local col2 = e == line_len and e or e + 1
+        doc:add_search_selection(line, s, line, col2)
+        return line, s, line, col2
       end
     end
     col = opt.reverse and -1 or 1
