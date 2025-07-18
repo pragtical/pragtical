@@ -370,7 +370,7 @@ function DocView:scroll_to_make_visible(line, col)
   local lh = self:get_line_height()
   local _, _, _, scroll_h = self.h_scrollbar:get_track_rect()
 
-  local pad = (config.scroll_context_lines or 1)
+  local pad = not self.mouse_selecting and config.scroll_context_lines or 1
   local above = ly - oy - lh * pad
   local below = ly - oy - self.size.y + scroll_h + lh * pad
 
