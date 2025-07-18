@@ -371,7 +371,7 @@ function DocView:scroll_to_make_visible(line, col, instant)
   local _, _, _, scroll_h = self.h_scrollbar:get_track_rect()
 
   local pad = not self.mouse_selecting and config.scroll_context_lines or 1
-  local above = ly - oy - lh * pad
+  local above = math.max(0, ly - oy - lh * pad)
   local below = ly - oy - self.size.y + scroll_h + lh * (pad + 1)
 
   self.scroll.to.y = common.clamp(self.scroll.to.y, below, above)
