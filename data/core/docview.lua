@@ -449,6 +449,7 @@ end
 
 
 function DocView:on_mouse_pressed(button, x, y, clicks)
+  if button == "left" then self.doc:clear_search_selections() end
   if button ~= "left" or not self.hovering_gutter then
     return DocView.super.on_mouse_pressed(self, button, x, y, clicks)
   end
@@ -478,10 +479,12 @@ end
 
 
 function DocView:on_text_input(text)
+  self.doc:clear_search_selections()
   self.doc:text_input(text)
 end
 
 function DocView:on_ime_text_editing(text, start, length)
+  self.doc:clear_search_selections()
   self.doc:ime_text_editing(text, start, length)
   self.ime_status = #text > 0
   self.ime_selection.from = start
