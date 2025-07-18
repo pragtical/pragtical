@@ -164,6 +164,13 @@ config.highlight_current_line = "no_selection"
 ---@type number
 config.line_height = 1.2
 
+---Minimum number of lines to keep visible above and below the cursor
+---when scrolling the document.
+---
+---The default is 10
+---@type integer
+config.scroll_context_lines = 10
+
 ---The number of spaces each level of indentation represents.
 ---
 ---The default is 2.
