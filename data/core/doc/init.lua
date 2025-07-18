@@ -43,6 +43,7 @@ end
 function Doc:reset()
   self.lines = { "\n" }
   self.selections = { 1, 1, 1, 1 }
+  self.search_selections = {}
   self.last_selection = 1
   self.undo_stack = { idx = 1 }
   self.redo_stack = { idx = 1 }
@@ -894,6 +895,24 @@ function Doc:get_non_word_chars(symbol)
   end
   return (current_syntax and current_syntax[non_word_chars])
     and current_syntax[non_word_chars] or config.non_word_chars
+end
+
+
+function Doc:add_search_selection(line1, col1, line2, col2)
+  line1, col1, line2, col2 = sort_positions(line1, col1, line2, col2)
+  local idx = string.format("%d:%d-%d:%d", line1, col1, line2, col2)
+  self.search_selections[idx] = true
+end
+
+function Doc:is_search_selection(line1, col1, line2, col2)
+  line1, col1, line2, col2 = sort_positions(line1, col1, line2, col2)
+  local idx = string.format("%d:%d-%d:%d", line1, col1, line2, col2)
+  if self.search_selections[idx] then return true end
+  return false
+end
+
+function Doc:clear_search_selections()
+  self.search_selections = {}
 end
 
 

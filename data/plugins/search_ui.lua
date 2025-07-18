@@ -408,7 +408,7 @@ local function find(reverse, not_scroll, unselect_first, no_wrap)
         doc:set_selection(line1, col1, line2, col2)
       end
       if not not_scroll then
-        doc_view:scroll_to_make_visible(line1, col1)
+        doc_view:scroll_to_make_visible(line1, col1, true)
       end
       Results:find(text, doc)
     end
