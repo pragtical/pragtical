@@ -787,7 +787,7 @@ settings.add("Advanced",
     },
     {
       label = "Garbage Collector Pause",
-      description = "How many times ram has to increase after last clean in order to reclean. Lower value makes GC more aggressive but may cause stuttering.",
+      description = "How many times ram has to increase after last clean in order to reclean. Lower value makes GC more aggressive but may cause stuttering. (Ignored on Lua 5.4+)",
       path = "gc_pause",
       type = settings.type.NUMBER,
       default = 2,
@@ -800,14 +800,12 @@ settings.add("Advanced",
       on_apply = function(value)
         if LUA_VERSION < 5.4 then
           collectgarbage("setpause", value*100)
-        else
-          collectgarbage("incremental", value*100, 0, 0)
         end
       end
     },
     {
       label = "Garbage Collector Step Multiplier",
-      description = "How many times faster to run the collector in relation to allocations. Higher value makes GC more aggressive but may cause stuttering.",
+      description = "How many times faster to run the collector in relation to allocations. Higher value makes GC more aggressive but may cause stuttering. (Ignored on Lua 5.4+)",
       path = "gc_step_multiplier",
       type = settings.type.NUMBER,
       default = 2,
@@ -820,8 +818,6 @@ settings.add("Advanced",
       on_apply = function(value)
         if LUA_VERSION < 5.4 then
           collectgarbage("setstepmul", value*100)
-        else
-          collectgarbage("incremental", 0, value*100, 0)
         end
       end
     },
