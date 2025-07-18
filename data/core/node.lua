@@ -510,9 +510,7 @@ end
 function Node:update()
   if self.type == "leaf" then
     self:scroll_tabs_to_visible()
-    for _, view in ipairs(self.views) do
-      view:update()
-    end
+    self.active_view:update()
     self:tab_hovered_update(core.root_view.mouse.x, core.root_view.mouse.y)
     local tab_width = self:target_tab_width()
     self:move_towards("tab_shift", tab_width * (self.tab_offset - 1), nil, "tabs")
@@ -622,9 +620,11 @@ function Node:draw()
       self:draw_tabs()
     end
     local pos, size = self.active_view.position, self.active_view.size
-    core.push_clip_rect(pos.x, pos.y, size.x, size.y)
-    self.active_view:draw()
-    core.pop_clip_rect()
+    if size.x > 0 and size.y > 0 then
+      core.push_clip_rect(pos.x, pos.y, size.x, size.y)
+      self.active_view:draw()
+      core.pop_clip_rect()
+    end
   else
     local x, y, w, h = self:get_divider_rect()
     renderer.draw_rect(x, y, w, h, style.divider)

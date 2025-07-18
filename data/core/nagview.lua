@@ -27,6 +27,7 @@ function NagView:new()
   self.target_height = 0
   self.on_mouse_pressed_root = nil
   self.dim_alpha = 0
+  self.visible = false
 end
 
 function NagView:get_title()
@@ -60,8 +61,6 @@ function NagView:get_scrollable_size()
   if self.visible and self:get_target_height() > h then
     self.size.y = h
     return self:get_target_height()
-  else
-    self.size.y = 0
   end
   return 0
 end
@@ -177,6 +176,7 @@ function NagView:update()
   NagView.super.update(self)
 
   if self.visible and core.active_view == self and self.title then
+    if self.size.y == 0 then self.size.y = 0.001 end
     local target_height = self:get_target_height()
     self:move_towards(self, "show_height", target_height, nil, "nagbar")
     self:move_towards(self, "underline_progress", 1, nil, "nagbar")
@@ -185,6 +185,7 @@ function NagView:update()
     self:move_towards(self, "show_height", 0, nil, "nagbar")
     self:move_towards(self, "dim_alpha", 0, nil, "nagbar")
     if self.show_height <= 0 then
+      self.size.y = 0
       self.title = nil
       self.message = nil
       self.options = nil
