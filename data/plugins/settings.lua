@@ -606,6 +606,15 @@ settings.add("Editor",
       step = 0.1
     },
     {
+      label = "Context Lines",
+      description = "Minimum number of lines to keep visible above and below the cursor when scrolling the document.",
+      path = "scroll_context_lines",
+      type = settings.type.NUMBER,
+      default = 10,
+      min = 0,
+      step = 1
+    },
+    {
       label = "Highlight Line",
       description = "Highlight the current line.",
       path = "highlight_current_line",

@@ -369,8 +369,13 @@ function DocView:scroll_to_make_visible(line, col)
   local _, ly = self:get_line_screen_position(line, col)
   local lh = self:get_line_height()
   local _, _, _, scroll_h = self.h_scrollbar:get_track_rect()
-  local overscroll = math.min(lh * 2, self.size.y) -- always show the previous / next line when possible
-  self.scroll.to.y = common.clamp(self.scroll.to.y, ly - oy - self.size.y + scroll_h + overscroll, ly - oy - lh)
+
+  local pad = (config.scroll_context_lines or 1)
+  local above = ly - oy - lh * pad
+  local below = ly - oy - self.size.y + scroll_h + lh * pad
+
+  self.scroll.to.y = common.clamp(self.scroll.to.y, below, above)
+
   local gw = self:get_gutter_width()
   local xoffset = self:get_col_x_offset(line, col)
   local xmargin = 3 * self:get_font():get_width(' ')
@@ -378,6 +383,7 @@ function DocView:scroll_to_make_visible(line, col)
   local xinf = xoffset - xmargin
   local _, _, scroll_w = self.v_scrollbar:get_track_rect()
   local size_x = math.max(0, self.size.x - scroll_w)
+
   if xsup > self.scroll.x + size_x then
     self.scroll.to.x = xsup - size_x
   elseif xinf < self.scroll.x then
