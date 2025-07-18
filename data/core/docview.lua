@@ -364,7 +364,7 @@ function DocView:supports_text_input()
 end
 
 
-function DocView:scroll_to_make_visible(line, col)
+function DocView:scroll_to_make_visible(line, col, instant)
   local _, oy = self:get_content_offset()
   local _, ly = self:get_line_screen_position(line, col)
   local lh = self:get_line_height()
@@ -388,6 +388,11 @@ function DocView:scroll_to_make_visible(line, col)
     self.scroll.to.x = xsup - size_x
   elseif xinf < self.scroll.x then
     self.scroll.to.x = math.max(0, xinf)
+  end
+
+  if instant then
+    self.scroll.y = self.scroll.to.y
+    self.scroll.x = self.scroll.to.x
   end
 end
 
