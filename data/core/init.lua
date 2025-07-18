@@ -1396,6 +1396,15 @@ local rendering_speed = 0.004
 ---@type number
 local cycle_end_time = 0
 
+---Keep track of frame drops in order to decide if we should adjust the timings.
+---@type integer
+local fps_drops = 0
+
+---Maximum amount of coroutines to execute on a frame iteration that not exceed
+---the maximum allowed time. Value is adjusted on each run_threads as needed.
+---@type integer
+local max_coroutines = 1000
+
 ---Amount of time spent running the main loop without the time it takes to
 ---run the coroutines. (resets at very cycle end)
 ---@type number
@@ -1488,12 +1497,21 @@ function core.step(next_frame_time)
 
   local frame_time = system.get_time() - start_time
   rendering_speed = math.max(0.001, frame_time)
+  local meets_fps = rendering_speed * config.fps < 1
 
-  if rendering_speed * config.fps < 1 then
+  if meets_fps or fps_drops < 3 then
     -- Calculate max allowed coroutines run time based on rendering speed.
     -- verbose formula: (1s - (rendering_speed * config.fps)) / config.fps
     core.co_max_time = 1 / config.fps - rendering_speed
     core.fps = config.fps
+
+    if meets_fps then
+      fps_drops = math.max(fps_drops - 1, 0)
+    else
+      fps_drops = fps_drops + 1
+      core.co_max_time = rendering_speed / 3
+      max_coroutines = 1
+    end
   else
     -- If fps rendering dropped from config target we set the max time to
     -- to consume a fourth of the time that would be spent rendering.
@@ -1502,6 +1520,7 @@ function core.step(next_frame_time)
     -- maximum time for coroutines of 0.013333333333333 per iteration.
     -- verbose formula: (rendering_speed * (fps / 4)) / (fps - (fps / 4))
     core.co_max_time = rendering_speed / 3
+    max_coroutines = 1
 
     -- current frames per second substracting portion given to coroutines
     core.fps = 1 / (rendering_speed + core.co_max_time)
@@ -1546,11 +1565,6 @@ end
 ---Flag that indicates which coroutines should be ran by run_threads().
 ---@type "all" | "background"
 local run_threads_mode = "all"
-
----Maximum amount of coroutines to execute on a frame iteration that not exceed
----the maximum allowed time. Value is adjusted on each run_threads as needed.
----@type integer
-local max_coroutines = 1000
 
 local run_threads = coroutine.wrap(function()
   while true do
@@ -1701,7 +1715,7 @@ function core.run()
   local skip_no_focus = 0
   local burst_events = 0
   local has_focus = true
-  local next_frame_time = 1 / config.fps
+  local next_frame_time = system.get_time() + 1 / config.fps
   while true do
     local uncapped = config.draw_stats == "uncapped"
     core.frame_start = system.get_time()
