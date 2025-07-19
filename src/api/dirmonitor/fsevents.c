@@ -1,10 +1,10 @@
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <CoreServices/CoreServices.h>
 
 #include "dirmonitor.h"
 
 struct dirmonitor_internal {
-  SDL_mutex* lock;
+  SDL_Mutex* lock;
   char** changes;
   size_t count;
   FSEventStreamRef stream;
