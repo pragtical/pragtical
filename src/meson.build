@@ -11,6 +11,7 @@ pragtical_sources = [
     'api/shmem.c',
     'api/utf8.c',
     'api/encoding.c',
+    'api/diff.c',
     'arena_allocator.c',
     'renderer.c',
     'renwindow.c',
