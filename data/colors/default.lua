@@ -5,7 +5,7 @@ style.background = { common.color "#2c2c2c" }  -- Docview
 style.background2 = { common.color "#222222" } -- Treeview
 style.background3 = { common.color "#222222" } -- Command view
 style.text = { common.color "#C0BFBC" }
-style.caret = { common.color "#3771c8" }
+style.caret = { common.color "#87aade" }
 style.accent = { common.color "#FCFCFC" }
 -- style.dim - text color for nonactive tabs, tabs divider, prefix in log and
 -- search result, hotkeys for context menu and command view
@@ -27,6 +27,9 @@ style.good = { common.color "#47D35C" }
 style.warn = { common.color "#FAA82F" }
 style.error = { common.color "#c7162b" }
 style.modified = { common.color "#19B6EE" }
+
+style.search_selection = { common.color "#6a5acd" }
+style.search_selection_text = { common.color "#ffffff" }
 
 style.syntax["normal"] = { common.color "#C0BFBC" }
 style.syntax["symbol"] = { common.color "#B0AFAC" }
