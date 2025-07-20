@@ -1572,8 +1572,6 @@ local run_threads = coroutine.wrap(function()
     local minimal_time_to_wake = math.huge
     -- a count on the amount of threads that ran
     local runs = 0
-    -- time taken to execute coroutines without yielding
-    local total_time = 0
     -- used to re-adjust the minimal_time_to_wake to prioritize recurrent threads
     local run_start = system.get_time()
 
@@ -1590,13 +1588,11 @@ local run_threads = coroutine.wrap(function()
             and
             start_time + thread.avg_time > cycle_end_time - main_loop_time
           then
-              coroutine.yield(thread.avg_time, total_time)
+              coroutine.yield(thread.avg_time)
               start_time = system.get_time()
-              total_time = 0
           end
           local _, wait = assert(coroutine.resume(thread.cr))
           end_time = system.get_time() - start_time
-          total_time = total_time + end_time
           runs = runs + 1
           if coroutine.status(thread.cr) == "dead" then
             if type(k) == "number" then
@@ -1653,8 +1649,7 @@ local run_threads = coroutine.wrap(function()
         if max_coroutines > 1 then
           max_coroutines = math.max(runs-1, 1)
         end
-        coroutine.yield(0, total_time)
-        total_time = 0
+        coroutine.yield(0)
       elseif runs >= max_coroutines then
         coroutine.yield(
           yield_time - run_start > minimal_time_to_wake
@@ -1662,10 +1657,8 @@ local run_threads = coroutine.wrap(function()
             or (minimal_time_to_wake > yield_time
               and minimal_time_to_wake - yield_time
               or minimal_time_to_wake
-            ),
-          total_time
+            )
         )
-        total_time = 0
       end
     end
 
@@ -1680,8 +1673,7 @@ local run_threads = coroutine.wrap(function()
         or (minimal_time_to_wake > yield_time
           and minimal_time_to_wake - yield_time
           or minimal_time_to_wake
-        ),
-      total_time
+        )
     )
   end
 end)
@@ -1717,8 +1709,9 @@ function core.run()
   local has_focus = true
   local next_frame_time = system.get_time() + 1 / config.fps
   while true do
+    local now = system.get_time()
     local uncapped = config.draw_stats == "uncapped"
-    core.frame_start = system.get_time()
+    core.frame_start = now
 
     -- start a new 1s cycle
     if core.frame_start >= cycle_end_time then
@@ -1728,7 +1721,9 @@ function core.run()
     end
 
     -- run all coroutine tasks
-    local time_to_wake, threads_end_time = run_threads()
+    local time_to_wake = run_threads()
+    local threads_end_time = system.get_time() - now
+    now = now + threads_end_time
 
     -- respect coroutines redraw requests
     if has_focus or core.redraw then
@@ -1751,18 +1746,18 @@ function core.run()
       -- run background threads, no drawing or events processing
       next_step = nil
       if system.wait_event(time_to_wake) then
-        skip_no_focus = system.get_time() + 5
+        skip_no_focus = now + 5
       end
     else
       -- run all threads, listen events and perform drawing as needed
       local did_redraw = false
-      if not next_step or system.get_time() >= next_step then
+      if not next_step or now >= next_step then
         did_redraw = core.step(next_frame_time)
+        now = system.get_time()
         next_step = nil
       end
       if core.restart_request or core.quit_request then break end
       if not did_redraw then
-        local now = system.get_time()
         if has_focus or core.background_threads > 0 or skip_no_focus > now then
           if not next_step then -- compute the time until the next blink
             local t = now - core.blink_start
@@ -1792,7 +1787,6 @@ function core.run()
           next_step = nil
         end
       else -- if we redrew, then make sure we only draw at most FPS/sec
-        local now = system.get_time()
         local elapsed = now - core.frame_start
         local next_frame = math.max(0, 1 / core.fps - elapsed)
         next_frame_time = now + next_frame
