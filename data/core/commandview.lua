@@ -34,6 +34,7 @@ local noop = function() end
 ---@field cancel function
 ---@field validate function
 ---@field text string
+---@field draw_text? fun(item, font, color, x, y, w, h)
 ---@field select_text boolean
 ---@field show_suggestions boolean
 ---@field typeahead boolean
@@ -44,6 +45,7 @@ local default_state = {
   cancel = noop,
   validate = function() return true end,
   text = "",
+  draw_text = nil,
   select_text = false,
   show_suggestions = true,
   typeahead = true,
@@ -350,6 +352,7 @@ function CommandView:is_mouse_on_suggestions()
 end
 
 
+---@param self core.commandview
 local function draw_suggestions_box(self)
   local lh = self:get_suggestion_line_height()
   local dh = style.divider_size
@@ -386,6 +389,8 @@ local function draw_suggestions_box(self)
       last = math.min(self.suggestions_last, #self.suggestions)
     end
     core.push_clip_rect(rx, ry, rw, rh)
+    local draw_text = self.state.draw_text
+    local font = self:get_font()
     for i=first, last do
       local item = self.suggestions[i]
       local color = (i == current) and style.accent or style.text
@@ -393,9 +398,13 @@ local function draw_suggestions_box(self)
       if i == current then
         renderer.draw_rect(rx, y, rw, lh, style.line_highlight)
       end
-      common.draw_text(self:get_font(), color, item.text, nil, x, y, 0, lh)
+      local w = self.size.x - x - style.padding.x
+      if not draw_text then
+        common.draw_text(font, color, item.text, nil, x, y, 0, lh)
+      else
+        draw_text(item, font, color, x, y, w, lh)
+      end
       if item.info then
-        local w = self.size.x - x - style.padding.x
         common.draw_text(self:get_font(), style.dim, item.info, "right", x, y, w, lh)
       end
     end
