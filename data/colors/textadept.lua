@@ -25,6 +25,10 @@ style.scrollbar2          =     { common.color(b60) }
 style.nagbar              =     { common.color(red) }
 style.nagbar_text         =     { common.color(b00) }
 style.nagbar_dim          =     { common.color(b05) }
+
+style.search_selection = { common.color "#e6b800" }
+style.search_selection_text = { common.color "#4d3d00" }
+
 --------------------------=--------------------------
 style.syntax              =                        {}
 style.syntax['normal']    =     { common.color(b80) }
