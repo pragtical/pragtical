@@ -576,6 +576,23 @@ local commands = {
           init_items()
           return common.fuzzy_match(items, text)
         end
+      end,
+      draw_text = function(item, font, color, x, y, w, h)
+        y = common.round(y + (h - font:get_height()) / 2)
+        local tx = x
+        local last_token = nil
+        local tokens = dv.doc.highlighter:get_line(item.line).tokens
+        local tokens_count = #tokens
+        if tokens_count > 0 and string.sub(tokens[tokens_count], -1) == "\n" then
+          last_token = tokens_count - 1
+        end
+        for tidx, type, text in dv.doc.highlighter:each_token(item.line) do
+          color = style.syntax[type] or style.syntax["normal"]
+          -- do not render newline, fixes issue #1164
+          if tidx == last_token then text = text:sub(1, -2) end
+          tx = renderer.draw_text(font, text, tx, y, color)
+          if tx > (x + w) - font:get_width(item.info) - style.padding.x * 2 then break end
+        end
       end
     })
   end,
