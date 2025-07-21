@@ -12,6 +12,7 @@ local element_a = nil
 local element_b = nil
 local element_a_text = nil
 local element_b_text = nil
+local diff_updater_idx = 0
 
 ---@class core.diffview : core.view
 ---@field doc_view_a core.docview
@@ -41,27 +42,49 @@ function DiffView:new(a, b, is_string)
   self.doc_view_a = DocView(doc_a)
   self.doc_view_b = DocView(doc_b)
 
-  self.a_spaces = {}
-  self.b_spaces = {}
+  self.a_gaps = {}
+  self.b_gaps = {}
   self.a_changes = {}
   self.b_changes = {}
 
-  core.add_thread(function()
+  self:patch_views()
+  self:update_diff()
+end
+
+function DiffView:get_name()
+  return not self.is_string and "Files Comparison" or "Strings Comparison"
+end
+
+function DiffView:update_diff()
+  -- stop previous update if still running.
+  if self.updater_idx then
+    for _, thread in pairs(core.threads) do
+      if thread.diff_viewer and thread.diff_viewer == self.updater_idx then
+        thread.cr = coroutine.create(function() end)
+      end
+    end
+  end
+
+  local idx = core.add_thread(function()
     local ai, bi = 1, 1
     local a_offset, b_offset = 0, 0
     local a_offset_total, b_offset_total = 0, 0
     local a_len = #self.doc_view_a.doc.lines
     local b_len = #self.doc_view_b.doc.lines
 
+    local a_gaps = #self.a_gaps == 0 and self.a_gaps or {}
+    local b_gaps = #self.b_gaps == 0 and self.b_gaps or {}
+    local a_changes = #self.a_changes == 0 and self.a_changes or {}
+    local b_changes = #self.b_changes == 0 and self.b_changes or {}
     for edit in diff.diff_iter(self.doc_view_a.doc.lines, self.doc_view_b.doc.lines) do
       if edit.tag == "equal" or edit.tag == "modify" then
         -- Assign gaps for this line
-        self.a_spaces[ai] = { a_offset, a_offset_total }
-        self.b_spaces[bi] = { b_offset, b_offset_total }
+        a_gaps[ai] = { a_offset, a_offset_total }
+        b_gaps[bi] = { b_offset, b_offset_total }
 
         -- Insert inline diffs if present
         if edit.a then
-          table.insert(self.a_changes, {
+          table.insert(a_changes, {
             tag = edit.tag,
             changes = diff.inline_diff(edit.b or "", edit.a)
           })
@@ -69,7 +92,7 @@ function DiffView:new(a, b, is_string)
           a_offset = 0
         end
         if edit.b then
-          table.insert(self.b_changes, {
+          table.insert(b_changes, {
             tag = edit.tag,
             changes = diff.inline_diff(edit.a or "", edit.b)
           })
@@ -80,8 +103,8 @@ function DiffView:new(a, b, is_string)
       elseif edit.tag == "delete" then
         -- Lines only in A (deleted from B)
         if edit.a then
-          self.a_spaces[ai] = { a_offset, a_offset_total }
-          table.insert(self.a_changes, { tag = "delete" })
+          a_gaps[ai] = { a_offset, a_offset_total }
+          table.insert(a_changes, { tag = "delete" })
           ai = ai + 1
           -- Increase gap on B side because these lines are missing in B
           b_offset = b_offset + 1
@@ -91,31 +114,13 @@ function DiffView:new(a, b, is_string)
       elseif edit.tag == "insert" then
         -- Lines only in B (inserted in B)
         if edit.b then
-          self.b_spaces[bi] = { b_offset, b_offset_total }
-          table.insert(self.b_changes, { tag = "insert" })
+          b_gaps[bi] = { b_offset, b_offset_total }
+          table.insert(b_changes, { tag = "insert" })
           bi = bi + 1
           -- Increase gap on A side because these lines are missing in A
           a_offset = a_offset + 1
           a_offset_total = a_offset_total + 1
         end
-
-      elseif edit.tag == "replace" then
-        -- Replace: treat as delete + insert
-        if edit.a then
-          self.a_spaces[ai] = { a_offset, a_offset_total }
-          table.insert(self.a_changes, { tag = "replace" })
-          ai = ai + 1
-        end
-        if edit.b then
-          self.b_spaces[bi] = { b_offset, b_offset_total }
-          table.insert(self.b_changes, { tag = "replace" })
-          bi = bi + 1
-        end
-        -- Increase offsets for gaps on both sides
-        a_offset = a_offset + (edit.b and 1 or 0)
-        a_offset_total = a_offset_total + (edit.b and 1 or 0)
-        b_offset = b_offset + (edit.a and 1 or 0)
-        b_offset_total = b_offset_total + (edit.a and 1 or 0)
       end
 
       coroutine.yield()
@@ -123,20 +128,25 @@ function DiffView:new(a, b, is_string)
 
     -- Fill trailing lines spaces after diff ends
     while ai <= a_len do
-      self.a_spaces[ai] = self.a_spaces[ai] or { a_offset, a_offset_total }
+      a_gaps[ai] = a_gaps[ai] or { a_offset, a_offset_total }
       ai = ai + 1
     end
     while bi <= b_len do
-      self.b_spaces[bi] = self.b_spaces[bi] or { b_offset, b_offset_total }
+      b_gaps[bi] = b_gaps[bi] or { b_offset, b_offset_total }
       bi = bi + 1
     end
+
+    self.a_gaps = a_gaps
+    self.b_gaps = b_gaps
+    self.a_changes = a_changes
+    self.b_changes = b_changes
+
+    self.updater_idx = nil
   end)
 
-  self:patch_views()
-end
-
-function DiffView:get_name()
-  return not self.is_string and "Files Comparison" or "Strings Comparison"
+  core.threads[idx].diff_viewer = diff_updater_idx
+  self.updater_idx = diff_updater_idx
+  diff_updater_idx = diff_updater_idx + 1
 end
 
 function DiffView:on_mouse_pressed(button, x, y, clicks)
@@ -213,6 +223,7 @@ end
 
 local delete_color = {common.color "rgba(200, 84, 84, 0.15)"}
 local insert_color = {common.color "rgba(121, 199, 114, 0.15)"}
+local modify_color = {common.color "rgba(85, 112, 201, 0.15)"}
 local delete_inline_color = {common.color "rgba(200, 84, 84, 0.20)"}
 local insert_inline_color = {common.color "rgba(121, 199, 114, 0.20)"}
 
@@ -264,126 +275,165 @@ end
 function DiffView:patch_views()
   local parent = self
 
-  local a_draw_line_text = self.doc_view_a.draw_line_text
-  function parent.doc_view_a:draw_line_text(line, x, y)
-    draw_line_text_override(parent, self, line, x, y, parent.a_changes)
-    local lh = a_draw_line_text(self, line, x, y)
-    return lh
-  end
-
-  local b_draw_line_text = self.doc_view_b.draw_line_text
-  function parent.doc_view_b:draw_line_text(line, x, y)
-    draw_line_text_override(parent, self, line, x, y, parent.b_changes)
-    local lh = b_draw_line_text(self, line, x, y)
-    return lh
-  end
-
-  local a_draw_line_gutter = self.doc_view_a.draw_line_gutter
-  function parent.doc_view_a:draw_line_gutter(line, x, y, width)
-    local gaps = parent.a_spaces
-    local offset = (gaps[line] and gaps[line][2] or 0) * self:get_line_height()
-    local lh = a_draw_line_gutter(self, line, x, y + offset, width)
-    return lh
-  end
-
-  local b_draw_line_gutter = self.doc_view_b.draw_line_gutter
-  function parent.doc_view_b:draw_line_gutter(line, x, y, width)
-    local gaps = parent.b_spaces
-    local offset = (gaps[line] and gaps[line][2] or 0) * self:get_line_height()
-    local lh = b_draw_line_gutter(self, line, x, y + offset, width)
-    return lh
-  end
-
-  local a_draw_line_body = self.doc_view_a.draw_line_body
-  function parent.doc_view_a:draw_line_body(line, x, y)
-    local gaps = parent.a_spaces
-    local gaps_h = 0
-    if gaps[line] then
-      gaps_h = self:get_line_height() * (gaps[line][2] or 0)
+  local function wrap_draw_line_text(doc_view, is_a)
+    local orig = doc_view.draw_line_text
+    doc_view.draw_line_text = function(self, line, x, y)
+      local changes = is_a and parent.a_changes or parent.b_changes
+      draw_line_text_override(parent, self, line, x, y, changes)
+      return orig(self, line, x, y)
     end
-    local lh = a_draw_line_body(self, line, x, y + gaps_h)
-    return lh
   end
 
-  local b_draw_line_body = self.doc_view_b.draw_line_body
-  function parent.doc_view_b:draw_line_body(line, x, y)
-    local gaps = parent.b_spaces
-    local gaps_h = 0
-    if gaps[line] then
-      gaps_h = self:get_line_height() * (gaps[line][2] or 0)
-    end
-    local lh = b_draw_line_body(self, line, x, y + gaps_h)
-    return lh
-  end
-
-  function parent.doc_view_a:get_visible_line_range()
-    local _, oy, _, y2 = self:get_content_bounds()
-    local lh = self:get_line_height()
-    local lines = self.doc.lines
-    local minline, maxline = 1, #lines
-    local a_spaces = parent.a_spaces
-
-    local y = style.padding.y
-    for i = 1, #lines do
-      local gap = (a_spaces[i] and a_spaces[i][1] or 0) * lh
-      local h = lh
-      local total = y + gap + h
-      if total > oy then
-        minline = i
-        break
+  local function wrap_get_line_screen_position(doc_view, is_a)
+    doc_view.get_line_screen_position = function(self, line, col)
+      local x, y = self:get_content_offset()
+      local lh = self:get_line_height()
+      local gaps = is_a and parent.a_gaps or parent.b_gaps
+      local gap_y = (gaps[line] and gaps[line][2] or 0) * lh
+      y = y + (line - 1) * lh + gap_y + style.padding.y
+      if col then
+        return x + self:get_gutter_width() + self:get_col_x_offset(line, col), y
+      else
+        return x + self:get_gutter_width(), y
       end
-      y = total
     end
-
-    y = style.padding.y
-    for i = 1, #lines do
-      local gap = (a_spaces[i] and a_spaces[i][1] or 0) * lh
-      local h = lh
-      local total = y + gap + h
-      if total > y2 then
-        maxline = i
-        break
-      end
-      y = total
-    end
-
-    return minline, maxline
   end
 
-  function parent.doc_view_b:get_visible_line_range()
-    local _, oy, _, y2 = self:get_content_bounds()
-    local lh = self:get_line_height()
-    local lines = self.doc.lines
-    local minline, maxline = 1, #lines
-    local b_spaces = parent.b_spaces
+  local function wrap_resolve_screen_position(doc_view, is_a)
+    doc_view.resolve_screen_position = function(self, x, y)
+      local lines = self.doc.lines
+      local lh = self:get_line_height()
+      local gaps = is_a and parent.a_gaps or parent.b_gaps
 
-    local y = style.padding.y
-    for i = 1, #lines do
-      local gap = (b_spaces[i] and b_spaces[i][1] or 0) * lh
-      local h = lh
-      local total = y + gap + h
-      if total > oy then
-        minline = i
-        break
+      for i = 1, #lines do
+        local line_x, line_y = self:get_line_screen_position(i)
+        local next_y
+        if i < #lines then
+          local _
+          _, next_y = self:get_line_screen_position(i + 1)
+        else
+          next_y = line_y + lh + ((gaps[i] and gaps[i][1] or 0) * lh)
+        end
+
+        if y >= line_y and y < next_y then
+          local col = self:get_x_offset_col(i, x - line_x)
+          return i, col
+        end
       end
-      y = total
-    end
 
-    y = style.padding.y
-    for i = 1, #lines do
-      local gap = (b_spaces[i] and b_spaces[i][1] or 0) * lh
-      local h = lh
-      local total = y + gap + h
-      if total > y2 then
-        maxline = i
-        break
-      end
-      y = total
+      local last = #lines
+      local line_x, _ = self:get_line_screen_position(last)
+      return last, self:get_x_offset_col(last, x - line_x)
     end
-
-    return minline, maxline
   end
 
+  local function wrap_get_visible_line_range(doc_view, is_a)
+    doc_view.get_visible_line_range = function(self)
+      local _, oy, _, y2 = self:get_content_bounds()
+      local lh = self:get_line_height()
+      local lines = self.doc.lines
+      local minline, maxline = 1, #lines
+      local gaps = is_a and parent.a_gaps or parent.b_gaps
+
+      local y = style.padding.y
+      for i = 1, #lines do
+        local gap = (gaps[i] and gaps[i][2] or 0) * lh
+        local h = lh
+        local total = y + h
+        y = total
+        if total + gap > oy then
+          minline = i
+          break
+        end
+      end
+
+      for i = minline, #lines do
+        local gap = (gaps[i] and gaps[i][2] or 0) * lh
+        local h = lh
+        local total = y + h
+        y = total
+        if total + gap > y2 then
+          maxline = i
+          break
+        end
+      end
+
+      return minline, maxline
+    end
+  end
+
+  local function wrap_doc_raw_insert(doc_view)
+    local orig = doc_view.doc.raw_insert
+    doc_view.doc.raw_insert = function(...)
+      parent:update_diff()
+      return orig(...)
+    end
+  end
+
+  local function wrap_doc_raw_remove(doc_view)
+    local orig = doc_view.doc.raw_remove
+    doc_view.doc.raw_remove = function(...)
+      parent:update_diff()
+      return orig(...)
+    end
+  end
+
+  local function wrap_draw(doc_view)
+    doc_view.draw = function(self)
+      self:draw_background(style.background)
+      local _, indent_size = self.doc:get_indent_info()
+      self:get_font():set_tab_size(indent_size)
+
+      local minline, maxline = self:get_visible_line_range()
+      local lh = self:get_line_height()
+
+      local gw, gpad = self:get_gutter_width()
+      for i = minline, maxline do
+        local _, y = self:get_line_screen_position(i)
+        self:draw_line_gutter(i, self.position.x, y, gpad and gw - gpad or gw)
+      end
+
+      local pos = self.position
+      -- the clip below ensure we don't write on the gutter region. On the
+      -- right side it is redundant with the Node's clip.
+      core.push_clip_rect(pos.x + gw, pos.y, self.size.x - gw, self.size.y)
+      for i = minline, maxline do
+        local x, y = self:get_line_screen_position(i)
+        y = y + (self:draw_line_body(i, x, y) or lh)
+      end
+      self:draw_overlay()
+      core.pop_clip_rect()
+
+      self:draw_scrollbar()
+    end
+  end
+
+  local function wrap_get_scrollable_size(doc_view, is_a)
+    doc_view.get_scrollable_size = function(self)
+      local gaps = is_a and parent.a_gaps or parent.b_gaps
+      local lc = #self.doc.lines
+      if not config.scroll_past_end then
+        local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
+        return self:get_line_height() * (lc) + style.padding.y * 2 + h_scroll
+      end
+      return self:get_line_height() * ((lc + (gaps[lc] and gaps[lc][2] or 0)) - 1) + self.size.y
+    end
+  end
+
+  -- Apply to both views with dynamic referencing
+  for _, side in ipairs {
+    {view = self.doc_view_a, is_a = true},
+    {view = self.doc_view_b, is_a = false}
+  } do
+    wrap_draw_line_text(side.view, side.is_a)
+    wrap_get_line_screen_position(side.view, side.is_a)
+    wrap_resolve_screen_position(side.view, side.is_a)
+    wrap_get_visible_line_range(side.view, side.is_a)
+    wrap_get_scrollable_size(side.view, side.is_a)
+    wrap_draw(side.view)
+    wrap_doc_raw_insert(side.view)
+    wrap_doc_raw_remove(side.view)
+  end
 end
 
 function DiffView:update()
