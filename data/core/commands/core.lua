@@ -43,6 +43,10 @@ command.add(nil, {
     config.hide_tabs = not config.hide_tabs
   end,
 
+  ["core:toggle-line-numbers"] = function()
+    config.show_line_numbers = not config.show_line_numbers
+  end,
+
   ["core:toggle-fullscreen"] = function()
     local current_mode = system.get_window_mode(core.window)
     local fullscreen = current_mode == "fullscreen"
