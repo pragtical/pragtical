@@ -186,7 +186,15 @@ function DiffView:on_mouse_moved(...)
     return true
   end
   self.doc_view_a:on_mouse_moved(...)
+  if self.doc_view_a:scrollbar_dragging() then
+    self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
+    self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
+  end
   self.doc_view_b:on_mouse_moved(...)
+  if self.doc_view_b:scrollbar_dragging() then
+    self.doc_view_a.scroll.y = self.doc_view_b.scroll.y
+    self.doc_view_a.scroll.to.y = self.doc_view_b.scroll.y
+  end
 end
 
 function DiffView:on_mouse_left(...)
@@ -223,9 +231,12 @@ end
 
 local delete_color = {common.color "rgba(200, 84, 84, 0.15)"}
 local insert_color = {common.color "rgba(121, 199, 114, 0.15)"}
-local modify_color = {common.color "rgba(85, 112, 201, 0.15)"}
+local modify_color = {common.color "rgba(202, 173, 85, 0.15)"}
 local delete_inline_color = {common.color "rgba(200, 84, 84, 0.20)"}
 local insert_inline_color = {common.color "rgba(121, 199, 114, 0.20)"}
+local delete_color_opaque = {common.color "rgba(200, 84, 84, 1)"}
+local insert_color_opaque = {common.color "rgba(121, 199, 114, 1)"}
+local modify_color_opaque = {common.color "rgba(202, 173, 85, 1)"}
 
 ---@param parent core.diffview
 ---@param self core.docview
@@ -280,6 +291,33 @@ function DiffView:patch_views()
     doc_view.draw_line_text = function(self, line, x, y)
       local changes = is_a and parent.a_changes or parent.b_changes
       draw_line_text_override(parent, self, line, x, y, changes)
+      if
+        changes[line]
+        and
+        (not changes[line-1] or changes[line].tag ~= changes[line-1].tag)
+        and
+        (
+          changes[line].tag == "insert"
+          or changes[line].tag == "delete"
+          or changes[line].tag == "modify"
+        )
+      then
+        local ax, icon
+        local pad = style.padding.x / 2
+        if is_a then
+          icon = ">"
+          ax = self.position.x + self.size.x + pad
+        else
+          icon = "<"
+          ax = self.position.x - pad
+        end
+        core.root_view:defer_draw(function()
+          core.push_clip_rect(parent.position.x, parent.position.y, parent.size.x, parent.size.y)
+          local ay = y + (self:get_line_height() / 2) - (style.icon_font:get_height() / 2)
+          renderer.draw_text(style.icon_font, icon, ax, ay, style.text)
+          core.pop_clip_rect()
+        end)
+      end
       return orig(self, line, x, y)
     end
   end
@@ -436,18 +474,82 @@ function DiffView:patch_views()
   end
 end
 
+function DiffView:draw_scrollbar()
+  DiffView.super.draw_scrollbar(self)
+
+  for _, side in ipairs {
+    {view = self.doc_view_a, changes = self.a_changes},
+    {view = self.doc_view_b, changes = self.b_changes},
+  } do
+    local view = side.view
+    local changes = side.changes
+    local scrollbar = view.v_scrollbar
+
+    local lh = view:get_line_height()
+    local full_h = view:get_scrollable_size()
+    local visible_h = view.size.y
+    local x, y, w, h = scrollbar:get_track_rect()
+
+    local scroll_range = math.max(1, full_h - visible_h)
+
+    -- Step 1: group consecutive lines of same change tag
+    local change_lines = {}
+    for line, change in pairs(changes) do
+      change_lines[#change_lines+1] = { line = line, tag = change.tag }
+    end
+    table.sort(change_lines, function(a, b) return a.line < b.line end)
+
+    local i = 1
+    while i <= #change_lines do
+      local tag = change_lines[i].tag
+      local start_line = change_lines[i].line
+      local end_line = start_line
+
+      -- Group consecutive lines with same tag
+      while i + 1 <= #change_lines and
+            change_lines[i+1].tag == tag and
+            change_lines[i+1].line == end_line + 1 do
+        i = i + 1
+        end_line = change_lines[i].line
+      end
+
+      -- Draw block for [start_line, end_line]
+      local color =
+        tag == "insert" and insert_color_opaque
+        or tag == "delete" and delete_color_opaque
+        or tag == "modify" and modify_color_opaque
+
+      if color then
+        local scroll_y_start = (start_line - 1) * lh
+        local scroll_y_end = (end_line) * lh
+        local ratio_start = scroll_y_start / scroll_range
+        local ratio_end = scroll_y_end / scroll_range
+        local marker_y = y + ratio_start * h
+        local marker_h = math.max(2, (ratio_end - ratio_start) * h) * SCALE
+
+        renderer.draw_rect(x, marker_y, w, marker_h, color)
+
+        local sx, _, sw = self.v_scrollbar:get_track_rect()
+        renderer.draw_rect(sx, marker_y, sw, marker_h, color)
+      end
+
+      i = i + 1
+    end
+  end
+end
+
 function DiffView:update()
   DiffView.super.update(self)
   local _, _, scroll_w, _ = self.v_scrollbar:_get_track_rect_normal()
 
   self.doc_view_a.position.x = self.position.x
   self.doc_view_a.position.y = self.position.y
-  self.doc_view_a.size.x = (self.size.x / 2) - scroll_w
+  self.doc_view_a.size.x = (self.size.x / 2) - scroll_w - 20 * SCALE
   self.doc_view_a.size.y = self.size.y
 
-  self.doc_view_b.position.x = (self.position.x + self.size.x / 2) - scroll_w
+  self.doc_view_b.position.x = (self.position.x + self.size.x / 2) - scroll_w + 20 * SCALE
   self.doc_view_b.position.y = self.position.y
-  self.doc_view_b.size.x = (self.size.x / 2) - scroll_w
+  self.doc_view_b.size.x = (self.size.x / 2) - scroll_w - 20 * SCALE
   self.doc_view_b.size.y = self.size.y
 
   self.doc_view_a:update()
