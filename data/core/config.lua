@@ -171,6 +171,12 @@ config.line_height = 1.2
 ---@type integer
 config.scroll_context_lines = 10
 
+---Show or hide the line numbers.
+---
+---The default is true
+---@type boolean
+config.show_line_numbers = true
+
 ---The number of spaces each level of indentation represents.
 ---
 ---The default is 2.

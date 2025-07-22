@@ -615,6 +615,13 @@ settings.add("Editor",
       step = 1
     },
     {
+      label = "Show Line Numbers",
+      description = "Show or hide a document line numbers.",
+      path = "show_line_numbers",
+      type = settings.type.TOGGLE,
+      default = true,
+    },
+    {
       label = "Highlight Line",
       description = "Highlight the current line.",
       path = "highlight_current_line",
