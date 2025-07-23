@@ -225,9 +225,11 @@ function DiffView:sync(line, target_line, is_a)
     l = l + 1
   end
   if tag == "modify" then
-    to.doc:set_selection(target_line, 1, target_line, math.huge)
+    to.doc:set_selection(target_line, 1, target_line+total-1, math.huge)
     to.doc:replace(function() return text:sub(1, #text-1) end)
-    target_changes[target_line] = {tag = "equal"}
+    for i=target_line, target_line+total-1 do
+      target_changes[i] = {tag = "equal"}
+    end
   else
     to.doc:insert(target_line, math.huge, "\n" .. text:sub(1, #text - 1))
 
@@ -484,7 +486,8 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
           if edit.tag == "insert" then
             text = text .. edit.val
             local tx = self:get_col_x_offset(
-              line, i - (changes == parent.b_changes and 1 or 0)
+                      -- TODO: why is this needed in some instances?
+              line, i --[[ - (changes == parent.b_changes and 1 or 0) ]]
             )
             local w = self:get_font():get_width(edit.val);
             renderer.draw_rect(
@@ -776,7 +779,7 @@ function DiffView:patch_views()
             in_second_block = true
           end
         elseif in_second_block and changes[target].tag ~= "equal" then
-          if changes[target-1].tag ~= changes[target].tag then
+          if not changes[target-1] or changes[target-1].tag ~= changes[target].tag then
             break
           end
         end
