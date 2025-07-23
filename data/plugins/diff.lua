@@ -120,6 +120,8 @@ function DiffView:update_diff()
     end
   end
 
+  local start_time = system.get_time()
+  core.log((#self.a_changes == 0 and "Computing " or "Recomputing ") .. "differences...")
   local idx = core.add_thread(function()
     local ai, bi = 1, 1
     local a_offset, b_offset = 0, 0
@@ -127,6 +129,7 @@ function DiffView:update_diff()
     local a_len = #self.doc_view_a.doc.lines
     local b_len = #self.doc_view_b.doc.lines
 
+    local computing_start = system.get_time()
     local a_gaps = #self.a_gaps == 0 and self.a_gaps or {}
     local b_gaps = #self.b_gaps == 0 and self.b_gaps or {}
     local a_changes = #self.a_changes == 0 and self.a_changes or {}
@@ -178,7 +181,10 @@ function DiffView:update_diff()
         end
       end
 
-      coroutine.yield()
+      if system.get_time() - computing_start >= 0.5 then
+        coroutine.yield()
+        computing_start = system.get_time()
+      end
     end
 
     -- Fill trailing lines spaces after diff ends
@@ -200,6 +206,7 @@ function DiffView:update_diff()
 
     self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
+    core.log("Finished computing differences in %.2fs", system.get_time() - start_time)
   end)
 
   core.threads[idx].diff_viewer = diff_updater_idx
@@ -977,6 +984,18 @@ command.add(
       element_b = dv.doc.abs_filename
     end
     start_compare()
+  end
+})
+
+command.add(nil, {
+  ["diff:start-file-comparison"] = function()
+    command.perform("core:open-file", "Select File A", function(file_a)
+      element_a = file_a
+      command.perform("core:open-file", "Select File B", function(file_b)
+        element_b = file_b
+        start_compare()
+      end)
+    end)
   end
 })
 
