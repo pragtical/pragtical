@@ -684,7 +684,7 @@ function DiffView:patch_views()
           next_y = line_y + lh + ((gaps[i] and gaps[i][1] or 0) * lh)
         end
 
-        if y >= line_y and y < next_y then
+        if (y >= line_y or i == 1) and y < next_y then
           local col = self:get_x_offset_col(i, x - line_x)
           return i, col
         end
