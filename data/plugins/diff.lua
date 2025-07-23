@@ -218,7 +218,7 @@ function DiffView:sync(line, target_line, is_a)
   local tag = changes[l].tag
   local text = ""
   local total = 0
-  while changes[l].tag == tag do
+  while changes[l] and changes[l].tag == tag do
     total = total + 1
     changes[l] = {tag = "equal"}
     text = text .. from.doc.lines[l]
