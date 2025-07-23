@@ -361,11 +361,15 @@ function DiffView:on_mouse_pressed(button, x, y, clicks)
     return true
   elseif self.doc_view_a:on_mouse_pressed(button, x, y, clicks) then
     self.doc_view_a.scroll.y = self.doc_view_a.scroll.to.y
+    self.scroll.to.y = self.doc_view_a.scroll.y
+    self.scroll.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
     return true
   elseif self.doc_view_b:on_mouse_pressed(button, x, y, clicks) then
     self.doc_view_b.scroll.y = self.doc_view_b.scroll.to.y
+    self.scroll.to.y = self.doc_view_b.scroll.y
+    self.scroll.y = self.doc_view_b.scroll.y
     self.doc_view_a.scroll.to.y = self.doc_view_b.scroll.y
     self.doc_view_a.scroll.y = self.doc_view_b.scroll.y
     return true
@@ -451,6 +455,8 @@ function DiffView:on_mouse_moved(...)
   self.doc_view_a:on_mouse_moved(...)
   if self.doc_view_a:scrollbar_dragging() then
     self.doc_view_a.scroll.y = self.doc_view_a.scroll.to.y
+    self.scroll.to.y = self.doc_view_a.scroll.y
+    self.scroll.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
     return true
@@ -458,6 +464,8 @@ function DiffView:on_mouse_moved(...)
   self.doc_view_b:on_mouse_moved(...)
   if self.doc_view_b:scrollbar_dragging() then
     self.doc_view_b.scroll.y = self.doc_view_b.scroll.to.y
+    self.scroll.to.y = self.doc_view_b.scroll.y
+    self.scroll.y = self.doc_view_b.scroll.y
     self.doc_view_a.scroll.y = self.doc_view_b.scroll.y
     self.doc_view_a.scroll.to.y = self.doc_view_b.scroll.y
     return true
