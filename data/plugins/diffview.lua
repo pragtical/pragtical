@@ -9,15 +9,15 @@ local DocView = require "core.docview"
 local Doc = require "core.doc"
 local View = require "core.view"
 
----Configuration options for `diff` plugin.
----@class config.plugins.diff
+---Configuration options for `diffview` plugin.
+---@class config.plugins.diffview
 ---Logs the amount of time taken to recompute differences.
 ---@field log_times boolean
 ---Disable syntax coloring on changed lines to improve visibility.
 ---@field plain_text boolean
 ---The color used on changed lines when plain text is enabled.
 ---@field plain_text_color renderer.color
-config.plugins.diff = common.merge({
+config.plugins.diffview = common.merge({
   log_times = false,
   plain_text = false,
   plain_text_color = { common.color "#ffffff" },
@@ -45,7 +45,7 @@ config.plugins.diff = common.merge({
       default = { common.color "#ffffff" }
     }
   }
-}, config.plugins.diff)
+}, config.plugins.diffview)
 
 ---@type string?
 local element_a = nil
@@ -58,18 +58,18 @@ local element_b_text = nil
 ---@type integer
 local diff_updater_idx = 0
 
----@class plugins.diff.view : core.view
+---@class plugins.diffview.view : core.view
 ---@field doc_view_a core.docview
 ---@field doc_view_b core.docview
 ---@field a_changes diff.changes[]
 ---@field a_changes diff.changes[]
 ---@field a_gaps table<integer,table<integer,integer>>
 ---@field b_gaps table<integer,table<integer,integer>>
----@field compare_type plugins.diff.view.type
----@field hovered_sync? plugins.diff.view.hovered_sync
+---@field compare_type plugins.diffview.view.type
+---@field hovered_sync? plugins.diffview.view.hovered_sync
 local DiffView = View:extend()
 
----@enum plugins.diff.view.type
+---@enum plugins.diffview.view.type
 DiffView.type = {
   STRING_FILE = 1,
   FILE_STRING = 2,
@@ -77,39 +77,48 @@ DiffView.type = {
   STRING_STRING = 4
 }
 
----@class plugins.diff.view.hovered_sync
+---Represents the active sync indicator.
+---@class plugins.diffview.view.hovered_sync
 ---@field is_a boolean
 ---@field line integer
 ---@field target_line integer
 
+---Names used when a or b are not files.
+---@class plugins.diffview.view.string_names
+---@field a? string
+---@field b? string
+
 ---Constructor
 ---@param a string
 ---@param b string
----@param compare_type plugins.diff.view.type
-function DiffView:new(a, b, compare_type)
+---@param compare_type plugins.diffview.view.type
+---@param names plugins.diffview.view.string_names
+function DiffView:new(a, b, compare_type, names)
   DiffView.super.new(self)
 
   self.scrollable = true
-  self.compare_type = compare_type
+  self.compare_type = compare_type or DiffView.type.STRING_STRING
   self.hovered_sync = nil
   self.skip_update_diff = false
+
+  names = names or {}
 
   local doc_a, doc_b
   if compare_type == DiffView.type.FILE_FILE then
     doc_a = Doc(common.basename(a), a)
     doc_b = Doc(common.basename(b), b)
   elseif compare_type == DiffView.type.STRING_STRING then
-    doc_a = Doc(nil, nil, true)
+    doc_a = Doc(names.a, names.a, true)
     if a ~= "" then doc_a:insert(1, 1, a) doc_a:clear_undo_redo() end
-    doc_b = Doc(nil, nil, true)
+    doc_b = Doc(names.b, names.b, true)
     if b ~= "" then doc_b:insert(1, 1, b) doc_b:clear_undo_redo() end
   elseif compare_type == DiffView.type.STRING_FILE then
-    doc_a = Doc(nil, nil, true)
+    doc_a = Doc(names.a, names.a, true)
     if a ~= "" then doc_a:insert(1, 1, a) doc_a:clear_undo_redo() end
     doc_b = Doc(common.basename(b), b)
   elseif compare_type == DiffView.type.FILE_STRING then
     doc_a = Doc(common.basename(a), a)
-    doc_b = Doc(nil, nil, true)
+    doc_b = Doc(names.b, names.b, true)
     if b ~= "" then doc_b:insert(1, 1, b) doc_b:clear_undo_redo() end
   end
 
@@ -160,7 +169,7 @@ function DiffView:update_diff()
 
   local start_time = system.get_time()
 
-  if config.plugins.diff.log_times then
+  if config.plugins.diffview.log_times then
     core.log(
       (#self.a_changes == 0 and "Computing " or "Recomputing ")
       .. "differences..."
@@ -252,7 +261,7 @@ function DiffView:update_diff()
     self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
 
-    if config.plugins.diff.log_times then
+    if config.plugins.diffview.log_times then
       core.log(
         "Finished computing differences in %.2fs",
         system.get_time() - start_time
@@ -412,7 +421,7 @@ function DiffView:on_mouse_released(...)
   self.doc_view_b:on_mouse_released(...)
 end
 
----@param self plugins.diff.view
+---@param self plugins.diffview.view
 local function check_hovered_sync(self, x, y)
   local x1 = self.doc_view_a.position.x + self.doc_view_a.size.x
   local x2 = self.doc_view_b.position.x + style.padding.x / 2
@@ -551,7 +560,7 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
     local insert_bg = style.diff_insert_background
     local delete_inline = style.diff_delete_inline
     local insert_inline = style.diff_insert_inline
-    if config.plugins.diff.plain_text then
+    if config.plugins.diffview.plain_text then
       -- increase opacity to half
       delete_bg = { table.unpack(delete_bg) }
       delete_bg[4] = 128
@@ -639,12 +648,12 @@ function DiffView:patch_views()
           core.pop_clip_rect()
         end)
       end
-      if has_changes and config.plugins.diff.plain_text then
+      if has_changes and config.plugins.diffview.plain_text then
         renderer.draw_text(
           self:get_font(),
           self.doc.lines[line],
           x, y + self:get_line_text_y_offset(),
-          config.plugins.diff.plain_text_color
+          config.plugins.diffview.plain_text_color
         )
         return self:get_line_height()
       else
@@ -1046,7 +1055,7 @@ end
 
 -- Register file compare commands
 command.add("core.docview", {
-  ["diff:select-file-for-compare"] = function(dv)
+  ["diff-view:select-file-for-compare"] = function(dv)
     if dv.doc and dv.doc.abs_filename then
       element_a = dv.doc.abs_filename
     end
@@ -1058,7 +1067,7 @@ command.add(
     return element_a and core.active_view and core.active_view:is(DocView),
     core.active_view
   end, {
-  ["diff:compare-file-with-selected"] = function(dv)
+  ["diff-view:compare-file-with-selected"] = function(dv)
     if dv.doc and dv.doc.abs_filename then
       element_b = dv.doc.abs_filename
     end
@@ -1067,7 +1076,7 @@ command.add(
 })
 
 command.add(nil, {
-  ["diff:start-file-comparison"] = function()
+  ["diff-view:start-file-comparison"] = function()
     command.perform("core:open-file", "Select File A", function(file_a)
       element_a = file_a
       command.perform("core:open-file", "Select File B", function(file_b)
@@ -1079,7 +1088,7 @@ command.add(nil, {
 })
 
 command.add(nil, {
-  ["diff:start-strings-comparison"] = function()
+  ["diff-view:start-strings-comparison"] = function()
     element_a_text = ""
     element_b_text = ""
     start_compare_string()
@@ -1095,23 +1104,23 @@ command.add(
         and core.active_view.diff_view_parent,
       core.active_view
   end, {
-  ["diff:prev-change"] = function(dv)
+  ["diff-view:prev-change"] = function(dv)
     dv:prev_change()
   end,
 
-  ["diff:next-change"] = function(dv)
+  ["diff-view:next-change"] = function(dv)
     dv:next_change()
   end,
 
-  ["diff:sync-change"] = function(dv)
+  ["diff-view:sync-change"] = function(dv)
     dv.diff_view_parent:sync_selected()
   end
 })
 
 keymap.add({
-  ["ctrl+alt+,"] = "diff:prev-change",
-  ["ctrl+alt+."] = "diff:next-change",
-  ["ctrl+return"] = "diff:sync-change",
+  ["ctrl+alt+,"] = "diff-view:prev-change",
+  ["ctrl+alt+."] = "diff-view:next-change",
+  ["ctrl+return"] = "diff-view:sync-change",
 })
 
 
@@ -1132,13 +1141,13 @@ local function text_compare_with_predicate()
 end
 
 command.add(text_select_compare_predicate, {
-  ["diff:select-text-for-compare"] = function(doc)
+  ["diff-view:select-text-for-compare"] = function(doc)
     element_a_text = doc:get_selection_text()
   end
 })
 
 command.add(text_compare_with_predicate, {
-  ["diff:compare-text-with-selected"] = function(doc)
+  ["diff-view:compare-text-with-selected"] = function(doc)
     element_b_text = doc:get_selection_text()
     start_compare_string()
   end
@@ -1154,14 +1163,14 @@ core.add_thread(function()
       contextmenu.DIVIDER,
       {
         text = "Select Text for Compare",
-        command = "diff:select-text-for-compare"
+        command = "diff-view:select-text-for-compare"
       }
     })
 
     contextmenu:register(text_compare_with_predicate, {
       {
         text = "Compare Text with Selected",
-        command = "diff:compare-text-with-selected"
+        command = "diff-view:compare-text-with-selected"
       }
     })
   end
@@ -1237,15 +1246,15 @@ end)
 
 
 ---Functionality to view the textual differences of two elements.
----@class plugins.diff
-local diff = {
+---@class plugins.diffview
+local diffview = {
   ---The differences viewer exposed for extensiblity.
-  ---@type plugins.diff.view
+  ---@type plugins.diffview.view
   Viewer = DiffView
 }
 
 ---Helper differences view to rootview add.
----@param view plugins.diff.view
+---@param view plugins.diffview.view
 local function compare_add_to_root_node(view)
   core.root_view:get_active_node_default():add_view(view)
   core.set_active_view(view)
@@ -1254,11 +1263,12 @@ end
 ---Helper differences starter.
 ---@param a string
 ---@param b string
----@param ct plugins.diff.view.type
----@param noshow boolean
----@return plugins.diff.view
-local function compare_start(a, b, ct, noshow)
-  local view = DiffView(a, b, ct)
+---@param ct plugins.diffview.view.type
+---@param names? plugins.diffview.view.string_names
+---@param noshow? boolean
+---@return plugins.diffview.view
+local function compare_start(a, b, ct, names, noshow)
+  local view = DiffView(a, b, ct, names)
   if not noshow then
     compare_add_to_root_node(view)
   end
@@ -1268,38 +1278,44 @@ end
 ---Create a file to file diff viewer.
 ---@param a string
 ---@param b string
----@param noshow boolean If true doesn't adds to the rootview
----@return plugins.diff.view
-function diff.file_to_file(a, b, noshow)
-  return compare_start(a, b, DiffView.type.FILE_FILE, noshow)
+---@param noshow? boolean If true doesn't adds to the rootview
+---@return plugins.diffview.view
+function diffview.file_to_file(a, b, noshow)
+  return compare_start(a, b, DiffView.type.FILE_FILE, nil, noshow)
 end
 
 ---Create a string to string diff viewer.
 ---@param a string
 ---@param b string
----@param noshow boolean If true doesn't adds to the rootview
----@return plugins.diff.view
-function diff.string_to_string(a, b, noshow)
-  return compare_start(a, b, DiffView.type.STRING_STRING, noshow)
+---@param a_name? string
+---@param b_name? string
+---@param noshow? boolean If true doesn't adds to the rootview
+---@return plugins.diffview.view
+function diffview.string_to_string(a, b, a_name, b_name, noshow)
+  return compare_start(
+    a, b, DiffView.type.STRING_STRING, {a = a_name, b = b_name}, noshow
+  )
 end
 
 ---Create a file to string diff viewer.
 ---@param a string
 ---@param b string
----@param noshow boolean If true doesn't adds to the rootview
----@return plugins.diff.view
-function diff.file_to_string(a, b, noshow)
-  return compare_start(a, b, DiffView.type.FILE_STRING, noshow)
+---@param b_name? string
+---@param noshow? boolean If true doesn't adds to the rootview
+---@return plugins.diffview.view
+function diffview.file_to_string(a, b, b_name, noshow)
+  return compare_start(a, b, DiffView.type.FILE_STRING, {b = b_name}, noshow)
 end
 
 ---Create a string to file diff viewer.
 ---@param a string
 ---@param b string
----@param noshow boolean If true doesn't adds to the rootview
----@return plugins.diff.view
-function diff.string_to_file(a, b, noshow)
-  return compare_start(a, b, DiffView.type.STRING_FILE, noshow)
+---@param a_name? string
+---@param noshow? boolean If true doesn't adds to the rootview
+---@return plugins.diffview.view
+function diffview.string_to_file(a, b, a_name, noshow)
+  return compare_start(a, b, DiffView.type.STRING_FILE, {a = a_name}, noshow)
 end
 
 
-return diff
+return diffview
