@@ -511,13 +511,11 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
         ---@type diff.changes[]
         local mods = change.changes
         local text = ""
+        local deletes = 0
         for i, edit in ipairs(mods) do
           if edit.tag == "insert" then
             text = text .. edit.val
-            local tx = self:get_col_x_offset(
-                      -- TODO: why is this needed in some instances?
-              line, i --[[ - (changes == parent.b_changes and 1 or 0) ]]
-            )
+            local tx = self:get_col_x_offset(line, i - deletes)
             local w = self:get_font():get_width(edit.val);
             renderer.draw_rect(
               x + tx, y, w, h,
@@ -525,6 +523,8 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
                 and delete_inline_color
                 or insert_inline_color
             )
+          elseif edit.tag == "delete" then
+            deletes = deletes + 1
           end
         end
       end
