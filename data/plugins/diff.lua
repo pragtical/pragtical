@@ -3,38 +3,74 @@ local core = require "core"
 local config = require "core.config"
 local command = require "core.command"
 local common = require "core.common"
+local keymap = require "core.keymap"
 local style = require "core.style"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
 local View = require "core.view"
 
+---@type string?
 local element_a = nil
+---@type string?
 local element_b = nil
+---@type string?
 local element_a_text = nil
+---@type string?
 local element_b_text = nil
+---@type integer
 local diff_updater_idx = 0
 
----@class core.diffview : core.view
+---@class plugins.diff.view : core.view
 ---@field doc_view_a core.docview
 ---@field doc_view_b core.docview
 ---@field a_changes diff.changes[]
----@field b_changes diff.changes[]
----@field is_string boolean
+---@field a_changes diff.changes[]
+---@field a_gaps table<integer,table<integer,integer>>
+---@field b_gaps table<integer,table<integer,integer>>
+---@field compare_type plugins.diff.view.type
+---@field hovered_sync? plugins.diff.view.hovered_sync
 local DiffView = View:extend()
 
-function DiffView:new(a, b, is_string)
+---@enum plugins.diff.view.type
+DiffView.type = {
+  STRING_FILE = 1,
+  FILE_STRING = 2,
+  FILE_FILE = 3,
+  STRING_STRING = 4
+}
+
+---@class plugins.diff.view.hovered_sync
+---@field is_a boolean
+---@field line integer
+---@field target_line integer
+
+---Constructor
+---@param a string
+---@param b string
+---@param compare_type plugins.diff.view.type
+function DiffView:new(a, b, compare_type)
   DiffView.super.new(self)
 
   self.scrollable = true
-  self.is_string = is_string or false
+  self.compare_type = compare_type
+  self.hovered_sync = nil
+  self.skip_update_diff = false
 
   local doc_a, doc_b
-  if not is_string then
+  if compare_type == DiffView.type.FILE_FILE then
     doc_a = Doc(common.basename(a), a)
     doc_b = Doc(common.basename(b), b)
-  else
+  elseif compare_type == DiffView.type.STRING_STRING then
     doc_a = Doc("file_a.txt", "file_a.txt", true)
     doc_a:insert(1, 1, a)
+    doc_b = Doc("file_b.txt", "file_b.txt", true)
+    doc_b:insert(1, 1, b)
+  elseif compare_type == DiffView.type.STRING_FILE then
+    doc_a = Doc("file_a.txt", "file_a.txt", true)
+    doc_a:insert(1, 1, a)
+    doc_b = Doc(common.basename(b), b)
+  elseif compare_type == DiffView.type.FILE_STRING then
+    doc_a = Doc(common.basename(a), a)
     doc_b = Doc("file_b.txt", "file_b.txt", true)
     doc_b:insert(1, 1, b)
   end
@@ -42,20 +78,36 @@ function DiffView:new(a, b, is_string)
   self.doc_view_a = DocView(doc_a)
   self.doc_view_b = DocView(doc_b)
 
+  self.doc_view_a.diff_view_parent = self
+  self.doc_view_b.diff_view_parent = self
+
   self.a_gaps = {}
   self.b_gaps = {}
   self.a_changes = {}
   self.b_changes = {}
+  self.views_patched = false
 
   self:patch_views()
   self:update_diff()
 end
 
 function DiffView:get_name()
-  return not self.is_string and "Files Comparison" or "Strings Comparison"
+  if self.compare_type == DiffView.type.FILE_FILE then
+    return "Files Comparison"
+  elseif self.compare_type == DiffView.type.STRING_STRING then
+    return "Strings Comparison"
+  elseif self.compare_type == DiffView.type.FILE_STRING then
+    return "File->String Comparison"
+  elseif self.compare_type == DiffView.type.STRING_FILE then
+    return "String->File Comparison"
+  end
+  return "Diff Viewer"
 end
 
+---Updates the registered differences between current side A and B.
 function DiffView:update_diff()
+  if self.skip_update_diff then self.skip_update_diff = false return end
+
   -- stop previous update if still running.
   if self.updater_idx then
     for _, thread in pairs(core.threads) do
@@ -149,7 +201,111 @@ function DiffView:update_diff()
   diff_updater_idx = diff_updater_idx + 1
 end
 
+function DiffView:sync(line, target_line, is_a)
+  local changes = is_a and self.a_changes or self.b_changes
+  local target_changes = is_a and self.b_changes or self.a_changes
+  local target_gaps = is_a and self.b_gaps or self.a_gaps
+
+  ---@type core.docview
+  local from = is_a and self.doc_view_a or self.doc_view_b
+  ---@type core.docview
+  local to = is_a and self.doc_view_b or self.doc_view_a
+
+  local l = line
+  local tag = changes[l].tag
+  local text = ""
+  local total = 0
+  while changes[l].tag == tag do
+    total = total + 1
+    changes[l] = {tag = "equal"}
+    text = text .. from.doc.lines[l]
+    l = l + 1
+  end
+  if tag == "modify" then
+    to.doc:set_selection(target_line, 1, target_line, math.huge)
+    to.doc:replace(function() return text:sub(1, #text-1) end)
+    target_changes[target_line] = {tag = "equal"}
+  else
+    to.doc:insert(target_line, math.huge, "\n" .. text:sub(1, #text - 1))
+
+    -- update target changes and target gaps
+    local changes_inserts = {}
+
+    for _=1, total do
+      table.insert(changes_inserts, {tag = "equal"})
+    end
+
+    common.splice(target_changes, target_line, 0, changes_inserts)
+
+    local gaps_inserts = {}
+    local gaps = {0, 0}
+
+    if target_gaps[target_line+1] then
+      gaps = {0, target_gaps[target_line+1][2] - total}
+      target_gaps[target_line+1] = {table.unpack(gaps)}
+      for i=target_line+2, #target_gaps do
+        target_gaps[i][2] = target_gaps[i][2] - total
+      end
+    end
+
+    for _=1, total do
+      table.insert(gaps_inserts, {table.unpack(gaps)})
+    end
+
+    common.splice(target_gaps, target_line, 0, gaps_inserts)
+  end
+end
+
+function DiffView:sync_selected()
+  local view, changes, to_view, is_a
+
+  if core.active_view == self.doc_view_a then
+    view = self.doc_view_a
+    to_view = self.doc_view_b
+    changes = self.a_changes
+    is_a = true
+  elseif core.active_view == self.doc_view_b then
+    view = self.doc_view_b
+    to_view = self.doc_view_a
+    changes = self.b_changes
+  end
+
+  if not view then return end
+
+  local line = view.doc:get_selection()
+  local tag = changes[line].tag
+  if tag == "equal" then
+    core.error("No valid change selected")
+    return
+  end
+
+  while changes[line-1] and changes[line-1].tag == tag do
+    line = line - 1
+  end
+
+  view.doc:set_selection(line, 1, line, 1)
+
+  local _, y = view:get_line_screen_position(line, 1)
+  to_view.scroll.to.y =  view.scroll.y
+  to_view.scroll.y =  view.scroll.y
+
+  local target_line = to_view:resolve_screen_position(
+    to_view.position.x + style.padding.x, y
+  )
+
+  self:sync(line, target_line, is_a)
+end
+
 function DiffView:on_mouse_pressed(button, x, y, clicks)
+  if button == "left" and self.hovered_sync then
+    self:sync(
+      self.hovered_sync.line,
+      self.hovered_sync.target_line,
+      self.hovered_sync.is_a
+    )
+    self.hovered_sync = nil
+    return
+  end
   if
     DiffView.super.on_mouse_pressed(self, button, x, y, clicks)
     or
@@ -177,24 +333,72 @@ function DiffView:on_mouse_released(...)
   self.doc_view_b:on_mouse_released(...)
 end
 
+---@param self plugins.diff.view
+local function check_hovered_sync(self, x, y)
+  local x1 = self.doc_view_a.position.x + self.doc_view_a.size.x
+  local x2 = self.doc_view_b.position.x + style.padding.x / 2
+
+  if x >= x1 and x <= x2 then
+    ---@type integer
+    local line
+    ---@type integer
+    local target_line
+    ---@type diff.changes[]
+    local changes
+    ---@type boolean
+    local is_a = false
+
+    -- hovering side A
+    if x <= x1 + ((x2 - x1) / 2) then
+      line = self.doc_view_a:resolve_screen_position(x1 - style.padding.x, y)
+      target_line = self.doc_view_b:resolve_screen_position(x2 - style.padding.x, y)
+      changes = self.a_changes
+      is_a = true
+
+    -- hovering side B
+    elseif x >= x1 + ((x2 - x1) / 2) + style.padding.x / 2  then
+      line = self.doc_view_b:resolve_screen_position(x2 - style.padding.x, y)
+      target_line = self.doc_view_a:resolve_screen_position(x1 - style.padding.x, y)
+      changes = self.b_changes
+    end
+
+    -- check if hovering valid line and save it
+    if line and changes[line] and changes[line].tag ~= "equal" then
+      if not changes[line-1] or changes[line-1].tag ~= changes[line].tag then
+        self.hovered_sync = {
+          is_a = is_a,
+          line = line,
+          target_line = target_line
+        }
+        return
+      end
+    end
+  end
+
+  self.hovered_sync = nil
+end
+
 function DiffView:on_mouse_moved(...)
   if DiffView.super.on_mouse_moved(self, ...) then
     if self.v_scrollbar.dragging then
       self.doc_view_a.scroll.to.y = self.scroll.y
       self.doc_view_b.scroll.to.y = self.scroll.y
+      return true
     end
-    return true
   end
   self.doc_view_a:on_mouse_moved(...)
   if self.doc_view_a:scrollbar_dragging() then
     self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
+    return true
   end
   self.doc_view_b:on_mouse_moved(...)
   if self.doc_view_b:scrollbar_dragging() then
     self.doc_view_a.scroll.y = self.doc_view_b.scroll.y
     self.doc_view_a.scroll.to.y = self.doc_view_b.scroll.y
+    return true
   end
+  check_hovered_sync(self, ...)
 end
 
 function DiffView:on_mouse_left(...)
@@ -204,8 +408,18 @@ function DiffView:on_mouse_left(...)
 end
 
 function DiffView:on_mouse_wheel(y, x)
-  self.doc_view_a.scroll.to.y = self.doc_view_a.scroll.to.y + y * -config.mouse_wheel_scroll
-  self.doc_view_b.scroll.to.y = self.doc_view_b.scroll.to.y + y * -config.mouse_wheel_scroll
+  if keymap.modkeys["shift"] then
+    x = y
+    y = 0
+  end
+  if y and y ~= 0 then
+    self.doc_view_a.scroll.to.y = self.doc_view_a.scroll.to.y + y * -config.mouse_wheel_scroll
+    self.doc_view_b.scroll.to.y = self.doc_view_b.scroll.to.y + y * -config.mouse_wheel_scroll
+  end
+  if x and x ~= 0 then
+    self.doc_view_a.scroll.to.x = self.doc_view_a.scroll.to.x + x * -config.mouse_wheel_scroll
+    self.doc_view_b.scroll.to.x = self.doc_view_b.scroll.to.x + x * -config.mouse_wheel_scroll
+  end
 end
 
 function DiffView:on_scale_change(...)
@@ -284,6 +498,9 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
 end
 
 function DiffView:patch_views()
+  if self.views_patched then return end
+  self.views_patched = true
+
   local parent = self
 
   local function wrap_draw_line_text(doc_view, is_a)
@@ -292,15 +509,9 @@ function DiffView:patch_views()
       local changes = is_a and parent.a_changes or parent.b_changes
       draw_line_text_override(parent, self, line, x, y, changes)
       if
-        changes[line]
+        changes[line] and changes[line].tag ~= "equal"
         and
         (not changes[line-1] or changes[line].tag ~= changes[line-1].tag)
-        and
-        (
-          changes[line].tag == "insert"
-          or changes[line].tag == "delete"
-          or changes[line].tag == "modify"
-        )
       then
         local ax, icon
         local pad = style.padding.x / 2
@@ -311,10 +522,16 @@ function DiffView:patch_views()
           icon = "<"
           ax = self.position.x - pad
         end
+        local color = style.text
+        if parent.hovered_sync and parent.hovered_sync.is_a == is_a then
+          if parent.hovered_sync.line == line then
+            color = style.caret
+          end
+        end
         core.root_view:defer_draw(function()
           core.push_clip_rect(parent.position.x, parent.position.y, parent.size.x, parent.size.y)
           local ay = y + (self:get_line_height() / 2) - (style.icon_font:get_height() / 2)
-          renderer.draw_text(style.icon_font, icon, ax, ay, style.text)
+          renderer.draw_text(style.icon_font, icon, ax, ay, color)
           core.pop_clip_rect()
         end)
       end
@@ -400,19 +617,29 @@ function DiffView:patch_views()
     end
   end
 
-  local function wrap_doc_raw_insert(doc_view)
-    local orig = doc_view.doc.raw_insert
-    doc_view.doc.raw_insert = function(...)
-      parent:update_diff()
-      return orig(...)
+  local function wrap_get_scrollable_size(doc_view, is_a)
+    doc_view.get_scrollable_size = function(self)
+      local gaps = is_a and parent.a_gaps or parent.b_gaps
+      local lc = #self.doc.lines
+      if not config.scroll_past_end then
+        local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
+        return self:get_line_height() * (lc) + style.padding.y * 2 + h_scroll
+      end
+      return self:get_line_height() * ((lc + (gaps[lc] and gaps[lc][2] or 0)) - 1) + self.size.y
     end
   end
 
-  local function wrap_doc_raw_remove(doc_view)
-    local orig = doc_view.doc.raw_remove
-    doc_view.doc.raw_remove = function(...)
-      parent:update_diff()
-      return orig(...)
+  local function wrap_scroll_to_line(doc_view, is_a)
+    local orig = doc_view.scroll_to_line
+    doc_view.scroll_to_line = function(self, ...)
+      orig(self, ...)
+      if is_a then
+        parent.doc_view_b.scroll.y = self.scroll.y
+        parent.doc_view_b.scroll.to.y = self.scroll.y
+      else
+        parent.doc_view_a.scroll.y = self.scroll.y
+        parent.doc_view_a.scroll.to.y = self.scroll.y
+      end
     end
   end
 
@@ -446,15 +673,124 @@ function DiffView:patch_views()
     end
   end
 
-  local function wrap_get_scrollable_size(doc_view, is_a)
-    doc_view.get_scrollable_size = function(self)
-      local gaps = is_a and parent.a_gaps or parent.b_gaps
-      local lc = #self.doc.lines
-      if not config.scroll_past_end then
-        local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
-        return self:get_line_height() * (lc) + style.padding.y * 2 + h_scroll
+  local function wrap_doc_raw_insert(doc_view)
+    local orig = doc_view.doc.raw_insert
+    doc_view.doc.raw_insert = function(...)
+      parent:update_diff()
+      return orig(...)
+    end
+  end
+
+  local function wrap_doc_raw_remove(doc_view)
+    local orig = doc_view.doc.raw_remove
+    doc_view.doc.raw_remove = function(...)
+      parent:update_diff()
+      return orig(...)
+    end
+  end
+
+  ---@param changes diff.changes[]
+  local function has_changes(changes)
+    for _, change in ipairs(changes) do
+      if change.tag ~= "equal" then
+        return true
       end
-      return self:get_line_height() * ((lc + (gaps[lc] and gaps[lc][2] or 0)) - 1) + self.size.y
+    end
+    return false
+  end
+
+  local function wrap_prev_change(doc_view, is_a)
+    doc_view.prev_change = function(self)
+      local changes = is_a and parent.a_changes or parent.b_changes
+      if not has_changes(changes) then return end
+
+      local line = self.doc:get_selection()
+      if not changes[line] then return end
+      local tag = changes[line].tag
+      if line == 1 then
+        line = #self.doc.lines
+      else
+        line = line - 1
+      end
+
+      local target = line
+      local in_first_block = tag ~= "equal" and true or false
+      local in_second_block = tag == "equal" and true or false
+
+      while true do
+        if not changes[target] then break end
+        if in_first_block then
+          if changes[target].tag ~= tag then
+            in_first_block = false
+            in_second_block = true
+          end
+        elseif in_second_block and changes[target].tag ~= "equal" then
+          if changes[target-1].tag ~= changes[target].tag then
+            break
+          end
+        end
+        target = target - 1
+        if target == 1 then
+          if changes[target].tag == "equal" then
+            target = #self.doc.lines
+          else
+            break
+          end
+        elseif target < 1 then
+          target = #self.doc.lines
+        end
+      end
+
+      self.doc:set_selection(target, 1, target, 1)
+      self:scroll_to_line(target, false, true)
+    end
+  end
+
+  local function wrap_next_change(doc_view, is_a)
+    doc_view.next_change = function(self)
+      local changes = is_a and parent.a_changes or parent.b_changes
+      if not has_changes(changes) then return end
+
+      local count_lines = #self.doc.lines
+      local line = self.doc:get_selection()
+      if not changes[line] then return end
+      local tag = changes[line].tag
+      if line == count_lines then
+        line = 1
+      else
+        line = line + 1
+      end
+
+      local target = line
+      local in_first_block = tag ~= "equal" and true or false
+      local in_second_block = tag == "equal" and true or false
+
+      while true do
+        if not changes[target] then break end
+        if in_first_block then
+          if changes[target].tag ~= tag then
+            in_first_block = false
+            in_second_block = true
+          end
+        elseif in_second_block and changes[target].tag ~= "equal" then
+          if changes[target-1].tag ~= changes[target].tag then
+            break
+          end
+        end
+        target = target + 1
+        if target == count_lines then
+          if changes[target].tag == "equal" then
+            target = 1
+          else
+            break
+          end
+        elseif target > count_lines then
+          target = 1
+        end
+      end
+
+      self.doc:set_selection(target, 1, target, 1)
+      self:scroll_to_line(target, false, true)
     end
   end
 
@@ -468,9 +804,12 @@ function DiffView:patch_views()
     wrap_resolve_screen_position(side.view, side.is_a)
     wrap_get_visible_line_range(side.view, side.is_a)
     wrap_get_scrollable_size(side.view, side.is_a)
+    wrap_scroll_to_line(side.view, side.is_a)
     wrap_draw(side.view)
     wrap_doc_raw_insert(side.view)
     wrap_doc_raw_remove(side.view)
+    wrap_prev_change(side.view, side.is_a)
+    wrap_next_change(side.view, side.is_a)
   end
 end
 
@@ -565,12 +904,13 @@ function DiffView:draw()
 end
 
 
+-- Helper functions to start file to file or string to string diff viewer.
 local function start_compare()
   if not element_a or not element_b then
     core.log("First select something to compare")
     return
   end
-  local view = DiffView(element_a, element_b)
+  local view = DiffView(element_a, element_b, DiffView.type.FILE_FILE)
   core.root_view:get_active_node_default():add_view(view)
   core.set_active_view(view)
   element_a = nil
@@ -582,7 +922,7 @@ local function start_compare_string()
     core.log("First select something to compare")
     return
   end
-  local view = DiffView(element_a_text, element_b_text, true)
+  local view = DiffView(element_a_text, element_b_text, DiffView.type.STRING_STRING)
   core.root_view:get_active_node_default():add_view(view)
   core.set_active_view(view)
   element_a_text = nil
@@ -610,6 +950,34 @@ command.add(
     end
     start_compare()
   end
+})
+
+
+-- Register changes navigation and sync commands
+command.add(
+  function()
+    return core.active_view
+        and core.active_view:is(DocView)
+        and core.active_view.diff_view_parent,
+      core.active_view
+  end, {
+  ["diff:prev-change"] = function(dv)
+    dv:prev_change()
+  end,
+
+  ["diff:next-change"] = function(dv)
+    dv:next_change()
+  end,
+
+  ["diff:sync-change"] = function(dv)
+    dv.diff_view_parent:sync_selected()
+  end
+})
+
+keymap.add({
+  ["ctrl+alt+,"] = "diff:prev-change",
+  ["ctrl+alt+."] = "diff:next-change",
+  ["ctrl+return"] = "diff:sync-change",
 })
 
 
@@ -692,7 +1060,6 @@ core.add_thread(function()
         and system.get_file_info(TreeView.hovered_item.abs_filename).type == "file"
     end,
     {
-      TreeViewMenu.DIVIDER,
       { text = "Compare with Selected", command = "treeview:compare-with-selected" }
     }
   )
@@ -735,4 +1102,70 @@ core.add_thread(function()
 end)
 
 
-return DiffView
+---Functionality to view the textual differences of two elements.
+---@class plugins.diff
+local diff = {
+  ---The differences viewer exposed for extensiblity.
+  ---@type plugins.diff.view
+  Viewer = DiffView
+}
+
+---Helper differences view to rootview add.
+---@param view plugins.diff.view
+local function compare_add_to_root_node(view)
+  core.root_view:get_active_node_default():add_view(view)
+  core.set_active_view(view)
+end
+
+---Helper differences starter.
+---@param a string
+---@param b string
+---@param ct plugins.diff.view.type
+---@param noshow boolean
+---@return plugins.diff.view
+local function compare_start(a, b, ct, noshow)
+  local view = DiffView(a, b, ct)
+  if not noshow then
+    compare_add_to_root_node(view)
+  end
+  return view
+end
+
+---Create a file to file diff viewer.
+---@param a string
+---@param b string
+---@param noshow boolean If true doesn't adds to the rootview
+---@return plugins.diff.view
+function diff.file_to_file(a, b, noshow)
+  return compare_start(a, b, DiffView.type.FILE_FILE, noshow)
+end
+
+---Create a string to string diff viewer.
+---@param a string
+---@param b string
+---@param noshow boolean If true doesn't adds to the rootview
+---@return plugins.diff.view
+function diff.string_to_string(a, b, noshow)
+  return compare_start(a, b, DiffView.type.STRING_STRING, noshow)
+end
+
+---Create a file to string diff viewer.
+---@param a string
+---@param b string
+---@param noshow boolean If true doesn't adds to the rootview
+---@return plugins.diff.view
+function diff.file_to_string(a, b, noshow)
+  return compare_start(a, b, DiffView.type.FILE_STRING, noshow)
+end
+
+---Create a string to file diff viewer.
+---@param a string
+---@param b string
+---@param noshow boolean If true doesn't adds to the rootview
+---@return plugins.diff.view
+function diff.string_to_file(a, b, noshow)
+  return compare_start(a, b, DiffView.type.STRING_FILE, noshow)
+end
+
+
+return diff
