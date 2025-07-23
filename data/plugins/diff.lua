@@ -194,6 +194,9 @@ function DiffView:update_diff()
     self.b_changes = b_changes
 
     self.updater_idx = nil
+
+    self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
+    self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
   end)
 
   core.threads[idx].diff_viewer = diff_updater_idx
