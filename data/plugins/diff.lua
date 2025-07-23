@@ -9,6 +9,24 @@ local DocView = require "core.docview"
 local Doc = require "core.doc"
 local View = require "core.view"
 
+---Configuration options for `diff` plugin.
+---@class config.plugins.diff
+---Logs the amount of time taken to recompute differences.
+---@field log_times boolean
+config.plugins.diff = common.merge({
+  log_times = false,
+  config_spec = {
+    name = "Differences Viewer",
+    {
+      label = "Log Times",
+      description = "Logs the amount of time taken to compute differences.",
+      path = "log_times",
+      type = "toggle",
+      default = false
+    }
+  }
+}, config.plugins.diff)
+
 ---@type string?
 local element_a = nil
 ---@type string?
@@ -121,7 +139,14 @@ function DiffView:update_diff()
   end
 
   local start_time = system.get_time()
-  core.log((#self.a_changes == 0 and "Computing " or "Recomputing ") .. "differences...")
+
+  if config.plugins.diff.log_times then
+    core.log(
+      (#self.a_changes == 0 and "Computing " or "Recomputing ")
+      .. "differences..."
+    )
+  end
+
   local idx = core.add_thread(function()
     local ai, bi = 1, 1
     local a_offset, b_offset = 0, 0
@@ -206,7 +231,13 @@ function DiffView:update_diff()
 
     self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
-    core.log("Finished computing differences in %.2fs", system.get_time() - start_time)
+
+    if config.plugins.diff.log_times then
+      core.log(
+        "Finished computing differences in %.2fs",
+        system.get_time() - start_time
+      )
+    end
   end)
 
   core.threads[idx].diff_viewer = diff_updater_idx
@@ -477,15 +508,6 @@ function DiffView:get_scrollable_size()
   return self.doc_view_a:get_line_height() * (lc - 1) + self.size.y
 end
 
-local delete_color = {common.color "rgba(200, 84, 84, 0.15)"}
-local insert_color = {common.color "rgba(121, 199, 114, 0.15)"}
-local modify_color = {common.color "rgba(202, 173, 85, 0.15)"}
-local delete_inline_color = {common.color "rgba(200, 84, 84, 0.20)"}
-local insert_inline_color = {common.color "rgba(121, 199, 114, 0.20)"}
-local delete_color_opaque = {common.color "rgba(200, 84, 84, 1)"}
-local insert_color_opaque = {common.color "rgba(121, 199, 114, 1)"}
-local modify_color_opaque = {common.color "rgba(202, 173, 85, 1)"}
-
 ---@param parent core.diffview
 ---@param self core.docview
 ---@param line integer
@@ -498,15 +520,23 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
   local change = changes[line]
   if change and change.tag ~= "equal" then
     if change.tag == "delete" then
-      renderer.draw_rect(self.position.x, y, self.size.x, h, delete_color)
+      renderer.draw_rect(
+        self.position.x, y, self.size.x, h, style.diff_delete_background
+      )
     elseif change.tag == "insert" then
-      renderer.draw_rect(self.position.x, y, self.size.x, h, insert_color)
+      renderer.draw_rect(
+        self.position.x, y, self.size.x, h, style.diff_insert_background
+      )
     else
       if change.changes then
         if changes == parent.a_changes then
-          renderer.draw_rect(self.position.x, y, self.size.x, h, delete_color)
+          renderer.draw_rect(
+            self.position.x, y, self.size.x, h, style.diff_delete_background
+          )
         else
-          renderer.draw_rect(self.position.x, y, self.size.x, h, insert_color)
+          renderer.draw_rect(
+            self.position.x, y, self.size.x, h, style.diff_insert_background
+          )
         end
         ---@type diff.changes[]
         local mods = change.changes
@@ -520,8 +550,8 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
             renderer.draw_rect(
               x + tx, y, w, h,
               changes == parent.a_changes
-                and delete_inline_color
-                or insert_inline_color
+                and style.diff_delete_inline
+                or style.diff_insert_inline
             )
           elseif edit.tag == "delete" then
             deletes = deletes + 1
@@ -889,9 +919,9 @@ function DiffView:draw_scrollbar()
 
       -- Draw block for [start_line, end_line]
       local color =
-        tag == "insert" and insert_color_opaque
-        or tag == "delete" and delete_color_opaque
-        or tag == "modify" and modify_color_opaque
+        tag == "insert" and style.diff_insert
+        or tag == "delete" and style.diff_delete
+        or tag == "modify" and style.diff_modify
 
       if color then
         local scroll_y_start = (start_line - 1) * lh

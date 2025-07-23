@@ -28,6 +28,15 @@ style.warn = { common.color "#FAA82F" }
 style.error = { common.color "#c7162b" }
 style.modified = { common.color "#19B6EE" }
 
+style.diff_delete = { common.color "rgba(200, 84, 84, 1)" }
+style.diff_insert = { common.color "rgba(77, 127, 73, 1)" }
+style.diff_modify = { common.color "rgba(202, 173, 85, 1)" }
+style.diff_delete_background = { common.color "rgba(200, 84, 84, 0.30)" }
+style.diff_insert_background = { common.color "rgba(77, 127, 73, 0.30)" }
+style.diff_modify_background = { common.color "rgba(202, 173, 85, 0.30)" }
+style.diff_delete_inline = { common.color "rgba(200, 84, 84, 0.40)" }
+style.diff_insert_inline = { common.color "rgba(77, 127, 73, 0.40)" }
+
 style.search_selection = { common.color "#6a5acd" }
 style.search_selection_text = { common.color "#ffffff" }
 
