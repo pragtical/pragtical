@@ -13,8 +13,14 @@ local View = require "core.view"
 ---@class config.plugins.diff
 ---Logs the amount of time taken to recompute differences.
 ---@field log_times boolean
+---Disable syntax coloring on changed lines to improve visibility.
+---@field plain_text boolean
+---The color used on changed lines when plain text is enabled.
+---@field plain_text_color renderer.color
 config.plugins.diff = common.merge({
   log_times = false,
+  plain_text = false,
+  plain_text_color = { common.color "#ffffff" },
   config_spec = {
     name = "Differences Viewer",
     {
@@ -23,6 +29,20 @@ config.plugins.diff = common.merge({
       path = "log_times",
       type = "toggle",
       default = false
+    },
+    {
+      label = "Plain Text",
+      description = "Disable syntax coloring on changed lines to improve visibility.",
+      path = "plain_text",
+      type = "toggle",
+      default = false
+    },
+    {
+      label = "Plain Text Color",
+      description = "The color used on changed lines when plain text is enabled.",
+      path = "plain_text_color",
+      type = "color",
+      default = { common.color "#ffffff" }
     }
   }
 }, config.plugins.diff)
@@ -527,24 +547,34 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
   local h = self:get_line_height()
   local change = changes[line]
   if change and change.tag ~= "equal" then
+    local delete_bg = style.diff_delete_background
+    local insert_bg = style.diff_insert_background
+    local delete_inline = style.diff_delete_inline
+    local insert_inline = style.diff_insert_inline
+    if config.plugins.diff.plain_text then
+      -- increase opacity to half
+      delete_bg = { table.unpack(delete_bg) }
+      delete_bg[4] = 128
+      insert_bg = { table.unpack(insert_bg) }
+      insert_bg[4] = 128
+      -- make inline opaque
+      delete_inline = style.diff_delete
+      insert_inline = style.diff_insert
+    end
     if change.tag == "delete" then
       renderer.draw_rect(
-        self.position.x, y, self.size.x, h, style.diff_delete_background
+        self.position.x, y, self.size.x, h, delete_bg
       )
     elseif change.tag == "insert" then
       renderer.draw_rect(
-        self.position.x, y, self.size.x, h, style.diff_insert_background
+        self.position.x, y, self.size.x, h, insert_bg
       )
     else
       if change.changes then
         if changes == parent.a_changes then
-          renderer.draw_rect(
-            self.position.x, y, self.size.x, h, style.diff_delete_background
-          )
+          renderer.draw_rect(self.position.x, y, self.size.x, h, delete_bg)
         else
-          renderer.draw_rect(
-            self.position.x, y, self.size.x, h, style.diff_insert_background
-          )
+          renderer.draw_rect(self.position.x, y, self.size.x, h, insert_bg)
         end
         ---@type diff.changes[]
         local mods = change.changes
@@ -558,8 +588,8 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
             renderer.draw_rect(
               x + tx, y, w, h,
               changes == parent.a_changes
-                and style.diff_delete_inline
-                or style.diff_insert_inline
+                and delete_inline
+                or insert_inline
             )
           elseif edit.tag == "delete" then
             deletes = deletes + 1
@@ -581,6 +611,7 @@ function DiffView:patch_views()
     doc_view.draw_line_text = function(self, line, x, y)
       local changes = is_a and parent.a_changes or parent.b_changes
       draw_line_text_override(parent, self, line, x, y, changes)
+      local has_changes = changes[line] and changes[line].tag ~= "equal"
       if
         changes[line] and changes[line].tag ~= "equal"
         and
@@ -608,7 +639,17 @@ function DiffView:patch_views()
           core.pop_clip_rect()
         end)
       end
-      return orig(self, line, x, y)
+      if has_changes and config.plugins.diff.plain_text then
+        renderer.draw_text(
+          self:get_font(),
+          self.doc.lines[line],
+          x, y + self:get_line_text_y_offset(),
+          config.plugins.diff.plain_text_color
+        )
+        return self:get_line_height()
+      else
+        return orig(self, line, x, y)
+      end
     end
   end
 
