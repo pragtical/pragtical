@@ -99,18 +99,18 @@ function DiffView:new(a, b, compare_type)
     doc_a = Doc(common.basename(a), a)
     doc_b = Doc(common.basename(b), b)
   elseif compare_type == DiffView.type.STRING_STRING then
-    doc_a = Doc("file_a.txt", "file_a.txt", true)
-    doc_a:insert(1, 1, a)
-    doc_b = Doc("file_b.txt", "file_b.txt", true)
-    doc_b:insert(1, 1, b)
+    doc_a = Doc(nil, nil, true)
+    if a ~= "" then doc_a:insert(1, 1, a) doc_a:clear_undo_redo() end
+    doc_b = Doc(nil, nil, true)
+    if b ~= "" then doc_b:insert(1, 1, b) doc_b:clear_undo_redo() end
   elseif compare_type == DiffView.type.STRING_FILE then
-    doc_a = Doc("file_a.txt", "file_a.txt", true)
-    doc_a:insert(1, 1, a)
+    doc_a = Doc(nil, nil, true)
+    if a ~= "" then doc_a:insert(1, 1, a) doc_a:clear_undo_redo() end
     doc_b = Doc(common.basename(b), b)
   elseif compare_type == DiffView.type.FILE_STRING then
     doc_a = Doc(common.basename(a), a)
-    doc_b = Doc("file_b.txt", "file_b.txt", true)
-    doc_b:insert(1, 1, b)
+    doc_b = Doc(nil, nil, true)
+    if b ~= "" then doc_b:insert(1, 1, b) doc_b:clear_undo_redo() end
   end
 
   self.doc_view_a = DocView(doc_a)
@@ -1075,6 +1075,14 @@ command.add(nil, {
         start_compare()
       end)
     end)
+  end
+})
+
+command.add(nil, {
+  ["diff:start-strings-comparison"] = function()
+    element_a_text = ""
+    element_b_text = ""
+    start_compare_string()
   end
 })
 

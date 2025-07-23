@@ -54,6 +54,13 @@ function Doc:reset()
 end
 
 
+function Doc:clear_undo_redo()
+  self.clean_change_id = 1
+  self.undo_stack = { idx = 1 }
+  self.redo_stack = { idx = 1 }
+end
+
+
 ---Always returns a valid utf8 line even if the file contains binary data.
 ---@param idx integer
 ---@return string
