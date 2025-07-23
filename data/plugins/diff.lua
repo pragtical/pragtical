@@ -89,6 +89,9 @@ function DiffView:new(a, b, compare_type)
 
   self:patch_views()
   self:update_diff()
+
+  self.v_scrollbar.contracted_size = style.expanded_scrollbar_size * 2
+  self.v_scrollbar.expanded_size = style.expanded_scrollbar_size * 2
 end
 
 function DiffView:get_name()
@@ -311,13 +314,22 @@ function DiffView:on_mouse_pressed(button, x, y, clicks)
     self.hovered_sync = nil
     return
   end
-  if
-    DiffView.super.on_mouse_pressed(self, button, x, y, clicks)
-    or
-    self.doc_view_a:on_mouse_pressed(button, x, y, clicks)
-    or
-    self.doc_view_b:on_mouse_pressed(button, x, y, clicks)
-  then
+  if DiffView.super.on_mouse_pressed(self, button, x, y, clicks) then
+    self.scroll.y = self.scroll.to.y
+    self.doc_view_a.scroll.to.y = self.scroll.y
+    self.doc_view_a.scroll.y = self.scroll.y
+    self.doc_view_b.scroll.to.y = self.scroll.y
+    self.doc_view_b.scroll.y = self.scroll.y
+    return true
+  elseif self.doc_view_a:on_mouse_pressed(button, x, y, clicks) then
+    self.doc_view_a.scroll.y = self.doc_view_a.scroll.to.y
+    self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
+    self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
+    return true
+  elseif self.doc_view_b:on_mouse_pressed(button, x, y, clicks) then
+    self.doc_view_b.scroll.y = self.doc_view_b.scroll.to.y
+    self.doc_view_a.scroll.to.y = self.doc_view_b.scroll.y
+    self.doc_view_a.scroll.y = self.doc_view_b.scroll.y
     return true
   end
   for _, view in ipairs({self.doc_view_a, self.doc_view_b}) do
@@ -384,21 +396,30 @@ local function check_hovered_sync(self, x, y)
 end
 
 function DiffView:on_mouse_moved(...)
+  -- ignore config.animate_drag_scroll by setting scroll.y to scroll.to.y
+  -- since views would end in different positions, also scrolling two
+  -- views at the same time with animation on would be more cpu demanding.
+
   if DiffView.super.on_mouse_moved(self, ...) then
     if self.v_scrollbar.dragging then
+      self.scroll.y = self.scroll.to.y
       self.doc_view_a.scroll.to.y = self.scroll.y
+      self.doc_view_a.scroll.y = self.scroll.y
       self.doc_view_b.scroll.to.y = self.scroll.y
+      self.doc_view_b.scroll.y = self.scroll.y
       return true
     end
   end
   self.doc_view_a:on_mouse_moved(...)
   if self.doc_view_a:scrollbar_dragging() then
+    self.doc_view_a.scroll.y = self.doc_view_a.scroll.to.y
     self.doc_view_b.scroll.y = self.doc_view_a.scroll.y
     self.doc_view_b.scroll.to.y = self.doc_view_a.scroll.y
     return true
   end
   self.doc_view_b:on_mouse_moved(...)
   if self.doc_view_b:scrollbar_dragging() then
+    self.doc_view_b.scroll.y = self.doc_view_b.scroll.to.y
     self.doc_view_a.scroll.y = self.doc_view_b.scroll.y
     self.doc_view_a.scroll.to.y = self.doc_view_b.scroll.y
     return true
@@ -428,7 +449,8 @@ function DiffView:on_mouse_wheel(y, x)
 end
 
 function DiffView:on_scale_change(...)
-  DiffView.super.on_scale_change(self, ...)
+  self.v_scrollbar.contracted_size = style.expanded_scrollbar_size  * 2
+  self.v_scrollbar.expanded_size = style.expanded_scrollbar_size * 2
   self.doc_view_a:on_scale_change(...)
   self.doc_view_b:on_scale_change(...)
 end
