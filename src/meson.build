@@ -111,10 +111,28 @@ if host_machine.system() == 'windows'
     pragtical_rc += windows.compile_resources('../resources/icons/icon.rc')
     pragtical_rc += windows.compile_resources('../resources/windows/manifest.rc')
 
-    pragtical_sources += 'windows/darkmode.c'
-    pragtical_deps += cc.find_library('dwmapi', required : true)
+    # solve missing symbols when building from sdl3 cmake subproject
+    if sdl_dep.type_name() == 'internal'
+        pragtical_deps += cc.find_library('winmm', required : true)
+        pragtical_deps += cc.find_library('imm32', required: true)
+        pragtical_deps += cc.find_library('setupapi', required: true)
+        pragtical_deps += cc.find_library('version', required: true)
+    endif
 elif host_machine.system() == 'darwin'
     pragtical_sources += 'bundle_open.m'
+
+    # solve missing symbols when building from sdl3 cmake subproject
+    if sdl_dep.type_name() == 'internal'
+        pragtical_link_args += [
+            '-framework', 'Carbon',
+            '-framework', 'CoreFoundation',
+            '-framework', 'Metal',
+            '-framework', 'AppKit',
+            '-framework', 'CoreVideo',
+            '-framework', 'IOKit',
+            '-framework', 'UniformTypeIdentifiers'
+        ]
+    endif
 endif
 
 pragtical_includes += include_directories('.')
