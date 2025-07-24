@@ -336,7 +336,11 @@ local function view_is_open(target_view)
   if not target_view then return false end
   local found = false
   for _, view in ipairs(core.root_view.root_node:get_children()) do
-    if view == target_view then
+    if
+      view == target_view
+      or
+      (target_view.diff_view_parent and view == target_view.diff_view_parent)
+    then
       found = true
       break
     end
