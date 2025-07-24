@@ -118,7 +118,7 @@ command.add(nil, {
     })
   end,
 
-  ["core:open-file"] = function()
+  ["core:open-file"] = function(label, selection_callback)
     local view = core.active_view
     local text, root_dir, filename = "", core.root_project().path, ""
     if view.doc and view.doc.abs_filename then
@@ -130,10 +130,14 @@ command.add(nil, {
         root_dir = dirname
       end
     end
-    core.command_view:enter("Open File", {
+    core.command_view:enter(label or "Open File", {
       text = text,
       submit = function(text)
-        core.root_view:open_doc(core.open_doc(filename))
+        if not selection_callback then
+          core.root_view:open_doc(core.open_doc(filename))
+        else
+          selection_callback(filename)
+        end
       end,
       suggest = function(text)
         return common.home_encode_list(
