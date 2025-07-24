@@ -59,10 +59,11 @@ local element_b_text = nil
 local diff_updater_idx = 0
 
 ---@class plugins.diffview.view : core.view
+---@field super core.view
 ---@field doc_view_a core.docview
 ---@field doc_view_b core.docview
 ---@field a_changes diff.changes[]
----@field a_changes diff.changes[]
+---@field b_changes diff.changes[]
 ---@field a_gaps table<integer,table<integer,integer>>
 ---@field b_gaps table<integer,table<integer,integer>>
 ---@field compare_type plugins.diffview.view.type
@@ -503,10 +504,10 @@ function DiffView:on_mouse_moved(...)
   check_hovered_sync(self, ...)
 end
 
-function DiffView:on_mouse_left(...)
-  DiffView.super.on_mouse_left(self, ...)
-  self.doc_view_a:on_mouse_left(...)
-  self.doc_view_b:on_mouse_left(...)
+function DiffView:on_mouse_left()
+  DiffView.super.on_mouse_left(self)
+  self.doc_view_a:on_mouse_left()
+  self.doc_view_b:on_mouse_left()
 end
 
 function DiffView:on_mouse_wheel(y, x)
@@ -616,6 +617,8 @@ function DiffView:patch_views()
 
   local parent = self
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_draw_line_text(doc_view, is_a)
     local orig = doc_view.draw_line_text
     doc_view.draw_line_text = function(self, line, x, y)
@@ -663,6 +666,8 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_get_line_screen_position(doc_view, is_a)
     doc_view.get_line_screen_position = function(self, line, col)
       local x, y = self:get_content_offset()
@@ -678,6 +683,8 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_resolve_screen_position(doc_view, is_a)
     doc_view.resolve_screen_position = function(self, x, y)
       local lines = self.doc.lines
@@ -706,6 +713,8 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_get_visible_line_range(doc_view, is_a)
     doc_view.get_visible_line_range = function(self)
       local _, oy, _, y2 = self:get_content_bounds()
@@ -741,6 +750,8 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_get_scrollable_size(doc_view, is_a)
     doc_view.get_scrollable_size = function(self)
       local gaps = is_a and parent.a_gaps or parent.b_gaps
@@ -753,6 +764,8 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_scroll_to_line(doc_view, is_a)
     local orig = doc_view.scroll_to_line
     doc_view.scroll_to_line = function(self, ...)
@@ -767,6 +780,7 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
   local function wrap_draw(doc_view)
     doc_view.draw = function(self)
       self:draw_background(style.background)
@@ -797,6 +811,7 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
   local function wrap_doc_raw_insert(doc_view)
     local orig = doc_view.doc.raw_insert
     doc_view.doc.raw_insert = function(...)
@@ -805,6 +820,7 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
   local function wrap_doc_raw_remove(doc_view)
     local orig = doc_view.doc.raw_remove
     doc_view.doc.raw_remove = function(...)
@@ -823,6 +839,8 @@ function DiffView:patch_views()
     return false
   end
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_prev_change(doc_view, is_a)
     doc_view.prev_change = function(self)
       local changes = is_a and parent.a_changes or parent.b_changes
@@ -870,6 +888,8 @@ function DiffView:patch_views()
     end
   end
 
+  ---@param doc_view core.docview
+  ---@param is_a boolean
   local function wrap_next_change(doc_view, is_a)
     doc_view.next_change = function(self)
       local changes = is_a and parent.a_changes or parent.b_changes
