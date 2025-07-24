@@ -401,6 +401,25 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
 end
 
 
+local function token_iter(state, i)
+  i = i + 2
+  if i > state.tcount then return nil end
+  local type, text = state.t[i], state.t[i + 1]
+  if state.col then
+    text = string.sub(text, state.col)
+    state.col = nil -- slice only once
+  end
+  state.i = i
+  return i, type, text
+end
+
+---Iterator for a sequence of tokens in the form {type, token, ...},
+---returning each pair of token type and token string.
+---@param t string[] List of tokens in the form {type, token, ...}
+---@param scol? integer The starting offset of all combined tokens.
+---@return fun(state,idx):integer,string,string iterator
+---@return table state
+---@return integer idx
 function tokenizer.each_token(t, scol)
   local tcount, start, col = #t, 1, nil
   if scol then
@@ -416,13 +435,8 @@ function tokenizer.each_token(t, scol)
       ccol = ccol + len + 1
     end
   end
-  return coroutine.wrap(function()
-    for i=start, tcount, 2 do
-      local type, text = t[i], t[i+1]
-      if col then text = string.sub(text, col) col = nil end
-      coroutine.yield(i, type, text)
-    end
-  end)
+  local state = {t = t, tcount = tcount, col = col}
+  return token_iter, state, start - 2
 end
 
 
