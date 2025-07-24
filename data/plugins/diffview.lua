@@ -67,6 +67,7 @@ local diff_updater_idx = 0
 ---@field b_gaps table<integer,table<integer,integer>>
 ---@field compare_type plugins.diffview.view.type
 ---@field hovered_sync? plugins.diffview.view.hovered_sync
+---@overload fun(a:string,b:string,ct?:plugins.diffview.view.type,names?:plugins.diffview.view.string_names):plugins.diffview.view
 local DiffView = View:extend()
 
 ---@enum plugins.diffview.view.type
@@ -91,8 +92,8 @@ DiffView.type = {
 ---Constructor
 ---@param a string
 ---@param b string
----@param compare_type plugins.diffview.view.type
----@param names plugins.diffview.view.string_names
+---@param compare_type? plugins.diffview.view.type
+---@param names? plugins.diffview.view.string_names
 function DiffView:new(a, b, compare_type, names)
   DiffView.super.new(self)
 
@@ -1263,7 +1264,7 @@ end
 ---Helper differences starter.
 ---@param a string
 ---@param b string
----@param ct plugins.diffview.view.type
+---@param ct? plugins.diffview.view.type
 ---@param names? plugins.diffview.view.string_names
 ---@param noshow? boolean
 ---@return plugins.diffview.view
