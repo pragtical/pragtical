@@ -303,7 +303,12 @@ function DiffView:sync(line, target_line, is_a)
       target_changes[i] = {tag = "equal"}
     end
   else
-    to.doc:insert(target_line, math.huge, "\n" .. text:sub(1, #text - 1))
+    if line == 1 and target_line == 1 then
+      to.doc:insert(target_line, 1, text)
+      target_line = target_line - 1
+    else
+      to.doc:insert(target_line, math.huge, "\n" .. text:sub(1, #text - 1))
+    end
 
     -- update target changes and target gaps
     local changes_inserts = {}
