@@ -1102,7 +1102,7 @@ command.add(
 })
 
 command.add(nil, {
-  ["diff-view:start-file-comparison"] = function()
+  ["diff-view:start-files-comparison"] = function()
     command.perform("core:open-file", "Select File A", function(file_a)
       element_a = file_a
       command.perform("core:open-file", "Select File B", function(file_b)
