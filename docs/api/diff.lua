@@ -2,7 +2,7 @@
 
 ---
 ---Functionality to generate the differences between two strings.
----@class encoding
+---@class diff
 diff = {}
 
 ---@class diff.changes
