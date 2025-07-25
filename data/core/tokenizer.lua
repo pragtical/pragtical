@@ -131,6 +131,107 @@ local function report_bad_pattern(log_fn, syntax, pattern_idx, msg, ...)
             syntax.name or "unnamed", ...)
 end
 
+-- Should be used to set the state variable. Don't modify it directly.
+local function set_subsyntax_pattern_idx(state, current_level, pattern_idx)
+  local state_len = #state
+  if current_level > state_len then
+    return state .. string.char(pattern_idx)
+  elseif state_len == 1 then
+    return string.char(pattern_idx)
+  else
+    return ("%s%s%s"):format(
+      state:sub(1, current_level - 1),
+      string.char(pattern_idx),
+      state:sub(current_level + 1)
+    )
+  end
+end
+
+local function push_subsyntax(incoming_syntax, current_level, state, entering_syntax, pattern_idx)
+  state = set_subsyntax_pattern_idx(state, current_level, pattern_idx)
+  current_level = current_level + 1
+  local subsyntax_info = entering_syntax
+  local current_syntax = type(entering_syntax.syntax) == "table"
+    and entering_syntax.syntax or syntax.get(entering_syntax.syntax)
+  local current_pattern_idx = 0
+  return current_syntax, subsyntax_info, current_pattern_idx, current_level, state
+end
+
+local function pop_subsyntax(incoming_syntax, state, current_level)
+  current_level = current_level - 1
+  state = string.sub(state, 1, current_level)
+  state = set_subsyntax_pattern_idx(state, current_level, 0)
+  local current_syntax, subsyntax_info, current_pattern_idx, current_level2 =
+    retrieve_syntax_state(incoming_syntax, state)
+  return current_syntax, subsyntax_info, current_pattern_idx, current_level2, state
+end
+
+local function find_text(text, p, offset, at_start, close)
+  local target, res = p.pattern or p.regex, { 1, offset - 1 }
+  local p_idx = close and 2 or 1
+  local code = type(target) == "table" and target[p_idx] or target
+  if p.disabled then return end
+
+  if p.whole_line == nil then p.whole_line = {} end
+  if p.whole_line[p_idx] == nil then
+    -- Match patterns that start with '^'
+    p.whole_line[p_idx] = code:umatch("^%^") and true or false
+    if p.whole_line[p_idx] then
+      -- Remove '^' from the beginning of the pattern
+      if type(target) == "table" then
+        target[p_idx] = code:usub(2)
+        code = target[p_idx]
+      else
+        p.pattern = p.pattern and code:usub(2)
+        p.regex = p.regex and code:usub(2)
+        code = p.pattern or p.regex
+      end
+    end
+  end
+
+  if p.regex and type(p.regex) ~= "table" then
+    p._regex = p._regex or regex.compile(p.regex)
+    code = p._regex
+  end
+
+  repeat
+    local next = res[2] + 1
+    -- If the pattern contained '^', allow matching only the whole line
+    if p.whole_line[p_idx] and next > 1 then
+      return
+    end
+    res = p.pattern and { text:ufind((at_start or p.whole_line[p_idx]) and "^" .. code or code, next) }
+      or { regex.find(code, text, text:ucharpos(next), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
+    if p.regex and #res > 0 then
+      local char_pos_1 = res[1] > next and string.ulen(text:sub(1, res[1]), nil, nil, true) or next
+      local char_pos_2 = string.ulen(text:sub(1, res[2]), nil, nil, true)
+      for i = 3, #res do
+        res[i] = string.ulen(text:sub(1, res[i] - 1), nil, nil, true) + 1
+      end
+      res[1] = char_pos_1
+      res[2] = char_pos_2
+    end
+    if not res[1] then return end
+    if res[1] and target[3] then
+      -- Check to see if the escaped character is there,
+      -- and if it is not itself escaped.
+      local count = 0
+      for i = res[1] - 1, 1, -1 do
+        if text:ubyte(i) ~= target[3]:ubyte() then break end
+        count = count + 1
+      end
+      if count % 2 == 0 then
+        -- The match is not escaped, so confirm it
+        break
+      else
+        -- The match is escaped, so avoid it
+        res[1] = false
+      end
+    end
+  until at_start or not close or not target[3]
+  return table.unpack(res)
+end
+
 ---@param incoming_syntax table
 ---@param text string
 ---@param state string
@@ -147,9 +248,9 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
   if resume then
     res = resume.res
     -- Remove "incomplete" tokens
-    while res[#res-1] == "incomplete" do
-      table.remove(res, #res)
-      table.remove(res, #res)
+    while res[#res - 1] == "incomplete" do
+      table.remove(res)
+      table.remove(res)
     end
     i = resume.i
     state = resume.state
@@ -166,107 +267,6 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
   -- current_level      : how many subsyntaxes deep we are.
   local current_syntax, subsyntax_info, current_pattern_idx, current_level =
     retrieve_syntax_state(incoming_syntax, state)
-
-  -- Should be used to set the state variable. Don't modify it directly.
-  local function set_subsyntax_pattern_idx(pattern_idx)
-    current_pattern_idx = pattern_idx
-    local state_len = #state
-    if current_level > state_len then
-      state = state .. string.char(pattern_idx)
-    elseif state_len == 1 then
-      state = string.char(pattern_idx)
-    else
-      state = ("%s%s%s"):format(
-        state:sub(1,current_level-1),
-        string.char(pattern_idx),
-        state:sub(current_level+1)
-      )
-    end
-  end
-
-
-  local function push_subsyntax(entering_syntax, pattern_idx)
-    set_subsyntax_pattern_idx(pattern_idx)
-    current_level = current_level + 1
-    subsyntax_info = entering_syntax
-    current_syntax = type(entering_syntax.syntax) == "table" and
-      entering_syntax.syntax or syntax.get(entering_syntax.syntax)
-    current_pattern_idx = 0
-  end
-
-  local function pop_subsyntax()
-    current_level = current_level - 1
-    state = string.sub(state, 1, current_level)
-    set_subsyntax_pattern_idx(0)
-    current_syntax, subsyntax_info, current_pattern_idx, current_level =
-      retrieve_syntax_state(incoming_syntax, state)
-  end
-
-  local function find_text(text, p, offset, at_start, close)
-    local target, res = p.pattern or p.regex, { 1, offset - 1 }
-    local p_idx = close and 2 or 1
-    local code = type(target) == "table" and target[p_idx] or target
-    if p.disabled then return end
-
-    if p.whole_line == nil then p.whole_line = { } end
-    if p.whole_line[p_idx] == nil then
-      -- Match patterns that start with '^'
-      p.whole_line[p_idx] = code:umatch("^%^") and true or false
-      if p.whole_line[p_idx] then
-        -- Remove '^' from the beginning of the pattern
-        if type(target) == "table" then
-          target[p_idx] = code:usub(2)
-          code = target[p_idx]
-        else
-          p.pattern = p.pattern and code:usub(2)
-          p.regex = p.regex and code:usub(2)
-          code = p.pattern or p.regex
-        end
-      end
-    end
-
-    if p.regex and type(p.regex) ~= "table" then
-      p._regex = p._regex or regex.compile(p.regex)
-      code = p._regex
-    end
-
-    repeat
-      local next = res[2] + 1
-      -- If the pattern contained '^', allow matching only the whole line
-      if p.whole_line[p_idx] and next > 1 then
-        return
-      end
-      res = p.pattern and { text:ufind((at_start or p.whole_line[p_idx]) and "^" .. code or code, next) }
-        or { regex.find(code, text, text:ucharpos(next), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
-      if p.regex and #res > 0 then -- set correct utf8 len for regex result
-        local char_pos_1 = res[1] > next and string.ulen(text:sub(1, res[1]), nil, nil, true) or next
-        local char_pos_2 = string.ulen(text:sub(1, res[2]), nil, nil, true)
-        for i=3,#res do
-          res[i] = string.ulen(text:sub(1, res[i] - 1), nil, nil, true) + 1
-        end
-        res[1] = char_pos_1
-        res[2] = char_pos_2
-      end
-      if not res[1] then return end
-      if res[1] and target[3] then
-        -- Check to see if the escaped character is there,
-        -- and if it is not itself escaped.
-        local count = 0
-        for i = res[1] - 1, 1, -1 do
-          if text:ubyte(i) ~= target[3]:ubyte() then break end
-          count = count + 1
-        end
-        if count % 2 == 0 then
-          -- The match is not escaped, so confirm it
-          break
-        else
-          -- The match is escaped, so avoid it
-          res[1] = false
-        end
-      end
-    until at_start or not close or not target[3]
-    return table.unpack(res)
-  end
 
   local text_len = text:ulen(nil, nil, true)
   local start_time = system.get_time()
@@ -321,7 +321,8 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
           end
           -- Push the end delimiter
           push_tokens(res, current_syntax, p, text, find_results)
-          set_subsyntax_pattern_idx(0)
+          current_pattern_idx = 0
+          state = set_subsyntax_pattern_idx(state, current_level, 0)
           i = e + 1
         else
           push_token(res, token_type, text:usub(i))
@@ -338,7 +339,8 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       if s then
         push_tokens(res, current_syntax, subsyntax_info, text, find_results)
         -- On finding unescaped delimiter, pop it.
-        pop_subsyntax()
+        current_syntax, subsyntax_info, current_pattern_idx, current_level, state =
+          pop_subsyntax(incoming_syntax, state, current_level)
         i = e + 1
       else
         break
@@ -354,7 +356,7 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
         -- those that delegate the result to a subsyntax
         if find_results[1] > find_results[2] and not p.syntax then
           report_bad_pattern(core.warn, current_syntax, n,
-              "Pattern successfully matched, but nothing was captured.")
+            "Pattern successfully matched, but nothing was captured.")
         -- Check for patterns with mismatching number of `types`
         else
           local type_is_table = type(p.type) == "table"
@@ -377,9 +379,11 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
           if type(p.pattern or p.regex) == "table" then
             -- If we have a subsyntax, push that onto the subsyntax stack.
             if p.syntax then
-              push_subsyntax(p, n)
+              current_syntax, subsyntax_info, current_pattern_idx, current_level, state =
+                push_subsyntax(incoming_syntax, current_level, state, p, n)
             else
-              set_subsyntax_pattern_idx(n)
+              current_pattern_idx = n
+              state = set_subsyntax_pattern_idx(state, current_level, n)
             end
           end
           -- move cursor past this token
