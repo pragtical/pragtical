@@ -1592,7 +1592,9 @@ function Settings:load_color_settings()
       listbox:set_selected(idx)
     end
     listbox:add_row({
-      style.text, name, ListBox.COLEND, on_color_draw
+      {type = "color", container = style, name = "text"}, name,
+      ListBox.COLEND,
+      on_color_draw
     }, {name = name, colors = details.colors})
   end
 
@@ -1863,7 +1865,9 @@ function Settings:load_keymap_settings()
       binding = "none"
     end
     listbox:add_row({
-      style.text, name, ListBox.COLEND, style.dim, binding
+      {type = "color", container = style, name = "text"}, name,
+      ListBox.COLEND,
+      {type = "color", container = style, name = "dim"}, binding
     }, name)
   end
 
