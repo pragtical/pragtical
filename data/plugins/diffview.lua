@@ -964,6 +964,15 @@ function DiffView:patch_views()
   end
 end
 
+local function redraw_thumb(view_scrollbar)
+  local highlight = view_scrollbar.hovering.thumb or view_scrollbar.dragging
+  local color = highlight and style.scrollbar2 or style.scrollbar
+  color = { table.unpack(color) }
+  color[4] = 100
+  local x, y, w, h = view_scrollbar:get_thumb_rect()
+  renderer.draw_rect(x, y, w, h, color)
+end
+
 function DiffView:draw_scrollbar()
   DiffView.super.draw_scrollbar(self)
 
@@ -1026,6 +1035,10 @@ function DiffView:draw_scrollbar()
       i = i + 1
     end
   end
+
+  redraw_thumb(self.doc_view_a.v_scrollbar)
+  redraw_thumb(self.doc_view_b.v_scrollbar)
+  redraw_thumb(self.v_scrollbar)
 end
 
 function DiffView:update()
