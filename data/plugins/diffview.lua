@@ -775,6 +775,8 @@ function DiffView:patch_views()
     local orig = doc_view.scroll_to_line
     doc_view.scroll_to_line = function(self, ...)
       orig(self, ...)
+      parent.scroll.y = self.scroll.y
+      parent.scroll.to.y = self.scroll.y
       if is_a then
         parent.doc_view_b.scroll.y = self.scroll.y
         parent.doc_view_b.scroll.to.y = self.scroll.y
