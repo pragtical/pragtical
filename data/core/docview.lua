@@ -373,7 +373,12 @@ function DocView:scroll_to_make_visible(line, col, instant)
   local lh = self:get_line_height()
   local _, _, _, scroll_h = self.h_scrollbar:get_track_rect()
 
-  local pad = not self.mouse_selecting and config.scroll_context_lines or 1
+  local minline, maxline = self:get_visible_line_range()
+  local visible_lines = maxline - minline
+
+  local requested_pad = config.scroll_context_lines
+  local max_pad = math.floor(visible_lines / 2)
+  local pad = not self.mouse_selecting and math.min(requested_pad, max_pad) or 1
   local above = math.max(0, ly - oy - lh * pad)
   local below = ly - oy - self.size.y + scroll_h + lh * (pad + 1)
 
