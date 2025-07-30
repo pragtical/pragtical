@@ -49,21 +49,6 @@ local buttons = {
   }
 }
 
----Opens web link using the current operating system launcher if possible.
----TODO: We should provide a core function for doing this which command is configurable
----@param link string
-local function open_link(link)
-  local launcher_command
-  if PLATFORM == "Windows" then
-    launcher_command = "start"
-  elseif PLATFORM == "Mac OS X" then
-    launcher_command = "open"
-  else
-    launcher_command = "xdg-open"
-  end
-  system.exec(launcher_command .. " " .. link)
-end
-
 ---Constructor
 function EmptyView:new()
   EmptyView.super.new(self, nil, false)
@@ -110,14 +95,14 @@ function EmptyView:new()
   self.website:set_icon("G")
   self.website:set_tooltip("Visit the editor website")
   self.website.on_click = function(_, pressed)
-    open_link("https://pragtical.dev")
+    common.open_in_system("https://pragtical.dev")
   end
 
   self.docs = Button(self.center_container, "Documentation")
   self.docs:set_icon("?")
   self.docs:set_tooltip("Visit the editor documentation")
   self.docs.on_click = function(_, pressed)
-    open_link("https://pragtical.dev/docs/intro")
+    common.open_in_system("https://pragtical.dev/docs/intro")
   end
 
   self.first_draw = true

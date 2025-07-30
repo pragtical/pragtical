@@ -965,13 +965,7 @@ command.add(
   end,
 
   ["treeview:open-in-system"] = function(item)
-    if PLATFORM == "Windows" then
-      system.exec(string.format("start \"\" %q", item.abs_filename))
-    elseif string.find(PLATFORM, "Mac") then
-      system.exec(string.format("open %q", item.abs_filename))
-    elseif PLATFORM == "Linux" or string.find(PLATFORM, "BSD") then
-      system.exec(string.format("xdg-open %q", item.abs_filename))
-    end
+    common.open_in_system(item.abs_filename)
   end
 })
 

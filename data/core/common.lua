@@ -869,4 +869,69 @@ function common.rm(path, recursively)
 end
 
 
+---Open the given resource using the system launcher.
+---The resource can be an url, file or directory in most cases...
+---@param resource string
+---@return boolean success
+function common.open_in_system(resource)
+  -- Detect platforms
+  local function detect_platform()
+    if PLATFORM:lower():find("unknown", 1, true) then
+      -- AmigaOS: ENV: is a system assign
+      local f = io.open("ENV:", "r")
+      if f then f:close() return "amiga" end
+      -- Try uname
+      local uname = process.start({"uname", "-s"})
+      if uname then
+        uname:wait(1000)
+        return uname:read_stdout(128):lower()
+      end
+      return "unknown"
+    end
+    return PLATFORM:lower()
+  end
+
+  local function is_url(str)
+    return str:match("^[a-z]+://")
+  end
+
+  local launcher
+  local platform = detect_platform()
+
+  if platform:find("windows", 1, true) then
+    launcher = 'start ""'
+  elseif
+    platform:find("mac", 1, true)
+    or platform:find("haiku", 1, true)
+    or platform:find("serenity", 1, true)
+  then
+    launcher = "open"
+  elseif
+    platform:find("amiga", 1, true)
+    or platform:find("morph", 1, true)
+    or platform:find("aros", 1, true)
+  then
+    if is_url(resource) then
+      launcher = "OpenURL"
+    else
+      local rtype = system.get_file_info(resource)
+      if rtype and rtype.type == "file" then
+        launcher = "Multiview"
+      else
+        launcher = "WBRun"
+      end
+    end
+  else
+    launcher = "xdg-open"
+  end
+
+  if launcher then
+    system.exec(string.format('%s %q', launcher, resource))
+    return true
+  end
+
+  return false
+end
+
+
 return common
