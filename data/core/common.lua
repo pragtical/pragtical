@@ -877,10 +877,8 @@ function common.open_in_system(resource)
   -- Detect platforms
   local function detect_platform()
     if PLATFORM:lower():find("unknown", 1, true) then
-      -- AmigaOS: ENV: is a system assign
-      local f = io.open("ENV:", "r")
-      if f then f:close() return "amiga" end
-      -- Try uname
+      -- Try uname for exotic unix platforms like SerenityOS in case
+      -- that the PLATFORM is set to unknown
       local uname = process.start({"uname", "-s"})
       if uname then
         uname:wait(1000)
@@ -899,34 +897,32 @@ function common.open_in_system(resource)
   local platform = detect_platform()
 
   if platform:find("windows", 1, true) then
-    launcher = 'start ""'
+    -- the first argument is the title of the window so set it to empty
+    launcher = 'start "" %q'
   elseif
     platform:find("mac", 1, true)
     or platform:find("haiku", 1, true)
+    or platform:find("morphos", 1, true)
     or platform:find("serenity", 1, true)
   then
-    launcher = "open"
-  elseif
-    platform:find("amiga", 1, true)
-    or platform:find("morph", 1, true)
-    or platform:find("aros", 1, true)
-  then
+    launcher = "open %q"
+  elseif platform:find("amiga", 1, true) then
     if is_url(resource) then
-      launcher = "OpenURL"
+      launcher = "urlopen %q"
     else
       local rtype = system.get_file_info(resource)
       if rtype and rtype.type == "file" then
-        launcher = "Multiview"
-      else
-        launcher = "WBRun"
+        launcher = "Multiview %q"
+      elseif rtype and rtype.type == "dir" then
+        launcher = "WBRUN %q SHOW=all VIEWBY=name"
       end
     end
   else
-    launcher = "xdg-open"
+    launcher = "xdg-open %q"
   end
 
   if launcher then
-    system.exec(string.format('%s %q', launcher, resource))
+    system.exec(string.format(launcher, resource))
     return true
   end
 
