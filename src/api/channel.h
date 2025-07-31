@@ -1,8 +1,8 @@
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include "api.h"
 
-extern SDL_mutex* ChannelsListMutex;
+extern SDL_Mutex* ChannelsListMutex;
 
 // channel table functions
 int f_channel_get(lua_State*);

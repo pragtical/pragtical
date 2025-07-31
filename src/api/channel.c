@@ -55,9 +55,9 @@ typedef struct channel {
     ChannelValue** last;
   } queue;
 
-  SDL_atomic_t ref;
-  SDL_mutex* mutex;
-  SDL_cond* cond;
+  SDL_AtomicInt ref;
+  SDL_Mutex* mutex;
+  SDL_Condition* cond;
   unsigned int sent;
   unsigned int received;
 
@@ -77,7 +77,7 @@ typedef struct channel_list {
 static ChannelList g_channels = { NULL, &(g_channels).first };
 
 /* Mutex initialized when plugin is loaded */
-SDL_mutex* ChannelsListMutex = NULL;
+SDL_Mutex* ChannelsListMutex = NULL;
 
 /* --------------------------------------------------------
  * Channel private functions
@@ -92,7 +92,7 @@ static void channelValueFree(ChannelValue *v)
 
   switch (v->type) {
     case LUA_TSTRING:
-      free(v->data.string.data);
+      SDL_free(v->data.string.data);
       break;
     case LUA_TTABLE:
       for (
@@ -102,12 +102,12 @@ static void channelValueFree(ChannelValue *v)
       ){
         channelValueFree(t->key);
         channelValueFree(t->value);
-        free(t);
+        SDL_free(t);
       }
       break;
   }
 
-  free(v);
+  SDL_free(v);
 }
 
 static ChannelValue* channelValueGet(lua_State *L, int index)
@@ -118,7 +118,7 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
   if ((type = lua_type(L, index)) == LUA_TNIL)
     return NULL;
 
-  if ((v = calloc(1, sizeof (ChannelValue))) == NULL)
+  if ((v = SDL_calloc(1, sizeof (ChannelValue))) == NULL)
     return NULL;
 
   v->type = type;
@@ -132,8 +132,8 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
       size_t length;
 
       str = lua_tolstring(L, index, &length);
-      if ((v->data.string.data = malloc(length)) == NULL) {
-        free(v);
+      if ((v->data.string.data = SDL_malloc(length)) == NULL) {
+        SDL_free(v);
         return NULL;
       }
 
@@ -155,7 +155,7 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
 
       lua_pushnil(L);
       while (lua_next(L, index)) {
-        ChannelValuePair* pair = malloc(sizeof (ChannelValuePair));
+        ChannelValuePair* pair = SDL_malloc(sizeof (ChannelValuePair));
 
         if (pair == NULL) {
           lua_pop(L, 1);
@@ -171,7 +171,7 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
           channelValueFree(pair->key);
           channelValueFree(pair->value);
           channelValueFree(v);
-          free(pair);
+          SDL_free(pair);
           break;
         }
 
@@ -289,7 +289,7 @@ static int channelPush(Channel* c, ChannelValue* v)
   c->queue.last = &v->next;
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 
   return ++c->sent;
 }
@@ -298,12 +298,12 @@ static const ChannelValue* channelWait(Channel *c)
 {
   SDL_LockMutex(c->mutex);
   while (c->queue.first == NULL)
-    SDL_CondWait(c->cond, c->mutex);
+    SDL_WaitCondition(c->cond, c->mutex);
 
   ++ c->received;
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 
   return c->queue.first;
 }
@@ -316,7 +316,7 @@ static void channelSupply(Channel* c, ChannelValue* v)
 
   id = channelPush(c, v);
   while (!channelGiven(id, c->received))
-    SDL_CondWait(c->cond, c->mutex);
+    SDL_WaitCondition(c->cond, c->mutex);
 }
 
 static void channelClear(Channel* c)
@@ -335,7 +335,7 @@ static void channelClear(Channel* c)
   c->queue.last = &c->queue.first;
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 }
 
 static void channelPop(Channel* c)
@@ -344,7 +344,7 @@ static void channelPop(Channel* c)
 
   if (c->queue.first == NULL) {
     SDL_UnlockMutex(c->mutex);
-    SDL_CondBroadcast(c->cond);
+    SDL_BroadcastCondition(c->cond);
     return;
   }
 
@@ -360,7 +360,7 @@ static void channelPop(Channel* c)
   channelValueFree(previous_first);
 
   SDL_UnlockMutex(c->mutex);
-  SDL_CondBroadcast(c->cond);
+  SDL_BroadcastCondition(c->cond);
 }
 
 static void removeChannelFromList(Channel* c)
@@ -401,10 +401,10 @@ static void channelFree(Channel* c)
   channelClear(c);
 
   SDL_DestroyMutex(c->mutex);
-  SDL_DestroyCond(c->cond);
+  SDL_DestroyCondition(c->cond);
 
-  free(c->name);
-  free(c);
+  SDL_free(c->name);
+  SDL_free(c);
 }
 
 /* --------------------------------------------------------
@@ -440,11 +440,11 @@ int f_channel_get(lua_State *L)
   const char* error_message = NULL;
 
   if (!found) {
-    if ((c = calloc(1, sizeof (Channel))) == NULL) {
+    if ((c = SDL_calloc(1, sizeof (Channel))) == NULL) {
       error_message = strerror(errno);
       goto fail;
     }
-    if ((c->name = malloc(name_len+1)) == NULL) {
+    if ((c->name = SDL_malloc(name_len+1)) == NULL) {
       error_message = strerror(errno);
       goto fail;
     }
@@ -452,7 +452,7 @@ int f_channel_get(lua_State *L)
       error_message = SDL_GetError();
       goto fail;
     }
-    if ((c->cond = SDL_CreateCond()) == NULL) {
+    if ((c->cond = SDL_CreateCondition()) == NULL) {
       error_message = SDL_GetError();
       goto fail;
     }
@@ -481,10 +481,10 @@ fail:
   if (c->mutex)
     SDL_DestroyMutex(c->mutex);
   if (c->cond)
-    SDL_DestroyCond(c->cond);
+    SDL_DestroyCondition(c->cond);
 
-  free(c->name);
-  free(c);
+  SDL_free(c->name);
+  SDL_free(c);
 
   SDL_UnlockMutex(ChannelsListMutex);
 
@@ -642,7 +642,7 @@ int m_channel_wait(lua_State *L)
   else
     channelValuePush(L, v);
 
-  SDL_CondBroadcast(self->cond);
+  SDL_BroadcastCondition(self->cond);
 
   return 1;
 }
@@ -661,7 +661,7 @@ int mm_channel_gc(lua_State *L)
   ))->channel;
 
   (void)SDL_AtomicDecRef(&self->ref);
-  if (SDL_AtomicGet(&self->ref) == 0)
+  if (SDL_GetAtomicInt(&self->ref) == 0)
     channelFree(self);
 
   return 0;

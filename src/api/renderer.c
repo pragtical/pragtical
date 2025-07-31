@@ -242,7 +242,7 @@ static int f_font_get_size(lua_State *L) {
 static int f_font_set_size(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
   float size = luaL_checknumber(L, 2);
-  double scale = 1.0;
+  float scale = 1.0;
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   RenWindow *window = ren_get_target_window();
   if (window != NULL) {

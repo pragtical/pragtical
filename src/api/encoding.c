@@ -1,4 +1,4 @@
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -325,7 +325,7 @@ int f_detect(lua_State *L) {
   /* TODO: on max_read_size if the ending byte is incomplete codepoint expand it */
   size_t file_size = ftell(file);
   size_t read_size = file_size > MAX_READ_SIZE ? MAX_READ_SIZE : file_size;
-  char* string = malloc(read_size);
+  char* string = SDL_malloc(read_size);
 
   if (!string) {
     lua_pushnil(L);
@@ -357,7 +357,7 @@ int f_detect(lua_State *L) {
 		rcount = 3;
   }
 
-  free(string);
+  SDL_free(string);
 
   return rcount;
 }

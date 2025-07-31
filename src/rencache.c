@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -50,7 +51,7 @@ typedef struct {
   RenRect rect;
   RenColor color;
   RenFont *fonts[FONT_FALLBACK_MAX];
-  double text_x;
+  float text_x;
   size_t len;
   int8_t tab_size;
   RenTab tab;
@@ -120,7 +121,7 @@ static bool expand_command_buffer(RenWindow *window_renderer) {
   if (new_size == 0) {
     new_size = CMD_BUF_INIT_SIZE;
   }
-  uint8_t *new_command_buf = realloc(window_renderer->command_buf, new_size);
+  uint8_t *new_command_buf = SDL_realloc(window_renderer->command_buf, new_size);
   if (!new_command_buf) {
     return false;
   }

@@ -5,6 +5,6 @@ Comment=The practical and pragmatic code editor.
 Exec=pragtical %F
 Icon=pragtical
 Terminal=false
-StartupWMClass=pragtical
+StartupWMClass=dev.pragtical.Pragtical
 Categories=Development;IDE;TextEditor;
 MimeType=text/plain;inode/directory;
