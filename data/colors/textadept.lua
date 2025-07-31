@@ -2,8 +2,8 @@ local b05 = 'rgba(0,0,0,0.5)'   local red = '#994D4D'
 local b80 = '#333333'       local orange  = '#B3661A'
 local b60 = '#525252'       local green   = '#52994D'
 local b40 = '#ADADAD'       local teal    = '#4D9999'
-local b20 = '#EDEDED'       local blue    = '#1A66B3'
-local b00 = '#E6E6E6'       local magenta = '#994D99'
+local b20 = '#E0E0E0'       local blue    = '#1A66B3'
+local b00 = '#EBEBEB'       local magenta = '#994D99'
 --------------------------=--------------------------
 local style               =     require  'core.style'
 local common              =     require 'core.common'
@@ -18,7 +18,7 @@ style.accent              =     { common.color(b80) }
 style.dim                 =     { common.color(b40) }
 style.divider             =     { common.color(b40) }
 style.selection           =     { common.color(b40) }
-style.line_number         =     { common.color(b60) }
+style.line_number         =     { common.color(b40) }
 style.line_number2        =     { common.color(b80) }
 style.scrollbar           =     { common.color(b40) }
 style.scrollbar2          =     { common.color(b60) }
