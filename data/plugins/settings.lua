@@ -1911,23 +1911,11 @@ function Settings:setup_about()
     true
   )
 
-  local function open_link(link)
-    local platform_filelauncher
-    if PLATFORM == "Windows" then
-      platform_filelauncher = "start"
-    elseif PLATFORM == "Mac OS X" then
-      platform_filelauncher = "open"
-    else
-      platform_filelauncher = "xdg-open"
-    end
-    system.exec(platform_filelauncher .. " " .. link)
-  end
-
   ---@type widget.button
   local button = Button(self.about, "Visit Website")
   button:set_icon("G")
   button:set_tooltip("Open https://pragtical.dev/")
-  function button:on_click() open_link("https://pragtical.dev/") end
+  function button:on_click() common.open_in_system("https://pragtical.dev/") end
 
   ---@type widget.listbox
   local contributors = ListBox(self.about)
@@ -1935,7 +1923,7 @@ function Settings:setup_about()
   contributors:add_column("Contributors")
   contributors:add_column("")
   contributors:add_column("Website")
-  function contributors:on_row_click(_, data) open_link(data) end
+  function contributors:on_row_click(_, data) common.open_in_system(data) end
 
 local contributors_list = {
   { "Rxi", "Lite Founder", "https://github.com/rxi" },
