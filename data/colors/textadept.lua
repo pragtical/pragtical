@@ -1,8 +1,8 @@
 local b05 = 'rgba(0,0,0,0.5)'   local red = '#994D4D'
 local b80 = '#333333'       local orange  = '#B3661A'
-local b60 = '#808080'       local green   = '#52994D'
+local b60 = '#525252'       local green   = '#52994D'
 local b40 = '#ADADAD'       local teal    = '#4D9999'
-local b20 = '#CECECE'       local blue    = '#1A66B3'
+local b20 = '#EDEDED'       local blue    = '#1A66B3'
 local b00 = '#E6E6E6'       local magenta = '#994D99'
 --------------------------=--------------------------
 local style               =     require  'core.style'
@@ -11,11 +11,11 @@ local common              =     require 'core.common'
 style.line_highlight      =     { common.color(b20) }
 style.background          =     { common.color(b00) }
 style.background2         =     { common.color(b20) }
-style.background3         =     { common.color(b20) }
-style.text                =     { common.color(b60) }
+style.background3         =     { common.color(b00) }
+style.text                =     { common.color(b80) }
 style.caret               =     { common.color(b80) }
 style.accent              =     { common.color(b80) }
-style.dim                 =     { common.color(b60) }
+style.dim                 =     { common.color(b40) }
 style.divider             =     { common.color(b40) }
 style.selection           =     { common.color(b40) }
 style.line_number         =     { common.color(b60) }
@@ -26,8 +26,8 @@ style.nagbar              =     { common.color(red) }
 style.nagbar_text         =     { common.color(b00) }
 style.nagbar_dim          =     { common.color(b05) }
 
-style.search_selection = { common.color "#e6b800" }
-style.search_selection_text = { common.color "#4d3d00" }
+style.search_selection = { common.color "#6a5acd" }
+style.search_selection_text = { common.color "#ffffff" }
 
 --------------------------=--------------------------
 style.syntax              =                        {}

@@ -4,12 +4,12 @@ local common = require "core.common"
 style.background = { common.color "#2e2e32" }  -- Docview
 style.background2 = { common.color "#252529" } -- Treeview
 style.background3 = { common.color "#252529" } -- Command view
-style.text = { common.color "#97979c" }
+style.text = { common.color "#ADADB3" }
 style.caret = { common.color "#93DDFA" }
 style.accent = { common.color "#e1e1e6" }
 -- style.dim - text color for nonactive tabs, tabs divider, prefix in log and
 -- search result, hotkeys for context menu and command view
-style.dim = { common.color "#525257" }
+style.dim = { common.color "#636369" }
 style.divider = { common.color "#202024" } -- Line between nodes
 style.selection = { common.color "#48484f" }
 style.line_number = { common.color "#525259" }
