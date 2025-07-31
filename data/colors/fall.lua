@@ -10,13 +10,13 @@ style.accent = { common.color "#ffd152" }
 style.dim = { common.color "#615d5f" }
 style.divider = { common.color "#242223" }
 style.selection = { common.color "#454244" }
-style.line_number = { common.color "#454244" }
-style.line_number2 = { common.color "#615d5f" }
+style.line_number = { common.color "#575356" }
+style.line_number2 = { common.color "#857F81" }
 style.line_highlight = { common.color "#383637" }
 style.scrollbar = { common.color "#454344" }
 style.scrollbar2 = { common.color "#524F50" }
 
-style.search_selection = { common.color "#827d80" }
+style.search_selection = { common.color "#6a5acd" }
 style.search_selection_text = { common.color "#ffffff" }
 
 style.syntax["normal"] = { common.color "#efdab9" }
