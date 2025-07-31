@@ -413,7 +413,6 @@ local function token_iter(state, i)
     text = string.sub(text, state.col)
     state.col = nil -- slice only once
   end
-  state.i = i
   return i, type, text
 end
 
