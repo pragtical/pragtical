@@ -59,6 +59,7 @@ local last_indexed_projects = ""
 
 local function basedir_files()
   local files_return = {}
+  local directories = 0
 
   for _, project in ipairs(core.projects) do
     local project_directory = project.path
@@ -81,6 +82,8 @@ local function basedir_files()
               file = project_name .. PATHSEP .. file
             end
             table.insert(files_return, file)
+          else
+            directories = directories + 1
           end
         end
       end
@@ -91,7 +94,7 @@ local function basedir_files()
     project_total_files = #files_return
   end
 
-  return files_return
+  return files_return, directories
 end
 
 local function update_suggestions()
@@ -340,8 +343,8 @@ command.add(nil, {
       current_projects = current_projects .. project.path .. ":"
     end
 
-    local base_files = basedir_files()
-    if #base_files == 0 then
+    local base_files, dirs = basedir_files()
+    if #base_files == 0 and dirs == 0 then
       return
     end
 
