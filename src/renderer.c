@@ -386,8 +386,9 @@ static RenFont *font_group_get_glyph(RenFont **fonts, unsigned int codepoint, in
   if ((!m || !m->flags) && codepoint != 0x25A1 && !white_space)
     return font_group_get_glyph(fonts, 0x25A1, subpixel_idx, surface, metric);
   if (metric && m) *metric = m;
-  // skip space glyph because it is empty causing redundant load tries
-  if (surface && m && codepoint != 0x20)
+  // skip all white space since empty on most fonts causing redundant load tries
+  // also we are already skipping them too on ren_draw_text
+  if (surface && m && !white_space)
     *surface = font_load_glyph_bitmap(font, glyph_id, subpixel_idx, m);
   return font;
 }
