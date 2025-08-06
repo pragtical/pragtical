@@ -87,7 +87,7 @@ ffi.cdef [[
 ]]
 
 renderer.draw_rect_lua = renderer.draw_rect
-function renderer.draw_rect(x, y, w, h, color, tab)
+function renderer.draw_rect(x, y, w, h, color)
   if not color then
     local core = require "core"
     core.error("renderer.draw_rect: color not provided")
@@ -120,7 +120,7 @@ function renderer.draw_text(font, text, x, y, color, tab)
     fonts[#fonts_list] = nil
     fonts_pointer_cache[font] = fonts
   end
-  local text = type(text) == "string" and text or tostring(text)
+  text = type(text) == "string" and text or tostring(text)
   if not color then color = {255, 255, 255, 255} end
   return ffi.C.rencache_draw_text_ffi(
     ffi.C.ren_get_target_window_ffi(),
