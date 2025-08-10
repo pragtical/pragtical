@@ -832,6 +832,7 @@ function core.load_project_module()
       local fn, err = loadfile(filename)
       if not fn then error("Error when loading project module:\n\t" .. err) end
       fn()
+      core.project_module_loaded = true
       core.log_quiet("Loaded project module")
     end)
   end
