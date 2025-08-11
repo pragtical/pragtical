@@ -22,9 +22,7 @@ show_help() {
   echo "-B --bundle                   Create an App bundle (macOS only)"
   echo "-P --portable                 Create a portable binary package."
   echo "-O --pgo                      Use profile guided optimizations (pgo)."
-  echo "-U --windows-lua-utf          Use the UTF8 patch for Lua."
-  echo "                              macOS: disabled when used with --bundle,"
-  echo "                              Windows: Implicit being the only option."
+  echo "-L --lto                      Enables Link-Time Optimization (LTO)."
   echo "-r --release                  Compile in release mode."
   echo "   --cross-platform PLATFORM  Cross compile for this platform."
   echo "                              The script will find the appropriate"
@@ -46,6 +44,7 @@ main() {
   local bundle
   local portable
   local pgo
+  local lto
   local cross
   local cross_platform
   local cross_arch
@@ -91,6 +90,10 @@ main() {
         ;;
       -O|--pgo)
         pgo="-Db_pgo=generate"
+        shift
+        ;;
+      -L|--lto)
+        lto="-Db_lto=true"
         shift
         ;;
       --cross-arch)
@@ -191,16 +194,16 @@ main() {
     $bundle \
     $portable \
     $pgo \
+    $lto \
     "${build_dir}"
 
   meson compile -C "${build_dir}"
 
   if [[ $pgo != "" ]]; then
-    cp -r data "${build_dir}/src"
-    "${build_dir}/src/pragtical"
+    echo "Generating Profiler Guided Optimizations data..."
+    SDL_VIDEO_DRIVER="dummy" ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
     meson configure -Db_pgo=use "${build_dir}"
     meson compile -C "${build_dir}"
-    rm -fr "${build_dir}/data"
   fi
 }
 

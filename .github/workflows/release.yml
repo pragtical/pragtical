@@ -105,11 +105,11 @@ jobs:
           sudo apt-get install -y ccache
           bash scripts/install-dependencies.sh --debug
       - name: Build Portable
-        run: bash scripts/build.sh --debug --forcefallback --portable --release
+        run: bash scripts/build.sh --debug --forcefallback --portable --release --lto --pgo
       - name: Package Portables
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
       - name: Build AppImages
-        run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release
+        run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release --lto --pgo
       - name: Upload Files
         uses: softprops/action-gh-release@v2.2.2
         with:
@@ -155,7 +155,7 @@ jobs:
         run: bash scripts/install-dependencies.sh --debug
       - name: Build
         run: |
-          bash scripts/build.sh --bundle --debug --forcefallback --release $ARCH
+          bash scripts/build.sh --bundle --debug --forcefallback --lto --pgo --release $ARCH
       - name: Create DMG Image
         run: |
           bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --addons --dmg --release
@@ -278,7 +278,7 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh --debug --forcefallback --release
+          bash scripts/build.sh --debug --forcefallback --release --lto --pgo
       - name: Package
         run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary --release
       - name: Build Installer
