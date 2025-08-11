@@ -210,7 +210,12 @@ command.add(nil, {
         end
         if abs_path == core.root_project().path then return end
         core.confirm_close_docs(core.docs, function(dirpath)
+          local project_module_loaded = core.project_module_loaded
+          core.project_module_loaded = nil
           core.open_project(dirpath)
+          if project_module_loaded then
+            command.perform "core:restart"
+          end
         end, abs_path)
       end,
       suggest = suggest_directory
