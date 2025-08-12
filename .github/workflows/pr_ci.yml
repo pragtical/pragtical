@@ -61,7 +61,7 @@ jobs:
           - arch: x86_64
             image: macos-13
           - arch: arm64
-            image: macos-13-xlarge
+            image: macos-14
     runs-on: ${{ matrix.config.image }}
     env:
       CC: clang
