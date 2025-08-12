@@ -211,7 +211,7 @@ main() {
           llvm-profdata-14 merge -output=default.profdata default.profraw
         else
           llvm-profdata merge -output=default.profdata default.profraw
-        end
+        fi
       fi
       mv default.profdata "${build_dir}"
     fi
