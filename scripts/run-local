@@ -111,6 +111,10 @@ copy_pragtical_build () {
   # there is already a start.lua file in data/core so the command below
   # should be executed after we copy the data/core directory.
   cp "$builddir/start.lua" "$datadir/core"
+  # For ci purposes we also copy datadir to bindir on macOS
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    cp -a "$datadir/"* "$bindir"
+  fi
 }
 
 run_pragtical () {
