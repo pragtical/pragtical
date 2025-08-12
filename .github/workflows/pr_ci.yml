@@ -55,13 +55,17 @@ jobs:
 
   build_macos:
     name: macOS
-    runs-on: macos-13
+    strategy:
+      matrix:
+        config:
+          - arch: x86_64
+            image: macos-13
+          - arch: arm64
+            image: macos-13-xlarge
+    runs-on: ${{ matrix.config.image }}
     env:
       CC: clang
       CXX: clang++
-    strategy:
-      matrix:
-        arch: ['x86_64', 'arm64']
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -76,8 +80,7 @@ jobs:
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
-          echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
-          if [[ $(uname -m) != ${{ matrix.arch }} ]]; then echo "ARCH=--cross-arch ${{ matrix.arch }}" >> "$GITHUB_ENV"; fi
+          echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-macos-${{ matrix.config.arch }}" >> "$GITHUB_ENV"
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
@@ -89,13 +92,13 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh --bundle --debug --pgo --lto --forcefallback $ARCH
+          bash scripts/build.sh --bundle --debug --pgo --lto --forcefallback
       - name: Create DMG Image
-        run: bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --dmg
+        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macOS DMG ${{ matrix.arch }}
+          name: macOS DMG ${{ matrix.config.arch }}
           path: ${{ env.INSTALL_NAME }}.dmg
 
   build_macos_universal:
