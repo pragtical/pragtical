@@ -46,7 +46,9 @@ main() {
     ~/node_modules/appdmg/bin/appdmg.js --version
   elif [[ "$OSTYPE" == "msys" ]]; then
     pacman --noconfirm -S \
-      ${MINGW_PACKAGE_PREFIX}-{ca-certificates,gcc,meson,ninja,cmake,ntldd,pkg-config,mesa,freetype,pcre2,SDL2} unzip
+      ${MINGW_PACKAGE_PREFIX}-{ca-certificates,gcc,python-pip,ninja,cmake,ntldd,pkg-config,mesa,freetype,pcre2,sdl3} unzip
+    python -m ensurepip
+    pip3 install meson
   fi
 }
 
