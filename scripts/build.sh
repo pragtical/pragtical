@@ -204,7 +204,15 @@ main() {
     LLVM_PROFILE_FILE=default.profraw SDL_VIDEO_DRIVER="dummy" ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
     # in case of clang handle the profile data appropriately
     if [ -e "default.profraw" ]; then
-      llvm-profdata merge -output=default.profdata default.profraw
+      if [[ $platform == "macos" ]]; then
+        xcrun llvm-profdata merge -output=default.profdata default.profraw
+      else
+        if command -v llvm-profdata-14 ; then
+          llvm-profdata-14 merge -output=default.profdata default.profraw
+        else
+          llvm-profdata merge -output=default.profdata default.profraw
+        end
+      fi
       mv default.profdata "${build_dir}"
     fi
     meson configure -Db_pgo=use "${build_dir}"
