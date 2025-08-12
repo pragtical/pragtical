@@ -1215,16 +1215,13 @@ function projectsearch.toggle(path, has_focus)
   end
 
   if treeview and toggle then
-    if type(previous_treeview_hidden) ~= "boolean" then
-      previous_treeview_hidden = treeview.visible
-    end
-
+    local treeview_visible = not visible
     if visible then
       previous_treeview_hidden = not treeview.visible
-    else
-      if previous_treeview_hidden then visible = true end
+    elseif previous_treeview_hidden then
+      treeview_visible = false
     end
-    treeview.visible = not visible
+    treeview.visible = treeview_visible
   end
 
   core.add_thread(function()
