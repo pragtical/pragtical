@@ -59,7 +59,12 @@ else
   datadir="$rundir/share/pragtical"
 fi
 
-userdir="$(realpath "$rundir")"
+# on macOS we need `brew install coreutils` for grealpath
+if command -v grealpath >/dev/null 2>&1; then
+  userdir="$(grealpath "$rundir")"
+else
+  userdir="$(realpath "$rundir")"
+fi
 builddir="${pargs[0]}"
 
 build_pragtical () {
