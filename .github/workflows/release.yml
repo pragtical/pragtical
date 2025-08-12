@@ -266,8 +266,7 @@ jobs:
             mingw-w64-${{ matrix.config.arch }}-ntldd
       - name: Setup Meson
         run: |
-          python -m ensurepip
-          pip3 install meson
+          pip install meson --break-system-packages
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
