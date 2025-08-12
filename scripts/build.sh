@@ -201,7 +201,12 @@ main() {
 
   if [[ $pgo != "" ]]; then
     echo "Generating Profiler Guided Optimizations data..."
-    SDL_VIDEO_DRIVER="dummy" ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
+    LLVM_PROFILE_FILE=default.profraw SDL_VIDEO_DRIVER="dummy" ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
+    # in case of clang handle the profile data appropriately
+    if [ -e "default.profraw" ]; then
+      llvm-profdata merge -output=default.profdata default.profraw
+      mv default.profdata "${build_dir}"
+    fi
     meson configure -Db_pgo=use "${build_dir}"
     meson compile -C "${build_dir}"
   fi
