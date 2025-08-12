@@ -638,6 +638,13 @@ settings.add("Editor",
       end
     },
     {
+      label = "Case Insensitive Word Selection",
+      description = "Perform case insensitive next word selection.",
+      path = "select_add_next_no_case",
+      type = settings.type.TOGGLE,
+      default = false
+    },
+    {
       label = "Maximum Undo History",
       description = "The amount of undo elements to keep.",
       path = "max_undos",

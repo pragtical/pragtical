@@ -158,6 +158,12 @@ config.always_show_tabs = true
 ---@type config.highlightlinetype
 config.highlight_current_line = "no_selection"
 
+---Perform case insensitive next word selection.
+---
+---The default is false.
+---@type boolean
+config.select_add_next_no_case = false
+
 ---The spacing between each line of text.
 ---
 ---The default is 120% of the height of the text (1.2).
