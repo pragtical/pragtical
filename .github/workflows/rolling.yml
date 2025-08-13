@@ -161,12 +161,6 @@ jobs:
       - name: Create DMG Image
         run: |
           bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --dmg
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macOS DMG ${{ matrix.config.arch }}
-          path: |
-            ${{ env.INSTALL_NAME }}.dmg
       - name: Upload Files
         uses: softprops/action-gh-release@v2.2.2
         with:
