@@ -42,7 +42,7 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh --debug --forcefallback --portable --pgo --lto
+          bash scripts/build.sh --debug --forcefallback --portable
       - name: Package
         if: ${{ matrix.config.cc == 'gcc' }}
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
@@ -92,7 +92,7 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh --bundle --debug --pgo --lto --forcefallback
+          bash scripts/build.sh --bundle --debug --forcefallback
       - name: Create DMG Image
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
       - name: Upload Artifact
@@ -149,7 +149,7 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh --debug --forcefallback --pgo --lto
+          bash scripts/build.sh --debug --forcefallback
       - name: Package
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
       - name: Upload Artifact
