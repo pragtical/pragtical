@@ -59,7 +59,12 @@ else
   datadir="$rundir/share/pragtical"
 fi
 
-userdir="$(realpath "$rundir")"
+# on macOS we need `brew install coreutils` for grealpath
+if command -v grealpath >/dev/null 2>&1; then
+  userdir="$(grealpath "$rundir")"
+else
+  userdir="$(realpath "$rundir")"
+fi
 builddir="${pargs[0]}"
 
 build_pragtical () {
@@ -106,6 +111,10 @@ copy_pragtical_build () {
   # there is already a start.lua file in data/core so the command below
   # should be executed after we copy the data/core directory.
   cp "$builddir/start.lua" "$datadir/core"
+  # For ci purposes we also copy datadir to bindir on macOS
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    cp -a "$datadir/"* "$bindir"
+  fi
 }
 
 run_pragtical () {

@@ -22,6 +22,8 @@ show_help(){
   echo "-s --static              Specify if building using static libraries."
   echo "-v --version VERSION     Specify a version, non whitespace separated string."
   echo "-a --addons              Install 3rd party addons."
+  echo "-O --pgo                 Use profile guided optimizations (pgo)."
+  echo "-L --lto                 Enables Link-Time Optimization (LTO)."
   echo "-r --release             Compile in release mode."
   echo "--cross-arch ARCH        The architecture to package for."
   echo
@@ -88,6 +90,8 @@ main() {
   local version=""
   local appimagebin="./appimagetool.$arch"
   local ppm_file="ppm.${arch}-linux"
+  local pgo
+  local lto
   local cross
   local cross_arch
 
@@ -127,6 +131,14 @@ main() {
       -v|--version)
         version="-$2"
         shift
+        shift
+        ;;
+      -O|--pgo)
+        pgo="-Db_pgo=generate"
+        shift
+        ;;
+      -L|--lto)
+        lto="-Db_lto=true"
         shift
         ;;
       --cross-arch)
@@ -196,6 +208,8 @@ main() {
         --prefix=/usr \
         -Dppm=false \
         "${cross_file[@]}" \
+        $pgo \
+        $lto \
         "${build_dir}"
     else
       meson setup --wrap-mode=forcefallback \
@@ -203,9 +217,19 @@ main() {
         --prefix=/usr \
         -Dppm=false \
          "${cross_file[@]}" \
+        $pgo \
+        $lto \
         "${build_dir}"
     fi
+
     meson compile -C "${build_dir}"
+
+    if [[ $pgo != "" ]]; then
+      echo "Generating Profiler Guided Optimizations data..."
+      SDL_VIDEO_DRIVER="dummy" ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
+      meson configure -Db_pgo=use "${build_dir}"
+      meson compile -C "${build_dir}"
+    fi
   fi
 
   # Generate AppImage

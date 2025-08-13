@@ -55,13 +55,17 @@ jobs:
 
   build_macos:
     name: macOS
-    runs-on: macos-13
+    strategy:
+      matrix:
+        config:
+          - arch: x86_64
+            image: macos-13
+          - arch: arm64
+            image: macos-14
+    runs-on: ${{ matrix.config.image }}
     env:
       CC: clang
       CXX: clang++
-    strategy:
-      matrix:
-        arch: ['x86_64', 'arm64']
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -76,8 +80,7 @@ jobs:
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
-          echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-macos-${{ matrix.arch }}" >> "$GITHUB_ENV"
-          if [[ $(uname -m) != ${{ matrix.arch }} ]]; then echo "ARCH=--cross-arch ${{ matrix.arch }}" >> "$GITHUB_ENV"; fi
+          echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-macos-${{ matrix.config.arch }}" >> "$GITHUB_ENV"
       - name: Python Setup
         uses: actions/setup-python@v5
         with:
@@ -89,56 +92,13 @@ jobs:
       - name: Build
         run: |
           bash --version
-          bash scripts/build.sh --bundle --debug --forcefallback $ARCH
+          bash scripts/build.sh --bundle --debug --forcefallback
       - name: Create DMG Image
-        run: bash scripts/package.sh --version ${INSTALL_REF} $ARCH --debug --dmg
+        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macOS DMG ${{ matrix.arch }}
-          path: ${{ env.INSTALL_NAME }}.dmg
-
-  build_macos_universal:
-    name: macOS (Universal)
-    needs: build_macos
-    runs-on: macos-13
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: System Information
-        run: |
-          system_profiler SPSoftwareDataType
-          bash --version
-          gcc -v
-          xcodebuild -version
-      - name: Set Environment Variables
-        run: |
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-macos-universal" >> "$GITHUB_ENV"
-      - name: Download X86_64 DMG
-        uses: actions/download-artifact@v4
-        with:
-          name: macOS DMG x86_64
-          path: dmgs-original
-      - name: Download ARM64 DMG
-        uses: actions/download-artifact@v4
-        with:
-          name: macOS DMG arm64
-          path: dmgs-original
-      - name: Python Setup
-        uses: actions/setup-python@v5
-        with:
-          python-version: 3.9
-      - name: Install appdmg
-        run: cd ~; npm i appdmg; cd -
-      - name: Make universal bundle
-        run: |
-          bash scripts/make-universal-binaries.sh dmgs-original "${INSTALL_NAME}"
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macOS DMG universal
+          name: macOS DMG ${{ matrix.config.arch }}
           path: ${{ env.INSTALL_NAME }}.dmg
 
   build_windows_msys2:
@@ -147,7 +107,7 @@ jobs:
     strategy:
       matrix:
         config:
-          - {msystem: MINGW32, arch: i686, target: x86}
+          # - {msystem: MINGW32, arch: i686, target: x86}
           - {msystem: MINGW64, arch: x86_64, target: x64}
     defaults:
       run:
@@ -166,11 +126,14 @@ jobs:
             zip
             unzip
             mingw-w64-${{ matrix.config.arch }}-gcc
-            mingw-w64-${{ matrix.config.arch }}-meson
+            mingw-w64-${{ matrix.config.arch }}-python-pip
             mingw-w64-${{ matrix.config.arch }}-ninja
             mingw-w64-${{ matrix.config.arch }}-cmake
             mingw-w64-${{ matrix.config.arch }}-ca-certificates
             mingw-w64-${{ matrix.config.arch }}-ntldd
+      - name: Setup Meson
+        run: |
+          pip install meson --break-system-packages
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
@@ -201,7 +164,7 @@ jobs:
     strategy:
       matrix:
         arch:
-          - { target: x86, name: i686 }
+          # - { target: x86, name: i686 }
           - { target: x64, name: x86_64 }
     steps:
       - name: Checkout Code

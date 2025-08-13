@@ -25,6 +25,9 @@ if lua_jit_found
     if host_machine.system() != 'windows' and host_machine.system() != 'darwin'
         # reminder: on mingw the valid flag is -Wl,--export-all-symbols
         pragtical_link_args += '-Wl,--export-dynamic'
+    elif host_machine.system() == 'darwin'
+        # macOS export dynamic symbols option slightly different
+        pragtical_link_args += '-Wl,-export_dynamic'
     endif
 endif
 
