@@ -1,5 +1,152 @@
 # Changes Log
 
+## [3.7.0] - 2025-08-13
+
+### New Features
+
+* Add option to draw rendering stats
+  ([#291](https://github.com/pragtical/pragtical/pull/291))
+
+* REPL history and completion support
+  ([#287](https://github.com/pragtical/pragtical/pull/287))
+
+* Configurable amount of context lines visible on scroll
+  ([#311](https://github.com/pragtical/pragtical/pull/311))
+
+* Add built-in config to toggle line numbers
+  ([#316](https://github.com/pragtical/pragtical/pull/316))
+
+* Add config option for insensitive next word selection
+  ([#332](https://github.com/pragtical/pragtical/pull/332))
+
+* New Diff Viewer for built-in support of file and string comparisons
+  ([#306](https://github.com/pragtical/pragtical/pull/306))
+
+* Add common.open_in_system(resource) function
+  ([#321](https://github.com/pragtical/pragtical/pull/321))
+
+* SDL3 port
+  ([#254](https://github.com/pragtical/pragtical/pull/254))
+
+### Colors
+
+* Add special highlight colors to search selections
+  ([#312](https://github.com/pragtical/pragtical/pull/312))
+
+* add search highlight styles to pre-packaged themes
+  ([#315](https://github.com/pragtical/pragtical/pull/315))
+
+* Add search selection styles to extra color themes
+  ([colors/#2](https://github.com/pragtical/colors/pull/2))
+
+* Improve contrast for default themes
+  ([#322](https://github.com/pragtical/pragtical/pull/322))
+
+* Improve contrast on extra themes
+  ([colors/#5](https://github.com/pragtical/colors/pull/5))
+
+* Added new nightfox family of color themes
+  ([538d0424](https://github.com/pragtical/colors/commit/538d0424ea398f0a3db062d6ff472c36c5105b97))
+
+### Fixes
+
+* Fix common.color returning rgba values as strings
+  ([#289](https://github.com/pragtical/pragtical/pull/289))
+
+* Handle incomplete token type
+  ([#295](https://github.com/pragtical/pragtical/pull/295))
+
+* fix for tokenizer plugins not providing state
+  ([fb56c461](https://github.com/pragtical/pragtical/commit/fb56c461f876ba2431c6d18fdcec6fee5825780f))
+
+* borderless: scale window hit test info
+  ([#303](https://github.com/pragtical/pragtical/pull/303))
+
+* findfile: take into consideration subdirectories
+  ([#325](https://github.com/pragtical/pragtical/pull/325))
+
+* Reset previous project module settings on change
+  ([#329](https://github.com/pragtical/pragtical/pull/329))
+
+* projectsearch: restore docview focus on hidden treeview
+  ([#331](https://github.com/pragtical/pragtical/pull/331))
+
+### Enhancements
+
+* language_lua: add c syntax coloring to ffi.cdef
+  ([#290](https://github.com/pragtical/pragtical/pull/290))
+
+* autocomplete: on max symbols return syntax_symbols
+  ([#294](https://github.com/pragtical/pragtical/pull/294))
+
+* settings ui: allow lowering line height to 0.8
+  ([#299](https://github.com/pragtical/pragtical/pull/299))
+
+* Make welcome page responsive
+  ([#300](https://github.com/pragtical/pragtical/pull/300))
+
+* Scale treeview and projectsearch size on scale changes
+  ([#304](https://github.com/pragtical/pragtical/pull/304))
+
+* Search UI: also scroll horizontally
+  ([#310](https://github.com/pragtical/pragtical/pull/310))
+
+* doc:go-to-line: live syntax preview
+  ([#314](https://github.com/pragtical/pragtical/pull/314))
+
+### Performance
+
+* Use LuaJIT FFI to perform draw calls
+  ([#288](https://github.com/pragtical/pragtical/pull/288))
+
+* Limit FPS to match config.fps even during frequent events
+  ([#293](https://github.com/pragtical/pragtical/pull/293))
+
+* Add DocView:get_visible_cols_range(...)
+  ([#296](https://github.com/pragtical/pragtical/pull/296))
+
+* Revert "drawwhitespace: Cache whitespace location"
+  ([#302](https://github.com/pragtical/pragtical/pull/302))
+
+* luajit: arm64 patch to increase mcode alloc size
+  ([#301](https://github.com/pragtical/pragtical/pull/301))
+
+* Only update active views and draw visible ones
+  ([#307](https://github.com/pragtical/pragtical/pull/307))
+
+* Lower frame rate only after 3 consecutive drops
+  ([#308](https://github.com/pragtical/pragtical/pull/308))
+
+* Don't use incremental gc on Lua 5.4+
+  ([#309](https://github.com/pragtical/pragtical/pull/309))
+
+* Improve core.run() timings.
+  ([#313](https://github.com/pragtical/pragtical/pull/313))
+
+* Revert back to performant iterator on each_token
+  ([#317](https://github.com/pragtical/pragtical/pull/317))
+
+* Move inner functions to outer on tokenizer.tokenize
+  ([#318](https://github.com/pragtical/pragtical/pull/318))
+
+* Fix performance regression on defer bitmap
+  ([#326](https://github.com/pragtical/pragtical/pull/326))
+
+### Build System
+
+* Add PGO Stress Generator Script, release and rolling builds are now
+  PGO optimized, dropped macOS universal bundles and Windows 32 bit builds
+  ([#320](https://github.com/pragtical/pragtical/pull/320))
+
+### Widgets
+
+* Added alpha slider to colorpicker widget
+
+* Make use of new container widget on settings UI installed plugins
+  and also on the EmptyView
+
+* Added color reference support and make use of it on ListBox
+
 ## [3.6.0] - 2025-06-30
 
 ### New Features
@@ -2600,6 +2747,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.7.0]: https://github.com/pragtical/pragtical/releases/tag/v3.7.0
 [3.6.0]: https://github.com/pragtical/pragtical/releases/tag/v3.6.0
 [3.5.2]: https://github.com/pragtical/pragtical/releases/tag/v3.5.2
 [3.5.1]: https://github.com/pragtical/pragtical/releases/tag/v3.5.1

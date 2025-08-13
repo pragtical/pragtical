@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/libsdl-org/SDL.git
-revision = release-3.2.18
+revision = release-3.2.20
 depth = 1
 patch_directory = sdl3
 
