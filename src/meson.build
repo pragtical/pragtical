@@ -43,19 +43,19 @@ if dirmonitor_backends.length() == 0
     endif
 
     if cc.has_function('kqueue', prefix : '#include<sys/event.h>')
-        dirmonitor_backend = 'kqueue'
+        dirmonitor_backends += 'kqueue'
     endif
 
     if cc.has_function('create_inode_watcher', prefix : '#include<fcntl.h>')
-        dirmonitor_backend = 'inodewatcher'
+        dirmonitor_backends += 'inodewatcher'
     endif
 
     if dependency('libkqueue', required : false).found()
-        dirmonitor_backend = 'kqueue'
+        dirmonitor_backends += 'kqueue'
     endif
 
     if host_machine.system() == 'windows'
-        dirmonitor_backend = 'win32'
+        dirmonitor_backends += 'win32'
     endif
 
     dirmonitor_backends += 'dummy'
