@@ -20,7 +20,7 @@ static int get_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buf
 }
 
 
-static struct dirmonitor* init_dirmonitor() {
+static struct dirmonitor_internal* init_dirmonitor() {
   return SDL_calloc(1, sizeof(struct dirmonitor_internal));
 }
 
