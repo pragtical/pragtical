@@ -1339,9 +1339,31 @@ function core.on_event(type, ...)
 end
 
 
-local function get_title_filename(view)
-  local doc_filename = view.get_filename and view:get_filename() or view:get_name()
-  if doc_filename ~= "---" then return doc_filename end
+function core.get_view_title(view)
+  local title = ""
+  local project = core.projects[1]
+  if view.get_filename and view:get_filename() then
+    if view.doc.abs_filename then
+      local prj, is_open, belongs = core.current_project(view.doc.abs_filename)
+      if prj and is_open and belongs then
+        project = prj
+        title = common.relative_path(project.path, view.doc.abs_filename)
+        if view.doc:is_dirty() then title = title .. "*" end
+      else
+        title = view:get_filename()
+      end
+    else
+      title = view:get_filename()
+    end
+  else
+    project = {path = ""}
+    title = view:get_name()
+  end
+  if title and title ~= "---" then
+    return title .. (
+      project.path ~= "" and " - " .. common.basename(project.path) or ""
+    )
+  end
   return ""
 end
 
@@ -1477,7 +1499,7 @@ function core.step(next_frame_time)
   end
 
   -- update window title
-  local current_title = get_title_filename(core.active_view)
+  local current_title = core.get_view_title(core.active_view)
   if current_title ~= nil and current_title ~= core.window_title then
     system.set_window_title(core.window, core.compose_window_title(current_title))
     core.window_title = current_title
