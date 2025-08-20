@@ -961,7 +961,6 @@ function ResultsView:update()
   self.sensitive_toggle:set_position(self.wholeword_toggle:get_position().x - (px / 2) - self.sensitive_toggle:get_width(), py)
 
   self.find_text:set_position(px, self.regex_toggle:get_bottom() + py)
-  self.find_text:set_size(self:get_width() - self.find_button:get_size().x - px * 3)
   if
     (
       self.find_text:get_text() == self.query
@@ -983,6 +982,7 @@ function ResultsView:update()
     self.find_button:set_icon()
     self.find_button:set_tooltip(nil, "project-search:refresh")
   end
+  self.find_text:set_size(self:get_width() - self.find_button:get_size().x - px * 3)
   self.find_button:set_position(self.find_text:get_size().x + px * 2, self.regex_toggle:get_bottom() + py)
 
   if self.replace_text:is_visible() then
