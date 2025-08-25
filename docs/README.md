@@ -28,6 +28,7 @@ C API in the four namespaces that follow:
 * [encoding](api/encoding.lua)
 * [shmem](api/shmem.lua)
 * [thread](api/thread.lua)
+* [canvas](api/canvas.lua)
 
 Finally, all global variables are documented in the file named
 [globals.lua](api/globals.lua).

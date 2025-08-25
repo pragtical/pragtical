@@ -12,6 +12,8 @@ pragtical_sources = [
     'api/utf8.c',
     'api/encoding.c',
     'api/diff.c',
+    'api/canvas.c',
+    'api/utils/lxlauxlib.c',
     'arena_allocator.c',
     'renderer.c',
     'renwindow.c',

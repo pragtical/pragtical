@@ -1,4 +1,3 @@
-#include <math.h>
 #include <string.h>
 #include <assert.h>
 #include <lua.h>
@@ -7,9 +6,13 @@
 #include "../renderer.h"
 #include "../rencache.h"
 #include "../renwindow.h"
+#include "lua.h"
+#include "utils/lxlauxlib.h"
 
-// a reference index to a table that stores the fonts
+// a reference index to a table that stores fonts during a render cycle
 static int RENDERER_FONT_REF = LUA_NOREF;
+// a reference index to a table that stores canvases during a render cycle
+static int RENDERER_CANVAS_REF = LUA_NOREF;
 
 static int font_get_options(
   lua_State *L,
@@ -101,27 +104,6 @@ static int f_font_load(lua_State *L) {
   return 1;
 }
 
-static bool font_retrieve(lua_State* L, RenFont** fonts, int idx) {
-  bool is_table;
-  memset(fonts, 0, sizeof(RenFont*)*FONT_FALLBACK_MAX);
-  if (lua_type(L, idx) != LUA_TTABLE) {
-    fonts[0] = *(RenFont**)luaL_checkudata(L, idx, API_TYPE_FONT);
-    is_table = false;
-  } else {
-    is_table = true;
-    int len = luaL_len(L, idx); len = len > FONT_FALLBACK_MAX ? FONT_FALLBACK_MAX : len;
-    for (int i = 0; i < len; i++) {
-      lua_rawgeti(L, idx, i+1);
-      fonts[i] = *(RenFont**) luaL_checkudata(L, -1, API_TYPE_FONT);
-      lua_pop(L, 1);
-    }
-  }
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-  update_font_scale(ren_get_target_window(), fonts);
-#endif
-  return is_table;
-}
-
 static int f_font_copy(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX];
   bool table = font_retrieve(L, fonts, 1);
@@ -202,25 +184,11 @@ static int f_font_gc(lua_State *L) {
   return 0;
 }
 
-
-static RenTab checktab(lua_State *L, int idx) {
-  RenTab tab = {.offset = NAN};
-  if (lua_isnoneornil(L, idx)) {
-    return tab;
-  }
-  luaL_checktype(L, idx, LUA_TTABLE);
-  if (lua_getfield(L, idx, "tab_offset") == LUA_TNIL) {
-    return tab;
-  }
-  tab.offset = luaL_checknumber(L, -1);
-  return tab;
-}
-
 static int f_font_get_width(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
   size_t len;
   const char *text = luaL_checklstring(L, 2, &len);
-  RenTab tab = checktab(L, 3);
+  RenTab tab = luaXL_checktab(L, 3);
 
   lua_pushnumber(L, ren_font_group_get_width(fonts, text, len, tab, NULL));
   return 1;
@@ -398,7 +366,6 @@ static RenColor checkcolor(lua_State *L, int idx, int def) {
   return color;
 }
 
-
 static int f_show_debug(lua_State *L) {
   luaL_checkany(L, 1);
   rencache_show_debug(lua_toboolean(L, 1));
@@ -435,6 +402,9 @@ static int f_end_frame(UNUSED lua_State *L) {
   // clear the font reference table
   lua_newtable(L);
   lua_rawseti(L, LUA_REGISTRYINDEX, RENDERER_FONT_REF);
+  // clear the canvas reference table
+  lua_newtable(L);
+  lua_rawseti(L, LUA_REGISTRYINDEX, RENDERER_CANVAS_REF);
   return 0;
 }
 
@@ -463,7 +433,7 @@ static int f_draw_rect(lua_State *L) {
   lua_Number w = luaL_checknumber(L, 3);
   lua_Number h = luaL_checknumber(L, 4);
   RenRect rect = rect_to_grid(x, y, w, h);
-  RenColor color = checkcolor(L, 5, 255);
+  RenColor color = luaXL_checkcolor(L, 5, 255);
   rencache_draw_rect(&ren_get_target_window()->cache, rect, color);
   return 0;
 }
@@ -528,10 +498,59 @@ static int f_draw_text(lua_State *L) {
   const char *text = luaL_checklstring(L, 2, &len);
   double x = luaL_checknumber(L, 3);
   double y = luaL_checknumber(L, 4);
-  RenColor color = checkcolor(L, 5, 255);
-  RenTab tab = checktab(L, 6);
+  RenColor color = luaXL_checkcolor(L, 5, 255);
+  RenTab tab = luaXL_checktab(L, 6);
   x = rencache_draw_text(&ren_get_target_window()->cache, fonts, text, len, x, y, color, tab);
   lua_pushnumber(L, x);
+  return 1;
+}
+
+static int f_draw_canvas(lua_State *L) {
+  RenCanvas* canvas = luaL_checkudata(L, 1, API_TYPE_CANVAS);
+  int x = luaL_checkinteger(L, 2);
+  int y = luaL_checkinteger(L, 3);
+
+  // Save the CanvasRef to avoid it being GCd while in flight to the renderer
+  lua_rawgeti(L, LUA_REGISTRYINDEX, RENDERER_CANVAS_REF);
+  if (!lua_istable(L, -1)) {
+    return luaL_error(L, "Unable to add reference to Canvas");
+  }
+
+  lua_getiuservalue(L, 1, USERDATA_CANVAS_REF);
+  RenCanvasRef *ref = lua_touserdata(L, -1); // TODO: do we need to do checkudata?
+
+  lua_pushboolean(L, true);
+  lua_rawset(L, -3);
+
+  RenRect rect = { .x = x, .y = y, .width = canvas->w, .height = canvas->h };
+  rencache_draw_canvas(ren_get_target_window(), rect, ref, canvas->version);
+  return 0;
+}
+
+static int f_to_canvas(lua_State *L) {
+  lua_Number x = luaL_checkinteger(L, 1);
+  lua_Number y = luaL_checkinteger(L, 2);
+  lua_Number w = luaL_checkinteger(L, 3);
+  lua_Number h = luaL_checkinteger(L, 4);
+
+  // TODO: this is duplicated code from canvas.f_new, maybe add this to the utils?
+  SDL_Surface *dst = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
+  RenSurface rs = renwin_get_surface(ren_get_target_window());
+  SDL_Rect rect = { .x = x, .y = y, .w = w, .h = h };
+  SDL_BlitSurface(rs.surface, &rect, dst, NULL);
+
+  RenCanvas *canvas = lua_newuserdatauv(L, sizeof(RenCanvas), USERDATA_LAST - 1);
+  luaL_setmetatable(L, API_TYPE_CANVAS);
+  canvas->w = w;
+  canvas->h = h;
+  canvas->version = 0;
+
+  RenCanvasRef *ref = lua_newuserdata(L, sizeof(RenCanvasRef));
+  luaL_setmetatable(L, API_TYPE_CANVAS_REF);
+  lua_setiuservalue(L, -2, USERDATA_CANVAS_REF);
+  ref->render_ref_count = 0;
+  ref->surface = dst;
+
   return 1;
 }
 
@@ -544,7 +563,9 @@ static const luaL_Reg lib[] = {
   { "draw_rect",          f_draw_rect          },
   { "draw_text",          f_draw_text          },
   { "draw_poly",          f_draw_poly          },
-  { NULL,                 NULL                 },
+  { "draw_canvas",        f_draw_canvas        },
+  { "to_canvas",          f_to_canvas          },
+  { NULL,                 NULL                 }
 };
 
 static const luaL_Reg fontLib[] = {
@@ -566,6 +587,10 @@ int luaopen_renderer(lua_State *L) {
   // gets a reference on the registry to store font data
   lua_newtable(L);
   RENDERER_FONT_REF = luaL_ref(L, LUA_REGISTRYINDEX);
+
+  // gets a reference on the registry to store canvas data
+  lua_newtable(L);
+  RENDERER_CANVAS_REF = luaL_ref(L, LUA_REGISTRYINDEX);
 
   luaL_newlib(L, lib);
   luaL_newmetatable(L, API_TYPE_FONT);
