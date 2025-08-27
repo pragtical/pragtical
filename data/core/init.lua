@@ -288,7 +288,11 @@ function core.write_init_project_module(init_filename)
 local config = require "core.config"
 
 -- you can add some patterns to ignore files within the project
+-- this will overwrite the default ignored files
 -- config.ignore_files = {"^%.", <some-patterns>}
+
+-- this will extend the list of default ignored files
+-- for i, v in ipairs({"^%.", <some-patterns>}) do table.insert(config.ignore_files, v) end
 
 -- Patterns are normally applied to the file's or directory's name, without
 -- its path. See below about how to apply filters on a path.
@@ -297,11 +301,12 @@ local config = require "core.config"
 --
 -- "^%." matches any file of directory whose basename begins with a dot.
 --
--- When there is an '/' or a '/$' at the end, the pattern will only match
--- directories. When using such a pattern a final '/' will be added to the name
--- of any directory entry before checking if it matches.
+-- When there is an '/' at the end, the pattern will only match directories.
+-- When there is an "$" at the end, the pattern will only match files.
 --
 -- "^%.git/" matches any directory named ".git" anywhere in the project.
+-- "somefile$" matches a specific file
+-- "%.lua$" matches any lua file
 --
 -- If a "/" appears anywhere in the pattern (except when it appears at the end or
 -- is immediately followed by a '$'), then the pattern will be applied to the full
