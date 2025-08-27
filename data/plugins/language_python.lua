@@ -142,7 +142,7 @@ local python_func = {
       type = "operator",
       syntax = python_type
     },
-    { pattern = { ":%s*", "%f[^%[%]%w_]" }, syntax = python_type },
+    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, syntax = python_type },
 
   }, python_patterns),
 
@@ -212,11 +212,20 @@ syntax.add {
       type = { "keyword", "keyword2", "normal" }
     },
 
+    -- single quote forward type declarations eg: variable_name: 'type1 | type2'
     { pattern = { ":()%s*'", "()'" },
       type = { "normal", "string" },
       syntax = python_type
     },
-    { pattern = { ":%s*", "%f[^%[%]%w_]" }, syntax = python_type },
+
+    -- double quote forward type declarations eg: variable_name: "type1 | type2"
+    { pattern = { ':()%s*"', '()"' },
+      type = { "normal", "string" },
+      syntax = python_type
+    },
+
+    -- type declarations eg: variable_name: type1 | type2
+    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, syntax = python_type },
 
   }, python_patterns),
 
