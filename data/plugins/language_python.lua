@@ -142,6 +142,14 @@ local python_func = {
       type = "operator",
       syntax = python_type
     },
+    { pattern = { ":()%s*'", "()'" },
+      type = { "normal", "string" },
+      syntax = python_type
+    },
+    { pattern = { ':()%s*"', '()"' },
+      type = { "normal", "string" },
+      syntax = python_type
+    },
     { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, syntax = python_type },
 
   }, python_patterns),
