@@ -500,6 +500,19 @@ function Cube:draw()
 end
 ---------------------------End of Rotating Cube Code----------------------------
 
+-- Max execution time check (allow a maximum of 5 minutes to prevent endless CI)
+local start_time = os.time()
+core.add_thread(function()
+  while true do
+    coroutine.yield(1)
+    if os.time() - start_time >= 5 * 60 then
+      print "Maximum pgo stress time exceeded, quitting..."
+      command.perform "core:force-quit"
+      break
+    end
+  end
+end)
+
 -- Main Entry Point
 core.add_thread(function()
   local start_time = system.get_time()
