@@ -192,6 +192,7 @@ jobs:
           meson setup --wrap-mode=forcefallback -Dppm=false build
       - name: Build
         run: |
+          meson compile -j 1 -C build
           meson install -C build --destdir="../pragtical"
       - name: Package
         run: |
