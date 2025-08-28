@@ -67,12 +67,12 @@ local python_fstring = {
 local python_patterns = {
   { pattern = "#.*", type = "comment" },
 
-  { pattern = '[uUrR]%f["]', type = "keyword" },
+  { pattern = '[uUrR]%f["\']', type = "keyword" },
 
-  { pattern = { '[ruU]?"""', '"""', '\\' }, type = "string" },
-  { pattern = { "[ruU]?'''", "'''", '\\' }, type = "string" },
-  { pattern = { '[ruU]?"', '"', '\\' }, type = "string" },
-  { pattern = { "[ruU]?'", "'", '\\' }, type = "string" },
+  { pattern = { '"""', '"""', '\\' }, type = "string" },
+  { pattern = { "'''", "'''", '\\' }, type = "string" },
+  { pattern = { '"', '"', '\\' }, type = "string" },
+  { pattern = { "'", "'", '\\' }, type = "string" },
 
   { pattern = { 'f"', '"', "\\" },
     type = "string", syntax = python_fstring
