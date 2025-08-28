@@ -67,12 +67,12 @@ local python_fstring = {
 local python_patterns = {
   { pattern = "#.*", type = "comment" },
 
-  { pattern = '[uUrR]%f["]', type = "keyword" },
+  { pattern = '[uUrR]%f["\']', type = "keyword" },
 
-  { pattern = { '[ruU]?"""', '"""', '\\' }, type = "string" },
-  { pattern = { "[ruU]?'''", "'''", '\\' }, type = "string" },
-  { pattern = { '[ruU]?"', '"', '\\' }, type = "string" },
-  { pattern = { "[ruU]?'", "'", '\\' }, type = "string" },
+  { pattern = { '"""', '"""', '\\' }, type = "string" },
+  { pattern = { "'''", "'''", '\\' }, type = "string" },
+  { pattern = { '"', '"', '\\' }, type = "string" },
+  { pattern = { "'", "'", '\\' }, type = "string" },
 
   { pattern = { 'f"', '"', "\\" },
     type = "string", syntax = python_fstring
@@ -142,7 +142,15 @@ local python_func = {
       type = "operator",
       syntax = python_type
     },
-    { pattern = { ":%s*", "%f[^%[%]%w_]" }, syntax = python_type },
+    { pattern = { ":()%s*'", "()'" },
+      type = { "normal", "string" },
+      syntax = python_type
+    },
+    { pattern = { ':()%s*"', '()"' },
+      type = { "normal", "string" },
+      syntax = python_type
+    },
+    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, syntax = python_type },
 
   }, python_patterns),
 
@@ -212,11 +220,20 @@ syntax.add {
       type = { "keyword", "keyword2", "normal" }
     },
 
+    -- single quote forward type declarations eg: variable_name: 'type1 | type2'
     { pattern = { ":()%s*'", "()'" },
       type = { "normal", "string" },
       syntax = python_type
     },
-    { pattern = { ":%s*", "%f[^%[%]%w_]" }, syntax = python_type },
+
+    -- double quote forward type declarations eg: variable_name: "type1 | type2"
+    { pattern = { ':()%s*"', '()"' },
+      type = { "normal", "string" },
+      syntax = python_type
+    },
+
+    -- type declarations eg: variable_name: type1 | type2
+    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, syntax = python_type },
 
   }, python_patterns),
 
