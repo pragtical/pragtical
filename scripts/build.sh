@@ -177,7 +177,12 @@ main() {
 
   # Download the subprojects so we can copy plugin manager,
   # this will prevent reconfiguring the project.
-  meson subprojects download
+  if [[ $platform == "windows" ]]; then
+    # on windows file locks can occur so 1 job at a time
+    meson subprojects download -j 1
+  else
+    meson subprojects download
+  fi
 
   # Enable ppm only for windows 32 Bits which binary download is not available
   local ppm="-Dppm=false"
