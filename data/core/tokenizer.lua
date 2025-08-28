@@ -297,14 +297,16 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
       local cont = true
       -- If we're in subsyntax mode, always check to see if we end our syntax
       -- first, before the found delimeter, as ending the subsyntax takes
-      -- precedence over ending the delimiter in the subsyntax.
-      if subsyntax_info then
+      -- precedence over ending the delimiter in the subsyntax. This check
+      -- is perform if we are not inside a child subsyntax to prevent the
+      -- parent subsyntax from prematurely ending the child.
+      if subsyntax_info and not s then
         local ss, se = find_text(text, subsyntax_info, i, false, true)
         -- If we find that we end the subsyntax before the
         -- delimiter, push the token, and signal we shouldn't
         -- treat the bit after as a token to be normally parsed
         -- (as it's the syntax delimiter).
-        if ss and (s == nil or ss < s) then
+        if ss then
           push_token(res, token_type, text:usub(i, ss - 1))
           i = ss
           cont = false
