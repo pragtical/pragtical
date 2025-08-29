@@ -3,26 +3,18 @@ local core = require "core"
 local common = require "core.common"
 local DocView = require "core.docview"
 local LogView = require "core.logview"
+local storage = require "core.storage"
 
+local STORAGE_MODULE = "ws"
 
-local function workspace_files_for(project_dir)
+local function workspace_keys_for(project_dir)
   local basename = common.basename(project_dir)
-  local workspace_dir = USERDIR .. PATHSEP .. "ws"
-  local info_wsdir = system.get_file_info(workspace_dir)
-  if not info_wsdir then
-    local ok, err = system.mkdir(workspace_dir)
-    if not ok then
-      error("cannot create workspace directory: \"" .. err .. "\"")
-    end
-  end
   return coroutine.wrap(function()
-    local files = system.list_dir(workspace_dir) or {}
-    local n = #basename
-    for _, file in ipairs(files) do
-      if file:sub(1, n) == basename then
-        local id = tonumber(file:sub(n + 1):match("^-(%d+)$"))
+    for _, key in ipairs(storage.keys(STORAGE_MODULE) or {}) do
+      if key:sub(1, #basename) == basename then
+        local id = tonumber(key:sub(#basename + 1):match("^-(%d+)$"))
         if id then
-          coroutine.yield(workspace_dir .. PATHSEP .. file, id)
+          coroutine.yield(key, id)
         end
       end
     end
@@ -30,29 +22,14 @@ local function workspace_files_for(project_dir)
 end
 
 
-local function consume_workspace_file(project_dir)
-  for filename, id in workspace_files_for(project_dir) do
-    local load_f = loadfile(filename)
-    local workspace = load_f and load_f()
+local function consume_workspace(project_dir)
+  for key, id in workspace_keys_for(project_dir) do
+    local workspace = storage.load(STORAGE_MODULE, key)
     if workspace and workspace.path == project_dir then
-      os.remove(filename)
+      storage.clear(STORAGE_MODULE, key)
       return workspace
     end
   end
-end
-
-
-local function get_workspace_filename(project_dir)
-  local id_list = {}
-  for filename, id in workspace_files_for(project_dir) do
-    id_list[id] = true
-  end
-  local id = 1
-  while id_list[id] do
-    id = id + 1
-  end
-  local basename = common.basename(project_dir)
-  return USERDIR .. PATHSEP .. "ws" .. PATHSEP .. basename .. "-" .. tostring(id)
 end
 
 
@@ -195,25 +172,28 @@ end
 
 
 local function save_workspace()
-  local root = get_unlocked_root(core.root_view.root_node)
-  local workspace_filename = get_workspace_filename(core.root_project().path)
-  local fp = io.open(workspace_filename, "w")
-  if fp then
-    local workspace = {
-      path = core.root_project().path,
-      documents = save_node(root),
-      directories = save_directories(),
-      visited_files = core.visited_files
-    }
-    fp:write("return " .. common.serialize(workspace, {pretty = true}))
-    fp:close()
+  local project_dir = common.basename(core.root_project().path)
+  local id_list = {}
+  for filename, id in workspace_keys_for(project_dir) do
+    id_list[id] = true
   end
+  local id = 1
+  while id_list[id] do
+    id = id + 1
+  end
+  local root = get_unlocked_root(core.root_view.root_node)
+  storage.save(STORAGE_MODULE, project_dir .. "-" .. id, {
+    path = core.root_project().path,
+    documents = save_node(root),
+    directories = save_directories(),
+    visited_files = core.visited_files
+  })
 end
 
 
 local function load_workspace()
   core.add_thread(function()
-    local workspace = consume_workspace_file(core.root_project().path)
+    local workspace = consume_workspace(core.root_project().path)
     if workspace then
       if workspace.visited_files then
         core.visited_files = workspace.visited_files
@@ -223,7 +203,7 @@ local function load_workspace()
       if active_view then
         core.set_active_view(active_view)
       end
-      for i, dir_name in ipairs(workspace.directories) do
+      for _, dir_name in ipairs(workspace.directories) do
         core.add_project(system.absolute_path(dir_name))
       end
     end
@@ -240,7 +220,7 @@ function core.run(...)
     local set_project = core.set_project
     function core.set_project(project)
       core.try(save_workspace)
-      local project = set_project(project)
+      project = set_project(project)
       core.try(load_workspace)
       return project
     end
