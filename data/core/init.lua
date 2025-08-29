@@ -87,8 +87,19 @@ end
 
 function core.add_project(project)
   project = type(project) == "string" and Project(common.normalize_volume(project)) or project
-  table.insert(core.projects, project)
-  core.redraw = true
+  local duplicate = false
+  for _, cproject in ipairs(core.projects) do
+    if project.path == cproject.path then
+      duplicate = true
+      project = cproject
+      core.warn("The project '%s' is already loaded.", common.basename(project.path))
+      break
+    end
+  end
+  if not duplicate then
+    table.insert(core.projects, project)
+    core.redraw = true
+  end
   return project
 end
 
