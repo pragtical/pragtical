@@ -281,7 +281,7 @@ settings.add("Graphics",
       description = "Lower value for low end machines and higher for a smoother experience. This value is ignored if Auto FPS is enabled.",
       path = "fps",
       type = settings.type.NUMBER,
-      default = core.window:get_refresh_rate() or 60,
+      default = DEFAULT_FPS,
       min = 10,
       max = 300,
       on_apply = function(value)
@@ -870,6 +870,14 @@ settings.add("Advanced",
         end
       end
     },
+    {
+      label = "Reload User Modules at Startup",
+      description = "Reloads user and project modules after applying "
+        .. "the graphically set configuration settings.",
+      path = "reload_user_modules",
+      type = settings.type.TOGGLE,
+      default = false
+    }
   }
 )
 
@@ -2137,8 +2145,17 @@ function core.run()
   end
 
   -- re-apply user settings
-  core.load_user_directory()
-  core.load_project_module()
+  -- TODO: come up with a better solution for this that doesn't requires
+  -- reloading these user modules, got an idea time ago and forgot it :(
+  if settings.config.reload_user_modules then
+    local modules = {
+      USERDIR .. PATHSEP .. "init.lua",
+      core.root_project().path .. PATHSEP .. ".pragtical_project"
+    }
+    for _, module in ipairs(modules) do
+      core.reload_absolute_module(module)
+    end
+  end
 
   core_run()
 end

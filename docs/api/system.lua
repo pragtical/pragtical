@@ -391,4 +391,14 @@ function system.path_compare(path1, type1, path2, type2) end
 ---@return boolean ok True if call succeeded
 function system.setenv(key, val) end
 
+---
+---Get the primary display details.
+---
+---@return number current_scale
+---@return number refresh_rate
+---@return number width
+---@return number height
+---@return number default_scale
+function system.get_display_info() end
+
 return system

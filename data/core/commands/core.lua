@@ -7,7 +7,7 @@ local LogView = require "core.logview"
 
 
 local previous_win_mode = "normal"
-local previous_win_pos = table.pack(system.get_window_size(core.window))
+local previous_win_pos = core.window_size
 local restore_title_view = false
 
 local function suggest_directory(text)

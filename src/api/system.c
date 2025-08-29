@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "api.h"
@@ -398,6 +399,7 @@ top:
         lua_pushstring(L, "scalechanged");
         float new_scale = SDL_GetWindowDisplayScale(window_renderer->cache.window);
         lua_pushnumber(L, new_scale);
+        return 2;
       }
 
     default:
@@ -848,7 +850,7 @@ static int f_get_clipboard(lua_State *L) {
   if (!text) { return 0; }
 #ifdef _WIN32
   // on windows, text-based clipboard formats must terminate with \r\n
-  // we need to convert it to \n for Lite XL to read them properly
+  // we need to convert it to \n to read them properly
   // https://learn.microsoft.com/en-us/windows/win32/dataxchg/standard-clipboard-formats
   luaL_gsub(L, text, "\r\n", "\n");
 #else
@@ -1220,6 +1222,40 @@ static int f_setenv(lua_State* L) {
 }
 
 
+static int f_get_display_info(lua_State* L) {
+  bool video_was_init = SDL_WasInit(SDL_INIT_VIDEO);
+
+  if (!video_was_init) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        SDL_Log("Video subsystem failed: %s", SDL_GetError());
+        return luaL_error(L, "Video subsystem failed: %s", SDL_GetError());
+    }
+  }
+
+  SDL_DisplayID display_id = SDL_GetPrimaryDisplay();
+  if (display_id == 0)
+    return luaL_error(L, "Getting primary display failed: %s", SDL_GetError());
+
+  float default_scale = SDL_GetDisplayContentScale(display_id);
+  if (default_scale == 0.0f)
+    return luaL_error(L, "Getting display scale failed: %s", SDL_GetError());
+
+  const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(display_id);
+  if (!mode)
+    return luaL_error(L, "Getting display mode failed: %s", SDL_GetError());
+
+  lua_pushnumber(L, mode->pixel_density);
+  lua_pushnumber(L, round(mode->refresh_rate));
+  lua_pushnumber(L, mode->w);
+  lua_pushnumber(L, mode->h);
+  lua_pushnumber(L, default_scale);
+
+  if(!video_was_init) SDL_QuitSubSystem(SDL_INIT_VIDEO);
+
+  return 5;
+}
+
+
 static const luaL_Reg lib[] = {
   { "poll_event",            f_poll_event            },
   { "wait_event",            f_wait_event            },
@@ -1260,6 +1296,7 @@ static const luaL_Reg lib[] = {
   { "text_input",            f_text_input            },
   { "setenv",                f_setenv                },
   { "ftruncate",             f_ftruncate             },
+  { "get_display_info",      f_get_display_info      },
   { NULL, NULL }
 };
 

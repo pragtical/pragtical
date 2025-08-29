@@ -22,6 +22,9 @@ static int f_renwin_create(lua_State *L) {
   float width = luaL_optnumber(L, 2, 0);
   float height = luaL_optnumber(L, 3, 0);
 
+  if (video_init() != 0)
+    return luaL_error(L, "Error creating pragtical window: %s", SDL_GetError());
+
   if (width < 1 || height < 1) {
     const SDL_DisplayMode* dm = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay());
 

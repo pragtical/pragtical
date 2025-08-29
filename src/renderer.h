@@ -85,6 +85,7 @@ void ren_draw_pixels(RenSurface *rs, RenRect rect, const char* bytes, size_t len
 int ren_poly_cbox(RenPoint *points, int npoints, RenRect *cbox);
 void ren_draw_poly(RenSurface *rs, RenPoint *points, unsigned short npoints, RenColor color);
 
+int video_init(void);
 int ren_init(void);
 void ren_free(void);
 RenWindow* ren_create(SDL_Window *win);
