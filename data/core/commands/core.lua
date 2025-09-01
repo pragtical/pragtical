@@ -70,7 +70,7 @@ command.add(nil, {
   ["core:reload-module"] = function()
     core.command_view:enter("Reload Module", {
       submit = function(text, item)
-        local text = item and item.text or text
+        text = item and item.text or text
         core.reload_module(text)
         core.log("Reloaded module %q", text)
       end,
@@ -93,8 +93,9 @@ command.add(nil, {
         end
       end,
       suggest = function(text)
-        local res = common.fuzzy_match(commands, text)
-        for i, name in ipairs(res) do
+        local res = {}
+        local matched = common.fuzzy_match(commands, text)
+        for i, name in ipairs(matched) do
           res[i] = {
             text = command.prettify_name(name),
             info = keymap.get_binding(name),
@@ -124,7 +125,7 @@ command.add(nil, {
     if view.doc and view.doc.abs_filename then
       local dirname = common.dirname(view.doc.abs_filename)
       if dirname and common.path_belongs_to(dirname, root_dir) then
-        local dirname = core.normalize_to_project_dir(dirname)
+        dirname = core.normalize_to_project_dir(dirname)
         text = dirname == root_dir and "" or common.home_encode(dirname) .. PATHSEP
       elseif dirname then
         root_dir = dirname
@@ -164,7 +165,8 @@ command.add(nil, {
             end
           end
           core.error("Cannot open file %s: %s", text, err)
-        elseif path_stat.type == 'dir' then
+        elseif --[[@cast path_stat -nil]] path_stat.type == 'dir' then
+          -- TODO: remove the above cast once https://github.com/LuaLS/lua-language-server/discussions/3102 is implemented.
           core.error("Cannot open %s, is a folder", text)
         else
           return true
