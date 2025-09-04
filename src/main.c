@@ -3,9 +3,9 @@
 #include <signal.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
-
 #include "api/api.h"
 #include "renderer.h"
+#include "custom_events.h"
 
 #ifdef _WIN32
   #include <windows.h>
@@ -146,6 +146,11 @@ int main(int argc, char **argv) {
     exit(1);
   }
 
+  if (!init_custom_events()) {
+    fprintf(stderr, "Error initializing custom events: %s\n", SDL_GetError());
+    exit(1);
+  }
+
   int has_restarted = 0;
   lua_State *L;
 
@@ -239,6 +244,10 @@ init_lua:
   }
 
   lua_close(L);
+
+  // At this point we're not going to call the event loop anymore,
+  // so we can free the custom events.
+  free_custom_events();
 
   ren_free();
 

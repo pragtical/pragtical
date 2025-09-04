@@ -257,6 +257,13 @@ settings.add("General",
       min = 1,
       max = 10
     },
+    {
+      label = "Use System File Picker",
+      description = "Use the native file picker by default when opening files and directories.",
+      path = "use_system_file_picker",
+      type = settings.type.TOGGLE,
+      default = system.get_sandbox() ~= "none"
+    },
   }
 )
 

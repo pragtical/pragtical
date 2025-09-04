@@ -320,6 +320,13 @@ config.stonks = true
 ---Defaults to nil
 config.dirmonitor_backend = nil
 
+---Use the system file picker instead of the command palette
+---when opening files.
+---
+---Defaults to false if no sandbox is detected.
+---@type boolean
+config.use_system_file_picker = system.get_sandbox() ~= "none"
+
 -- holds the plugins real config table
 local plugins_config = {}
 
