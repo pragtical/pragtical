@@ -8,13 +8,12 @@ renwindow = {}
 ---
 ---Create a new window
 ---
----@param x integer? if nil will be undefined
----@param y integer? if nil will be undefined
+---@param str string? if nil will be undefined
 ---@param width integer? if nil or less than 1 will be calculated from display
 ---@param height integer? if nil or less than 1 will be calculated from display
 ---
 ---@return renwindow
-function renwindow.create(x, y, width, height) end
+function renwindow.create(str, width, height) end
 
 ---
 --- Get width and height of a window
@@ -33,3 +32,9 @@ function renwindow.get_size(window) end
 ---
 ---@return number? refresh_rate
 function renwindow.get_refresh_rate(window) end
+
+---
+--- Restore Window
+---
+---@return number
+function renwindow._restore() end
