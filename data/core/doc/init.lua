@@ -784,9 +784,10 @@ function Doc:select_to(...) return self:select_to_cursor(nil, ...) end
 function Doc:get_indent_string(col)
   local indent_type, indent_size = self:get_indent_info()
   if indent_type == "hard" then
-    return "\t"
+    return "\t", "\t"
   end
-  return string.rep(" ", indent_size - ((col-1) % indent_size))
+  return string.rep(" ", indent_size),
+    string.rep(" ", indent_size - ((col-1) % indent_size))
 end
 
 -- returns the size of the original indent, and the indent
@@ -817,8 +818,10 @@ end
 -- * if you are unindenting, the cursor will jump to the start of the line,
 --   and remove the appropriate amount of spaces (or a tab).
 function Doc:indent_text(unindent, line1, col1, line2, col2)
-  local text = self:get_indent_string(col1)
   local _, se = self.lines[line1]:find("^[ \t]+")
+  local text, text_stop = self:get_indent_string(
+    unindent and (se and se + 1 or 1) or col1
+  )
   local in_beginning_whitespace = col1 == 1 or (se and col1 <= se + 1)
   local has_selection = line1 ~= line2 or col1 ~= col2
   if unindent or has_selection or in_beginning_whitespace then
@@ -827,8 +830,11 @@ function Doc:indent_text(unindent, line1, col1, line2, col2)
       if not has_selection or #self.lines[line] > 1 then -- don't indent empty lines in a selection
         local e, rnded = self:get_line_indent(self.lines[line], unindent)
         self:remove(line, 1, line, (e or 0) + 1)
-        self:insert(line, 1,
-          unindent and rnded:sub(1, #rnded - #text) or rnded .. text)
+        self:insert(
+          line, 1, unindent and rnded:sub(
+            1, #rnded - (#text - (#text == #text_stop and 0 or #text_stop))
+          ) or rnded .. text
+        )
       end
     end
     l1d, l2d = #self.lines[line1] - l1d, #self.lines[line2] - l2d
@@ -838,8 +844,8 @@ function Doc:indent_text(unindent, line1, col1, line2, col2)
     end
     return line1, col1 + l1d, line2, col2 + l2d
   end
-  self:insert(line1, col1, text)
-  return line1, col1 + #text, line1, col1 + #text
+  self:insert(line1, col1, text_stop)
+  return line1, col1 + #text_stop, line1, col1 + #text_stop
 end
 
 -- For plugins to add custom actions of document change
