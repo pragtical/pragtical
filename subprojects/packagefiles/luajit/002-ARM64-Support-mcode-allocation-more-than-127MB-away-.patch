@@ -1,4 +1,4 @@
-From ca33f8a12b241510a8646b4475777001c75539ef Mon Sep 17 00:00:00 2001
+From 3a01b990c42879cf058e96a5cee9c6ca4df44bcf Mon Sep 17 00:00:00 2001
 From: Peter Cawley <corsix@corsix.org>
 Date: Thu, 29 Feb 2024 19:34:20 +0000
 Subject: [PATCH 1/2] ARM64: Support mcode allocation more than 127MB away from
@@ -10,11 +10,11 @@ Subject: [PATCH 1/2] ARM64: Support mcode allocation more than 127MB away from
  src/lj_mcode.c        | 20 ++++++------
  src/lj_target_arm64.h |  3 +-
  src/lj_trace.c        | 24 ++++++++++++--
- src/vm_arm64.dasc     | 39 +++++++++++++++-------
- 6 files changed, 125 insertions(+), 43 deletions(-)
+ src/vm_arm64.dasc     | 40 +++++++++++++++--------
+ 6 files changed, 125 insertions(+), 44 deletions(-)
 
 diff --git a/src/lj_asm_arm64.h b/src/lj_asm_arm64.h
-index 5b40f4cc..66b842a6 100644
+index 4feaa3b0..f4ab5bb9 100644
 --- a/src/lj_asm_arm64.h
 +++ b/src/lj_asm_arm64.h
 @@ -52,22 +52,35 @@ static void asm_exitstub_setup(ASMState *as, ExitNo nexits)
@@ -131,7 +131,7 @@ index 5b40f4cc..66b842a6 100644
  }
  
 diff --git a/src/lj_jit.h b/src/lj_jit.h
-index 6902fba3..f436758b 100644
+index 102ba0b4..78c89810 100644
 --- a/src/lj_jit.h
 +++ b/src/lj_jit.h
 @@ -374,10 +374,13 @@ enum {
@@ -158,10 +158,10 @@ index 6902fba3..f436758b 100644
    TValue errinfo;	/* Additional info element for trace errors. */
  
 diff --git a/src/lj_mcode.c b/src/lj_mcode.c
-index 8a4851dd..ffdcbc3f 100644
+index 2b8ac2df..3ec358ca 100644
 --- a/src/lj_mcode.c
 +++ b/src/lj_mcode.c
-@@ -208,17 +208,10 @@ static void mcode_protect(jit_State *J, int prot)
+@@ -227,17 +227,10 @@ static void mcode_protect(jit_State *J, int prot)
  /* Get memory within relative jump distance of our code in 64 bit mode. */
  static void *mcode_alloc(jit_State *J, size_t sz)
  {
@@ -181,7 +181,7 @@ index 8a4851dd..ffdcbc3f 100644
    const uintptr_t range = (1u << (LJ_TARGET_JUMPRANGE-1)) - (1u << 21);
    /* First try a contiguous area below the last one. */
    uintptr_t hint = J->mcarea ? (uintptr_t)J->mcarea - sz : 0;
-@@ -227,7 +220,6 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+@@ -246,7 +239,6 @@ static void *mcode_alloc(jit_State *J, size_t sz)
    for (i = 0; i < LJ_TARGET_JUMPRANGE; i++) {
      if (mcode_validptr(hint)) {
        void *p = mcode_alloc_at(J, hint, sz, MCPROT_GEN);
@@ -189,7 +189,7 @@ index 8a4851dd..ffdcbc3f 100644
        if (mcode_validptr(p) &&
  	  ((uintptr_t)p + sz - target < range || target - (uintptr_t)p < range))
  	return p;
-@@ -239,6 +231,14 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+@@ -258,6 +250,14 @@ static void *mcode_alloc(jit_State *J, size_t sz)
      } while (!(hint + sz < range+range));
      hint = target + hint - range;
    }
@@ -205,7 +205,7 @@ index 8a4851dd..ffdcbc3f 100644
    return NULL;
  }
 diff --git a/src/lj_target_arm64.h b/src/lj_target_arm64.h
-index c34f1e59..dc6a1e4d 100644
+index 30aff478..1d576d5b 100644
 --- a/src/lj_target_arm64.h
 +++ b/src/lj_target_arm64.h
 @@ -110,7 +110,7 @@ typedef struct {
@@ -226,7 +226,7 @@ index c34f1e59..dc6a1e4d 100644
    A64I_BLRAAZ = 0xd63f081f,
  
 diff --git a/src/lj_trace.c b/src/lj_trace.c
-index a5e316e1..8d8fd05a 100644
+index 0e948e8d..298bb351 100644
 --- a/src/lj_trace.c
 +++ b/src/lj_trace.c
 @@ -154,7 +154,7 @@ static void trace_save(jit_State *J, GCtrace *T)
@@ -238,7 +238,7 @@ index a5e316e1..8d8fd05a 100644
  #endif
    p += szins;
    TRACE_APPENDVEC(snap, nsnap, SnapShot)
-@@ -350,6 +350,18 @@ void lj_trace_initstate(global_State *g)
+@@ -343,6 +343,18 @@ void lj_trace_initstate(global_State *g)
    J->k32[LJ_K32_M2P64] = 0xdf800000;
  #endif
  #endif
@@ -257,7 +257,7 @@ index a5e316e1..8d8fd05a 100644
  }
  
  /* Free everything associated with the JIT compiler state. */
-@@ -644,10 +656,16 @@ static int trace_abort(jit_State *J)
+@@ -637,10 +649,16 @@ static int trace_abort(jit_State *J)
      J->cur.traceno = 0;
    }
    L->top--;  /* Remove error object */
@@ -277,10 +277,10 @@ index a5e316e1..8d8fd05a 100644
  }
  
 diff --git a/src/vm_arm64.dasc b/src/vm_arm64.dasc
-index a6ce0507..b7a29ff8 100644
+index a437b657..c230d61f 100644
 --- a/src/vm_arm64.dasc
 +++ b/src/vm_arm64.dasc
-@@ -1985,8 +1985,34 @@ static void build_subroutines(BuildCtx *ctx)
+@@ -2007,8 +2007,34 @@ static void build_subroutines(BuildCtx *ctx)
    |  stp x..a, x..b, [sp, #32*8+a*8]
    |.endmacro
    |
@@ -312,10 +312,10 @@ index a6ce0507..b7a29ff8 100644
 +  |  br lr
 +  |.endif
 +  |1:
+   |  bti_call
    |  sub     sp, sp, #(64*8)
    |  savex_, 0, 1
-   |  savex_, 2, 3
-@@ -2004,24 +2030,13 @@ static void build_subroutines(BuildCtx *ctx)
+@@ -2027,24 +2053,13 @@ static void build_subroutines(BuildCtx *ctx)
    |  savex_, 26, 27
    |  savex_, 28, 29
    |  stp d30, d31, [sp, #30*8]
@@ -340,7 +340,7 @@ index a6ce0507..b7a29ff8 100644
    |   str L, [GL, #GL_J(L)]
    |  str xzr, GL->jit_base
    |  add CARG1, GL, #GG_G2J
-@@ -3857,7 +3872,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
+@@ -3906,7 +3921,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
      |   str L, GL->tmpbuf.L
      |  sub sp, sp, #16	// See SPS_FIXED. Avoids sp adjust in every root trace.
      |.if PAUTH
@@ -349,6 +349,11 @@ index a6ce0507..b7a29ff8 100644
      |.else
      |  br RA
      |.endif
+@@ -4289,4 +4304,3 @@ static void emit_asm_debug(BuildCtx *ctx)
+     break;
+   }
+ }
+-
 -- 
-2.50.1
+2.51.1
 
