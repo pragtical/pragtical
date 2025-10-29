@@ -544,7 +544,10 @@ function DiffView:on_touch_moved(...)
 end
 
 function DiffView:get_scrollable_size()
-  local lc = math.max(#self.doc_view_a.doc.lines, #self.doc_view_b.doc.lines)
+  local a_lines, b_lines = #self.doc_view_a.doc.lines, #self.doc_view_b.doc.lines
+  local a_gaps = (self.a_gaps[a_lines] and self.a_gaps[a_lines][2] or 0)
+  local b_gaps = (self.b_gaps[b_lines] and self.b_gaps[b_lines][2] or 0)
+  local lc = math.max(a_lines + a_gaps, b_lines + b_gaps)
   if not config.scroll_past_end then
     local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
     return self.doc_view_a:get_line_height() * (lc) + style.padding.y * 2 + h_scroll
@@ -761,11 +764,12 @@ function DiffView:patch_views()
     doc_view.get_scrollable_size = function(self)
       local gaps = is_a and parent.a_gaps or parent.b_gaps
       local lc = #self.doc.lines
+      lc = lc + (gaps[lc] and gaps[lc][2] or 0)
       if not config.scroll_past_end then
         local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
         return self:get_line_height() * (lc) + style.padding.y * 2 + h_scroll
       end
-      return self:get_line_height() * ((lc + (gaps[lc] and gaps[lc][2] or 0)) - 1) + self.size.y
+      return self:get_line_height() * (lc - 1) + self.size.y
     end
   end
 
