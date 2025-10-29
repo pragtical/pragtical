@@ -1,4 +1,4 @@
-From 9d021f2fa09addd957d62e09fc8126ad4e54a463 Mon Sep 17 00:00:00 2001
+From 7fb306a61839112df32f08824710f8897378c0ca Mon Sep 17 00:00:00 2001
 From: Vyacheslav Egorov <vegorov@google.com>
 Date: Thu, 2 Mar 2023 10:33:35 +0100
 Subject: [PATCH 2/2] Support placing JIT code outside of jump range from
@@ -27,7 +27,7 @@ the first trace. This keeps JIT from death spiralling.
  5 files changed, 96 insertions(+), 3 deletions(-)
 
 diff --git a/src/lj_asm.h b/src/lj_asm.h
-index 5eb396b1..76f4e7bf 100644
+index b793b101..c9b94b40 100644
 --- a/src/lj_asm.h
 +++ b/src/lj_asm.h
 @@ -12,6 +12,14 @@
@@ -46,7 +46,7 @@ index 5eb396b1..76f4e7bf 100644
  
  #endif
 diff --git a/src/lj_asm_x86.h b/src/lj_asm_x86.h
-index aee33716..8af95db8 100644
+index 774e77b4..2379b0c2 100644
 --- a/src/lj_asm_x86.h
 +++ b/src/lj_asm_x86.h
 @@ -31,7 +31,7 @@ static MCode *asm_exitstub_gen(ASMState *as, ExitNo group)
@@ -58,7 +58,7 @@ index aee33716..8af95db8 100644
    /* Commit the code for this group (even if assembly fails later on). */
    lj_mcode_commitbot(as->J, mxp);
    as->mcbot = mxp;
-@@ -2941,7 +2941,7 @@ static void asm_tail_fixup(ASMState *as, TraceNo lnk)
+@@ -2942,7 +2942,7 @@ static void asm_tail_fixup(ASMState *as, TraceNo lnk)
      p1[-1] = MODRM(XM_REG, XOg_ADD, RID_ESP);
    }
    /* Patch exit branch. */
@@ -67,7 +67,7 @@ index aee33716..8af95db8 100644
    *(int32_t *)(p-4) = jmprel(as->J, p, target);
    p[-5] = XI_JMP;
    /* Drop unused mcode tail. Fill with NOPs to make the prefetcher happy. */
-@@ -3137,3 +3137,37 @@ void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
+@@ -3138,3 +3138,37 @@ void lj_asm_patchexit(jit_State *J, GCtrace *T, ExitNo exitno, MCode *target)
    lj_mcode_patch(J, mcarea, 1);
  }
  
@@ -106,7 +106,7 @@ index aee33716..8af95db8 100644
 +}
 +#endif
 diff --git a/src/lj_jit.h b/src/lj_jit.h
-index f436758b..6aa78ef9 100644
+index 78c89810..345a7a74 100644
 --- a/src/lj_jit.h
 +++ b/src/lj_jit.h
 @@ -510,6 +510,10 @@ typedef struct jit_State {
@@ -121,7 +121,7 @@ index f436758b..6aa78ef9 100644
    MCode *mcarea;	/* Base of current mcode area. */
    MCode *mctop;		/* Top of current mcode area. */
 diff --git a/src/lj_mcode.c b/src/lj_mcode.c
-index ffdcbc3f..7a25c286 100644
+index 3ec358ca..7f180fb8 100644
 --- a/src/lj_mcode.c
 +++ b/src/lj_mcode.c
 @@ -16,6 +16,9 @@
@@ -134,7 +134,7 @@ index ffdcbc3f..7a25c286 100644
  #if LJ_HASJIT || LJ_HASFFI
  #include "lj_vm.h"
  #endif
-@@ -211,7 +214,15 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+@@ -230,7 +233,15 @@ static void *mcode_alloc(jit_State *J, size_t sz)
    /* Try addresses within a distance of target-range/2+1MB..target+range/2-1MB.
    ** Use half the jump range so every address in the range can reach any other.
    */
@@ -150,7 +150,7 @@ index ffdcbc3f..7a25c286 100644
    const uintptr_t range = (1u << (LJ_TARGET_JUMPRANGE-1)) - (1u << 21);
    /* First try a contiguous area below the last one. */
    uintptr_t hint = J->mcarea ? (uintptr_t)J->mcarea - sz : 0;
-@@ -269,9 +280,35 @@ static void *mcode_alloc(jit_State *J, size_t sz)
+@@ -288,9 +299,35 @@ static void *mcode_alloc(jit_State *J, size_t sz)
  static void mcode_allocarea(jit_State *J)
  {
    MCode *oldarea = J->mcarea;
@@ -187,7 +187,7 @@ index ffdcbc3f..7a25c286 100644
    J->szmcarea = sz;
    J->mcprot = MCPROT_GEN;
    J->mctop = (MCode *)((char *)J->mcarea + J->szmcarea);
-@@ -280,12 +317,21 @@ static void mcode_allocarea(jit_State *J)
+@@ -299,12 +336,21 @@ static void mcode_allocarea(jit_State *J)
    ((MCLink *)J->mcarea)->size = sz;
    J->szallmcarea += sz;
    J->mcbot = (MCode *)lj_err_register_mcode(J->mcarea, sz, (uint8_t *)J->mcbot);
@@ -210,10 +210,10 @@ index ffdcbc3f..7a25c286 100644
    J->szallmcarea = 0;
    while (mc) {
 diff --git a/src/lj_trace.c b/src/lj_trace.c
-index 8d8fd05a..624e1372 100644
+index 298bb351..55603f53 100644
 --- a/src/lj_trace.c
 +++ b/src/lj_trace.c
-@@ -664,6 +664,7 @@ static int trace_abort(jit_State *J)
+@@ -657,6 +657,7 @@ static int trace_abort(jit_State *J)
        J->flags &= ~(uint32_t)JIT_F_ON;
        lj_dispatch_update(J2G(J));
      }
@@ -222,5 +222,5 @@ index 8d8fd05a..624e1372 100644
    }
    return 0;
 -- 
-2.50.1
+2.51.1
 
