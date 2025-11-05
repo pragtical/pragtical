@@ -11,6 +11,18 @@ project('pragtical',
 
 version = meson.project_version()
 mod_version = version.split('.')
+cc = meson.get_compiler('c')
+
+#===============================================================================
+# Enable static linking on windows
+#===============================================================================
+if host_machine.system() == 'windows'
+    use_forcefallback = get_option('wrap_mode') == 'forcefallback'
+    use_static_sys_libs = cc.get_id() == 'gcc' or cc.get_id() == 'clang'
+    if use_forcefallback and use_static_sys_libs
+        add_global_link_arguments(['-static'], language: ['c', 'cpp'])
+    endif
+endif
 
 #===============================================================================
 # System dependency settings
@@ -75,8 +87,6 @@ conf_data.set('MOD_VERSION_PATCH', mod_version[2])
 if host_machine.system() == 'darwin'
     add_languages('objc')
 endif
-
-cc = meson.get_compiler('c')
 
 pragtical_includes = []
 pragtical_cargs = [
