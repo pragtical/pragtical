@@ -137,6 +137,10 @@ function EmptyView:new()
   self:update()
 end
 
+function EmptyView:get_h_scrollable_size()
+  return 0
+end
+
 function EmptyView:on_scale_change(new_scale)
   if not icon_font_scaled then
     icon_font_scaled = true
