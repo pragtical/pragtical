@@ -22,6 +22,13 @@
 #include <dirent.h>
 #include <unistd.h>
 
+#ifdef __GLIBC__
+  #define _GNU_SOURCE
+  #include <malloc.h>
+#elif defined(__APPLE__)
+  #include <malloc/malloc.h>
+#endif
+
 #ifdef __linux__
   #include <sys/vfs.h>
 #endif
@@ -1204,6 +1211,18 @@ static int f_setenv(lua_State* L) {
   return 1;
 }
 
+static int f_mem_trim(lua_State* L) {
+#if defined(__GLIBC__)
+  malloc_trim(0);
+#elif defined(__APPLE__)
+  malloc_zone_pressure_relief(NULL, 0);
+#elif defined(_WIN32)
+  HANDLE heap = GetProcessHeap();
+  if (heap) HeapCompact(heap, 0);
+#endif
+  return 0;
+}
+
 
 static const luaL_Reg lib[] = {
   { "poll_event",            f_poll_event            },
@@ -1245,6 +1264,7 @@ static const luaL_Reg lib[] = {
   { "text_input",            f_text_input            },
   { "setenv",                f_setenv                },
   { "ftruncate",             f_ftruncate             },
+  { "mem_trim",              f_mem_trim              },
   { NULL, NULL }
 };
 

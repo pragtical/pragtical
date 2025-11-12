@@ -391,4 +391,12 @@ function system.path_compare(path1, type1, path2, type2) end
 ---@return boolean ok True if call succeeded
 function system.setenv(key, val) end
 
+---
+---Trims unused heap memory back to the system.
+---On Linux (glibc) calls `malloc_trim(0)`.
+---On macOS calls `malloc_zone_pressure_relief(NULL, 0)`.
+---On Windows calls `HeapCompact()`.
+---No effect on platforms that do not support heap trimming.
+function system.mem_trim() end
+
 return system

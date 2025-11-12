@@ -1732,6 +1732,7 @@ function collectgarbage(opt, ...)
   else
     ret = collectgarbage_lua(opt, ...)
   end
+  system.mem_trim()
   return ret
 end
 
