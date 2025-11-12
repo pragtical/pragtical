@@ -1,5 +1,66 @@
 # Changes Log
 
+## [3.7.1] - 2025-11-11
+
+### Fixes
+
+* Fix dirmonitor backend detection logic
+  ([#334](https://github.com/pragtical/pragtical/pull/334))
+
+* projectsearch: properly update find text widget
+  ([#335](https://github.com/pragtical/pragtical/pull/335))
+
+* tokenizer: fix premature end of child subsyntaxes
+  ([#339](https://github.com/pragtical/pragtical/pull/339))
+
+* python: fix vars and params type hinting matching
+  ([#338](https://github.com/pragtical/pragtical/pull/338))
+
+* Prevent duplicate projects on core.add_project
+  ([#342](https://github.com/pragtical/pragtical/pull/342))
+
+* DiffView: always account for gaps on scrolling
+  ([#344](https://github.com/pragtical/pragtical/pull/344))
+
+* Fix Doc:Indent/Unindent commands that inserted/deleted a wrong amount of whitespace
+  ([#343](https://github.com/pragtical/pragtical/pull/343))
+
+* treeview: fix a scale re-trigger issue
+  ([#348](https://github.com/pragtical/pragtical/pull/348))
+
+### Enhancements
+
+* Change window title to include current project
+  ([#336](https://github.com/pragtical/pragtical/pull/336))
+
+* clarify docs for ignored files and dir/files patterns
+  ([#337](https://github.com/pragtical/pragtical/pull/337))
+
+* emptyview: disable horizontal scrollbar
+  ([#351](https://github.com/pragtical/pragtical/pull/351))
+
+### Build System
+
+* CI: fix for minwg download file lock
+  ([#340](https://github.com/pragtical/pragtical/pull/340))
+
+* ci: allow max of 5 min on pgo stress
+  ([#341](https://github.com/pragtical/pragtical/pull/341))
+
+* meson: update freetype2 subproject to v2.14.1-1
+  ([#347](https://github.com/pragtical/pragtical/pull/347))
+
+* meson: force static linking on windows
+  ([#346](https://github.com/pragtical/pragtical/pull/346))
+
+* meson: update pcre2 subproject to v10.47
+  ([#349](https://github.com/pragtical/pragtical/pull/349))
+
+* luajit subproject: drop mcode patches
+  ([#350](https://github.com/pragtical/pragtical/pull/350))
+
+* Update sdl3 subproject to v3.2.26
+
 ## [3.7.0] - 2025-08-13
 
 ### New Features
@@ -2747,6 +2808,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.7.1]: https://github.com/pragtical/pragtical/releases/tag/v3.7.1
 [3.7.0]: https://github.com/pragtical/pragtical/releases/tag/v3.7.0
 [3.6.0]: https://github.com/pragtical/pragtical/releases/tag/v3.6.0
 [3.5.2]: https://github.com/pragtical/pragtical/releases/tag/v3.5.2
