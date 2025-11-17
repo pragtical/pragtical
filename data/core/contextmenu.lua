@@ -219,6 +219,12 @@ end
 function ContextMenu:on_mouse_pressed(button, px, py, clicks)
   local caught = false
 
+  -- Don't trigger context menu if modkey pressed
+  -- this prevents issues with global hotkeys like Alt+Right, etc...
+  for _, pressed in pairs(keymap.modkeys) do
+    if pressed then return caught end
+  end
+
   if self.show_context_menu then
     local selected
     if button == "left" then
