@@ -914,7 +914,7 @@ command.add(
     if not is_project_folder(item) then
       path = common.dirname(item.abs_filename)
       if item.type == "dir" then
-        text = item.filename .. PATHSEP
+        text = item.project:normalize_path(item.abs_filename) .. PATHSEP
       elseif item.type == "file" then
         local parent_dir = common.dirname(
           item.project:normalize_path(item.abs_filename)
@@ -928,8 +928,9 @@ command.add(
     core.command_view:enter("Filename", {
       text = text,
       submit = function(filename)
-        local doc_filename = path .. PATHSEP .. filename
-        local file = io.open(doc_filename, "a+")
+        local doc_filename = item.project:absolute_path(filename)
+        local file, err = io.open(doc_filename, "a+")
+        assert(file, err)
         file:write("")
         file:close()
         view:open_doc(doc_filename)
@@ -946,7 +947,7 @@ command.add(
     if not is_project_folder(item) then
       path = common.dirname(item.abs_filename)
       if item.type == "dir" then
-        text = item.filename .. PATHSEP
+        text = item.project:normalize_path(item.abs_filename) .. PATHSEP
       elseif item.type == "file" then
         local parent_dir = common.dirname(
           item.project:normalize_path(item.abs_filename)
