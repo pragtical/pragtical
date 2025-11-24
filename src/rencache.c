@@ -195,6 +195,7 @@ void rencache_draw_rect(RenWindow *window_renderer, RenRect rect, RenColor color
 
 double rencache_draw_text(RenWindow *window_renderer, RenFont **fonts, const char *text, size_t len, double x, double y, RenColor color, RenTab tab)
 {
+  x = SDL_round(x); y = SDL_round(y);
   int x_offset;
   double width = ren_font_group_get_width(fonts, text, len, tab, &x_offset);
   RenRect rect = { x + x_offset, y, (int)(width - x_offset), ren_font_group_get_height(fonts) };
