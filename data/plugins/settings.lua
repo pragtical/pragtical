@@ -747,6 +747,18 @@ settings.add("Development",
         {"On", true},
         {"Uncapped", "uncapped"}
       }
+    },
+    {
+      label = "Draw Repainted Areas",
+      description = "Toggles drawing debugging rectangles on the currently "
+        .. "rendered sections of the window to help troubleshoot the "
+        .. "renderer.",
+      path = "draw_repaint",
+      type = settings.type.TOGGLE,
+      default = false,
+      on_apply = function(value)
+        renderer.show_debug(value)
+      end
     }
   }
 )
