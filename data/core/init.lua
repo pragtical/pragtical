@@ -1813,8 +1813,8 @@ function core.run()
             local cursor_time_to_wake = dt + 1 / core.fps
             next_step = now + cursor_time_to_wake
           end
-          local nframe = next_frame_time - now
-          nframe = nframe > 0 and nframe or 1
+          local nframe = next_frame_time - system.get_time()
+          nframe = nframe > 0 and nframe or (1/core.fps)
           local b = (
             (config.lower_input_latency or uncapped)
             and
@@ -1837,7 +1837,7 @@ function core.run()
         local elapsed = now - core.frame_start
         local next_frame = math.max(0, 1 / core.fps - elapsed)
         next_frame_time = now + next_frame
-        next_step = next_step or (now + next_frame)
+        next_step = next_step or next_frame_time
         system.sleep(math.min(uncapped and 0 or 1, next_frame, time_to_wake))
       end
     end
