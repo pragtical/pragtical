@@ -74,7 +74,7 @@ function View:move_towards(t, k, dest, rate, name)
   if val == dest then return end
   if
     not config.transitions
-    or math.abs(val - dest) < 1e-4
+    or math.abs(val - dest) < 1e-2
     or config.disabled_transitions[name]
   then
     t[k] = dest
@@ -86,7 +86,7 @@ function View:move_towards(t, k, dest, rate, name)
     end
     t[k] = common.lerp(val, dest, rate)
   end
-  if t[k] ~= dest then core.redraw = true end
+  core.redraw = true
 end
 
 
