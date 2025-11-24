@@ -272,7 +272,7 @@ settings.add("Graphics",
         if enabled then
           config.fps = DEFAULT_FPS
         else
-          config.fps = settings.config.fps
+          config.fps = settings.config.fps or DEFAULT_FPS
         end
       end
     },
