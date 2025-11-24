@@ -41,6 +41,10 @@ USERDIR = "/home/user/.config/pragtical"
 ---@type string
 EXEDIR = "/usr/bin"
 
+---The default system fps based on the current display refresh rate.
+---@type number
+DEFAULT_FPS = 60
+
 ---Default system scale.
 ---@type number
 DEFAULT_SCALE = 1.0

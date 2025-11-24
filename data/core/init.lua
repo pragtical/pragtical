@@ -382,6 +382,7 @@ function core.init()
     core.window = renwindow.create("")
   end
 
+  DEFAULT_FPS = core.window:get_refresh_rate() or DEFAULT_FPS
   DEFAULT_SCALE = system.get_scale(core.window)
   SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
 
@@ -455,6 +456,9 @@ function core.init()
       end
     end
   end
+
+  --Set the maximum fps from display refresh rate.
+  config.fps = DEFAULT_FPS
 
   ---The actual maximum frames per second that can be rendered.
   ---@type number
@@ -1459,6 +1463,9 @@ function core.step(next_frame_time)
       -- required to avoid flashing and refresh issues on mobile
       event_received = type
       break
+    elseif type == "displaychanged" then
+      DEFAULT_FPS = core.window:get_refresh_rate() or DEFAULT_FPS
+      if config.auto_fps then config.fps = DEFAULT_FPS end
     elseif type == "scalechanged" then
       update_scale(a)
     else
@@ -1712,6 +1719,12 @@ local run_threads = coroutine.wrap(function()
   end
 end)
 
+-- Increase garbage collection frequency to make collections smaller
+-- in order to improves editor responsiveness.
+if LUA_VERSION < 5.4 then
+  collectgarbage("setpause", 150)
+  collectgarbage("setstepmul", 150)
+end
 
 -- Override default collectgarbage function to prevent users from performing
 -- a system stalling garbage collection, instead a new forcecollect option

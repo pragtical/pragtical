@@ -263,13 +263,34 @@ settings.add("General",
 settings.add("Graphics",
   {
     {
+      label = "Auto FPS",
+      description = "Automatically set frames per second from current display refresh rate.",
+      path = "auto_fps",
+      type = settings.type.TOGGLE,
+      default = true,
+      on_apply = function(enabled)
+        if enabled then
+          config.fps = DEFAULT_FPS
+        else
+          config.fps = settings.config.fps
+        end
+      end
+    },
+    {
       label = "Frames Per Second",
-      description = "Lower value for low end machines and higher for a smoother experience.",
+      description = "Lower value for low end machines and higher for a smoother experience. This value is ignored if Auto FPS is enabled.",
       path = "fps",
       type = settings.type.NUMBER,
-      default = 60,
+      default = core.window:get_refresh_rate() or 60,
       min = 10,
-      max = 300
+      max = 300,
+      on_apply = function(value)
+        if config.auto_fps then
+          config.fps = DEFAULT_FPS
+        else
+          config.fps = value
+        end
+      end
     },
     {
       label = "Transitions",
@@ -511,7 +532,7 @@ settings.add("User Interface",
       description = "Interval in seconds in which the cursor blinks.",
       path = "blink_period",
       type = settings.type.NUMBER,
-      default = 0.8,
+      default = 1.2,
       min = 0.3,
       max = 2.0,
       step = 0.1
@@ -610,7 +631,7 @@ settings.add("Editor",
       description = "Minimum number of lines to keep visible above and below the cursor when scrolling the document.",
       path = "scroll_context_lines",
       type = settings.type.NUMBER,
-      default = 10,
+      default = 1,
       min = 0,
       step = 1
     },
@@ -825,7 +846,7 @@ settings.add("Advanced",
       description = "How many times ram has to increase after last clean in order to reclean. Lower value makes GC more aggressive but may cause stuttering. (Ignored on Lua 5.4+)",
       path = "gc_pause",
       type = settings.type.NUMBER,
-      default = 2,
+      default = 1.5,
       min = 1,
       max = 10,
       step = 0.1,
@@ -843,7 +864,7 @@ settings.add("Advanced",
       description = "How many times faster to run the collector in relation to allocations. Higher value makes GC more aggressive but may cause stuttering. (Ignored on Lua 5.4+)",
       path = "gc_step_multiplier",
       type = settings.type.NUMBER,
-      default = 2,
+      default = 1.5,
       min = 1,
       max = 10,
       step = 0.1,

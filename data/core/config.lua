@@ -4,11 +4,17 @@ local common = require "core.common"
 ---@class core.config
 local config = {}
 
----The frame rate of Pragtical.
----Note that setting this value to the screen's refresh rate
----does not eliminate screen tearing.
+---Keep the maximum FPS locked to current display refresh rate.
 ---
----Defaults to 60.
+---Defaults to true.
+---@type boolean
+config.auto_fps = true
+
+---The maximum frame rate of Pragtical.
+---Note that setting this value to the screen's refresh rate
+---does not necessarily eliminates screen tearing.
+---
+---Defaults to current display refresh rate or 60.
 ---@type number
 config.fps = 60
 
@@ -173,9 +179,9 @@ config.line_height = 1.2
 ---Minimum number of lines to keep visible above and below the cursor
 ---when scrolling the document.
 ---
----The default is 10
+---The default is 1
 ---@type integer
-config.scroll_context_lines = 10
+config.scroll_context_lines = 1
 
 ---Show or hide the line numbers.
 ---
@@ -248,9 +254,9 @@ config.animation_rate = 1.0
 
 ---The caret's blinking period, in seconds.
 ---
----Defaults to 0.8.
+---Defaults to 1.2.
 ---@type number
-config.blink_period = 0.8
+config.blink_period = 1.2
 
 ---Disables caret blinking.
 ---
