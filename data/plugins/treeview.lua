@@ -930,8 +930,10 @@ command.add(
       submit = function(filename)
         local doc_filename = item.project:absolute_path(filename)
         local file, err = io.open(doc_filename, "a+")
-        assert(file, err)
-        file:write("")
+        if not file then
+          core.error("Error: unable to create a new file in \"%s\": %s", doc_filename, err)
+          return
+        end
         file:close()
         view:open_doc(doc_filename)
         core.log("Created %s", doc_filename)
