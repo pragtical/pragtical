@@ -1479,14 +1479,12 @@ function core.step(next_frame_time)
 
   -- update
   local stats_config = config.draw_stats
-  local lower_latency = config.lower_input_latency
   local uncapped = stats_config == "uncapped"
-  local force = uncapped or lower_latency
   local priority_event = event_received
     and event_received:match("^[tk][e]") -- key event reduce input latency
     or event_received == "mousewheel"    -- scroll event keep smooth
   core.root_view.size.x, core.root_view.size.y = width, height
-  if force or priority_event or next_frame_time < system.get_time() then
+  if uncapped or priority_event or next_frame_time < system.get_time() then
       core.root_view:update()
   end
 
@@ -1496,13 +1494,10 @@ function core.step(next_frame_time)
   ---interaction. Otherwise, rendering is prioritized on user events and
   ---config.fps not obeyed.
   if
-    not uncapped and ((not event_received and not core.redraw) or (
+    not uncapped and ((not event_received and not core.redraw) or
       -- time left before next frame so we can skip
       next_frame_time > system.get_time()
-      and
-      -- do not skip if low latency enabled
-      not lower_latency
-    ))
+    )
   then
     return false
   end
@@ -1815,11 +1810,7 @@ function core.run()
           end
           local nframe = next_frame_time - system.get_time()
           nframe = nframe > 0 and nframe or (1/core.fps)
-          local b = (
-            (config.lower_input_latency or uncapped)
-            and
-            burst_events > now
-          ) and rendering_speed or nframe
+          local b = (uncapped and burst_events > now) and rendering_speed or nframe
           if system.wait_event(math.min(next_step - now, time_to_wake, b)) then
             next_step = nil
             -- burst event processing speed to reduce input lag

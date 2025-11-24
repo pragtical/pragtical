@@ -307,13 +307,6 @@ config.skip_plugins_version = false
 ---@type boolean
 config.log_slow_threads = false
 
----When enabled, background tasks are processed more aggressively by waiting
----less for system events when events are received. Disable this option to
----reduce CPU usage.
----
----Defaults to false.
-config.lower_input_latency = false
-
 ---Increases the performance of the editor and its user.
 ---Do not change this unless you know what you are doing.
 ---
