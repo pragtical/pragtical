@@ -1791,7 +1791,7 @@ function core.run()
         skip_no_focus = now + 5
       end
     else
-      -- run all threads, listen events and perform drawing as needed
+      -- listen events and perform drawing as needed
       local did_redraw = false
       if not next_step or now >= next_step then
         did_redraw = core.step(next_frame_time)
