@@ -71,8 +71,12 @@ function View:move_towards(t, k, dest, rate, name)
     return self:move_towards(self, t, k, dest, rate, name)
   end
   local val = t[k]
-  local diff = math.abs(val - dest)
-  if not config.transitions or diff < 0.5 or config.disabled_transitions[name] then
+  if val == dest then return end
+  if
+    not config.transitions
+    or math.abs(val - dest) < 0.5
+    or config.disabled_transitions[name]
+  then
     t[k] = dest
   else
     rate = rate or 0.5
@@ -82,9 +86,7 @@ function View:move_towards(t, k, dest, rate, name)
     end
     t[k] = common.lerp(val, dest, rate)
   end
-  if diff > 1e-8 then
-    core.redraw = true
-  end
+  core.redraw = true
 end
 
 
@@ -310,8 +312,8 @@ function View:update()
   end
 
   self:clamp_scroll_position()
-  self:move_towards(self.scroll, "x", self.scroll.to.x, 0.3, "scroll")
-  self:move_towards(self.scroll, "y", self.scroll.to.y, 0.3, "scroll")
+  self:move_towards(self.scroll, "x", self.scroll.to.x, 0.2, "scroll")
+  self:move_towards(self.scroll, "y", self.scroll.to.y, 0.2, "scroll")
   if not self.scrollable then return end
   self:update_scrollbar()
 end

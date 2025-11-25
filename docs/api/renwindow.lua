@@ -24,3 +24,12 @@ function renwindow.create(x, y, width, height) end
 ---@return number width
 ---@return number height
 function renwindow.get_size(window) end
+
+---
+---Gets the display refresh rate of a window.
+---Returns nil if it cannot be determined.
+---
+---@param window renwindow
+---
+---@return number? refresh_rate
+function renwindow.get_refresh_rate(window) end

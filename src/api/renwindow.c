@@ -92,12 +92,30 @@ static int f_renwin_restore(lua_State *L) {
   return 1;
 }
 
+static int f_get_refresh_rate(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+
+  SDL_DisplayID display = SDL_GetDisplayForWindow(window_renderer->window);
+  if (!display) return 0;
+
+  const SDL_DisplayMode *mode;
+  if ((mode = SDL_GetCurrentDisplayMode(display)) && mode->refresh_rate > 0)
+    lua_pushnumber(L, SDL_round(mode->refresh_rate));
+  else if ((mode = SDL_GetDesktopDisplayMode(display)) && mode->refresh_rate > 0)
+    lua_pushnumber(L, SDL_round(mode->refresh_rate));
+  else
+    lua_pushnil(L);
+
+  return 1;
+}
+
 static const luaL_Reg renwindow_lib[] = {
-  { "create",     f_renwin_create     },
-  { "__gc",       f_renwin_gc         },
-  { "get_size",   f_renwin_get_size   },
-  { "_persist",   f_renwin_persist    },
-  { "_restore",   f_renwin_restore    },
+  { "create",           f_renwin_create     },
+  { "__gc",             f_renwin_gc         },
+  { "get_size",         f_renwin_get_size   },
+  { "get_refresh_rate", f_get_refresh_rate  },
+  { "_persist",         f_renwin_persist    },
+  { "_restore",         f_renwin_restore    },
   {NULL, NULL}
 };
 

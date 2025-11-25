@@ -382,6 +382,7 @@ function core.init()
     core.window = renwindow.create("")
   end
 
+  DEFAULT_FPS = core.window:get_refresh_rate() or DEFAULT_FPS
   DEFAULT_SCALE = system.get_scale(core.window)
   SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
 
@@ -455,6 +456,9 @@ function core.init()
       end
     end
   end
+
+  --Set the maximum fps from display refresh rate.
+  config.fps = DEFAULT_FPS
 
   ---The actual maximum frames per second that can be rendered.
   ---@type number
@@ -1459,6 +1463,9 @@ function core.step(next_frame_time)
       -- required to avoid flashing and refresh issues on mobile
       event_received = type
       break
+    elseif type == "displaychanged" then
+      DEFAULT_FPS = core.window:get_refresh_rate() or DEFAULT_FPS
+      if config.auto_fps then config.fps = DEFAULT_FPS end
     elseif type == "scalechanged" then
       update_scale(a)
     else
@@ -1472,14 +1479,12 @@ function core.step(next_frame_time)
 
   -- update
   local stats_config = config.draw_stats
-  local lower_latency = config.lower_input_latency
   local uncapped = stats_config == "uncapped"
-  local force = uncapped or lower_latency
   local priority_event = event_received
     and event_received:match("^[tk][e]") -- key event reduce input latency
     or event_received == "mousewheel"    -- scroll event keep smooth
   core.root_view.size.x, core.root_view.size.y = width, height
-  if force or priority_event or next_frame_time < system.get_time() then
+  if uncapped or priority_event or next_frame_time < system.get_time() then
       core.root_view:update()
   end
 
@@ -1489,13 +1494,10 @@ function core.step(next_frame_time)
   ---interaction. Otherwise, rendering is prioritized on user events and
   ---config.fps not obeyed.
   if
-    not uncapped and ((not event_received and not core.redraw) or (
+    not uncapped and ((not event_received and not core.redraw) or
       -- time left before next frame so we can skip
       next_frame_time > system.get_time()
-      and
-      -- do not skip if low latency enabled
-      not lower_latency
-    ))
+    )
   then
     return false
   end
@@ -1712,6 +1714,12 @@ local run_threads = coroutine.wrap(function()
   end
 end)
 
+-- Increase garbage collection frequency to make collections smaller
+-- in order to improves editor responsiveness.
+if LUA_VERSION < 5.4 then
+  collectgarbage("setpause", 150)
+  collectgarbage("setstepmul", 150)
+end
 
 -- Override default collectgarbage function to prevent users from performing
 -- a system stalling garbage collection, instead a new forcecollect option
@@ -1783,7 +1791,7 @@ function core.run()
         skip_no_focus = now + 5
       end
     else
-      -- run all threads, listen events and perform drawing as needed
+      -- listen events and perform drawing as needed
       local did_redraw = false
       if not next_step or now >= next_step then
         did_redraw = core.step(next_frame_time)
@@ -1800,13 +1808,9 @@ function core.run()
             local cursor_time_to_wake = dt + 1 / core.fps
             next_step = now + cursor_time_to_wake
           end
-          local nframe = next_frame_time - now
-          nframe = nframe > 0 and nframe or 1
-          local b = (
-            (config.lower_input_latency or uncapped)
-            and
-            burst_events > now
-          ) and rendering_speed or nframe
+          local nframe = next_frame_time - system.get_time()
+          nframe = nframe > 0 and nframe or (1/core.fps)
+          local b = (uncapped and burst_events > now) and rendering_speed or nframe
           if system.wait_event(math.min(next_step - now, time_to_wake, b)) then
             next_step = nil
             -- burst event processing speed to reduce input lag
@@ -1824,7 +1828,7 @@ function core.run()
         local elapsed = now - core.frame_start
         local next_frame = math.max(0, 1 / core.fps - elapsed)
         next_frame_time = now + next_frame
-        next_step = next_step or (now + next_frame)
+        next_step = next_step or next_frame_time
         system.sleep(math.min(uncapped and 0 or 1, next_frame, time_to_wake))
       end
     end

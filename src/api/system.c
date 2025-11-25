@@ -178,6 +178,12 @@ top:
         return 3;
       }
 
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+      {
+        lua_pushstring(L, "displaychanged");
+        return 1;
+      }
+
     case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
       {
         RenWindow* window_renderer = ren_find_window_from_id(e.window.windowID);
