@@ -62,6 +62,7 @@ function scale.set(scale)
   style.expanded_scrollbar_size = style.expanded_scrollbar_size * s
   style.caret_width             = style.caret_width             * s
   style.tab_width               = style.tab_width               * s
+  config.mouse_wheel_scroll     = config.mouse_wheel_scroll     * s
 
   for _, name in ipairs {"font", "big_font", "icon_font", "icon_big_font"} do
     style[name]:set_size(s * style[name]:get_size())
