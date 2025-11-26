@@ -71,7 +71,7 @@ function View:move_towards(t, k, dest, rate, name)
     return self:move_towards(self, t, k, dest, rate, name)
   end
   local val = t[k]
-  if val == dest then return end
+  if tostring(val) == tostring(dest) then return end
   if
     not config.transitions
     or math.abs(val - dest) < 0.5
