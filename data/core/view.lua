@@ -190,8 +190,7 @@ function View:move_towards(t, k, dest, rate, name)
       elseif t[mk][3] ~= dest then
         t[mk][1] = val
         t[mk][3] = dest
-        t[mk][4] = math.min(t[mk][4] + 0.1, 3)  -- increase acceleration
-        t[mk][5] = rate and lerp_duration(rate) or 0.2
+        t[mk][4] = math.min(t[mk][4] + 0.2, 3)  -- increase acceleration
       else
         t[mk][4] = math.max(t[mk][4] - 0.05, 1) -- decrease acceleration
       end
