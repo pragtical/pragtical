@@ -92,7 +92,7 @@ function View:move_towards(t, k, dest, rate, name)
   end
   local val = t[k]
   if tostring(val) == tostring(dest) then return end
-  if not config.transitions or config.disabled_transitions[name] or core.fps < 30 then
+  if not config.transitions or config.disabled_transitions[name] or config.fps < 30 then
     t[k] = dest
   else
     local constant_scroll = name == "scroll"
