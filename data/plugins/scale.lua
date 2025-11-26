@@ -55,14 +55,18 @@ function scale.set(scale)
 
   SCALE = scale
 
-  style.padding.x               = style.padding.x               * s
-  style.padding.y               = style.padding.y               * s
-  style.divider_size            = style.divider_size            * s
-  style.scrollbar_size          = style.scrollbar_size          * s
-  style.expanded_scrollbar_size = style.expanded_scrollbar_size * s
-  style.caret_width             = style.caret_width             * s
-  style.tab_width               = style.tab_width               * s
-  config.mouse_wheel_scroll     = config.mouse_wheel_scroll     * s
+  style.divider_size                = style.divider_size                * s
+  style.scrollbar_size              = style.scrollbar_size              * s
+  style.expanded_scrollbar_size     = style.expanded_scrollbar_size     * s
+  style.minimum_thumb_size          = style.minimum_thumb_size          * s
+  style.contracted_scrollbar_margin = style.contracted_scrollbar_margin * s
+  style.expanded_scrollbar_margin   = style.expanded_scrollbar_margin   * s
+  style.caret_width                 = style.caret_width                 * s
+  style.tab_width                   = style.tab_width                   * s
+  style.padding.x                   = style.padding.x                   * s
+  style.padding.y                   = style.padding.y                   * s
+  style.margin.tab.top              = style.margin.tab.top              * s
+  config.mouse_wheel_scroll         = config.mouse_wheel_scroll         * s
 
   for _, name in ipairs {"font", "big_font", "icon_font", "icon_big_font"} do
     style[name]:set_size(s * style[name]:get_size())

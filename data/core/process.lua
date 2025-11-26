@@ -1,4 +1,4 @@
-local config = require "core.config"
+local config
 
 
 ---An abstraction over the standard input and outputs of a process
@@ -161,6 +161,8 @@ end
 
 local old_start = process.start
 function process.start(command, options)
+  -- delay config load since some values depend on system scale
+  if not config then config = require "core.config" end
   assert(type(command) == "table" or type(command) == "string", "invalid argument #1 to process.start(), expected string or table, got "..type(command))
   assert(type(options) == "table" or type(options) == "nil", "invalid argument #2 to process.start(), expected table or nil, got "..type(options))
   if PLATFORM == "Windows" then

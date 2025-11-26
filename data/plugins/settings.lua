@@ -443,9 +443,9 @@ settings.add("User Interface",
       description = "The amount of margin to apply on the top of tabs.",
       path = "tabs_top_margin",
       type = settings.type.NUMBER,
-      default = -style.divider_size * SCALE,
+      default = -style.divider_size,
       on_apply = function(value)
-        style.margin.tab.top = tonumber(value)
+        style.margin.tab.top = (tonumber(value) or -1) * SCALE
       end
     },
     {
