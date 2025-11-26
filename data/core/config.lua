@@ -259,6 +259,22 @@ config.disabled_transitions = {
   statusbar = false,
 }
 
+---@alias config.animationtype
+---| "constant" # Time based constant velocity with acceleration support.
+---| "lerp" # Linear Interpolation, starts fast ends slow.
+
+---The type of algorithm employed on general transitions.
+---
+---Defaults to "constant".
+---@type config.animationtype
+config.animation_type = "constant"
+
+---The type of algorithm employed on the code editor scroll transition.
+---
+---Defaults to "constant".
+---@type config.animationtype
+config.scroll_animation_type = "constant"
+
 ---The rate of all transitions.
 ---
 ---Defaults to 1.
