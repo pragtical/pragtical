@@ -1,6 +1,6 @@
 require "core.strict"
 local common = require "core.common"
-local config = require "core.config"
+local config
 local style
 local cli
 local scale
@@ -374,9 +374,6 @@ end
 
 
 function core.init()
-  core.log_items = {}
-  core.log_quiet("Pragtical version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
-
   core.window = renwindow._restore()
   if core.window == nil then
     core.window = renwindow.create("")
@@ -385,6 +382,13 @@ function core.init()
   DEFAULT_FPS = core.window:get_refresh_rate() or DEFAULT_FPS
   DEFAULT_SCALE = system.get_scale(core.window)
   SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
+
+  -- load config after scale detection for flags that depend on it
+  config = require "core.config"
+
+  -- log functions depend on config so initialize after loading config
+  core.log_items = {}
+  core.log_quiet("Pragtical version %s - mod-version %s", VERSION, MOD_VERSION_STRING)
 
   style = require "colors.default"
   cli = require "core.cli"
