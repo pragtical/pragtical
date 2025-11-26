@@ -164,11 +164,7 @@ function View:move_towards(t, k, dest, rate, name)
   local val = t[k]
   -- we use epsilon comparison in case dest is inconsistent
   if math.abs(dest - val) < 1e-8 then return end
-  if
-    not config.transitions
-    or math.abs(val - dest) < 0.5
-    or config.disabled_transitions[name]
-  then
+  if not config.transitions or config.disabled_transitions[name] or config.fps < 30 then
     t[k] = dest
   else
     local constant_scroll = name == "scroll"
