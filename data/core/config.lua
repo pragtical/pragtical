@@ -55,9 +55,9 @@ config.message_timeout = 5
 
 ---The number of pixels scrolled per-step.
 ---
----Defaults to 50 * SCALE.
+---Defaults to 70 * SCALE.
 ---@type number
-config.mouse_wheel_scroll = 50 * SCALE
+config.mouse_wheel_scroll = 70 * SCALE
 
 ---Enables/disables transitions when scrolling with the scrollbar.
 ---When enabled, the scrollbar will have inertia and slowly move towards the cursor.
