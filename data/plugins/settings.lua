@@ -489,7 +489,7 @@ settings.add("User Interface",
       description = "The amount to scroll when using the mouse wheel.",
       path = "mouse_wheel_scroll",
       type = settings.type.NUMBER,
-      default = 50,
+      default = 70,
       min = 10,
       max = 200,
       get_value = function(value)
