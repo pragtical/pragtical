@@ -466,8 +466,8 @@ settings.add("User Interface",
       get_value = function(value)
         return value / SCALE
       end,
-      set_value = function(value)
-        return value * SCALE
+      on_apply = function(value)
+        config.mouse_wheel_scroll = value * SCALE
       end
     },
     {
