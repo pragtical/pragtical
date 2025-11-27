@@ -2090,6 +2090,12 @@ function Settings:update()
   if self.about:is_visible() then
     self.about:update_positions()
   end
+
+  if self.size.x == 0 and self.size.y == 0 then
+    -- we need this since sometimes when adding a view to a node
+    -- it isn't initially given any size, needed for calculations
+    self:schedule_update(true)
+  end
 end
 
 ---Hide the widget when the node is removed.

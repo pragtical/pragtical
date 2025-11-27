@@ -104,7 +104,7 @@ function EmptyView:new()
     common.open_in_system("https://pragtical.dev/docs/intro")
   end
 
-  self.first_draw = true
+  self.first_update = true
   self.plugin_manager_loaded = false
   self.plugins = Button(self.center_container, "Plugins")
   self.plugins:set_icon("p")
@@ -191,17 +191,6 @@ end
 
 function EmptyView:draw()
   if not EmptyView.super.draw(self) then return end
-
-  if self.first_draw then
-    self.first_draw = false
-    local plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
-    if plugin_manager_loaded then
-      self.plugins:show()
-      self.prev_size.x = -1
-      self.center_container.size.x = -1
-    end
-    core.redraw = true
-  end
   local _, oy = self:get_content_offset()
   draw_text(self, self.text_x, self.text_y + oy)
   self:draw_scrollbar()
@@ -213,6 +202,16 @@ function EmptyView:update()
   self.background_color = style.background
 
   if self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y then
+    if self.first_update then
+      self.first_update = false
+      local plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
+      if plugin_manager_loaded then
+        self.plugins:show()
+        self.prev_size.x = -1
+        self.center_container.size.x = -1
+      end
+    end
+
     self.recent_projects:update_position()
 
     self.top_container:set_position(0, 0)
