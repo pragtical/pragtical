@@ -177,11 +177,11 @@ function View:move_towards(t, k, dest, rate, name)
       local mk = "move_"..k
       if not t[mk] or t[mk][2] ~= (dest > val and "f" or "b") then
         t[mk] = {
-          val,                                -- starting position
-          dest > val and "f" or "b",          -- direction
-          dest,                               -- final destination
-          1,                                  -- acceleration
-          rate and lerp_duration(rate) or 0.2 -- rate
+          val,                                 -- starting position
+          dest > val and "f" or "b",           -- direction
+          dest,                                -- final destination
+          1,                                   -- acceleration
+          rate and lerp_duration(rate) or 0.15 -- rate
         }
       elseif t[mk][3] ~= dest then
         t[mk][1] = val
