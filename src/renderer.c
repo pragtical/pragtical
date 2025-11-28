@@ -1060,7 +1060,7 @@ int ren_init(void) {
 }
 
 void ren_free(void) {
-  if (draw_rect_surface) SDL_DestroySurface(draw_rect_surface);
+  SDL_DestroySurface(draw_rect_surface);
   FT_Done_FreeType(library);
 }
 
