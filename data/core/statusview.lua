@@ -722,8 +722,9 @@ function StatusView:draw_item_tooltip(item)
     renderer.draw_text(
       style.font,
       text,
-      x + (style.padding.x * 2),
-      self.position.y - h - style.padding.y,
+      -- we round the coords to prevent jumpy text on fractional scales
+      common.round(x + (style.padding.x * 2)),
+      common.round(self.position.y - h - style.padding.y),
       style.text
     )
   end)
