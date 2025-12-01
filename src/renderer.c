@@ -79,7 +79,8 @@ typedef enum {
 typedef enum {
   EGlyphNone = 0,             // glyph is not loaded
   EGlyphXAdvance = (1 << 0L), // xadvance is loaded
-  EGlyphBitmap = (1 << 1L)    // bitmap is loaded
+  EGlyphBitmap = (1 << 1L),   // bitmap is loaded
+  EGlyphBitmapMissing = (1 << 2L) // bitmap is missing
 } ERenGlyphFlags;
 
 // metrics for a loaded glyph
@@ -328,8 +329,10 @@ static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id,
   if (!slot->bitmap.width || !slot->bitmap.rows || !slot->bitmap.buffer ||
       (slot->bitmap.pixel_mode != FT_PIXEL_MODE_MONO
         && slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY
-        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_LCD))
+        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_LCD)) {
+    metric->flags |= EGlyphBitmapMissing;
     return NULL;
+  }
 
   unsigned int glyph_width = slot->bitmap.width / FONT_BITMAP_COUNT(font);
   // FT_PIXEL_MODE_MONO uses 1 bit per pixel packed bitmap
@@ -373,22 +376,20 @@ static RenFont *font_group_get_glyph(RenFont **fonts, unsigned int codepoint, in
   if (subpixel_idx < 0) subpixel_idx += SUBPIXEL_BITMAPS_CACHED;
   RenFont *font = NULL;
   unsigned int glyph_id = 0;
-  bool white_space = is_whitespace(codepoint);
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
     font = fonts[i]; glyph_id = font_get_glyph_id(fonts[i], codepoint);
-    // use the first font that has representation for the glyph ID, but for whitespaces always use the first font
-    if (glyph_id || white_space) break;
+    // use the first font that has representation for the glyph ID
+    if (glyph_id) break;
   }
   // load the glyph if it is not loaded
   subpixel_idx = FONT_IS_SUBPIXEL(font) ? subpixel_idx : 0;
   GlyphMetric *m = font_load_glyph_metric(font, glyph_id, subpixel_idx);
   // try the box drawing character (0x25A1) if the requested codepoint is not a whitespace, and we cannot load the .notdef glyph
-  if ((!m || !m->flags) && codepoint != 0x25A1 && !white_space)
+  if ((!m || !m->flags) && codepoint != 0x25A1 && !is_whitespace(codepoint))
     return font_group_get_glyph(fonts, 0x25A1, subpixel_idx, surface, metric);
   if (metric && m) *metric = m;
-  // skip all white space since empty on most fonts causing redundant load tries
-  // also we are already skipping them too on ren_draw_text
-  if (surface && m && !white_space)
+  // skip missing bitmaps to prevent redundant load tries
+  if (surface && m && !(m->flags & EGlyphBitmapMissing))
     *surface = font_load_glyph_bitmap(font, glyph_id, subpixel_idx, m);
   return font;
 }
@@ -762,9 +763,8 @@ int ren_font_group_get_height(RenFont **fonts) {
   return fonts[0]->height;
 }
 
-// some fonts provide xadvance for whitespaces (e.g. Unifont), which we need to ignore
 float font_get_xadvance(RenFont *font, unsigned int codepoint, GlyphMetric *metric, double curr_x, RenTab tab) {
-  if (!is_whitespace(codepoint) && metric && metric->xadvance) {
+  if (metric && metric->xadvance) {
     return metric->xadvance;
   }
   if (codepoint != '\t') {
@@ -853,10 +853,9 @@ double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t l
     int start_x = floor(pen_x) + metric->bitmap_left;
     int end_x = metric->x1 + start_x; // x0 is assumed to be 0
     int glyph_end = metric->x1, glyph_start = 0;
-    bool white_space = is_whitespace(codepoint);
-    if (!font_surface && !white_space)
+    if (!font_surface && !is_whitespace(codepoint))
       ren_draw_rect(rs, (RenRect){ start_x + 1, y, font->space_advance - 1, ren_font_group_get_height(fonts) }, color);
-    if (!white_space && font_surface && color.a > 0 && end_x >= clip.x && start_x < clip_end_x) {
+    else if (font_surface && color.a > 0 && end_x >= clip.x && start_x < clip_end_x) {
       uint8_t* source_pixels = font_surface->pixels;
       for (int line = metric->y0; line < metric->y1; ++line) {
         int target_y = line - metric->y0 + y - metric->bitmap_top + (fonts[0]->baseline * surface_scale_y);
