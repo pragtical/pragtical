@@ -132,7 +132,7 @@ typedef struct RenFont {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
 void update_font_scale(RenWindow *window_renderer, RenFont **fonts) {
   if (window_renderer == NULL) return;
-  const float surface_scale = renwin_get_surface(window_renderer).scale_x;
+  const float surface_scale = rencache_get_surface(&window_renderer->cache).scale_x;
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
     if (fonts[i]->scale != surface_scale) {
       ren_font_group_set_size(fonts, fonts[0]->size, surface_scale);
@@ -1000,13 +1000,7 @@ void ren_free(void) {
 
 RenWindow* ren_create(SDL_Window *win) {
   assert(win);
-  RenWindow* window_renderer = SDL_calloc(1, sizeof(RenWindow));
-
-  window_renderer->window = win;
-  renwin_init_surface(window_renderer);
-  renwin_init_command_buf(window_renderer);
-  renwin_clip_to_surface(window_renderer);
-
+  RenWindow* window_renderer = renwin_create(win);
   ren_add_window(window_renderer);
   return window_renderer;
 }
@@ -1015,10 +1009,6 @@ void ren_destroy(RenWindow* window_renderer) {
   assert(window_renderer);
   ren_remove_window(window_renderer);
   renwin_free(window_renderer);
-  SDL_free(window_renderer->command_buf);
-  window_renderer->command_buf = NULL;
-  window_renderer->command_buf_size = 0;
-  SDL_free(window_renderer);
 }
 
 void ren_resize_window(RenWindow *window_renderer) {
@@ -1026,29 +1016,35 @@ void ren_resize_window(RenWindow *window_renderer) {
   renwin_update_scale(window_renderer);
 }
 
-// TODO: Does not work nicely with multiple windows
-void ren_update_rects(RenWindow *window_renderer, RenRect *rects, int count) {
-  static bool initial_frame = true;
-  renwin_update_rects(window_renderer, rects, count);
-  if (initial_frame) {
-    renwin_show_window(window_renderer);
-    initial_frame = false;
-  }
-}
 
-
-void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect) {
-  renwin_set_clip_rect(window_renderer, rect);
-}
-
-
-void ren_get_size(RenWindow *window_renderer, int *x, int *y) {
-  RenSurface rs = renwin_get_surface(window_renderer);
-  *x = rs.surface->w;
-  *y = rs.surface->h;
+static RenRect scaled_rect(const RenRect rect, const RenSurface *rs) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
-  *x /= rs.scale_x;
-  *y /= rs.scale_y;
+  float scale_x = rs->scale_x;
+  float scale_y = rs->scale_y;
+#else
+  int scale_x = 1;
+  int scale_y = 1;
+#endif
+  return (RenRect) {
+    rect.x * scale_x,
+    rect.y * scale_y,
+    rect.width * scale_x,
+    rect.height * scale_y
+  };
+}
+
+void ren_set_clip_rect(RenSurface *rs, RenRect rect) {
+  RenRect sr = scaled_rect(rect, rs);
+  SDL_SetSurfaceClipRect(rs->surface, &(SDL_Rect){.x = sr.x, .y = sr.y, .w = sr.width, .h = sr.height});
+}
+
+
+void ren_get_size(RenSurface *rs, int *x, int *y) {
+  *x = rs->surface->w;
+  *y = rs->surface->h;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  *x /= rs->scale_x;
+  *y /= rs->scale_y;
 #endif
 }
 
@@ -1060,7 +1056,7 @@ size_t ren_get_window_list(RenWindow ***window_list_dest) {
 RenWindow* ren_find_window(SDL_Window *window) {
   for (size_t i = 0; i < window_count; ++i) {
     RenWindow* window_renderer = window_list[i];
-    if (window_renderer->window == window) {
+    if (window_renderer->cache.window == window) {
       return window_renderer;
     }
   }
@@ -1073,12 +1069,10 @@ RenWindow* ren_find_window_from_id(uint32_t id) {
   return ren_find_window(window);
 }
 
-RenWindow* ren_get_target_window(void)
-{
+RenWindow* ren_get_target_window(void) {
   return target_window;
 }
 
-void ren_set_target_window(RenWindow *window)
-{
+void ren_set_target_window(RenWindow *window) {
   target_window = window;
 }

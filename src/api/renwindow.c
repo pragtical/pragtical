@@ -1,8 +1,8 @@
+#include <lua.h>
+#include <SDL3/SDL.h>
 #include "api.h"
 #include "../renwindow.h"
-#include "lua.h"
-#include <SDL3/SDL.h>
-#include <stdlib.h>
+#include "../rencache.h"
 
 static RenWindow *persistant_window = NULL;
 
@@ -65,7 +65,8 @@ static int f_renwin_gc(lua_State *L) {
 static int f_renwin_get_size(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
   int w, h;
-  ren_get_size(window_renderer, &w, &h);
+  RenSurface rs = rencache_get_surface(&window_renderer->cache);
+  ren_get_size(&rs, &w, &h);
   lua_pushnumber(L, w);
   lua_pushnumber(L, h);
   return 2;
@@ -95,7 +96,7 @@ static int f_renwin_restore(lua_State *L) {
 static int f_get_refresh_rate(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
 
-  SDL_DisplayID display = SDL_GetDisplayForWindow(window_renderer->window);
+  SDL_DisplayID display = SDL_GetDisplayForWindow(window_renderer->cache.window);
   if (!display) return 0;
 
   const SDL_DisplayMode *mode;

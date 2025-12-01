@@ -1,12 +1,11 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
-#include "api/api.h"
-#include "rencache.h"
-#include "renderer.h"
 
-#include <signal.h>
+#include "api/api.h"
+#include "renderer.h"
 
 #ifdef _WIN32
   #include <windows.h>
@@ -251,7 +250,6 @@ init_lua:
   lua_pcall(L, 0, 1, 0);
   if (lua_toboolean(L, -1)) {
     lua_close(L);
-    rencache_invalidate();
     has_restarted = 1;
     goto init_lua;
   }
