@@ -45,6 +45,13 @@ static const char *const get_ft_error(FT_Error err) {
   return "unknown error";
 }
 
+// the parameters passed into freetype's scanline converter
+typedef struct {
+  SDL_Surface *surface;
+  SDL_Rect clip;
+  RenColor color;
+} RenPolyParams;
+
 /************************* Fonts *************************/
 
 // approximate number of glyphs per atlas surface
@@ -923,6 +930,65 @@ double ren_draw_text(RenSurface *rs, RenFont **fonts, const char *text, size_t l
     pen_x += adv;
   }
   return pen_x / surface_scale_x;
+}
+
+int ren_poly_cbox(RenPoint *points, int npoints, RenRect *cbox) {
+  if (npoints > MAX_POLY_POINTS) return -1;
+  if (npoints == 0) { memset(cbox, 0, sizeof(RenRect)); return 0; }
+  // the control box is just the min and max of all points,
+  // because the highest point of a curve can't go higher than the control point
+  RenPoint *end = points + npoints;
+  int xmin, ymin, xmax, ymax;
+  xmin = xmax = points->x; ymin = ymax = points->y;
+  points++;
+  for (; points < end; points++) {
+    if (points->x < xmin) xmin = points->x;
+    if (points->x > xmax) xmax = points->x;
+    if (points->y < ymin) ymin = points->y;
+    if (points->y > ymax) ymax = points->y;
+  }
+  cbox->x = xmin; cbox->y = ymin;
+  cbox->width = xmax - xmin; cbox->height = ymax - ymin;
+  return 0;
+}
+
+void raster_span(int y, int count, const FT_Span *spans, void *user) {
+  RenPolyParams *param = (RenPolyParams *) user;
+  if (y < param->clip.y || y >= param->clip.y + param->clip.h) return;
+  for (int i = 0; i < count; i++) {
+    SDL_Rect actual, span = { .x = spans[i].x, .y = y, .w = spans[i].len, .h = 1 };
+    if (span.x > param->clip.x + param->clip.w) break;
+    if (!SDL_GetRectIntersection(&param->clip, &span, &actual)) continue;
+    *((uint32_t *) draw_rect_surface->pixels) = SDL_MapRGBA(
+      SDL_GetPixelFormatDetails(draw_rect_surface->format),
+      SDL_GetSurfacePalette(draw_rect_surface),
+      param->color.r, param->color.g, param->color.b,
+      (param->color.a * spans[i].coverage) >> 8
+    );
+    SDL_BlitSurfaceScaled(draw_rect_surface, NULL, param->surface, &actual, SDL_SCALEMODE_LINEAR);
+  }
+}
+
+void ren_draw_poly(RenSurface *rs, RenPoint *points, unsigned short npoints, RenColor color) {
+  FT_Outline outline;
+  if (npoints == 0 || npoints > MAX_POLY_POINTS) return;
+  if (FT_Outline_New(library, npoints, 1, &outline) != 0) return;
+  for (int i = 0; i < npoints; i++) {
+    // this is undocumented, but freetype seems to expect 26.6 fixed point numbers
+    outline.points[i].x = points[i].x * rs->scale_x * 64;
+    outline.points[i].y = points[i].y * rs->scale_y * 64;
+    outline.tags[i] = points[i].tag;
+  }
+  outline.contours[0] = npoints - 1;
+  RenPolyParams params = { .color = color, .surface = rs->surface };
+  SDL_GetSurfaceClipRect(rs->surface, &params.clip);
+  FT_Outline_Render(library, &outline, &(FT_Raster_Params) {
+    .target = NULL,
+    .flags = FT_RASTER_FLAG_AA | FT_RASTER_FLAG_DIRECT,
+    .gray_spans = &raster_span,
+    .user = &params,
+  });
+  FT_Outline_Done(library, &outline);
 }
 
 /******************* Rectangles **********************/
