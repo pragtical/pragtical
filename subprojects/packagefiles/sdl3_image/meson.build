@@ -67,10 +67,12 @@ img_args += '-DLOAD_SVG'
 img_args += '-DLOAD_TGA'
 
 # TIFF
-tiff_dep = dependency('libtiff', 'libtiff-4', required: false)
-if tiff_dep.found()
-  img_args += '-DLOAD_TIF'
-  img_args += '-DLOAD_TIF_DYNAMIC="@0@tiff@1@"'.format(libprefix, libext)
+if host_machine.system() != 'darwin'
+  tiff_dep = dependency('libtiff', 'libtiff-4', required: false)
+  if tiff_dep.found()
+    img_args += '-DLOAD_TIF'
+    img_args += '-DLOAD_TIF_DYNAMIC="@0@tiff@1@"'.format(libprefix, libext)
+  endif
 endif
 
 # WEBP - seems to require more effort since it is not working :-(
