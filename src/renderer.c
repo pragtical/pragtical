@@ -1001,7 +1001,7 @@ static inline RenColor blend_pixel(RenColor dst, RenColor src) {
 }
 
 void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color, bool replace) {
-  if (color.a == 0) { return; }
+  if (color.a == 0 && !replace) { return; }
 
   SDL_Surface *surface = rs->surface;
   const float surface_scale_x = rs->scale_x;
@@ -1033,6 +1033,23 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color, bool replace) {
 void ren_draw_canvas(RenSurface *rs, SDL_Surface *surface, int x, int y) {
   SDL_Rect dst_pos = {.x = x, .y = y, .w = 0, .h = 0};
   SDL_BlitSurface(surface, NULL, rs->surface, &dst_pos);
+}
+
+/******************** Pixels ***********************/
+
+void ren_draw_pixels(RenSurface *rs, RenRect rect, const char* bytes, size_t len) {
+  SDL_Rect dst_pos = { .x = rect.x, .y = rect.y, .w = 0, .h = 0 };
+  const SDL_PixelFormatDetails *details = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA32);
+  int pitch = ((int)(details->bits_per_pixel+0.5)/8) * rect.width;
+
+  // Dropping const on bytes here is likely fine, as we won't be changing it
+  // and the surface will be destroyed by the end of this function
+  SDL_Surface *src = SDL_CreateSurfaceFrom(
+    rect.width, rect.height, SDL_PIXELFORMAT_RGBA32, (void *) bytes, pitch
+  );
+  SDL_SetSurfaceBlendMode(src, SDL_BLENDMODE_NONE);
+  SDL_BlitSurface(src, NULL, rs->surface, &dst_pos);
+  SDL_DestroySurface(src);
 }
 
 

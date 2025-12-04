@@ -10,6 +10,7 @@ local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
 local CommandView = require "core.commandview"
 local DocView = require "core.docview"
+local ImageView = require "core.imageview"
 local DirWatch = require "core.dirwatch"
 
 ---Configuration options for `treeview` plugin.
@@ -551,7 +552,11 @@ function TreeView:toggle_expand(toggle, item)
 end
 
 function TreeView:open_doc(filename)
-  core.root_view:open_doc(core.open_doc(filename))
+  if ImageView.is_supported(filename) then
+    core.open_image(filename)
+  else
+    core.root_view:open_doc(core.open_doc(filename))
+  end
 end
 
 -- init
@@ -652,6 +657,7 @@ local function treeitem() return view.hovered_item or view.selected_item end
 
 menu:register(function() return core.active_view:is(TreeView) and treeitem() end, {
   { text = "Open in System", command = "treeview:open-in-system" },
+  { text = "Open in Editor", command = "treeview:open-in-editor" },
   ContextMenu.DIVIDER
 })
 
@@ -966,6 +972,22 @@ command.add(
 
   ["treeview:open-in-system"] = function(item)
     common.open_in_system(item.abs_filename)
+  end
+})
+
+command.add(
+  function()
+    local item = treeitem()
+    if item then
+      local is_image, ext = ImageView.is_supported(item.abs_filename)
+      if is_image and ext == "svg" then
+        return (core.active_view == view or menu.show_context_menu), item
+      end
+    end
+    return false
+  end, {
+  ["treeview:open-in-editor"] = function(item)
+    core.root_view:open_doc(core.open_doc(item.abs_filename))
   end
 })
 

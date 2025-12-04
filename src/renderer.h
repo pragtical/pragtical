@@ -59,20 +59,6 @@ typedef struct {
 struct RenWindow;
 typedef struct RenWindow RenWindow;
 
-// We use the RenCanvas to represent an actual Canvas,
-// while the RenCanvasRef can be replaced transparently when needed.
-// This is done for example to allow editing a surface that's already been
-// sent to the renderer, but still render the old version.
-typedef struct {
-  unsigned int render_ref_count;
-  SDL_Surface *surface;
-} RenCanvasRef;
-
-typedef struct {
-  unsigned int w, h;
-  unsigned int version;
-} RenCanvas;
-
 RenFont* ren_font_load(const char *filename, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style);
 RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style);
 const char* ren_font_get_path(RenFont *font);
@@ -92,6 +78,8 @@ double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t le
 void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color, bool replace);
 
 void ren_draw_canvas(RenSurface *rs, SDL_Surface *surface, int x, int y);
+
+void ren_draw_pixels(RenSurface *rs, RenRect rect, const char* bytes, size_t len);
 
 // function to draw polygons and curves
 int ren_poly_cbox(RenPoint *points, int npoints, RenRect *cbox);
