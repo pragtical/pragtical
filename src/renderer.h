@@ -17,6 +17,10 @@
 #define RECT_TYPE int
 #endif
 
+#define RENCACHE_CELLS_X 80
+#define RENCACHE_CELLS_Y 50
+#define RENCACHE_CELL_SIZE 96
+
 #define FONT_FALLBACK_MAX 10
 typedef struct RenFont RenFont;
 typedef enum { FONT_HINTING_NONE, FONT_HINTING_SLIGHT, FONT_HINTING_FULL } ERenFontHinting;
@@ -28,6 +32,26 @@ typedef struct { RECT_TYPE x, y, width, height; } RenRect;
 typedef struct { double offset; } RenTab;
 typedef struct { SDL_Surface *surface; float scale_x, scale_y; } RenSurface;
 typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
+
+typedef struct {
+  uint8_t *command_buf;
+  size_t command_buf_idx;
+  size_t command_buf_size;
+  unsigned cells_buf1[RENCACHE_CELLS_X * RENCACHE_CELLS_Y];
+  unsigned cells_buf2[RENCACHE_CELLS_X * RENCACHE_CELLS_Y];
+  unsigned *cells_prev;
+  unsigned *cells;
+  RenRect rect_buf[RENCACHE_CELLS_X * RENCACHE_CELLS_Y / 2];
+  bool resize_issue;
+  RenRect screen_rect;
+  RenRect last_clip_rect;
+  SDL_Window *window;   /* The cache can be used for both a window or surface */
+  RenSurface rensurface;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  SDL_Renderer *renderer;
+  SDL_Texture *texture;
+#endif
+} RenCache;
 
 struct RenWindow;
 typedef struct RenWindow RenWindow;
@@ -55,9 +79,8 @@ void ren_free(void);
 RenWindow* ren_create(SDL_Window *win);
 void ren_destroy(RenWindow* window_renderer);
 void ren_resize_window(RenWindow *window_renderer);
-void ren_update_rects(RenWindow *window_renderer, RenRect *rects, int count);
-void ren_set_clip_rect(RenWindow *window_renderer, RenRect rect);
-void ren_get_size(RenWindow *window_renderer, int *x, int *y); /* Reports the size in points. */
+void ren_set_clip_rect(RenSurface *rs, RenRect rect);
+void ren_get_size(RenSurface *rs, int *x, int *y); /* Reports the size in points. */
 size_t ren_get_window_list(RenWindow ***window_list_dest);
 RenWindow* ren_find_window(SDL_Window *window);
 RenWindow* ren_find_window_from_id(uint32_t id);

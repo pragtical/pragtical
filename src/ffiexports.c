@@ -32,6 +32,7 @@
 
 #include "renderer.h"
 #include "rencache.h"
+#include "renwindow.h"
 
 #if defined(_WIN32)
   #define EXPORT __declspec(dllexport)
@@ -54,33 +55,33 @@ EXPORT RenWindow* ren_get_target_window_ffi(void)
 
 EXPORT void rencache_set_clip_rect_ffi(RenWindow *window_renderer, float x, float y, float w, float h) {
   RenRect rect = rect_to_grid(x, y, w, h);
-  rencache_set_clip_rect(window_renderer, rect);
+  rencache_set_clip_rect(&window_renderer->cache, rect);
 }
 
 EXPORT void rencache_draw_rect_ffi(RenWindow *window_renderer, float x, float y, float w, float h, unsigned char r, unsigned char g, unsigned char b, unsigned char a)
 {
   RenRect rect = rect_to_grid(x, y, w, h);
   RenColor color = {.r = r, .g = g, .b = b, .a = a};
-  rencache_draw_rect(window_renderer, rect, color);
+  rencache_draw_rect(&window_renderer->cache, rect, color);
 }
 
 EXPORT double rencache_draw_text_ffi(RenWindow *window_renderer, RenFont **fonts, const char *text, size_t len, double x, double y, unsigned char r, unsigned char g, unsigned char b, unsigned char a, double tab_offset)
 {
   RenColor color = {.r = r, .g = g, .b = b, .a = a};
   RenTab tab = {.offset = tab_offset};
-  return rencache_draw_text(window_renderer, fonts, text, len, x, y, color, tab);
+  return rencache_draw_text(&window_renderer->cache, fonts, text, len, x, y, color, tab);
 }
 
 EXPORT void rencache_begin_frame_ffi(RenWindow *window_renderer)
 {
   ren_set_target_window(window_renderer);
-  rencache_begin_frame(window_renderer);
+  rencache_begin_frame(&window_renderer->cache);
 }
 
 EXPORT void rencache_end_frame_ffi()
 {
   RenWindow *window = ren_get_target_window();
-  rencache_end_frame(window);
+  rencache_end_frame(&window->cache);
   ren_set_target_window(NULL);
 }
 

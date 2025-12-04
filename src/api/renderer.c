@@ -1,13 +1,12 @@
 #include <math.h>
 #include <string.h>
 #include <assert.h>
+#include <lua.h>
+
 #include "api.h"
 #include "../renderer.h"
 #include "../rencache.h"
-#ifdef PRAGTICAL_USE_SDL_RENDERER
 #include "../renwindow.h"
-#endif
-#include "lua.h"
 
 // a reference index to a table that stores the fonts
 static int RENDERER_FONT_REF = LUA_NOREF;
@@ -246,7 +245,7 @@ static int f_font_set_size(lua_State *L) {
 #ifdef PRAGTICAL_USE_SDL_RENDERER
   RenWindow *window = ren_get_target_window();
   if (window != NULL) {
-    scale = renwin_get_surface(window).scale_x;
+    scale = rencache_get_surface(&window->cache).scale_x;
   }
 #endif
   ren_font_group_set_size(fonts, size, scale);
@@ -410,8 +409,9 @@ static int f_show_debug(lua_State *L) {
 static int f_get_size(lua_State *L) {
   int w = 0, h = 0;
   RenWindow *window = ren_get_target_window();
+  RenSurface rs = rencache_get_surface(&window->cache);
   if (window)
-    ren_get_size(window, &w, &h);
+    ren_get_size(&rs, &w, &h);
   lua_pushnumber(L, w);
   lua_pushnumber(L, h);
   return 2;
@@ -422,7 +422,7 @@ static int f_begin_frame(UNUSED lua_State *L) {
   assert(ren_get_target_window() == NULL);
   RenWindow *window = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
   ren_set_target_window(window);
-  rencache_begin_frame(window);
+  rencache_begin_frame(&window->cache);
   return 0;
 }
 
@@ -430,7 +430,7 @@ static int f_begin_frame(UNUSED lua_State *L) {
 static int f_end_frame(UNUSED lua_State *L) {
   RenWindow *window = ren_get_target_window();
   assert(window != NULL);
-  rencache_end_frame(window);
+  rencache_end_frame(&window->cache);
   ren_set_target_window(NULL);
   // clear the font reference table
   lua_newtable(L);
@@ -452,7 +452,7 @@ static int f_set_clip_rect(lua_State *L) {
   lua_Number w = luaL_checknumber(L, 3);
   lua_Number h = luaL_checknumber(L, 4);
   RenRect rect = rect_to_grid(x, y, w, h);
-  rencache_set_clip_rect(ren_get_target_window(), rect);
+  rencache_set_clip_rect(&ren_get_target_window()->cache, rect);
   return 0;
 }
 
@@ -464,7 +464,7 @@ static int f_draw_rect(lua_State *L) {
   lua_Number h = luaL_checknumber(L, 4);
   RenRect rect = rect_to_grid(x, y, w, h);
   RenColor color = checkcolor(L, 5, 255);
-  rencache_draw_rect(ren_get_target_window(), rect, color);
+  rencache_draw_rect(&ren_get_target_window()->cache, rect, color);
   return 0;
 }
 
@@ -490,7 +490,7 @@ static int f_draw_text(lua_State *L) {
   double y = luaL_checknumber(L, 4);
   RenColor color = checkcolor(L, 5, 255);
   RenTab tab = checktab(L, 6);
-  x = rencache_draw_text(ren_get_target_window(), fonts, text, len, x, y, color, tab);
+  x = rencache_draw_text(&ren_get_target_window()->cache, fonts, text, len, x, y, color, tab);
   lua_pushnumber(L, x);
   return 1;
 }
