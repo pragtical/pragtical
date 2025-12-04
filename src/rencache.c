@@ -28,9 +28,10 @@
 
 #define CMD_BUF_RESIZE_RATE 1.2
 #define CMD_BUF_INIT_SIZE (1024 * 512)
+#define CMD_BUF_CANVAS_INIT_SIZE (1024 * 64)
 #define COMMAND_BARE_SIZE offsetof(Command, command)
 
-enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_POLY };
+enum CommandType { SET_CLIP, DRAW_TEXT, DRAW_RECT, DRAW_POLY, DRAW_CANVAS, DRAW_PIXELS };
 
 typedef struct {
   enum CommandType type;
@@ -58,6 +59,7 @@ typedef struct {
 typedef struct {
   RenRect rect;
   RenColor color;
+  bool replace;
 } DrawRectCommand;
 
 typedef struct {
@@ -66,6 +68,17 @@ typedef struct {
   unsigned short npoints;
   RenPoint points[];
 } DrawBezierCommand;
+
+typedef struct {
+  RenRect rect;
+  RenCache *canvas;
+} DrawCanvasCommand;
+
+typedef struct {
+  RenRect rect;
+  size_t len;
+  char bytes[];
+} DrawPixelsCommand;
 
 static bool show_debug = false;
 
@@ -115,7 +128,7 @@ static RenRect merge_rects(RenRect a, RenRect b) {
 static bool expand_command_buffer(RenCache *ren_cache) {
   size_t new_size = ren_cache->command_buf_size * CMD_BUF_RESIZE_RATE;
   if (new_size == 0) {
-    new_size = CMD_BUF_INIT_SIZE;
+    new_size = ren_cache->window ? CMD_BUF_INIT_SIZE : CMD_BUF_CANVAS_INIT_SIZE;
   }
   uint8_t *new_command_buf = SDL_realloc(ren_cache->command_buf, new_size);
   if (!new_command_buf) {
@@ -203,7 +216,7 @@ void rencache_set_clip_rect(RenCache *ren_cache, RenRect rect) {
 }
 
 
-void rencache_draw_rect(RenCache *ren_cache, RenRect rect, RenColor color) {
+void rencache_draw_rect(RenCache *ren_cache, RenRect rect, RenColor color, bool replace) {
   if (rect.width == 0 || rect.height == 0 || !rects_overlap(ren_cache->last_clip_rect, rect)) {
     return;
   }
@@ -211,6 +224,7 @@ void rencache_draw_rect(RenCache *ren_cache, RenRect rect, RenColor color) {
   if (cmd) {
     cmd->rect = rect;
     cmd->color = color;
+    cmd->replace = replace;
   }
 }
 
@@ -252,6 +266,30 @@ RenRect rencache_draw_poly(RenCache *ren_cache, RenPoint *points, int npoints, R
     }
   }
   return rect;
+}
+
+void rencache_draw_canvas(RenCache *ren_cache, RenRect rect, RenCache *canvas) {
+  if (rect.width == 0 || rect.height == 0 || !rects_overlap(ren_cache->last_clip_rect, rect)) {
+    return;
+  }
+  DrawCanvasCommand *cmd = push_command(ren_cache, DRAW_CANVAS, sizeof(DrawCanvasCommand));
+  if (cmd) {
+    cmd->rect = rect;
+    cmd->canvas = canvas;
+    rencache_begin_frame(canvas);
+  }
+}
+
+void rencache_draw_pixels(RenCache *ren_cache, RenRect rect, const char* bytes, size_t len) {
+  if (rect.width > 0 && rect.height > 0 && rects_overlap(ren_cache->last_clip_rect, rect)) {
+    int sz = len + 1;
+    DrawPixelsCommand *cmd = push_command(ren_cache, DRAW_PIXELS, sizeof(DrawPixelsCommand) + sz);
+    if (cmd) {
+      memcpy(cmd->bytes, bytes, sz);
+      cmd->len = len;
+      cmd->rect = rect;
+    }
+  }
 }
 
 void rencache_invalidate(RenCache *ren_cache) {
@@ -309,7 +347,10 @@ void rencache_end_frame(RenCache *ren_cache) {
   RenRect cr = ren_cache->screen_rect;
   while (next_command(ren_cache, &cmd)) {
     /* cmd->command[0] should always be the Command rect */
-    if (cmd->type == SET_CLIP) { cr = cmd->command[0]; }
+    if (cmd->type == SET_CLIP) {
+      SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
+      cr = ccmd->rect;
+    }
     RenRect r = intersect_rects(cmd->command[0], cr);
     if (r.width == 0 || r.height == 0) { continue; }
     unsigned h = HASH_INITIAL;
@@ -355,12 +396,14 @@ void rencache_end_frame(RenCache *ren_cache) {
       DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
       DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
       DrawBezierCommand *bcmd = (DrawBezierCommand*)&cmd->command;
+      DrawCanvasCommand *cvcmd = (DrawCanvasCommand*)&cmd->command;
+      DrawPixelsCommand *pcmd = (DrawPixelsCommand*)&cmd->command;
       switch (cmd->type) {
         case SET_CLIP:
           ren_set_clip_rect(&rs, intersect_rects(ccmd->rect, r));
           break;
         case DRAW_RECT:
-          ren_draw_rect(&rs, rcmd->rect, rcmd->color);
+          ren_draw_rect(&rs, rcmd->rect, rcmd->color, rcmd->replace);
           break;
         case DRAW_TEXT:
           ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
@@ -369,12 +412,19 @@ void rencache_end_frame(RenCache *ren_cache) {
         case DRAW_POLY:
           ren_draw_poly(&rs, bcmd->points, bcmd->npoints, bcmd->color);
           break;
+        case DRAW_CANVAS:
+          rencache_end_frame(cvcmd->canvas);
+          ren_draw_canvas(&rs, cvcmd->canvas->rensurface.surface, cvcmd->rect.x, cvcmd->rect.y);
+          break;
+        case DRAW_PIXELS:
+          ren_draw_pixels(&rs, pcmd->rect, pcmd->bytes, pcmd->len);
+          break;
       }
     }
 
     if (show_debug) {
       RenColor color = { rand(), rand(), rand(), 50 };
-      ren_draw_rect(&rs, r, color);
+      ren_draw_rect(&rs, r, color, false);
     }
   }
 

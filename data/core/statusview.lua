@@ -6,6 +6,7 @@ local style = require "core.style"
 local DocView = require "core.docview"
 local CommandView = require "core.commandview"
 local LogView = require "core.logview"
+local ImageView = require "core.imageview"
 local View = require "core.view"
 local Object = require "core.object"
 
@@ -192,6 +193,7 @@ function StatusView:new()
 
   self:register_docview_items()
   self:register_command_items()
+  self:register_imageview_items()
 end
 
 local clicks = -1
@@ -417,6 +419,35 @@ function StatusView:register_command_items()
         style.font, style.dim, self.separator2
       }
     end
+  })
+end
+
+
+---The predefined status bar items displayed when an image view is active.
+function StatusView:register_imageview_items()
+  self:add_item({
+    predicate = ImageView,
+    name = "image-view:details",
+    alignment = StatusView.Item.LEFT,
+    get_item = function()
+      if core.active_view.image then
+        local file = common.basename(core.active_view.path)
+        local w, h = core.active_view.image:get_size()
+        local dimensions = string.format("%dx%d", w, h)
+        return {
+          style.font, style.accent,
+          file,
+          style.text,
+          StatusView.separator,
+          dimensions,
+          StatusView.separator,
+          string.format("Zoom: %sx", core.active_view.zoom_scale),
+        }
+      else
+        return {}
+      end
+    end,
+    position = 1
   })
 end
 

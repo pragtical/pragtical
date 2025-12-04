@@ -14,6 +14,7 @@ local TitleView
 local CommandView
 local NagView
 local DocView
+local ImageView
 local Doc
 local Project
 
@@ -403,6 +404,7 @@ function core.init()
   NagView = require "core.nagview"
   Project = require "core.project"
   DocView = require "core.docview"
+  ImageView = require "core.imageview"
   Doc = require "core.doc"
 
   -- apply to default color scheme
@@ -1206,6 +1208,37 @@ function core.get_views_referencing_doc(doc)
     if view.doc == doc then table.insert(res, view) end
   end
   return res
+end
+
+
+---@param filename string
+---@return core.imageview? image_view
+function core.open_image(filename)
+  ---@cast ImageView core.imageview
+  if ImageView.is_supported(filename) then
+    local file = io.open(filename)
+    if not file then return false end
+    file:close()
+
+    local node = core.root_view:get_active_node_default()
+    for i, view in ipairs(node.views) do
+      if view.path == filename then
+        node:set_active_view(node.views[i])
+        return view
+      end
+    end
+    local view = ImageView(filename)
+    if view.image then
+      node:add_view(view)
+      core.root_view.root_node:update_layout()
+      return view
+    else
+      core.error(
+        "Image could not be loaded.%s",
+        view.errmsg and " Error: " .. view.errmsg or ""
+      )
+    end
+  end
 end
 
 

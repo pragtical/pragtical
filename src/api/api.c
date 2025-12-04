@@ -11,6 +11,7 @@ int luaopen_shmem(lua_State* L);
 int luaopen_utf8extra(lua_State* L);
 int luaopen_encoding(lua_State* L);
 int luaopen_diff(lua_State *L);
+int luaopen_canvas(lua_State* L);
 
 #ifdef PRAGTICAL_REPL_HISTORY
   #define LUA_REPL { "repl",  luaopen_linenoise  },
@@ -52,6 +53,7 @@ static const luaL_Reg libs[] = {
   { "encoding",   luaopen_encoding   },
   { "shmem",      luaopen_shmem      },
   { "diff",       luaopen_diff       },
+  { "canvas",     luaopen_canvas     },
   LUA_REPL
   LUA53_COMPATIBILITY
   { NULL, NULL }
