@@ -45,6 +45,15 @@ local View = require "core.view"
 
 local CWD = system.getcwd()
 
+-- Allow printing to terminal when no video
+if os.getenv("SDL_VIDEO_DRIVER") == "dummy" then
+  local core_log = core.log
+  core.log = function(text, ...)
+    core_log(text, ...)
+    print(string.format(text, ...))
+  end
+end
+
 ---Helper for the fetch resource function.
 ---@param curl process
 ---@param callback? fun(percent,total,dowloaded,speed,left,elapsed)
@@ -502,8 +511,10 @@ end
 
 -- Max execution time check (allow a maximum of 5 minutes to prevent endless CI)
 local start_time = os.time()
-core.add_thread(function()
+core.add_background_thread(function()
   while true do
+    -- allow to keep running even if unfocus
+    core.redraw = true
     coroutine.yield(1)
     if os.time() - start_time >= 5 * 60 then
       print "Maximum pgo stress time exceeded, quitting..."
