@@ -206,7 +206,9 @@ main() {
 
   if [[ $pgo != "" ]]; then
     echo "Generating Profiler Guided Optimizations data..."
-    LLVM_PROFILE_FILE=default.profraw SDL_VIDEO_DRIVER="dummy" ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
+    export LLVM_PROFILE_FILE=default.profraw
+    export SDL_VIDEO_DRIVER="dummy"
+    ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
     # in case of clang handle the profile data appropriately
     if [ -e "default.profraw" ]; then
       if [[ $platform == "macos" ]]; then
