@@ -27,6 +27,19 @@ config.fps = 60
 ---@type boolean | "uncapped"
 config.draw_stats = false
 
+---The type of background drawn behind the images.
+---
+---Defaults to "grid".
+---@type "grid" | "solid" | "none"
+config.images_background_mode = "grid"
+
+---The color used for the background of transparent images when the
+---background mode is set to solid.
+---
+---Defaults to "#ffffff".
+---@type renderer.color
+config.images_background_color = { common.color "#ffffff" }
+
 ---Maximum number of log items that will be stored.
 ---When the number of log items exceed this value, old items will be discarded.
 ---
