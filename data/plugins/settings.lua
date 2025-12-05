@@ -721,6 +721,30 @@ settings.add("Editor",
   }
 )
 
+settings.add("Image Viewer",
+  {
+    {
+      label = "Background Mode",
+      description = "The type of background to draw behind transparent images.",
+      path = "images_background_mode",
+      type = settings.type.SELECTION,
+      default = "grid",
+      values = {
+        {"Grid", "grid"},
+        {"Solid", "solid"},
+        {"None", "none"}
+      }
+    },
+    {
+      label = "Background Color",
+      description = "The color used when background mode is set to solid.",
+      path = "images_background_color",
+      type = settings.type.COLOR,
+      default = table.pack(table.unpack(config.images_background_color))
+    }
+  }
+)
+
 settings.add("Development",
   {
     {

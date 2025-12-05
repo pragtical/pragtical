@@ -1,4 +1,5 @@
 local common = require "core.common"
+local config = require "core.config"
 local style = require "core.style"
 local keymap = require "core.keymap"
 local View = require "core.view"
@@ -50,7 +51,7 @@ local SUPPORTED_EXTENSIONS = {
 ---@class core.imageview : core.view
 ---@field super core.view
 ---@field path string?
----@field grid canvas?
+---@field background canvas?
 ---@field image canvas?
 ---@field image_scaled canvas?
 ---@field zoom_mode "fit" | "fixed"
@@ -78,6 +79,8 @@ function ImageView:new(path)
   self.width = 0
   self.height = 0
   self.errmsg = nil
+  self.bg_mode = config.images_background_mode or "grid"
+  self.bg_color = config.images_background_color or { common.color "#ffffff" }
 
   self:load(path)
 end
@@ -133,30 +136,53 @@ function ImageView:scale_image()
 
   local new_w = math.floor(img_w * self.zoom_scale)
   local new_h = math.floor(img_h * self.zoom_scale)
+  local needs_scaling = true
   if self.image_scaled then
     local cw, ch = self.image_scaled:get_size()
     if new_w == cw and new_h == ch then
-      return
+      needs_scaling = false
     end
   end
 
-  self.image_scaled = self.image:scaled(new_w, new_h, "nearest")
-  self.width, self.height = self.image_scaled:get_size()
-  self.grid = canvas.new(
-    self.width, self.height, { common.color "rgb(0,0,0)" }, false
-  )
-  local bright = { common.color "#AAAAAA" }
-  local dark = { common.color "#555555" }
-  local bsize = 50
-  local bhalf = bsize / 2
-  for h=0, self.height+(bsize*2), bhalf do
-    for w=0, self.width+(bsize*2), bsize do
-      self.grid:draw_rect(w, h, bhalf, bhalf, dark, false)
-      self.grid:draw_rect(w+bhalf, h, bhalf, bhalf, bright, false)
+  if needs_scaling then
+    self.image_scaled = self.image:scaled(new_w, new_h, "nearest")
+  end
+
+  if
+    needs_scaling
+    or
+    self.bg_mode ~= config.images_background_mode
+    or
+    self.bg_color ~= config.images_background_color
+  then
+    self.bg_mode = config.images_background_mode
+    self.bg_color = config.images_background_color
+    self.width, self.height = self.image_scaled:get_size()
+
+    if self.bg_mode == "grid" then
+      self.background = canvas.new(
+        self.width, self.height, { common.color "rgb(0,0,0)" }, false
+      )
+      local bright = { common.color "#AAAAAA" }
+      local dark = { common.color "#555555" }
+      local bsize = 50
+      local bhalf = bsize / 2
+      for h=0, self.height+(bsize*2), bhalf do
+        for w=0, self.width+(bsize*2), bsize do
+          self.background:draw_rect(w, h, bhalf, bhalf, dark, false)
+          self.background:draw_rect(w+bhalf, h, bhalf, bhalf, bright, false)
+        end
+        local temp = bright
+        bright = dark
+        dark = temp
+      end
+    elseif self.bg_mode == "solid" then
+      self.background = canvas.new(
+        self.width, self.height, self.bg_color, true
+      )
+    else
+      self.background = nil
     end
-    local temp = bright
-    bright = dark
-    dark = temp
   end
 end
 
@@ -171,6 +197,13 @@ end
 function ImageView:zoom_out()
   self.zoom_mode = "fixed"
   self.zoom_scale = math.max(self.zoom_scale - 0.5, 0.1)
+  self:scale_image()
+end
+
+---Sets image size to original.
+function ImageView:zoom_reset()
+  self.zoom_mode = "fixed"
+  self.zoom_scale = 1
   self:scale_image()
 end
 
@@ -218,7 +251,13 @@ end
 
 function ImageView:update()
   ImageView.super.update(self)
-  if self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y then
+  if
+    self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y
+    or
+    self.bg_mode ~= config.images_background_mode
+    or
+    self.bg_color ~= config.images_background_color
+  then
     self:scale_image()
     self.prev_size = {x = self.size.x, y = self.size.y}
   end
@@ -234,11 +273,13 @@ function ImageView:draw_image()
   if h < self.size.y then
     y = (self.size.y / 2) - (h / 2)
   end
-  renderer.draw_canvas(
-    self.grid,
-    self.position.x + x - self.scroll.x,
-    self.position.y + y - self.scroll.y
-  )
+  if self.bg_mode == "grid" or self.bg_mode == "solid" then
+    renderer.draw_canvas(
+      self.background,
+      self.position.x + x - self.scroll.x,
+      self.position.y + y - self.scroll.y
+    )
+  end
   renderer.draw_canvas(
     self.image_scaled,
     self.position.x + x - self.scroll.x,
