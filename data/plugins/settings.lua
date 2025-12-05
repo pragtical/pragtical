@@ -2157,7 +2157,7 @@ function core.run()
   if settings.config.reload_user_modules then
     local modules = {
       USERDIR .. PATHSEP .. "init.lua",
-      core.root_project().path .. PATHSEP .. ".pragtical_project"
+      core.root_project().path .. PATHSEP .. ".pragtical_project.lua"
     }
     for _, module in ipairs(modules) do
       core.reload_absolute_module(module)

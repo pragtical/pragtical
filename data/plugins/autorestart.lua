@@ -33,7 +33,7 @@ local save = Doc.save
 Doc.save = function(self, ...)
   local res = save(self, ...)
   local user = USERDIR .. PATHSEP .. "init.lua"
-  local project = core.root_project().path .. PATHSEP .. ".pragtical_project"
+  local project = core.root_project().path .. PATHSEP .. ".pragtical_project.lua"
   if self.abs_filename == user or self.abs_filename == project then
     if config.plugins.autorestart.reload_type == "restart" then
       command.perform("core:restart")
