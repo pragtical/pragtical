@@ -914,7 +914,7 @@ command.add(
     if not is_project_folder(item) then
       path = common.dirname(item.abs_filename)
       if item.type == "dir" then
-        text = item.project:normalize_path(item.abs_filename) .. PATHSEP
+        text = item.filename .. PATHSEP
       elseif item.type == "file" then
         local parent_dir = common.dirname(
           item.project:normalize_path(item.abs_filename)
@@ -928,7 +928,7 @@ command.add(
     core.command_view:enter("Filename", {
       text = text,
       submit = function(filename)
-        local doc_filename = item.project:absolute_path(filename)
+        local doc_filename = path .. PATHSEP .. filename
         local file, err = io.open(doc_filename, "a+")
         if not file then
           core.error("Error: unable to create a new file in \"%s\": %s", doc_filename, err)
@@ -949,7 +949,7 @@ command.add(
     if not is_project_folder(item) then
       path = common.dirname(item.abs_filename)
       if item.type == "dir" then
-        text = item.project:normalize_path(item.abs_filename) .. PATHSEP
+        text = item.filename .. PATHSEP
       elseif item.type == "file" then
         local parent_dir = common.dirname(
           item.project:normalize_path(item.abs_filename)
