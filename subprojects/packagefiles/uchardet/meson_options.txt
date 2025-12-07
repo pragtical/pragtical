@@ -1,0 +1,12 @@
+option(
+    'use_sse2',
+    type : 'feature',
+    description : 'Enable SSE2 support'
+)
+
+option(
+    'test',
+    type: 'boolean',
+    value: true,
+    description: 'Compile the test executable and enable tests',
+)
