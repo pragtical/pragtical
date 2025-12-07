@@ -1,41 +1,48 @@
 #!/bin/bash
 
-set -o errexit
+set -e
 
 # accept argument in the form
 github_raw_content () {
   echo "https://raw.githubusercontent.com/$1"
 }
 
-option_portable=off
-option_copy=on
+option_debug=false
+option_portable=false
+option_copy=true
+option_global=false
+run_windows=false
 pargs=()
 plugins=()
 while [[ "$#" -gt 0 ]]; do
   case $1 in
+    -debug)
+      option_debug=true
+      set -x
+      ;;
     -portable)
-    option_portable=on
-    ;;
+      option_portable=true
+      ;;
     -keep)
-    option_copy=off
-    ;;
+      option_copy=false
+      ;;
     -plugin=*)
-    # should be like -plugin=franko/lite-plugins/master/plugins/autowrap.lua
-    plugins+=("${1#-plugin=}")
-    ;;
+      # should be like -plugin=franko/lite-plugins/master/plugins/autowrap.lua
+      plugins+=("${1#-plugin=}")
+      ;;
     -global)
-    option_global=on
-    ;;
+      option_global=true
+      ;;
     -*)
-    if [ "${#pargs[@]}" = "0" ]; then
-      echo "error: unknown option \"$1\""
-      exit 1
-    else
-      pargs+=("$1")
-    fi
-    ;;
+      if [ "${#pargs[@]}" = "0" ]; then
+        echo "error: unknown option \"$1\""
+        exit 1
+      else
+        pargs+=("$1")
+      fi
+      ;;
     *)
-    pargs+=("$1")
+      pargs+=("$1")
     ;;
   esac
   shift
@@ -47,11 +54,11 @@ if [ "${#pargs[@]}" -lt 1 ]; then
 fi
 
 if [[ "$OSTYPE" == "msys"* || "$OSTYPE" == "mingw"* ]]; then
-  run_windows=yes
+  run_windows=true
 fi
 
 rundir=".run"
-if [ "$option_portable" == on ]; then
+if [[ $option_portable == true ]]; then
   bindir="$rundir"
   datadir="$rundir/data"
 else
@@ -76,7 +83,7 @@ copy_pragtical_build () {
   echo "copying pragtical executable and data"
   rm -fr "$rundir"
   mkdir -p "$bindir" "$datadir"
-  if [ ! -z ${run_windows+x} ]; then
+  if [[ $run_windows == true ]]; then
     cp "$builddir/src/pragtical.exe" "$bindir"
   else
     cp "$builddir/src/pragtical" "$bindir"
@@ -118,15 +125,19 @@ copy_pragtical_build () {
 }
 
 run_pragtical () {
-  if [ ! -z ${option_global+x} ]; then
+  if [[ $option_debug == true ]]; then
+    echo "LLVM_PROFILE_FILE: $LLVM_PROFILE_FILE"
+    echo "SDL_VIDEO_DRIVER: $SDL_VIDEO_DRIVER"
+  fi
+  if [[ $option_global == true ]]; then
     echo "running \"pragtical ${pargs[@]:1}\""
     exec "$bindir/pragtical" "${pargs[@]:1}"
   else
     echo "running \"pragtical ${pargs[@]:1}\" with local HOME"
-    if [ ! -z ${run_windows+x} ]; then
-      USERPROFILE="$userdir" exec "$bindir/pragtical" "${pargs[@]:1}"
+    if [[ $run_windows == true ]]; then
+      USERPROFILE="$userdir" ./$bindir/pragtical "${pargs[@]:1}"
     else
-      PRAGTICAL_USERDIR="$userdir" exec "$bindir/pragtical" "${pargs[@]:1}"
+      PRAGTICAL_USERDIR="$userdir" ./$bindir/pragtical "${pargs[@]:1}"
     fi
   fi
 }
@@ -148,7 +159,7 @@ fetch_plugins () {
   done
 }
 
-if [ $option_copy == on ]; then
+if [[ $option_copy == true ]]; then
   build_pragtical
   copy_pragtical_build
 fi

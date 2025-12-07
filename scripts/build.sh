@@ -209,10 +209,10 @@ main() {
     if [[ $platform == "windows" ]]; then
       export LLVM_PROFILE_FILE=default.profraw
       export SDL_VIDEO_DRIVER="dummy"
-      ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
+      ./scripts/run-local -debug "${build_dir}" run -n scripts/lua/pgo.lua
     else
       LLVM_PROFILE_FILE=default.profraw SDL_VIDEO_DRIVER="dummy" \
-        ./scripts/run-local "${build_dir}" run -n scripts/lua/pgo.lua
+        ./scripts/run-local -debug "${build_dir}" run -n scripts/lua/pgo.lua
     fi
     # in case of clang handle the profile data appropriately
     if [ -e "default.profraw" ]; then

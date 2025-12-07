@@ -77,7 +77,6 @@ jobs:
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "/usr/lib/ccache" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
       - name: Python Setup
         uses: actions/setup-python@v5
@@ -100,10 +99,10 @@ jobs:
         run: sudo apt-get update
       - name: Install Dependencies
         run: |
-          sudo apt-get install -y ccache
           bash scripts/install-dependencies.sh --debug
       - name: Build Portable
-        run: bash scripts/build.sh --debug --forcefallback --portable --lto --pgo
+        run: |
+          bash scripts/build.sh --debug --forcefallback --portable --lto --pgo
       - name: Package Portables
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary
       - name: Build AppImages
@@ -217,7 +216,6 @@ jobs:
           fi
       - name: Build
         run: |
-          bash --version
           bash scripts/build.sh --debug --forcefallback --lto --pgo
       - name: Package
         run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary
