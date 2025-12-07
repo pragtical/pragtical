@@ -173,7 +173,7 @@ if not get_option('source-only')
     )
 
     uchardet_dep = dependency('uchardet', fallback: ['uchardet', 'uchardet_dep'],
-        default_options: default_fallback_options + ['default_library=static']
+        default_options: default_fallback_options + ['default_library=static', 'test=false']
     )
 
     if get_option('wrap_mode') != 'forcefallback'
