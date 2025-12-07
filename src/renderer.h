@@ -17,10 +17,6 @@
 #define RECT_TYPE int
 #endif
 
-#define RENCACHE_CELLS_X 80
-#define RENCACHE_CELLS_Y 50
-#define RENCACHE_CELL_SIZE 96
-
 #define FONT_FALLBACK_MAX 10
 #define MAX_POLY_POINTS 0xFFFF
 typedef struct RenFont RenFont;
@@ -35,26 +31,6 @@ typedef struct { RECT_TYPE x, y, width, height; } RenRect;
 typedef struct { double offset; } RenTab;
 typedef struct { SDL_Surface *surface; float scale_x, scale_y; } RenSurface;
 typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
-
-typedef struct {
-  uint8_t *command_buf;
-  size_t command_buf_idx;
-  size_t command_buf_size;
-  unsigned cells_buf1[RENCACHE_CELLS_X * RENCACHE_CELLS_Y];
-  unsigned cells_buf2[RENCACHE_CELLS_X * RENCACHE_CELLS_Y];
-  unsigned *cells_prev;
-  unsigned *cells;
-  RenRect rect_buf[RENCACHE_CELLS_X * RENCACHE_CELLS_Y / 2];
-  bool resize_issue;
-  RenRect screen_rect;
-  RenRect last_clip_rect;
-  SDL_Window *window;   /* The cache can be used for both a window or surface */
-  RenSurface rensurface;
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-  SDL_Renderer *renderer;
-  SDL_Texture *texture;
-#endif
-} RenCache;
 
 struct RenWindow;
 typedef struct RenWindow RenWindow;

@@ -4,6 +4,30 @@
 #include <stdbool.h>
 #include "renderer.h"
 
+#define RENCACHE_CELLS_X 80
+#define RENCACHE_CELLS_Y 50
+#define RENCACHE_CELL_SIZE 96
+
+typedef struct {
+  uint8_t *command_buf;
+  size_t command_buf_idx;
+  size_t command_buf_size;
+  unsigned cells_buf1[RENCACHE_CELLS_X * RENCACHE_CELLS_Y];
+  unsigned cells_buf2[RENCACHE_CELLS_X * RENCACHE_CELLS_Y];
+  unsigned *cells_prev;
+  unsigned *cells;
+  RenRect rect_buf[RENCACHE_CELLS_X * RENCACHE_CELLS_Y / 2];
+  bool resize_issue;
+  RenRect screen_rect;
+  RenRect last_clip_rect;
+  SDL_Window *window;   /* The cache can be used for both a window or surface */
+  RenSurface rensurface;
+#ifdef PRAGTICAL_USE_SDL_RENDERER
+  SDL_Renderer *renderer;
+  SDL_Texture *texture;
+#endif
+} RenCache;
+
 void rencache_init(RenCache *rc);
 void rencache_uninit(RenCache *rc);
 void  rencache_show_debug(bool enable);
