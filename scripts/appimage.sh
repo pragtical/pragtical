@@ -190,10 +190,6 @@ main() {
 
   # Build
   if [[ $run_build == true ]]; then
-    if [ -e build ]; then
-      rm -rf build
-    fi
-
     if [ -e "${build_dir}" ]; then
       rm -rf "${build_dir}"
     fi
@@ -230,6 +226,8 @@ main() {
       meson configure -Db_pgo=use "${build_dir}"
       meson compile -C "${build_dir}"
     fi
+  else
+    meson configure -Dportable=false "${build_dir}"
   fi
 
   # Generate AppImage
@@ -244,8 +242,16 @@ main() {
     strip_flag="--strip"
   fi
 
-  DESTDIR="$(realpath Pragtical.AppDir)" meson install $strip_flag \
-    --skip-subprojects="freetype2,pcre2" -C "${build_dir}"
+  DESTDIR="../Pragtical.AppDir/usr" meson install $strip_flag \
+    --skip-subprojects="freetype2,pcre2,sdl3" -C "${build_dir}"
+
+  if [[ $run_build == false ]]; then
+    # When using existing build the install path can still be wrong after reconfigure
+    if [ -e "Pragtical.AppDir/usr/data" ]; then
+      cp -a Pragtical.AppDir/usr/data/* "Pragtical.AppDir/usr/share/pragtical/"
+      rm -rf "Pragtical.AppDir/usr/data"
+    fi
+  fi
 
   if [[ -z "$cross" ]]; then
     polyfill_glibc Pragtical.AppDir/usr/bin/pragtical

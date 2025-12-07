@@ -109,7 +109,7 @@ jobs:
       - name: Package Portables
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
       - name: Build AppImages
-        run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --release --lto --pgo
+        run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --nobuild --release
       - name: Upload Files
         uses: softprops/action-gh-release@v2.2.2
         with:
