@@ -34,6 +34,16 @@ function renwindow.get_size(window) end
 function renwindow.get_refresh_rate(window) end
 
 ---
+---Gets the window pixel color of the specified position.
+---
+---@param window renwindow
+---@param x number
+---@param y number
+---
+---@return renderer.color? color
+function renwindow.get_color(window, x, y) end
+
+---
 ---Restore Window
 ---
 ---@return number
