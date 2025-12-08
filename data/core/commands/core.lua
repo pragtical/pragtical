@@ -163,7 +163,6 @@ end
 local function add_project_directory(use_dialog)
   open_directory("Add Directory", use_dialog, true, function(abs_path)
     for _, dir in ipairs(abs_path) do
-      print(dir)
       core.add_project(system.absolute_path(dir))
     end
   end)
