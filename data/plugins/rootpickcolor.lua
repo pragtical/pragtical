@@ -1,5 +1,6 @@
 -- mod-version:3
 local core = require "core"
+local common = require "core.common"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local style = require "core.style"
@@ -10,7 +11,7 @@ local cx, cy, pick_color, mode, color = 0, 0, false, "rgb", {0, 0, 0, 255}
 local rootview_on_mouse_moved = RootView.on_mouse_moved
 function RootView:on_mouse_moved(x, y, dx, dy)
   rootview_on_mouse_moved(self, x, y, dx, dy)
-  cx, cy = x, y
+  cx, cy = common.round(x), common.round(y)
 end
 
 local rootviewon_mouse_pressed = RootView.on_mouse_pressed
