@@ -113,11 +113,61 @@ static int f_get_refresh_rate(lua_State *L) {
   return 1;
 }
 
+static int f_get_color(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  int x = luaL_optinteger(L, 2, 0);
+  int y = luaL_optinteger(L, 3, 0);
+
+  SDL_Surface *surface = rencache_get_surface(&window_renderer->cache).surface;
+  SDL_Color color = {0, 0, 0, 255};
+
+  if (surface && x >= 0 && y >= 0 && x <= surface->w && y <= surface->h) {
+    Uint8 *pixels = (Uint8*)surface->pixels;
+    int bpp = SDL_BYTESPERPIXEL(surface->format);
+
+    Uint8 *p = pixels + y * surface->pitch + x * bpp;
+    Uint32 pixel = 0;
+
+    switch (bpp) {
+      case 1: pixel = *p; break;
+      case 2: pixel = *(Uint16*)p; break;
+      case 3:
+        #if SDL_BYTEORDER == SDL_BIG_ENDIAN
+        pixel = (p[0] << 16) | (p[1] << 8) | p[2];
+        #else
+        pixel = p[0] | (p[1] << 8) | (p[2] << 16);
+        #endif
+        break;
+      case 4: pixel = *(Uint32*)p; break;
+    }
+
+    SDL_GetRGBA(
+      pixel,
+      SDL_GetPixelFormatDetails(surface->format),
+      SDL_GetSurfacePalette(surface),
+      &color.r, &color.g, &color.b, &color.a
+    );
+  }
+
+  lua_createtable(L, 4, 0);
+  lua_pushinteger(L, color.r);
+  lua_rawseti(L, -2, 1);
+  lua_pushinteger(L, color.g);
+  lua_rawseti(L, -2, 2);
+  lua_pushinteger(L, color.b);
+  lua_rawseti(L, -2, 3);
+  lua_pushinteger(L, color.a);
+  lua_rawseti(L, -2, 4);
+
+  return 1;
+}
+
 static const luaL_Reg renwindow_lib[] = {
   { "create",           f_renwin_create     },
   { "__gc",             f_renwin_gc         },
   { "get_size",         f_renwin_get_size   },
   { "get_refresh_rate", f_get_refresh_rate  },
+  { "get_color",        f_get_color         },
   { "_persist",         f_renwin_persist    },
   { "_restore",         f_renwin_restore    },
   {NULL, NULL}
