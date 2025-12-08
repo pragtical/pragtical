@@ -290,7 +290,6 @@ command.add(nil, {
     end
     local doc = core.open_doc(".pragtical_project.lua")
     core.root_view:open_doc(doc)
-    doc:save()
   end,
 
   ["core:change-project-folder"] = function()
