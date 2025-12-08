@@ -549,22 +549,24 @@ core.add_background_thread(function()
 
   config.draw_stats = "uncapped"
 
-  core.log("Downloading sqlite3.c using curl thru process api")
-  coroutine.yield(1)
-
-  fetch(
-    "https://github.com/jeffboody/libsqlite3/raw/refs/heads/master/sqlite3.c",
-    false,
-    function(percent, total, dowloaded, speed, left)
-      core.log(
-        "percent: %s, total: %s, downloaded: %s, speed: %s, left: %s",
-        percent, total, dowloaded, speed, left
-      )
-      coroutine.yield()
-    end
-  )
-
-  os.remove(sqlite_path)
+  -- disable this for now
+  -- core.log("Downloading sqlite3.c using curl thru process api")
+  -- coroutine.yield(1)
+  -- if
+  --   fetch(
+  --     "https://github.com/jeffboody/libsqlite3/raw/refs/heads/master/sqlite3.c",
+  --     false,
+  --     function(percent, total, dowloaded, speed, left)
+  --       core.log(
+  --         "percent: %s, total: %s, downloaded: %s, speed: %s, left: %s",
+  --         percent, total, dowloaded, speed, left
+  --       )
+  --       coroutine.yield()
+  --     end
+  --   )
+  -- then
+  --   os.remove(sqlite_path)
+  -- end
 
   core.log("Generating stress HTML file...")
   coroutine.yield()
