@@ -74,7 +74,7 @@ command.add(function() return pick_color end, {
   end
 })
 
-keymap.add_direct({
+keymap.add({
   ["ctrl+1"] = "root:pick-rgb-color",
   ["ctrl+2"] = "root:pick-hex-color",
   ["escape"] = "root:pick-color-cancel",
