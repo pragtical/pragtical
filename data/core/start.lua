@@ -160,9 +160,9 @@ if PLATFORM == "Mac OS X" then
   end
 end
 
--- Prevent CI jobs from stalling, because wait event can fail on dummy driver
+-- Try to prevent CI jobs from stalling
 if os.getenv('SDL_VIDEO_DRIVER') == "dummy" then
-  function system.wait_event(timeout)
-    return true
-  end
+  function system.wait_event(timeout) return true end
+  function system.sleep(timeout) end
+  function system.poll_event() end
 end
