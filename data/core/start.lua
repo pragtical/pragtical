@@ -162,8 +162,7 @@ end
 
 -- Prevent CI jobs from stalling, because wait event can fail on dummy driver
 if os.getenv('SDL_VIDEO_DRIVER') == "dummy" then
-  local system_wait_event = system.wait_event
   function system.wait_event(timeout)
-    system_wait_event(0)
+    return true
   end
 end
