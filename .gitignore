@@ -2,6 +2,7 @@ build*/
 .build*/
 submodules/
 subprojects/*/
+subprojects/.wraplock
 !subprojects/packagefiles
 /appimage*
 .vscode
