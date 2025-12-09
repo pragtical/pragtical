@@ -174,7 +174,7 @@ function View:move_towards(t, k, dest, rate, name)
       and config.animation_type == "constant"
     -- Timed Constant Velocity with Acceleration
     if constant_scroll or constant_general then
-      local mk = "move_"..k
+      local mk = "move_data_"..k
       if not t[mk] or t[mk][2] ~= (dest > val and "f" or "b") then
         t[mk] = {
           val,                                 -- starting position
@@ -194,8 +194,9 @@ function View:move_towards(t, k, dest, rate, name)
       if config.animation_rate ~= 1 then
         rate = common.clamp(rate, 1e-8, 1 - 1e-8) ^ config.animation_rate
       end
-      t[k] = move_constant(val, dest, rate, t[mk][1], t[mk][4])
-      if dest == t[k] then t[mk] = nil end
+      val = move_constant(val, dest, rate, t[mk][1], t[mk][4])
+      t[k] = val
+      if math.abs(dest - val) < 1e-8 then t[mk] = nil end
     -- Classic Linear Interpolation
     else
       rate = rate or 0.2
