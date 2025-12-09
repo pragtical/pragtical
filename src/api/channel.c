@@ -150,15 +150,16 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
       v->data.table.queue.first = NULL;
       v->data.table.queue.last = &v->data.table.queue.first;
 
+      /* If index is negative (relative), keep lua_next happy by adapting */
       if (index < 0)
-        -- index;
+        --index;
 
       lua_pushnil(L);
       while (lua_next(L, index)) {
-        ChannelValuePair* pair = SDL_malloc(sizeof (ChannelValuePair));
-
+        ChannelValuePair* pair = SDL_calloc(1, sizeof (ChannelValuePair));
         if (pair == NULL) {
-          lua_pop(L, 1);
+          /* pop value and key pushed by lua_next */
+          lua_pop(L, 2);
           channelValueFree(v);
           return NULL;
         }
@@ -167,14 +168,16 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
         pair->value = channelValueGet(L, -1);
 
         if (pair->key == NULL || pair->value == NULL) {
-          lua_pop(L, 1);
+          /* Clean up: pop value and key, free allocated pieces */
+          lua_pop(L, 2);
           channelValueFree(pair->key);
           channelValueFree(pair->value);
-          channelValueFree(v);
           SDL_free(pair);
-          break;
+          channelValueFree(v);
+          return NULL;
         }
 
+        /* normal path: pop the value (keep key for next lua_next) */
         lua_pop(L, 1);
 
         pair->next = NULL;
@@ -192,8 +195,10 @@ static ChannelValue* channelValueGet(lua_State *L, int index)
 
 static void channelValuePush(lua_State* L, const ChannelValue* v)
 {
-  if (v == NULL)
+  if (v == NULL) {
+    lua_pushnil(L);
     return;
+  }
 
   switch (v->type) {
     case LUA_TNUMBER:
@@ -203,8 +208,8 @@ static void channelValuePush(lua_State* L, const ChannelValue* v)
       lua_pushlstring(L, v->data.string.data, v->data.string.length);
       break;
     case LUA_TBOOLEAN:
-        lua_pushboolean(L, v->data.boolean);
-        break;
+      lua_pushboolean(L, v->data.boolean);
+      break;
     case LUA_TTABLE:
     {
       ChannelValuePair* pair;
@@ -220,6 +225,9 @@ static void channelValuePush(lua_State* L, const ChannelValue* v)
         lua_settable(L, -3);
       }
     }
+      break;
+    default:
+      lua_pushnil(L);
       break;
   }
 }
@@ -263,19 +271,20 @@ static const ChannelValue* channelFirst(const Channel* c)
 
 static const ChannelValue* channelLast(const Channel *c)
 {
-  ChannelValue *v;
+  ChannelValue* last = NULL;
 
   SDL_LockMutex(c->mutex);
-  if (c->queue.first == NULL){
+  if (c->queue.first == NULL) {
     SDL_UnlockMutex(c->mutex);
     return NULL;
   }
 
-  v = c->queue.first == NULL ? NULL : *(c->queue.last);
+  /* queue.last points to the `next` of the last element, so we can backtrack */
+  last = (ChannelValue*)((uintptr_t)c->queue.last - offsetof(ChannelValue, next));
 
   SDL_UnlockMutex(c->mutex);
 
-  return v;
+  return last;
 }
 
 static int channelPush(Channel* c, ChannelValue* v)
@@ -300,7 +309,7 @@ static const ChannelValue* channelWait(Channel *c)
   while (c->queue.first == NULL)
     SDL_WaitCondition(c->cond, c->mutex);
 
-  ++ c->received;
+  ++c->received;
 
   SDL_UnlockMutex(c->mutex);
   SDL_BroadcastCondition(c->cond);
@@ -312,11 +321,13 @@ static void channelSupply(Channel* c, ChannelValue* v)
 {
   unsigned id;
 
-  SDL_LockMutex(c->mutex);
-
+  /* channelPush handles its own locking; avoid locking twice (deadlock) */
   id = channelPush(c, v);
+
+  SDL_LockMutex(c->mutex);
   while (!channelGiven(id, c->received))
     SDL_WaitCondition(c->cond, c->mutex);
+  SDL_UnlockMutex(c->mutex);
 }
 
 static void channelClear(Channel* c)
@@ -365,30 +376,35 @@ static void channelPop(Channel* c)
 
 static void removeChannelFromList(Channel* c)
 {
-  Channel* first = g_channels.first;
-
   SDL_LockMutex(ChannelsListMutex);
 
-  if (c == first && first->next == NULL) {
-    g_channels.first = NULL;
-    g_channels.last = &g_channels.first;
+  Channel* first = g_channels.first;
+  if (first == NULL) {
+    /* nothing to remove */
+    SDL_UnlockMutex(ChannelsListMutex);
+    return;
   }
-  else if (c == first) {
-    g_channels.first = c->next;
-  } else {
-    Channel* prev = first;
-    for (Channel* ch = first->next; ch; ch = ch->next) {
-      if (strcmp(ch->name, c->name) == 0) {
-        break;
-      }
-      prev = ch;
+
+  if (c == first) {
+    /* remove head */
+    g_channels.first = first->next;
+    if (g_channels.first == NULL)
+      g_channels.last = &g_channels.first;
+    SDL_UnlockMutex(ChannelsListMutex);
+    return;
+  }
+
+  /* find previous node by pointer equality (safer & faster than strcmp) */
+  Channel* prev = first;
+  for (Channel* ch = first->next; ch; ch = ch->next) {
+    if (ch == c) {
+      /* unlink */
+      prev->next = ch->next;
+      if (ch->next == NULL)
+        g_channels.last = &prev->next;
+      break;
     }
-    if (c->next == NULL) {
-      prev->next = NULL;
-      g_channels.last = &prev->next;
-    } else {
-      prev->next = c->next;
-    }
+    prev = ch;
   }
 
   SDL_UnlockMutex(ChannelsListMutex);
@@ -400,8 +416,10 @@ static void channelFree(Channel* c)
 
   channelClear(c);
 
-  SDL_DestroyMutex(c->mutex);
-  SDL_DestroyCondition(c->cond);
+  if (c->mutex)
+    SDL_DestroyMutex(c->mutex);
+  if (c->cond)
+    SDL_DestroyCondition(c->cond);
 
   SDL_free(c->name);
   SDL_free(c);
@@ -425,7 +443,7 @@ int f_channel_get(lua_State *L)
 {
   size_t name_len = 0;
   const char *name = luaL_checklstring(L, 1, &name_len);
-  Channel *c;
+  Channel *c = NULL;
   int found = 0;
 
   SDL_LockMutex(ChannelsListMutex);
@@ -441,11 +459,22 @@ int f_channel_get(lua_State *L)
 
   if (!found) {
     if ((c = SDL_calloc(1, sizeof (Channel))) == NULL) {
-      error_message = strerror(errno);
+      error_message = "out of memory when initializing channel";
       goto fail;
     }
+    /* initialize all fields to be safe */
+    c->name = NULL;
+    c->mutex = NULL;
+    c->cond = NULL;
+    c->next = NULL;
+    c->queue.first = NULL;
+    c->queue.last = &c->queue.first;
+    c->sent = 0;
+    c->received = 0;
+    SDL_SetAtomicInt(&c->ref, 0); /* start at zero, we'll increment below */
+
     if ((c->name = SDL_malloc(name_len+1)) == NULL) {
-      error_message = strerror(errno);
+      error_message = "out of memory when initializing channel name";
       goto fail;
     }
     if ((c->mutex = SDL_CreateMutex()) == NULL) {
@@ -459,14 +488,12 @@ int f_channel_get(lua_State *L)
 
     strcpy(c->name, name);
 
-    c->queue.first = NULL;
-    c->queue.last = &c->queue.first;
-
     c->next = NULL;
     *g_channels.last = c;
     g_channels.last = &c->next;
   }
 
+  /* increment refcount */
   SDL_AtomicIncRef(&c->ref);
 
   ChannelContainer* self = lua_newuserdata(L, sizeof(ChannelContainer));
@@ -478,18 +505,18 @@ int f_channel_get(lua_State *L)
   return 1;
 
 fail:
-  if (c->mutex)
-    SDL_DestroyMutex(c->mutex);
-  if (c->cond)
-    SDL_DestroyCondition(c->cond);
-
-  SDL_free(c->name);
-  SDL_free(c);
+  if (c) {
+    if (c->mutex)
+      SDL_DestroyMutex(c->mutex);
+    if (c->cond)
+      SDL_DestroyCondition(c->cond);
+    SDL_free(c->name);
+    SDL_free(c);
+  }
 
   SDL_UnlockMutex(ChannelsListMutex);
 
-  luaL_error(L, error_message);
-
+  luaL_error(L, error_message ? error_message : "unknown error while getting the channel");
   return 2;
 }
 

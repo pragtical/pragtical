@@ -27,7 +27,7 @@ typedef struct thread {
   lua_State *L;
   SDL_Thread *ptr;
   SDL_AtomicInt ref;
-  int clean;
+  bool clean;
 } LuaThread;
 
 typedef struct thread_container {
@@ -38,9 +38,9 @@ typedef struct loadstate {
   struct {
     char* data;
     size_t size;
-    size_t last_written;
+    ptrdiff_t last_written;
   } buffer;
-  int given;
+  bool given;
 } LoadState;
 
 /* --------------------------------------------------------
@@ -73,9 +73,10 @@ static const char* reader(lua_State *L, LoadState *state, size_t *size)
 
   if (state->given) {
     *size = 0;
-    state->given = 1;
     return NULL;
   }
+
+  state->given = true;
 
   *size = state->buffer.last_written + 1;
 
@@ -110,10 +111,8 @@ static int callback(LuaThread *t)
 
 static int loadfunction(lua_State *owner, lua_State *thread, int index)
 {
-  LoadState state;
+  LoadState state = {0};
   int ret = 0;
-
-  memset(&state, 0, sizeof (LoadState));
 
   if (!(state.buffer.data = SDL_malloc(32))) {
     lua_pushnil(owner);
@@ -348,19 +347,19 @@ static int f_thread_create(lua_State *L)
   int ret, iv;
   LuaThread *thread;
 
-  if ((thread = SDL_calloc(1, sizeof (LuaThread))) == NULL){
+  if ((thread = SDL_malloc(sizeof(LuaThread))) == NULL){
     luaL_error(L, "could not allocate a new thread");
     return 2;
   }
 
+  SDL_memset(thread, 0, sizeof(LuaThread));
   thread->L = luaL_newstate();
   luaL_openlibs(thread->L);
 
   ret = threadDump(L, thread->L, 2);
 
   /* If return number is 2, it is nil and the error */
-  if (ret == 2)
-    goto failure;
+  if (ret == 2) goto failure;
 
   /* Iterate over the optional arguments to pass to the callback */
   int optargc = lua_gettop(L);
@@ -475,7 +474,7 @@ static int m_thread_wait(lua_State *L)
   int status;
 
   SDL_WaitThread(self->ptr, &status);
-  self->clean = 1;
+  self->clean = true;
 
   lua_pushinteger(L, status);
 
@@ -514,8 +513,10 @@ static int mm_thread_gc(lua_State *L)
   ))->thread;
 
   /* allow self clean */
-  if (!self->clean)
+  if (!self->clean) {
+    self->clean = true;
     SDL_DetachThread(self->ptr);
+  }
 
   /* this can take place before or after the thread callback ends
    * which is why ref counting is needed */
