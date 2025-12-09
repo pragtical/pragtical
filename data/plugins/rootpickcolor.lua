@@ -16,7 +16,6 @@ end
 
 local rootviewon_mouse_pressed = RootView.on_mouse_pressed
 function RootView:on_mouse_pressed(button, x, y, clicks)
-  rootviewon_mouse_pressed(self, button, x, y, clicks)
   if pick_color and button == "left" then
     pick_color = false
     local c = string.format(
@@ -25,7 +24,9 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     )
     core.log("Color %s copied to clipboard", c)
     system.set_clipboard(c)
+    return true
   end
+  return rootviewon_mouse_pressed(self, button, x, y, clicks)
 end
 
 local function draw_color_box()
