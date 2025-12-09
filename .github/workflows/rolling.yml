@@ -124,7 +124,7 @@ jobs:
       matrix:
         config:
           - arch: x86_64
-            image: macos-13
+            image: macos-15-intel
           - arch: arm64
             image: macos-14
     runs-on: ${{ matrix.config.image }}
