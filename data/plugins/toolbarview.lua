@@ -29,7 +29,11 @@ end
 
 
 function ToolbarView:update()
-  local dest_size = self.visible and (self.toolbar_font:get_height() + style.padding.y * 2) or 0
+  -- round due to the inconsistency of operation on fractional scales
+  -- inconsistency traced with common.get_caller_info() from self:move_towards()
+  local dest_size = self.visible
+    and common.round(self.toolbar_font:get_height() + style.padding.y * 2)
+    or 0
   if self.init_size then
     self.size.y = dest_size
     self.init_size = nil

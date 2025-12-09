@@ -524,6 +524,41 @@ function common.bench(name, fn, ...)
   return res
 end
 
+
+---Print debugging information about the caller at a given stack level.
+---
+---This function retrieves and prints:
+---  * Source file of the call
+---  * Line number within that file
+---  * Name of the calling function (if available)
+---
+---Useful for tracing execution flow.
+---
+---Stack levels:
+---  1 = get_caller_info()
+---  2 = the function that called get_caller_info()
+---  3 = that function’s caller (default)
+---
+---@param stacklevel? integer The stack frame to inspect. Defaults to 3.
+function common.get_caller_info(stacklevel)
+  local lvl = stacklevel or 3
+  local info = debug.getinfo(lvl, "nSl")
+  if not info then
+    print(string.format("Caller info unavailable (stack level %d).", lvl))
+    return
+  end
+  -- Normalize the source: strip leading '@'
+  local source = info.source
+  if source:sub(1, 1) == "@" then
+    source = source:sub(2)
+  end
+  print("Caller info:")
+  print(string.format("  File    : %s", source))
+  print(string.format("  Line    : %d", info.currentline or -1))
+  print(string.format("  Function: %s", info.name or "(anonymous)"))
+end
+
+
 -- From gvx/Ser
 local oddvals = {[tostring(1/0)] = "1/0", [tostring(-1/0)] = "-1/0", [tostring(-(0/0))] = "-(0/0)", [tostring(0/0)] = "0/0"}
 
