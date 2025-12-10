@@ -1,5 +1,5 @@
 project('pragtical',
-    ['c'],
+    ['c', 'cpp'],
     version : '3.7.1',
     license : 'MIT',
     meson_version : '>= 0.63',
@@ -232,7 +232,7 @@ if not get_option('source-only')
         meson.override_dependency('sdl3', sdl_dep)
     endif
 
-    sdl_image = dependency('SDL3_image', fallback: ['sdl3_image', 'sdl3_image_dep'],
+    sdl_image = dependency('SDL3_image', 'sdl3-image', fallback: ['sdl3_image', 'sdl3_image_dep'],
         default_options: default_fallback_options + ['default_library=static']
     )
 
