@@ -667,6 +667,8 @@ static SDL_EnumerationResult list_dir_enumeration_callback(void *userdata, const
 
 static int f_list_dir(lua_State *L) {
   const char *path = luaL_checkstring(L, 1);
+  /* Seems that SDL internal path normalizations strip a single / */
+  path = strcmp(path, "/") == 0 ? "/." : path;
   lua_newtable(L);
   bool res = SDL_EnumerateDirectory(path, list_dir_enumeration_callback, L);
   if (!res) {
