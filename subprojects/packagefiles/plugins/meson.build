@@ -1,4 +1,4 @@
-project('plugins', version: 'GIT', license: 'MIT')
+project('plugins', 'c', version: 'GIT', license: 'MIT')
 
 # Check for valid shell
 unix_shell = find_program('sh', required: false).found()

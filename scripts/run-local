@@ -75,8 +75,13 @@ fi
 builddir="${pargs[0]}"
 
 build_pragtical () {
-  echo "running meson compile"
-  meson compile -C "$builddir"
+  if [ -e "$builddir/.muon" ]; then
+    echo "running muon samu"
+    muon samu -C "$builddir"
+  else
+    echo "running meson compile"
+    meson compile -C "$builddir"
+  fi
 }
 
 copy_pragtical_build () {
