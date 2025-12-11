@@ -40,6 +40,13 @@ jit.opt.start(
 -- ffi overrides for faster rendering calls
 local ffi = require("ffi")
 
+local function ffi_error(err)
+  error(
+    "Error: " .. tostring(err) .. "\n"
+    .. debug.traceback("", 4) .. "\n"
+  )
+end
+
 ffi.cdef [[
   void* ren_get_target_window_ffi(void);
   void rencache_set_clip_rect_ffi(void *window_renderer, float x, float y, float w, float h);
@@ -59,8 +66,10 @@ function renderer.draw_rect(x, y, w, h, color)
     core.error("renderer.draw_rect: color not provided")
     color = {255, 255, 255, 255}
   end
+  local win = ffi.C.ren_get_target_window_ffi()
+  if win == nil then ffi_error("no target window found") return end
   ffi.C.rencache_draw_rect_ffi(
-    ffi.C.ren_get_target_window_ffi(),
+    win,
     x, y, w, h,
     color[1], color[2], color[3], color[4] or 255
   )
@@ -88,8 +97,10 @@ function renderer.draw_text(font, text, x, y, color, tab)
   end
   text = type(text) == "string" and text or tostring(text)
   if not color then color = {255, 255, 255, 255} end
+  local win = ffi.C.ren_get_target_window_ffi()
+  if win == nil then ffi_error("no target window found") return 0 end
   return ffi.C.rencache_draw_text_ffi(
-    ffi.C.ren_get_target_window_ffi(),
+    win,
     fonts_pointer_cache[font], text, #text, x, y,
     color[1], color[2], color[3], color[4] or 255,
     tab and tab.tab_offset or -1
@@ -112,7 +123,9 @@ end
 
 renderer.set_clip_rect_lua = renderer.set_clip_rect
 function renderer.set_clip_rect(x, y, w, h)
-  ffi.C.rencache_set_clip_rect_ffi(ffi.C.ren_get_target_window_ffi(), x, y, w, h)
+  local win = ffi.C.ren_get_target_window_ffi()
+  if win == nil then ffi_error("no target window found") return end
+  ffi.C.rencache_set_clip_rect_ffi(win, x, y, w, h)
 end
 
 system.sleep_lua = system.sleep
