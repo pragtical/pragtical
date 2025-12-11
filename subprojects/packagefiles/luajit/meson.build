@@ -10,6 +10,7 @@ project('luajit',
 )
 
 cc = meson.get_compiler('c')
+cc_native = meson.get_compiler('c', native : true)
 
 system = host_machine.system()
 
@@ -17,6 +18,11 @@ if system == 'linux' or system == 'darwin' or system == 'windows'
     system_deps = [
         cc.find_library('dl', required: false),
         cc.find_library('m', required: false)
+    ]
+
+    system_deps_native = [
+        cc_native.find_library('dl', required: false),
+        cc_native.find_library('m', required: false)
     ]
 
     # get architecture id for the host machine so it can be set when compiling buildvm natively
