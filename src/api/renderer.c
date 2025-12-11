@@ -331,9 +331,10 @@ static int f_show_debug(lua_State *L) {
 static int f_get_size(lua_State *L) {
   int w = 0, h = 0;
   RenWindow *window = ren_get_target_window();
-  RenSurface rs = rencache_get_surface(&window->cache);
-  if (window)
+  if (window) {
+    RenSurface rs = rencache_get_surface(&window->cache);
     ren_get_size(&rs, &w, &h);
+  }
   lua_pushnumber(L, w);
   lua_pushnumber(L, h);
   return 2;
@@ -379,7 +380,12 @@ static int f_set_clip_rect(lua_State *L) {
   lua_Number w = luaL_checknumber(L, 3);
   lua_Number h = luaL_checknumber(L, 4);
   RenRect rect = rect_to_grid(x, y, w, h);
-  rencache_set_clip_rect(&ren_get_target_window()->cache, rect);
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  } else {
+    rencache_set_clip_rect(&window->cache, rect);
+  }
   return 0;
 }
 
@@ -391,7 +397,12 @@ static int f_draw_rect(lua_State *L) {
   lua_Number h = luaL_checknumber(L, 4);
   RenRect rect = rect_to_grid(x, y, w, h);
   RenColor color = luaXL_checkcolor(L, 5, 255);
-  rencache_draw_rect(&ren_get_target_window()->cache, rect, color, false);
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  } else {
+    rencache_draw_rect(&window->cache, rect, color, false);
+  }
   return 0;
 }
 
@@ -402,7 +413,10 @@ static int f_draw_poly(lua_State *L) {
   static const char cubic_bezier_tag[] = { POLY_NORMAL, POLY_CONTROL_CUBIC, POLY_CONTROL_CUBIC, POLY_NORMAL };
 
   RenWindow *window = ren_get_target_window();
-  assert(window != NULL);
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  }
+
   luaL_checktype(L, 1, LUA_TTABLE);
   RenColor color = luaXL_checkcolor(L, 2, 255);
   lua_settop(L, 2);
@@ -459,7 +473,12 @@ static int f_draw_text(lua_State *L) {
   double y = luaL_checknumber(L, 4);
   RenColor color = luaXL_checkcolor(L, 5, 255);
   RenTab tab = luaXL_checktab(L, 6);
-  x = rencache_draw_text(&ren_get_target_window()->cache, fonts, text, len, x, y, color, tab);
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  } else {
+    x = rencache_draw_text(&window->cache, fonts, text, len, x, y, color, tab);
+  }
   lua_pushnumber(L, x);
   return 1;
 }
@@ -488,7 +507,12 @@ static int f_draw_canvas(lua_State *L) {
     .width = canvas->rensurface.surface->w,
     .height = canvas->rensurface.surface->h
   };
-  rencache_draw_canvas(&ren_get_target_window()->cache, rect, canvas);
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  } else {
+    rencache_draw_canvas(&window->cache, rect, canvas);
+  }
   return 0;
 }
 
@@ -500,7 +524,13 @@ static int f_to_canvas(lua_State *L) {
 
   // TODO: this is duplicated code from canvas.f_new, maybe add this to the utils?
   SDL_Surface *dst = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
-  RenSurface rs = rencache_get_surface(&ren_get_target_window()->cache);
+  RenSurface rs;
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  } else {
+    rs = rencache_get_surface(&window->cache);
+  }
   SDL_Rect rect = { .x = x, .y = y, .w = w, .h = h };
   SDL_BlitSurface(rs.surface, &rect, dst, NULL);
 
