@@ -628,13 +628,14 @@ static int g_read(lua_State* L, int stream, lua_Integer read_size) {
   #else
     luaL_Buffer b;
     luaL_buffinit(L, &b);
+    bool buffer_empty = true;
     do {
       uint8_t* buffer = (uint8_t*)luaL_prepbuffer(&b);
       length = read(self->child_pipes[stream][0], buffer, read_size < LUAL_BUFFERSIZE ? read_size : LUAL_BUFFERSIZE);
       if (length == 0 && !poll_process(self, WAIT_NONE))
         break;
       else if (length < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
-        length = 0;
+        break;
       if (length < 0) {
         signal_process(self, SIGNAL_TERM);
         return 0;
@@ -642,8 +643,10 @@ static int g_read(lua_State* L, int stream, lua_Integer read_size) {
       if (length) {
         luaL_addsize(&b, length);
         read_size -= length;
+        buffer_empty = false;
       }
     } while (read_size > 0 && length > 0);
+    if (buffer_empty && length > -1) return 0;
     luaL_pushresult(&b);
   #endif
   return 1;
