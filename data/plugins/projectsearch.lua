@@ -25,6 +25,8 @@ config.plugins.projectsearch = common.merge({
   threading = {
     workers = math.ceil(thread.get_cpu_count() / 2) + 1
   },
+  live_search = false,
+  syntax_highlighting = true,
   -- The config specification used by gui generators
   config_spec = {
     name = "Project Search",
@@ -35,6 +37,20 @@ config.plugins.projectsearch = common.merge({
       type = "number",
       default = math.ceil(thread.get_cpu_count() / 2) + 1,
       min = 1
+    },
+    {
+      label = "Live Search",
+      description = "Keep making new searches while typing (experimental).",
+      path = "live_search",
+      type = "toggle",
+      default = false
+    },
+    {
+      label = "Syntax Highlighting",
+      description = "Enable highlighting for search results (coloring may not be accurate on partial code).",
+      path = "syntax_highlighting",
+      type = "toggle",
+      default = true
     }
   }
 }, config.plugins.projectsearch)
@@ -76,6 +92,7 @@ end
 function ResultsView:new(path, text, search_type, insensitive, whole_word, replacement)
   ResultsView.super.new(self, nil, false)
   self.type_name = "plugins.projectsearch.resultsview"
+  self.stop = false
   self.is_global = false
   self.defer_draw = false
   self.scrollable = true
@@ -166,14 +183,21 @@ function ResultsView:new(path, text, search_type, insensitive, whole_word, repla
   self.regex_toggle.on_change = update_replacement
   self.replace_text.on_change = update_replacement
 
+  self.find_text.on_text_change = function()
+    if config.plugins.projectsearch.live_search then
+      self:queue_refresh()
+    end
+  end
+
   self.close_button.on_click = function()
     command.perform "project-search:find"
   end
 
   self.find_button.on_click = function()
     if self.find_button.label == "" then
-      if not self.searching or self.replacing then
-        self.replaced = true
+      if self.searching then
+        self:stop_search()
+      elseif self.find_button.icon.code == "T" and not self.replacing then
         self.results_list:clear()
         self.total_files_processed = nil
         self.find_button:set_label("Find")
@@ -346,6 +370,7 @@ local function files_search_thread(tid, options)
     id = math.floor(id)
     local results_channel = thread.get_channel("projectsearch_results"..tid..id)
     local filename_channel = thread.get_channel("projectsearch_fname"..tid..id)
+    local stop_channel = thread.get_channel("projectsearch_stop"..tid..id)
 
     local re = nil
     if search_type == "regex" then
@@ -369,6 +394,7 @@ local function files_search_thread(tid, options)
       return true
     end
 
+    local stop = false
     local filename = filename_channel:wait()
     while filename ~= "{{stop}}" do
       local results = {}
@@ -425,6 +451,8 @@ local function files_search_thread(tid, options)
           lines
         })
       end
+      stop = stop_channel:first() == "stop"
+      if stop then break end
       if found then
         results_channel:push(results)
       else
@@ -435,6 +463,11 @@ local function files_search_thread(tid, options)
       while filename == nil do
         filename = filename_channel:first()
       end
+    end
+    if stop then
+      results_channel:clear()
+      filename_channel:clear()
+      stop_channel:clear()
     end
     return 0
   end
@@ -452,6 +485,9 @@ local function files_search_thread(tid, options)
   -- channel used to inform the status of searching to coroutine
   -- the current dir/file index been searched is sent or "finished" on end
   local channel_status = thread.get_channel("projectsearch_status"..tid)
+
+  -- channel to monitor if the finding of should should be stopped.
+  local channel_stop = thread.get_channel("projectsearch_stop"..tid)
 
   local root = path
   local count = 0
@@ -485,6 +521,7 @@ local function files_search_thread(tid, options)
     ))
   end
 
+  local stop = false
   local current_worker = 1
   while #directories > 0 do
     for didx, directory in ipairs(directories) do
@@ -528,19 +565,27 @@ local function files_search_thread(tid, options)
       break
     end
 
+    stop = channel_stop:first() == "stop"
+    if not stop then
+      channel_status:clear()
+      channel_status:push(count)
+    else
+      break
+    end
+  end
+
+  if not stop then
+    for id=1, workers, 1 do
+      filename_channels[id]:push("{{stop}}")
+    end
+    -- before sending the "finished" status we wait for threads to finish
+    workers_wait(workers_list)
     channel_status:clear()
-    channel_status:push(count)
+    channel_status:push("finished")
+  else
+    channel_status:clear()
   end
 
-  for id=1, workers, 1 do
-    filename_channels[id]:push("{{stop}}")
-  end
-
-  -- before sending the "finished" status we wait for threads to finish
-  workers_wait(workers_list)
-
-  channel_status:clear()
-  channel_status:push("finished")
   collectgarbage("collect")
 end
 
@@ -553,6 +598,7 @@ local function worker_threads_add_results(self, result_channels)
   for _, channel_results in ipairs(result_channels) do
     local results = channel_results:first()
     if results then
+      self.queue_skip_draw = false
       self.total_files_processed = self.total_files_processed + 1
       channel_results:pop()
       if type(results) == "table" then
@@ -572,6 +618,17 @@ local function worker_threads_add_results(self, result_channels)
     end
   end
   return found
+end
+
+
+---Send stop signal to find files thread and find in file workers.
+---@param files_stop_channel thread.Channel
+---@param workers_stop_channel thread.Channel[]
+local function worker_threads_stop(files_stop_channel, workers_stop_channel)
+  files_stop_channel:push("stop")
+  for _, channel_stop in ipairs(workers_stop_channel) do
+    channel_stop:push("stop")
+  end
 end
 
 
@@ -630,6 +687,8 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
   end
   path = path or core.root_project().path
 
+  self.path = path
+  self.stop = false
   self.results_list:clear()
   self.total_files_processed = 0
   self.searching = true
@@ -638,11 +697,11 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
   self.end_time = self.start_time
   self.results_list.base_dir = path
 
+  threaded_search_id = threaded_search_id + 1
   core.add_thread(function()
-    threaded_search_id = threaded_search_id + 1
     local tid = threaded_search_id
     local workers = config.plugins.projectsearch.threading.workers
-    thread.create(
+    local search_thread = thread.create(
       "pspool"..tid,
       files_search_thread,
       threaded_search_id,
@@ -668,7 +727,16 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
         thread.get_channel("projectsearch_results"..tid..id)
       )
     end
+    ---@type thread.Channel[]
+    local stop_channels = {}
+    for id=1, workers, 1 do
+      table.insert(
+        stop_channels,
+        thread.get_channel("projectsearch_stop"..tid..id)
+      )
+    end
     local channel_status = thread.get_channel("projectsearch_status"..tid)
+    local channel_stop = thread.get_channel("projectsearch_stop"..tid)
     local status = channel_status:first()
     local count = 1
     while type(status) ~= "string" do
@@ -680,21 +748,47 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
       count = count + 1
       coroutine.yield()
       core.redraw = true
+      if self.stop then
+        break
+      elseif not self.is_global then
+        local node = core.root_view:get_active_node_default()
+        local found = false
+        for _, view in ipairs(node.views) do
+          if view == self then
+            found = true
+            break
+          end
+        end
+        if not found then self.stop = true break end
+      end
       status = channel_status:first()
     end
     channel_status:clear()
-    -- add any remaining results
-    while worker_threads_add_results(self, result_channels) do end
+    if not self.stop then
+      -- add any remaining results
+      while worker_threads_add_results(self, result_channels) do end
+    else
+      worker_threads_stop(channel_stop, stop_channels)
+    end
+    -- wait for thread manually to reduce thread leakage and stepping over
+    search_thread:wait()
     -- the search was completed
     self.searching = false
-    self.brightness = 100
-    core.redraw = true
+    if not self.queue_search then
+      self.brightness = 100
+      core.redraw = true
+    end
     self.end_time = system.get_time()
+    self.stop = false
   end, self.results_list.items)
 
   self.scroll.to.y = 0
 end
 
+---Flag that the search threads should be stopped.
+function ResultsView:stop_search()
+  self.stop = true
+end
 
 ---File text replacing thread function that uses worker threads to perform
 ---multi-file replacing.
@@ -810,6 +904,8 @@ function ResultsView:begin_replace()
     local replace_channels = {}
     ---@type thread.Channel[]
     local status_channels = {}
+    ---@type thread.Thread[]
+    local replace_workers = {}
 
     -- create all threads and channels
     for id=1, workers, 1 do
@@ -821,13 +917,13 @@ function ResultsView:begin_replace()
         status_channels,
         thread.get_channel("projectsearch_replace_status"..tid..id)
       )
-      thread.create(
+      table.insert(replace_workers, thread.create(
         "psrpool"..tid..id, files_replace_thread,
         tid, id,
         self.replace_text:get_text(),
         self.regex_toggle:is_toggled() and self.find_text:get_text(),
         self.sensitive_toggle:is_toggled()
-      )
+      ))
     end
 
     -- populate all replace channels by distributing the load
@@ -883,6 +979,10 @@ function ResultsView:begin_replace()
       if c % 100 == 0 then coroutine.yield() end
     end
 
+    for _, worker in ipairs(replace_workers) do
+      worker:wait()
+    end
+
     self.results_list.replacement = nil
     self.replacing = false
     self.replaced = true
@@ -895,10 +995,10 @@ end
 ---Re-perform the search procedure using previous search options.
 function ResultsView:refresh()
   local text = self.find_text:get_text()
-  if #text > 0 and not self.replacing and not self.searching then
+  if #text > 0 and not self.replacing and not self.searching and not self.queue_search then
     self.replaced = false
     self.path = self.file_picker:get_path()
-    self.query = self.find_text:get_text()
+    self.query = text
     self.search_type = self.regex_toggle:is_toggled() and "regex" or "plain"
     self.insensitive = not self.sensitive_toggle:is_toggled()
     self.whole_word = self.wholeword_toggle:is_toggled()
@@ -911,6 +1011,51 @@ function ResultsView:refresh()
   end
 end
 
+
+function ResultsView:queue_refresh()
+  if self.searching then self:stop_search() end
+  if
+    not self.replacing
+    and #self.find_text:get_text() > 2
+    and not self.queue_search
+    and self.query ~= self.find_text:get_text()
+  then
+    core.add_thread(function()
+      while true do
+        local text = self.find_text:get_text()
+        if not self.searching and not self.replacing and #text > 2 then
+          -- skip draw to smooth out result list changes
+          self.queue_skip_draw = true
+          self.replaced = false
+          self.path = self.file_picker:get_path()
+          self.query = text
+          self.search_type = self.regex_toggle:is_toggled() and "regex" or "plain"
+          self.insensitive = not self.sensitive_toggle:is_toggled()
+          self.whole_word = self.wholeword_toggle:is_toggled()
+          self:update_replacement()
+          self:begin_search(
+            self.path, self.query, self.search_type, self.insensitive, self.whole_word
+          )
+          break
+        elseif #text == 0 then
+          break
+        end
+        coroutine.yield()
+      end
+      self.queue_search = false
+    end)
+    self.queue_search = true
+  elseif self.replacing then
+    report_status("Replace")
+  elseif #self.find_text:get_text() == 0 then
+    self.queue_skip_draw = false
+    self.results_list:clear()
+    self.total_files_processed = nil
+    self.find_button:set_label("Find")
+    self.find_button:set_icon()
+    self.find_button:set_tooltip(nil, "project-search:refresh")
+  end
+end
 
 ---@type core.view?
 local previous_view
@@ -954,6 +1099,8 @@ function ResultsView:update()
     self.close_button:set_position(px, py)
   end
 
+  self.results_list.syntax_highlighting = config.plugins.projectsearch.syntax_highlighting
+
   self.replace_toggle:set_position(self.size.x - self.replace_toggle:get_width() - px, py)
   self.filters_toggle:set_position(self.replace_toggle:get_position().x - (px / 2) - self.filters_toggle:get_width(), py)
   self.regex_toggle:set_position(self.filters_toggle:get_position().x - (px / 2) - self.regex_toggle:get_width(), py)
@@ -961,7 +1108,11 @@ function ResultsView:update()
   self.sensitive_toggle:set_position(self.wholeword_toggle:get_position().x - (px / 2) - self.sensitive_toggle:get_width(), py)
 
   self.find_text:set_position(px, self.regex_toggle:get_bottom() + py)
-  if
+  if self.searching then
+    self.find_button:set_label("")
+    self.find_button:set_icon("C")
+    self.find_button:set_tooltip("Stop Search")
+  elseif
     (
       self.find_text:get_text() == self.query
       and
@@ -977,7 +1128,7 @@ function ResultsView:update()
     self.find_button:set_label("")
     self.find_button:set_icon("T")
     self.find_button:set_tooltip("Clear results")
-  else
+  elseif not self.queue_search then
     self.find_button:set_label("Find")
     self.find_button:set_icon()
     self.find_button:set_tooltip(nil, "project-search:refresh")
@@ -1025,14 +1176,14 @@ function ResultsView:update()
       + py * 3
     self.results_list:set_position(0, yoffset)
     self.results_list:set_size(self.size.x, self.size.y - yoffset)
-  else
+  elseif not self.queue_skip_draw then
     self.results_list:hide()
   end
 end
 
 
 function ResultsView:draw()
-  if not ResultsView.super.draw(self) then return false end
+  if self.queue_skip_draw or not ResultsView.super.draw(self) then return false end
   if not self.total_files_processed then return true end
 
   -- status
