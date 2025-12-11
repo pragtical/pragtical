@@ -115,12 +115,16 @@ function ImageView:scale_image()
 
   local img_w, img_h = self.image:get_size()
   if self.zoom_mode == "fit" then
-    self.zoom_scale = math.min(self.size.x / img_w, self.size.y / img_h)
-    self.zoom_scale = tonumber(string.format("%.2f", self.zoom_scale))
-      or self.zoom_scale
-    self.zoom_scale = self.zoom_scale - 0.01
-    if self.zoom_scale > 1 then
+    if img_w < self.size.x then
       self.zoom_scale = 1
+    else
+      self.zoom_scale = math.min(self.size.x / img_w, self.size.y / img_h)
+      self.zoom_scale = tonumber(string.format("%.2f", self.zoom_scale))
+        or self.zoom_scale
+      self.zoom_scale = self.zoom_scale - 0.01
+      if self.zoom_scale > 1 then
+        self.zoom_scale = 1
+      end
     end
   end
 
