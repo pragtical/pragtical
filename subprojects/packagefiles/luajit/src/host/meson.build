@@ -57,6 +57,6 @@ buildvm_arch = custom_target('buildvm_arch.h',
                              output: 'buildvm_arch.h')
 
 buildvm = executable('buildvm', buildvm_src, buildvm_arch, luajit_h,
-                     dependencies: system_deps,
+                     dependencies: system_deps_native,
                      include_directories: src_inc,
                      native: true)

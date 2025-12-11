@@ -77,7 +77,7 @@ ljcore_src = files(
 src_inc = include_directories('.')
 
 minilua = executable('minilua', 'host/minilua.c',
-                     dependencies: system_deps,
+                     dependencies: system_deps_native,
                      native: true)
 
 relver = vcs_tag(command: ['git', 'show', '-s', '--format=%ct'],
