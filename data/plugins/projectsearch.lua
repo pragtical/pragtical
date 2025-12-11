@@ -701,7 +701,7 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
   core.add_thread(function()
     local tid = threaded_search_id
     local workers = config.plugins.projectsearch.threading.workers
-    thread.create(
+    local search_thread = thread.create(
       "pspool"..tid,
       files_search_thread,
       threaded_search_id,
@@ -770,6 +770,8 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
     else
       worker_threads_stop(channel_stop, stop_channels)
     end
+    -- wait for thread manually to reduce thread leakage and stepping over
+    search_thread:wait()
     -- the search was completed
     self.searching = false
     if not self.queue_search then
@@ -902,6 +904,8 @@ function ResultsView:begin_replace()
     local replace_channels = {}
     ---@type thread.Channel[]
     local status_channels = {}
+    ---@type thread.Thread[]
+    local replace_workers = {}
 
     -- create all threads and channels
     for id=1, workers, 1 do
@@ -913,13 +917,13 @@ function ResultsView:begin_replace()
         status_channels,
         thread.get_channel("projectsearch_replace_status"..tid..id)
       )
-      thread.create(
+      table.insert(replace_workers, thread.create(
         "psrpool"..tid..id, files_replace_thread,
         tid, id,
         self.replace_text:get_text(),
         self.regex_toggle:is_toggled() and self.find_text:get_text(),
         self.sensitive_toggle:is_toggled()
-      )
+      ))
     end
 
     -- populate all replace channels by distributing the load
@@ -973,6 +977,10 @@ function ResultsView:begin_replace()
       c = c + 1
       core.redraw = true
       if c % 100 == 0 then coroutine.yield() end
+    end
+
+    for _, worker in ipairs(replace_workers) do
+      worker:wait()
     end
 
     self.results_list.replacement = nil
