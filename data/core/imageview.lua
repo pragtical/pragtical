@@ -152,14 +152,12 @@ function ImageView:scale_image()
   end
 
   if needs_scaling then
-    if self.type ~= "svg" then
+    if self.zoom_scale == 1 then
+      self.image_scaled = self.image
+    elseif self.type ~= "svg" then
       self.image_scaled = self.image:scaled(new_w, new_h, "nearest")
     else
-      if self.zoom_scale ~= 1 then
-        self.image_scaled = canvas.load_svg_image(self.path, new_w, new_h)
-      else
-        self.image_scaled = self.image
-      end
+      self.image_scaled = canvas.load_svg_image(self.path, new_w, new_h)
     end
   end
 
