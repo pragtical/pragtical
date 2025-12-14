@@ -101,6 +101,14 @@ else
     # Check dependencies
     bash_exe = find_program('bash')
     cmake_exe = find_program('cmake')
+    git_command = find_program('git')
+
+    # Fetch git submodules
+    message('Cloning git submodules...')
+    run_command(git_command,
+        'submodule', 'update', '--init', '--recursive', '--depth', '1',
+        check : false
+    )
 
     env = environment()
 
