@@ -27,6 +27,17 @@ function canvas.new(width, height, color, transparent) end
 function canvas.load_image(path) end
 
 ---
+---Loads an svg image with the specified width and height.
+---
+---@param path string
+---@param width integer
+---@param height integer
+---
+---@return canvas? canvas
+---@return string? errmsg
+function canvas.load_svg_image(path, width, height) end
+
+---
 ---Returns the Canvas size.
 ---
 ---@return integer w

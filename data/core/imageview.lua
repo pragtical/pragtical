@@ -91,6 +91,8 @@ end
 ---@return string? errmsg
 function ImageView:load(path)
   if not path or not io.open(path, "r") then return false, "invalid path" end
+  local _
+  _, self.type = ImageView.is_supported(path)
   self.path = path
   self.image, self.errmsg = canvas.load_image(path)
   if self.image then
@@ -119,8 +121,6 @@ function ImageView:scale_image()
       self.zoom_scale = 1
     else
       self.zoom_scale = math.min(self.size.x / img_w, self.size.y / img_h)
-      self.zoom_scale = tonumber(string.format("%.2f", self.zoom_scale))
-        or self.zoom_scale
       self.zoom_scale = self.zoom_scale - 0.01
       if self.zoom_scale > 1 then
         self.zoom_scale = 1
@@ -138,6 +138,9 @@ function ImageView:scale_image()
     self.zoom_scale = max_allowed_scale
   end
 
+  self.zoom_scale = tonumber(string.format("%.2f", self.zoom_scale))
+    or self.zoom_scale
+
   local new_w = math.floor(img_w * self.zoom_scale)
   local new_h = math.floor(img_h * self.zoom_scale)
   local needs_scaling = true
@@ -149,7 +152,15 @@ function ImageView:scale_image()
   end
 
   if needs_scaling then
-    self.image_scaled = self.image:scaled(new_w, new_h, "nearest")
+    if self.type ~= "svg" then
+      self.image_scaled = self.image:scaled(new_w, new_h, "nearest")
+    else
+      if self.zoom_scale ~= 1 then
+        self.image_scaled = canvas.load_svg_image(self.path, new_w, new_h)
+      else
+        self.image_scaled = self.image
+      end
+    end
   end
 
   if
