@@ -70,6 +70,38 @@ error:
 }
 
 
+static int f_load_svg_image(lua_State *L) {
+  size_t len;
+  const char *path = luaL_checklstring(L, 1, &len);
+  const int w = luaL_checkinteger(L, 2);
+  const int h = luaL_checkinteger(L, 3);
+  SDL_IOStream *file = SDL_IOFromFile(path, "r");
+  SDL_Surface *surface = IMG_LoadSizedSVG_IO(file, w, h);
+  if (!surface) goto error;
+
+  if (surface->format != SDL_PIXELFORMAT_RGBA32) {
+    SDL_Surface *new = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surface);
+    if (!new) goto error;
+    surface = new;
+  }
+
+  RenCache *canvas = lua_newuserdata(L, sizeof(RenCache));
+  luaL_setmetatable(L, API_TYPE_CANVAS);
+  rencache_init(canvas);
+  canvas->rensurface.surface = surface;
+  canvas->rensurface.scale_x = 1;
+  canvas->rensurface.scale_y = 1;
+  rencache_begin_frame(canvas);
+  return 1;
+
+error:
+  lua_pushnil(L);
+  lua_pushstring(L, SDL_GetError());
+  return 2;
+}
+
+
 static int f_get_size(lua_State *L) {
   RenCache *canvas = luaL_checkudata(L, 1, API_TYPE_CANVAS);
   lua_pushinteger(L, canvas->rensurface.surface->w);
@@ -402,9 +434,10 @@ static const luaL_Reg canvasLib[] = {
 };
 
 static const luaL_Reg lib[] = {
-  { "new",        f_new        },
-  { "load_image", f_load_image },
-  { NULL,         NULL         }
+  { "new",            f_new            },
+  { "load_image",     f_load_image     },
+  { "load_svg_image", f_load_svg_image },
+  { NULL,             NULL             }
 };
 
 int luaopen_canvas(lua_State *L) {
