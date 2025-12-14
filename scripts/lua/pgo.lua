@@ -111,14 +111,20 @@ end
 ---@param cwd? string
 ---@return boolean success
 ---@return string? errmsg
-local function fetch(url, async, callback, cwd)
+local function fetch(url, async, callback, cwd, extra_curl_flags)
   async = type(async) == "nil" and true or async
   cwd = cwd or system.getcwd()
 
-  local curl, errmsg = process.start(
-    { "curl", "--insecure", "-LO", url },
-    { cwd = cwd }
-  )
+  local flags = { "curl", "--insecure" }
+  if extra_curl_flags then
+    for _, flag in ipairs(extra_curl_flags) do
+      table.insert(flags, flag)
+    end
+  end
+  table.insert(flags, "-LO")
+  table.insert(flags, url)
+
+  local curl, errmsg = process.start(flags, { cwd = cwd })
 
   local success
 
@@ -549,24 +555,25 @@ core.add_background_thread(function()
 
   config.draw_stats = "uncapped"
 
-  -- disable this for now
-  -- core.log("Downloading sqlite3.c using curl thru process api")
-  -- coroutine.yield(1)
-  -- if
-  --   fetch(
-  --     "https://github.com/jeffboody/libsqlite3/raw/refs/heads/master/sqlite3.c",
-  --     false,
-  --     function(percent, total, dowloaded, speed, left)
-  --       core.log(
-  --         "percent: %s, total: %s, downloaded: %s, speed: %s, left: %s",
-  --         percent, total, dowloaded, speed, left
-  --       )
-  --       coroutine.yield()
-  --     end
-  --   )
-  -- then
-  --   os.remove(sqlite_path)
-  -- end
+  core.log("Downloading sqlite3.c using curl thru process api")
+  coroutine.yield(1)
+  if
+    fetch(
+      "https://github.com/jeffboody/libsqlite3/raw/refs/heads/master/sqlite3.c",
+      false,
+      function(percent, total, dowloaded, speed, left)
+        core.log(
+          "percent: %s, total: %s, downloaded: %s, speed: %s, left: %s",
+          percent, total, dowloaded, speed, left
+        )
+        coroutine.yield()
+      end,
+      nil,
+      {"--limit-rate", "400k"}
+    )
+  then
+    os.remove(sqlite_path)
+  end
 
   core.log("Generating stress HTML file...")
   coroutine.yield()
