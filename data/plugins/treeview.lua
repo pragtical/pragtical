@@ -310,6 +310,8 @@ function TreeView:update()
     self.init_size = false
   else
     self:move_towards(self.size, "x", dest, nil, "treeview")
+    -- round to allow constant positioning of slibing elements on resize
+    self.size.x = common.round(self.size.x)
   end
 
   if self.size.x == 0 or self.size.y == 0 or not self.visible then return end
