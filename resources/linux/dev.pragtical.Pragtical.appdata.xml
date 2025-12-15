@@ -11,7 +11,7 @@
   <description>
     <p>
       Pragtical is a text editor and development tool written mainly in Lua,
-      on top of a minimalistic C core using the SDL2 graphics library.
+      on top of a minimalistic C core using the SDL3 graphics library.
     </p>
   </description>
 
@@ -29,6 +29,6 @@
   </provides>
 
   <releases>
-    <release version="3.7.1" date="2025-11-11" />
+    <release version="3.8.0" date="2025-12-14" />
   </releases>
 </component>

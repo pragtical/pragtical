@@ -1,5 +1,227 @@
 # Changes Log
 
+## [3.8.0] - 2025-12-14
+
+### New Features
+
+* Add a built-in color picker
+  ([#375](https://github.com/pragtical/pragtical/pull/375))
+
+  - Document new renwindow.get_color
+    ([c60ee0d9](https://github.com/pragtical/pragtical/commit/c60ee0d990e9b03e8fa63210f159f7b14f95b139))
+
+  - Use proper add keymap function on rootpickcolor plugin
+    ([71af13e6](https://github.com/pragtical/pragtical/commit/71af13e6949e8c88ad31062ec5f72a4619128d76))
+
+  - rootpickcolor: forgot to properly return on_mouse_pressed
+    ([2c1a6944](https://github.com/pragtical/pragtical/commit/2c1a6944544248f02b4651d50d419b57f646b45c))
+
+* Live refresh and coloring for projectsearch plugin
+  ([#377](https://github.com/pragtical/pragtical/pull/377))
+
+* Image Viewer (directly added on merged canvas support)
+  ([#370](https://github.com/pragtical/pragtical/pull/370))
+
+### Core Changes
+
+* Generalize the rendering cache system
+  ([#368](https://github.com/pragtical/pragtical/pull/368))
+
+* Merged: Add support for drawing polygons (adapted to generalized rencache)
+  ([#369](https://github.com/pragtical/pragtical/pull/369))
+
+* Merged: canvas (adapted to generalized rencache, added poly draw, additional image loading support and image viewer)
+  ([#370](https://github.com/pragtical/pragtical/pull/370))
+
+  - Add the option to change background mode of images
+    ([#371](https://github.com/pragtical/pragtical/pull/371))
+
+  - ImageView: keep scale at 1 if width less than view
+    ([e9c305ed](https://github.com/pragtical/pragtical/commit/e9c305ed9cca34c15701ea882c5b1b4db230f482))
+
+  - ImageView: rescale svg images directly from source
+    ([#383](https://github.com/pragtical/pragtical/pull/383))
+
+### Fixes
+
+* Fix contextmenu triggered on window manager resize
+  ([#356](https://github.com/pragtical/pragtical/pull/356))
+
+* Update config.mouse_wheel_scroll on scale changes
+  ([#361](https://github.com/pragtical/pragtical/pull/361))
+
+* Scale initialization fixes
+  ([#362](https://github.com/pragtical/pragtical/pull/362))
+
+* Fix equal float comparison returning false
+  ([#363](https://github.com/pragtical/pragtical/pull/363))
+
+* Replace settings ui scroll wheel set with on_apply
+  ([eef5ef1e](https://github.com/pragtical/pragtical/commit/eef5ef1eae7bc75d7a1a8dae274a0316402ffc37))
+
+* Fix EmptyView AKA Welcome Screen flashing
+  ([#366](https://github.com/pragtical/pragtical/pull/366))
+
+* Fix the statusview tooltips jumpy text
+  ([#367](https://github.com/pragtical/pragtical/pull/367))
+
+* Fix treeview new file/folder regression (fix for inherited changes)
+  ([cb06c0fd](https://github.com/pragtical/pragtical/commit/cb06c0fd86e050c8d2d8283e12c3c58ff848be98))
+
+* Remove unneccesary save when loading project module (fix for inherited changes)
+  ([fe217606](https://github.com/pragtical/pragtical/commit/fe217606ae0cca636405b357982d8290642e1801))
+
+* Fixes to threads and channels code
+  ([#376](https://github.com/pragtical/pragtical/pull/376))
+
+* Fix inconsistency on toolbarview dest_size
+  ([#378](https://github.com/pragtical/pragtical/pull/378))
+
+* Fix system.list_dir to work with / (sdl3 port regression)
+  ([#379](https://github.com/pragtical/pragtical/pull/379))
+
+* Guard against null windows on draw operations
+  ([#381](https://github.com/pragtical/pragtical/pull/381))
+
+* Fix support for larger posix process reading (fix for inherited changes and real cause of PGO CI failures)
+  ([73b60926](https://github.com/pragtical/pragtical/commit/73b609264bb211c75ef94b4b9da6377df81158d6))
+
+* TreeView: round size.x on move_towards
+  ([#384](https://github.com/pragtical/pragtical/pull/384))
+
+### Enhancements
+
+* Add option to show repainted areas
+  ([#358](https://github.com/pragtical/pragtical/pull/358))
+
+* Better out of box smoothness and responsiveness
+  ([#357](https://github.com/pragtical/pragtical/pull/357))
+
+### Widgets
+
+* Properly return from updates and draws
+  ([8743ec6f](https://github.com/pragtical/widget/commit/8743ec6f9678317b12309ff82af2a4406387aba4))
+
+* keep list properly resized on selectbox
+  ([abad16b2](https://github.com/pragtical/widget/commit/abad16b2de043e2173ce9419db6485189e0cd412))
+
+* Ensure draw is called after a proper update
+  ([dc3bdd3a](https://github.com/pragtical/widget/commit/dc3bdd3a3c56ffb6dc5266386c7f0c10519c8974))
+
+* SearchReplaceList: allow syntax highlighting on search results
+  ([623b88be](https://github.com/pragtical/widget/commit/623b88be75aefef8e291721ba4fe549459cba398))
+
+* TextBox: simplified placeholder logic
+  ([e8ffacbf](https://github.com/pragtical/widget/commit/e8ffacbfaeba93361d5f46d72de0065da4d35bc3))
+
+* SearchReplaceList: correction to skip draw logic
+  ([ba3bde34](https://github.com/pragtical/widget/commit/ba3bde34589f0d703b99db7ec6fdc6fabd96af6d))
+
+### Build System
+
+* Fix pgo stresser getting stalled on CI (the endeavour)
+  ([b044ce4c](https://github.com/pragtical/pragtical/commit/b044ce4cc806ddb01a86fb19b395475c8a01cc43))
+
+  - Other changes to prevent pgo from stalling
+    ([64472f48](https://github.com/pragtical/pragtical/commit/64472f4850d55c73e4af8e30c25363b80313824c))
+
+  - Disable system sleep and poll_event to try fix CI stall
+    ([a8597926](https://github.com/pragtical/pragtical/commit/a8597926ec05977813526488bfbfe19412fec168))
+
+  - Timeout pgo stress to prevent stall
+    ([eac0b44b](https://github.com/pragtical/pragtical/commit/eac0b44b408eee7675e1666f2ae0a30c63b523ba))
+
+  - Remove ci lua system overrides and disable pgo sqlite download
+    ([f05047a0](https://github.com/pragtical/pragtical/commit/f05047a050c28b0bb13c264043a3cfd062ed6ca7))
+
+  - Restore pgo sqlite download stress
+    ([86b89ae8](https://github.com/pragtical/pragtical/commit/86b89ae8c3a79701ab51f420771f11f0f1c31544))
+
+  - Real cause of PGO stalls renferenced on fixes section
+   ([73b60926](https://github.com/pragtical/pragtical/commit/73b609264bb211c75ef94b4b9da6377df81158d6))
+
+* Fixes to rolling and release CI linux build
+  ([#372](https://github.com/pragtical/pragtical/pull/372))
+
+* Disable uchardet tests compilation
+  ([#374](https://github.com/pragtical/pragtical/pull/374))
+
+*  Update sdl to v3.2.28
+  ([#373](https://github.com/pragtical/pragtical/pull/373))
+
+* Update macOS x86 runner
+  ([66c75376](https://github.com/pragtical/pragtical/commit/66c75376142a6440112ac4eabaeebaa83c5c693b))
+
+* Initial support for [muon](https://github.com/muon-build/muon) build
+  ([#380](https://github.com/pragtical/pragtical/pull/380))
+
+* Fix luajit crosscompilation for muon
+  ([#382](https://github.com/pragtical/pragtical/pull/382))
+
+* PPM subproject: download git submodules on demand
+  ([#385](https://github.com/pragtical/pragtical/pull/385))
+
+### Miscelaneous
+
+* Keep icon svg segments on repo
+  ([16539334](https://github.com/pragtical/pragtical/commit/16539334889e696ca5e1db9486fa6246661dea75))
+
+* GIT ignore subprojects/.wraplock
+  ([b5017edc](https://github.com/pragtical/pragtical/commit/b5017edcdd239baea1ab0b2ecdd775b011bc5a72))
+
+* Remove leftover print statement (from inherited changes)
+  ([2b1c750a](https://github.com/pragtical/pragtical/commit/2b1c750a270da3c20301c4c36c6dfd7e42d899f2))
+
+### Lite XL Inherited Changes (with corrections and improvements)
+
+* Fixed timeout in process:wait; comparison
+  ([5a36b3f0](https://github.com/pragtical/pragtical/commit/5a36b3f07adeb3d5c0629c1f073c5931a471c355))
+
+* system: update window scale on scale changes
+  ([#2081](https://github.com/lite-xl/lite-xl/pull/2081))
+
+* Improve folder drag-and-drop experience
+  ([#1830](https://github.com/lite-xl/lite-xl/pull/1830))
+
+* Resolved some type-complaints that are detected by LuaLS
+  ([#2120](https://github.com/lite-xl/lite-xl/pull/2120))
+
+* Backporting ancient fix to allow for large amounts of reading.
+  ([#1547](https://github.com/lite-xl/lite-xl/pull/1547))
+
+* Update renwindow.lua
+  ([#2150](https://github.com/lite-xl/lite-xl/pull/2150))
+
+* Adjusted parameter order and docs for renwindow create.
+  ([#2155](https://github.com/lite-xl/lite-xl/pull/2155))
+
+* Fix wrong suggestion when creating file or folder in treeview
+  ([#2183](https://github.com/lite-xl/lite-xl/pull/2183))
+
+* fix(doc): don't modify doc with empty clipboard paste
+  ([#2185](https://github.com/lite-xl/lite-xl/pull/2185))
+
+* fix(treeview): avoid crashing if creating a new file errors out
+  ([#2184](https://github.com/lite-xl/lite-xl/pull/2184))
+
+* Rearrange Plugin Loading and SDL Initialization (#1881)
+  ([#1881](https://github.com/lite-xl/lite-xl/pull/1881))
+
+* Added generic storage system and use on workspace plugin
+  ([#1929](https://github.com/lite-xl/lite-xl/pull/1929))
+
+* feat: add SDL file picker
+  ([#2072](https://github.com/lite-xl/lite-xl/pull/2072))
+
+* Allow for negative priority numbers.
+  ([7d636075](https://github.com/pragtical/pragtical/commit/7d636075497dfbfa05fa2a9c89f018ddcbfdee29))
+
+* fix: make get_custom_event_callback_by_name return NULL on invalid event name
+  ([#2154](https://github.com/lite-xl/lite-xl/pull/2154))
+
+* Added in check for the blink timer so that we don't needlessly redraw
+  ([#2053](https://github.com/lite-xl/lite-xl/pull/2053))
+
 ## [3.7.1] - 2025-11-11
 
 ### Fixes
@@ -2808,6 +3030,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.0]: https://github.com/pragtical/pragtical/releases/tag/v3.8.0
 [3.7.1]: https://github.com/pragtical/pragtical/releases/tag/v3.7.1
 [3.7.0]: https://github.com/pragtical/pragtical/releases/tag/v3.7.0
 [3.6.0]: https://github.com/pragtical/pragtical/releases/tag/v3.6.0
