@@ -77,6 +77,7 @@ static int f_load_svg_image(lua_State *L) {
   const int h = luaL_checkinteger(L, 3);
   SDL_IOStream *file = SDL_IOFromFile(path, "r");
   SDL_Surface *surface = IMG_LoadSizedSVG_IO(file, w, h);
+  SDL_CloseIO(file);
   if (!surface) goto error;
 
   if (surface->format != SDL_PIXELFORMAT_RGBA32) {
