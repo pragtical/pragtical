@@ -145,6 +145,23 @@ function canvas:draw_text(font, text, x, y, color, tab_data) end
 function canvas:draw_canvas(canvas, x, y, blend) end
 
 ---
+---Draws a filled polygon, consisting of curves and points.
+---The polygon is filled using the non-zero winding rule in clockwise direction.
+---
+---The function returns the control box of the polygon,
+---which is greater than or equal to the dimensions of the rendered polygon.
+---It is not guaranteed to the exact dimension of the rendered polygon.
+---
+---@param poly renderer.poly_object[] the lines or curves to draw, up to 65535 points.
+---@param color renderer.color
+---
+---@return number x the X coordinate of top left corner of the control box.
+---@return number y the Y coordinate of the top left corner of the control box.
+---@return number w the width of the control box.
+---@return number h the height of the control box.
+function canvas:draw_poly(poly, color) end
+
+---
 ---Explicitly render all the draw commands sent to the canvas so far
 ---without having to render the canvas into a window first.
 ---
