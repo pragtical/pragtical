@@ -28,13 +28,10 @@ if not jit or not LUAJIT or not jit.status() then
 end
 
 jit.opt.start(
-  -- Double the defaults.
-  "maxtrace=2000", "maxrecord=8000",
-  -- Reduced to jit earlier
-  "hotloop=10", "hotexit=2",
-  -- Somewhat arbitrary value. Needs to be higher than the combined sizes below,
-  -- and higher than the default (512) because that's already too low.
-  "maxmcode=16384"
+  "maxtrace=1500",
+  "maxrecord=6000",
+  "maxirconst=1000",
+  "maxmcode=32768"
 )
 
 -- ffi overrides for faster rendering calls
