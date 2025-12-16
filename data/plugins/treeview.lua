@@ -304,14 +304,15 @@ end
 
 function TreeView:update()
   -- update width
-  local dest = self.visible and self.target_size or 0
+  local dest = self.visible and common.round(self.target_size) or 0
   if self.init_size then
     self.size.x = dest
     self.init_size = false
-  else
+  elseif self.size.x ~= dest then
     self:move_towards(self.size, "x", dest, nil, "treeview")
     -- round to allow constant positioning of slibing elements on resize
     self.size.x = common.round(self.size.x)
+    if math.abs(dest - self.size.x) < 2 then self.size.x = dest end
   end
 
   if self.size.x == 0 or self.size.y == 0 or not self.visible then return end
