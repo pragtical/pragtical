@@ -1,5 +1,15 @@
 # Changes Log
 
+## [3.8.1] - 2025-12-16
+
+### Fixes
+
+* Fix cpu usage due to treeview plugin move_towards
+  ([#387](https://github.com/pragtical/pragtical/pull/387))
+
+* Try to make JIT more predictable, less flushing
+  ([#388](https://github.com/pragtical/pragtical/pull/388))
+
 ## [3.8.0] - 2025-12-14
 
 ### New Features
@@ -3030,6 +3040,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.1]: https://github.com/pragtical/pragtical/releases/tag/v3.8.1
 [3.8.0]: https://github.com/pragtical/pragtical/releases/tag/v3.8.0
 [3.7.1]: https://github.com/pragtical/pragtical/releases/tag/v3.7.1
 [3.7.0]: https://github.com/pragtical/pragtical/releases/tag/v3.7.0
