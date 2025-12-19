@@ -1,0 +1,6 @@
+option(
+    'amalg',
+    type: 'boolean',
+    value: true,
+    description: 'Perform amalgamated build of LuaJIT.',
+)

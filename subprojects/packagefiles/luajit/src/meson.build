@@ -118,5 +118,10 @@ ljvm = custom_target(ljvm_bout,
                      command: [buildvm, '-m', ljvm_mode, '-o', '@OUTPUT@'],
                      output: ljvm_bout)
 
-luajit_lib = static_library('luajit', ljlib_src, ljcore_src, genheaders, ljvm,
-                            dependencies: system_deps)
+if get_option('amalg')
+    luajit_lib = static_library('luajit', 'ljamalg.c', 'utf8_wrappers.c', genheaders, ljvm,
+                                dependencies: system_deps)
+else
+    luajit_lib = static_library('luajit', ljlib_src, ljcore_src, genheaders, ljvm,
+                                dependencies: system_deps)
+endif
