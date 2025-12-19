@@ -200,6 +200,7 @@ main() {
     $portable \
     $pgo \
     $lto \
+    -Doptimization=3 \
     "${build_dir}"
 
   meson compile -C "${build_dir}"
