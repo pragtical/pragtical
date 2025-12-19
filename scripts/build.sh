@@ -206,7 +206,6 @@ main() {
 
   if [[ $pgo != "" ]]; then
     echo "Generating Profiler Guided Optimizations data..."
-    export LLVM_PROFILE_FILE=default.profraw
     export SDL_VIDEO_DRIVER="dummy"
     if [[ $platform == "macos" ]]; then
       gtimeout 120s ./scripts/run-local -debug "${build_dir}" run -n scripts/lua/pgo.lua || true
@@ -214,17 +213,16 @@ main() {
       timeout 120s ./scripts/run-local -debug "${build_dir}" run -n scripts/lua/pgo.lua || true
     fi
     # in case of clang handle the profile data appropriately
-    if [ -e "default.profraw" ]; then
+    if ls scripts/lua | grep default ; then
       if [[ $platform == "macos" ]]; then
-        xcrun llvm-profdata merge -output=default.profdata default.profraw
+        xcrun llvm-profdata merge -output="${build_dir}"/default.profdata scripts/lua/default_* "${build_dir}"/default_*
       else
         if command -v llvm-profdata-14 ; then
-          llvm-profdata-14 merge -output=default.profdata default.profraw
+          llvm-profdata-14 merge -output="${build_dir}"/default.profdata scripts/lua/default_* "${build_dir}"/default_*
         else
-          llvm-profdata merge -output=default.profdata default.profraw
+          llvm-profdata merge -output="${build_dir}"/default.profdata scripts/lua/default_* "${build_dir}"/default_*
         fi
       fi
-      mv default.profdata "${build_dir}"
     fi
     meson configure -Db_pgo=use "${build_dir}"
     meson compile -C "${build_dir}"
