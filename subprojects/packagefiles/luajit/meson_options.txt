@@ -4,3 +4,10 @@ option(
     value: true,
     description: 'Perform amalgamated build of LuaJIT.',
 )
+
+option(
+  'data_dir',
+  type : 'string',
+  value : '/',
+  description: 'Data directory for installation of LuaJIT lua modules.'
+)

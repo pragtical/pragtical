@@ -25,6 +25,23 @@ if host_machine.system() == 'windows'
 endif
 
 #===============================================================================
+# Configure output directories
+#===============================================================================
+if get_option('portable') or host_machine.system() == 'windows'
+    pragtical_bindir = '/'
+    pragtical_docdir = '/doc'
+    pragtical_datadir = '/data'
+elif get_option('bundle') and host_machine.system() == 'darwin'
+    pragtical_bindir = 'Contents/MacOS'
+    pragtical_docdir = 'Contents/Resources'
+    pragtical_datadir = 'Contents/Resources'
+else
+    pragtical_bindir = 'bin'
+    pragtical_docdir = 'share/doc/pragtical'
+    pragtical_datadir = 'share/pragtical'
+endif
+
+#===============================================================================
 # System dependency settings
 #===============================================================================
 use_system_lua = get_option('use_system_lua')
@@ -37,7 +54,7 @@ if get_option('jit')
     if not use_system_lua
         luajit_dep = subproject(
             'luajit',
-            default_options: ['default_library=static']
+            default_options: ['default_library=static', 'data_dir='+pragtical_datadir]
         ).get_variable('luajit_dep')
     else
         luajit_dep = dependency('luajit', required : false,
@@ -252,9 +269,6 @@ endif
 # Install Configuration
 #===============================================================================
 if get_option('portable') or host_machine.system() == 'windows'
-    pragtical_bindir = '/'
-    pragtical_docdir = '/doc'
-    pragtical_datadir = '/data'
     if host_machine.system() == 'windows'
         configure_file(
             input: 'resources/windows/pragtical.exe.manifest.in',
@@ -267,9 +281,6 @@ if get_option('portable') or host_machine.system() == 'windows'
     )
 elif get_option('bundle') and host_machine.system() == 'darwin'
     pragtical_cargs += '-DMACOS_USE_BUNDLE'
-    pragtical_bindir = 'Contents/MacOS'
-    pragtical_docdir = 'Contents/Resources'
-    pragtical_datadir = 'Contents/Resources'
     conf_data.set(
         'CURRENT_YEAR',
         run_command('date', '+%Y', capture: true).stdout().strip()
@@ -283,9 +294,6 @@ elif get_option('bundle') and host_machine.system() == 'darwin'
         install_dir : 'Contents'
     )
 else
-    pragtical_bindir = 'bin'
-    pragtical_docdir = 'share/doc/pragtical'
-    pragtical_datadir = 'share/pragtical'
     if host_machine.system() == 'linux'
         install_data('resources/icons/logo.svg',
             install_dir : 'share/icons/hicolor/scalable/apps',
