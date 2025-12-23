@@ -14,7 +14,7 @@ function Object:new() end
 ---Create a new class that inherits from this one.
 ---Returns a new class with this class as its parent.
 ---Example: `local MyClass = Object:extend()`
----@return core.object New class table
+---@return core.object cls The new class table
 function Object:extend()
   local cls = {}
   for k, v in pairs(self) do
@@ -32,7 +32,7 @@ end
 ---Use this for strict type matching.
 ---Example: `view:is(DocView)` returns true only if view is a DocView, not a subclass
 ---@param T any Class to check against
----@return boolean True if object is exactly type T
+---@return boolean is_exact True if object is exactly type T
 function Object:is(T)
   return getmetatable(self) == T
 end
@@ -41,7 +41,7 @@ end
 ---Inverse of is() - checks if T is an instance of self.
 ---Example: `DocView:is_class_of(obj)` checks if obj is exactly a DocView
 ---@param T any Object to check
----@return boolean True if T is exactly an instance of this class
+---@return boolean is_instance True if T is exactly an instance of this class
 function Object:is_class_of(T)
   return getmetatable(T) == self
 end
@@ -50,7 +50,7 @@ end
 ---Use this to check class hierarchy.
 ---Example: `view:extends(View)` returns true for View and all subclasses
 ---@param T any Class to check inheritance from
----@return boolean True if object is T or inherits from T
+---@return boolean extends True if object is T or inherits from T
 function Object:extends(T)
   local mt = getmetatable(self)
   while mt do
@@ -66,7 +66,7 @@ end
 ---Inverse of extends() - checks if T is a subclass of self.
 ---Example: `View:is_extended_by(DocView)` checks if DocView inherits from View
 ---@param T any Object or class to check
----@return boolean True if T inherits from this class
+---@return boolean is_extended True if T inherits from this class
 function Object:is_extended_by(T)
   local mt = getmetatable(T)
   while mt do
@@ -83,7 +83,7 @@ end
 ---Get string representation of the object (for debugging/logging).
 ---Override in subclasses to provide meaningful names.
 ---Example: `function MyClass:__tostring() return "MyClass" end`
----@return string String representation (default: "Object")
+---@return string str String representation (default: "Object")
 function Object:__tostring()
   return "Object"
 end
@@ -91,7 +91,7 @@ end
 ---Metamethod allowing class to be called like a constructor.
 ---Enables syntax: `local obj = MyClass(args)` instead of `MyClass:new(args)`
 ---Automatically creates instance and calls new() with provided arguments.
----@return core.object New instance of the class
+---@return core.object obj The new instance of the class
 function Object:__call(...)
   local obj = setmetatable({}, self)
   obj:new(...)
