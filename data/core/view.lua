@@ -113,7 +113,7 @@ end
 
 ---Get the name displayed in the view's tab.
 ---Override to show document name, file path, etc.
----@return string
+---@return string name
 function View:get_name()
   return "---"
 end
@@ -121,14 +121,14 @@ end
 
 ---Get the total scrollable height of the view's content.
 ---Used by scrollbar to calculate thumb size and position.
----@return number Height in pixels (default: infinite)
+---@return number height Height in pixels (default: infinite)
 function View:get_scrollable_size()
   return math.huge
 end
 
 ---Get the total scrollable width of the view's content.
 ---Used by horizontal scrollbar.
----@return number Width in pixels (default: 0, no horizontal scroll)
+---@return number width Width in pixels (default: 0, no horizontal scroll)
 function View:get_h_scrollable_size()
   return 0
 end
@@ -144,21 +144,21 @@ end
 ---Useful for determining cursor style or handling clicks.
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
----@return boolean True if point is over vertical or horizontal scrollbar
+---@return boolean overlaps True if point is over vertical or horizontal scrollbar
 function View:scrollbar_overlaps_point(x, y)
   return not (not (self.v_scrollbar:overlaps(x, y) or self.h_scrollbar:overlaps(x, y)))
 end
 
 
 ---Check if user is currently dragging either scrollbar.
----@return boolean True if scrollbar drag is in progress
+---@return boolean dragging True if scrollbar drag is in progress
 function View:scrollbar_dragging()
   return self.v_scrollbar.dragging or self.h_scrollbar.dragging
 end
 
 
 ---Check if mouse is hovering over either scrollbar track.
----@return boolean True if mouse is over scrollbar
+---@return boolean hovering True if mouse is over scrollbar
 function View:scrollbar_hovering()
   return self.v_scrollbar.hovering.track or self.h_scrollbar.hovering.track
 end
@@ -171,7 +171,7 @@ end
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
 ---@param clicks integer Number of consecutive clicks (configurable with config.max_clicks)
----@return boolean? True to consume event, false/nil to propagate
+---@return boolean? consumed True to consume event, false/nil to propagate
 function View:on_mouse_pressed(button, x, y, clicks)
   if not self.scrollable then return end
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
@@ -256,7 +256,7 @@ end
 ---@param filename string Absolute path to dropped file
 ---@param x number Screen x where file was dropped
 ---@param y number Screen y where file was dropped
----@return boolean True to consume event, false to propagate
+---@return boolean consumed True to consume event, false to propagate
 function View:on_file_dropped(filename, x, y)
   return false
 end
@@ -284,7 +284,7 @@ end
 ---Override for custom scroll behavior. Base implementation does nothing.
 ---@param y number Vertical scroll delta; positive is "up"
 ---@param x number Horizontal scroll delta; positive is "left"
----@return boolean? True to consume event
+---@return boolean? consumed True to consume event
 function View:on_mouse_wheel(y, x)
   -- no-op
 end

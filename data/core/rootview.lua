@@ -50,7 +50,7 @@ end
 
 ---Get the node containing the currently active view.
 ---Falls back to primary node if active view not found.
----@return core.node Node containing active view or primary node
+---@return core.node node Node containing active view or primary node
 function RootView:get_active_node()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
@@ -58,7 +58,7 @@ function RootView:get_active_node()
 end
 
 
----@return core.node
+---@return core.node node
 local function get_primary_node(node)
   if node.is_primary_node then
     return node
@@ -72,7 +72,7 @@ end
 ---Get the active node, ensuring it's not locked.
 ---If active node is locked, switches to primary node instead.
 ---Use this when adding new views to ensure they go to an editable node.
----@return core.node Unlocked node suitable for adding views
+---@return core.node node Unlocked node suitable for adding views
 function RootView:get_active_node_default()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
@@ -88,14 +88,14 @@ end
 
 ---Get the primary node (main document editing area).
 ---Primary node is where documents are opened by default.
----@return core.node The primary node
+---@return core.node node The primary node
 function RootView:get_primary_node()
   return get_primary_node(self.root_node)
 end
 
 
 ---@param node core.node
----@return core.node
+---@return core.node node
 local function select_next_primary_node(node)
   if node.is_primary_node then return end
   if node.type ~= "leaf" then
@@ -111,7 +111,7 @@ end
 
 ---Select a new primary node from available unlocked nodes.
 ---Used when closing the current primary node.
----@return core.node Next available unlocked node to be primary
+---@return core.node node Next available unlocked node to be primary
 function RootView:select_next_primary_node()
   return select_next_primary_node(self.root_node)
 end
@@ -121,7 +121,7 @@ end
 ---If document is already open, switches to that view instead.
 ---Creates a new DocView and adds it as a tab in the active node.
 ---@param doc core.doc Document to open
----@return core.docview The view displaying the document
+---@return core.docview view The view displaying the document
 function RootView:open_doc(doc)
   local node = self:get_active_node_default()
   for i, view in ipairs(node.views) do
@@ -187,7 +187,7 @@ end
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
 ---@param clicks integer Number of clicks
----@return boolean True if event was handled
+---@return boolean handled True if event was handled
 function RootView:on_mouse_pressed(button, x, y, clicks)
   -- If there is a grab, release it first
   if self.grab then
@@ -415,7 +415,7 @@ end
 ---@param filename string Absolute path to dropped file/folder
 ---@param x number Screen x where dropped
 ---@param y number Screen y where dropped
----@return boolean True if event was handled
+---@return boolean handled True if event was handled
 function RootView:on_file_dropped(filename, x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
   local result = node and node.active_view:on_file_dropped(filename, x, y)
