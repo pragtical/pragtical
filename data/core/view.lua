@@ -167,10 +167,10 @@ end
 ---Handle mouse button press events.
 ---Override to handle clicks. Return true to consume event and prevent propagation.
 ---Base implementation handles scrollbar clicks.
----@param button core.view.mousebutton "left" or "right"
+---@param button core.view.mousebutton
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
----@param clicks integer Number of clicks (1=single, 2=double, 3=triple)
+---@param clicks integer Number of consecutive clicks (configurable with config.max_clicks)
 ---@return boolean|nil True to consume event, false/nil to propagate
 function View:on_mouse_pressed(button, x, y, clicks)
   if not self.scrollable then return end

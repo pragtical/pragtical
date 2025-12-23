@@ -151,7 +151,7 @@ end
 ---even when the mouse moves outside the view's bounds.
 ---Only one grab can be active per button at a time.
 ---Common use: drag operations, scrollbar dragging, text selection.
----@param button core.view.mousebutton Button to grab ("left" or "right")
+---@param button core.view.mousebutton Button to grab
 ---@param view core.view View that should receive mouse events
 function RootView:grab_mouse(button, view)
   assert(self.grab == nil)
