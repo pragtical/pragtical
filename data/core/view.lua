@@ -171,7 +171,7 @@ end
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
 ---@param clicks integer Number of consecutive clicks (configurable with config.max_clicks)
----@return boolean|nil True to consume event, false/nil to propagate
+---@return boolean? True to consume event, false/nil to propagate
 function View:on_mouse_pressed(button, x, y, clicks)
   if not self.scrollable then return end
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
@@ -284,7 +284,7 @@ end
 ---Override for custom scroll behavior. Base implementation does nothing.
 ---@param y number Vertical scroll delta; positive is "up"
 ---@param x number Horizontal scroll delta; positive is "left"
----@return boolean|nil True to capture event
+---@return boolean? True to consume event
 function View:on_mouse_wheel(y, x)
   -- no-op
 end
