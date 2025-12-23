@@ -5,15 +5,15 @@
 local Object = {}
 Object.__index = Object
 
---- Constructor called when creating new instances.
---- Override in subclasses to initialize state. Always call super first:
---- `MyClass.super.new(self)`
---- Can be overridden by child objects to implement a constructor.
+---Constructor called when creating new instances.
+---Override in subclasses to initialize state. Always call super first:
+---`MyClass.super.new(self)`
+---Can be overridden by child objects to implement a constructor.
 function Object:new() end
 
---- Create a new class that inherits from this one.
---- Returns a new class with this class as its parent.
---- Example: `local MyClass = Object:extend()`
+---Create a new class that inherits from this one.
+---Returns a new class with this class as its parent.
+---Example: `local MyClass = Object:extend()`
 ---@return core.object New class table
 function Object:extend()
   local cls = {}
@@ -28,27 +28,27 @@ function Object:extend()
   return cls
 end
 
---- Check if object is exactly of the given type (no inheritance check).
---- Use this for strict type matching.
---- Example: `view:is(DocView)` returns true only if view is a DocView, not a subclass
+---Check if object is exactly of the given type (no inheritance check).
+---Use this for strict type matching.
+---Example: `view:is(DocView)` returns true only if view is a DocView, not a subclass
 ---@param T any Class to check against
 ---@return boolean True if object is exactly type T
 function Object:is(T)
   return getmetatable(self) == T
 end
 
---- Check if the given object is exactly an instance of this class.
---- Inverse of is() - checks if T is an instance of self.
---- Example: `DocView:is_class_of(obj)` checks if obj is exactly a DocView
+---Check if the given object is exactly an instance of this class.
+---Inverse of is() - checks if T is an instance of self.
+---Example: `DocView:is_class_of(obj)` checks if obj is exactly a DocView
 ---@param T any Object to check
 ---@return boolean True if T is exactly an instance of this class
 function Object:is_class_of(T)
   return getmetatable(T) == self
 end
 
---- Check if object inherits from the given type (inheritance-aware).
---- Use this to check class hierarchy.
---- Example: `view:extends(View)` returns true for View and all subclasses
+---Check if object inherits from the given type (inheritance-aware).
+---Use this to check class hierarchy.
+---Example: `view:extends(View)` returns true for View and all subclasses
 ---@param T any Class to check inheritance from
 ---@return boolean True if object is T or inherits from T
 function Object:extends(T)
@@ -62,9 +62,9 @@ function Object:extends(T)
   return false
 end
 
---- Check if the given object/class inherits from this class.
---- Inverse of extends() - checks if T is a subclass of self.
---- Example: `View:is_extended_by(DocView)` checks if DocView inherits from View
+---Check if the given object/class inherits from this class.
+---Inverse of extends() - checks if T is a subclass of self.
+---Example: `View:is_extended_by(DocView)` checks if DocView inherits from View
 ---@param T any Object or class to check
 ---@return boolean True if T inherits from this class
 function Object:is_extended_by(T)
@@ -80,17 +80,17 @@ function Object:is_extended_by(T)
   return false
 end
 
---- Get string representation of the object (for debugging/logging).
---- Override in subclasses to provide meaningful names.
---- Example: `function MyClass:__tostring() return "MyClass" end`
+---Get string representation of the object (for debugging/logging).
+---Override in subclasses to provide meaningful names.
+---Example: `function MyClass:__tostring() return "MyClass" end`
 ---@return string String representation (default: "Object")
 function Object:__tostring()
   return "Object"
 end
 
---- Metamethod allowing class to be called like a constructor.
---- Enables syntax: `local obj = MyClass(args)` instead of `MyClass:new(args)`
---- Automatically creates instance and calls new() with provided arguments.
+---Metamethod allowing class to be called like a constructor.
+---Enables syntax: `local obj = MyClass(args)` instead of `MyClass:new(args)`
+---Automatically creates instance and calls new() with provided arguments.
 ---@return core.object New instance of the class
 function Object:__call(...)
   local obj = setmetatable({}, self)
