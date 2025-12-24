@@ -10,6 +10,7 @@ local View = require "core.view"
 ---Nodes can be either "leaf" (contains views/tabs) or split (contains two child nodes).
 ---The root node forms a binary tree structure that defines the editor's layout.
 ---@class core.node : core.object
+---@overload fun(type?: string):core.node
 local Node = Object:extend()
 
 function Node:__tostring() return "Node" end

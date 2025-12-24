@@ -1,6 +1,7 @@
 ---Base class providing OOP functionality for Lua.
 ---All classes in Pragtical inherit from Object.
 ---@class core.object
+---@overload fun():core.object
 ---@field super core.object
 local Object = {}
 Object.__index = Object

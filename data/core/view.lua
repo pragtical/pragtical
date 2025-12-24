@@ -36,6 +36,7 @@ local Scrollbar = require "core.scrollbar"
 
 ---Base view.
 ---@class core.view : core.object
+---@overload fun():core.view
 ---@field context core.view.context
 ---@field super core.object
 ---@field position core.view.position

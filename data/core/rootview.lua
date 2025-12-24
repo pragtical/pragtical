@@ -8,6 +8,7 @@ local DocView = require "core.docview"
 ---Top-level view managing the entire UI layout.
 ---Coordinates the node tree, handles drag & drop, routes events to child views.
 ---@class core.rootview : core.view
+---@overload fun():core.rootview
 ---@field super core.view
 ---@field root_node core.node
 ---@field mouse core.view.position
