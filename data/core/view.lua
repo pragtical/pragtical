@@ -72,12 +72,13 @@ end
 
 ---Smoothly animate a value towards a destination.
 ---Use this for animations instead of direct assignment.
----@param t table Table containing the value (or pass value directly as first arg)
----@param k string|number Key in table, or destination if t is a number
+---@param t table Table containing the value
+---@param k string|number Key in table
 ---@param dest number Target value
 ---@param rate? number Animation speed (0-1, default 0.5, higher = faster)
 ---@param name? string Transition name (for config.disabled_transitions)
----Example: `self:move_towards(self.scroll, "y", 100, 0.3, "scroll")`
+---@overload fun(self: core.view, k: string|number, dest: number, rate?: number, name?: string)
+---Example: `self:move_towards(self.scroll, "y", 100, 0.3, "scroll")` or `self:move_towards("gutter_width", 100)`
 function View:move_towards(t, k, dest, rate, name)
   if type(t) ~= "table" then
     return self:move_towards(self, t, k, dest, rate, name)
