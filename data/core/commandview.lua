@@ -239,6 +239,7 @@ function CommandView:submit()
   end
 end
 
+
 ---Enter command mode with a prompt.
 ---Activates the command view with specified label and options.
 ---@param label string Label text to display (": " will be appended)

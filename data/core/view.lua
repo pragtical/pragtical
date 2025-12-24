@@ -70,6 +70,7 @@ function View:new()
   self.current_scale = SCALE
 end
 
+
 ---Smoothly animate a value towards a destination.
 ---Use this for animations instead of direct assignment.
 ---@param t table Table containing the value
@@ -291,11 +292,13 @@ function View:on_mouse_wheel(y, x)
   -- no-op
 end
 
+
 ---Called when DPI scale changes (display moved, zoom changed, etc.).
 ---Override to adjust sizes, padding, or other scale-dependent values.
 ---@param new_scale number New scale factor (e.g., 1.0, 1.5, 2.0)
 ---@param prev_scale number Previous scale factor
 function View:on_scale_change(new_scale, prev_scale) end
+
 
 ---Get the content bounds in content coordinates (accounting for scroll).
 ---@return number x1 Left edge
@@ -307,6 +310,7 @@ function View:get_content_bounds()
   local y = self.scroll.y
   return x, y, x + self.size.x, y + self.size.y
 end
+
 
 ---Handle touch move events (touchscreen/trackpad gestures).
 ---Override for touch-specific behavior. Base implementation handles scrolling.

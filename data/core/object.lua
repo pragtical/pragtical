@@ -12,6 +12,7 @@ Object.__index = Object
 ---Can be overridden by child objects to implement a constructor.
 function Object:new() end
 
+
 ---Create a new class that inherits from this one.
 ---Returns a new class with this class as its parent.
 ---Example: `local MyClass = Object:extend()`
@@ -28,6 +29,7 @@ function Object:extend()
   setmetatable(cls, self)
   return cls
 end
+
 
 ---Check if object is exactly of the given type (no inheritance check).
 ---Use this for strict type matching.
@@ -47,6 +49,7 @@ function Object:is_class_of(T)
   return getmetatable(T) == self
 end
 
+
 ---Check if object inherits from the given type (inheritance-aware).
 ---Use this to check class hierarchy.
 ---Example: `view:extends(View)` returns true for View and all subclasses
@@ -62,6 +65,7 @@ function Object:extends(T)
   end
   return false
 end
+
 
 ---Check if the given object/class inherits from this class.
 ---Inverse of extends() - checks if T is a subclass of self.
@@ -81,6 +85,7 @@ function Object:is_extended_by(T)
   return false
 end
 
+
 ---Get string representation of the object (for debugging/logging).
 ---Override in subclasses to provide meaningful names.
 ---Example: `function MyClass:__tostring() return "MyClass" end`
@@ -88,6 +93,7 @@ end
 function Object:__tostring()
   return "Object"
 end
+
 
 ---Metamethod allowing class to be called like a constructor.
 ---Enables syntax: `local obj = MyClass(args)` instead of `MyClass:new(args)`

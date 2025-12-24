@@ -154,6 +154,7 @@ function Node:split(dir, view, locked, resizable)
   return self.b
 end
 
+
 ---Remove a view from this node.
 ---If this is the last view, may collapse the node or replace with EmptyView.
 ---Handles primary node logic and tree restructuring.
@@ -205,6 +206,7 @@ function Node:remove_view(root, view)
   core.last_active_view = nil
 end
 
+
 ---Close a view with confirmation.
 ---Calls view:try_close() which may show save dialogs before removing.
 ---@param root core.node The root node of the tree
@@ -215,6 +217,7 @@ function Node:close_view(root, view)
   end
   view:try_close(do_close)
 end
+
 
 ---Close the currently active view in this node.
 ---@param root core.node The root node of the tree
@@ -448,6 +451,7 @@ function Node:get_child_overlapping_point(x, y)
   return child:get_child_overlapping_point(x, y)
 end
 
+
 ---Calculate tab bar vertical dimensions.
 ---@return number height Total tab height
 ---@return number padding Vertical padding
@@ -458,6 +462,7 @@ local function get_tab_y_sizes()
   local margin = style.margin.tab.top
   return height + (padding * 2) + margin, padding, margin
 end
+
 
 ---Get the rectangle for a scroll button.
 ---@param index integer Button index (1=left, 2=right)
@@ -675,6 +680,7 @@ function Node:update()
   end
 end
 
+
 ---Draw a tab's title text with ellipsis if needed.
 ---@param view core.view View whose name to display
 ---@param font renderer.font Font to use
@@ -704,6 +710,7 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
   if is_hovered then color = style.text end
   common.draw_text(font, color, text, align, x, y, w, h)
 end
+
 
 ---Draw tab borders and background.
 ---@param view core.view View for this tab
@@ -738,6 +745,7 @@ function Node:draw_tab_borders(view, is_active, is_hovered, x, y, w, h, standalo
   return x + ds, y, w - ds*2, h
 end
 
+
 ---Draw a complete tab (borders, title, close button).
 ---@param view core.view View for this tab
 ---@param is_active boolean Whether this is the active tab
@@ -765,6 +773,7 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
   self:draw_tab_title(view, style.font, is_active, is_hovered, x, y, w, h)
   core.pop_clip_rect()
 end
+
 
 ---Draw the entire tab bar including all visible tabs and scroll buttons.
 function Node:draw_tabs()
@@ -886,6 +895,7 @@ function Node:close_all_docviews(keep_active)
     end
   end
 end
+
 
 ---Check if this node can be resized along an axis.
 ---Returns true for proportional nodes or locked resizable nodes.

@@ -509,6 +509,7 @@ function RootView:on_file_dropped(filename, x, y)
   return true
 end
 
+
 ---Process deferred file drops (files dropped while nagview was active).
 ---Called during update() to safely open files when nagview is dismissed.
 function RootView:process_defer_open_docs()
@@ -540,6 +541,7 @@ function RootView:on_text_input(...)
   core.active_view:on_text_input(...)
 end
 
+
 ---Handle touch press events (touchscreen/trackpad).
 ---Tracks which view is being touched for subsequent touch events.
 function RootView:on_touch_pressed(x, y, ...)
@@ -547,11 +549,13 @@ function RootView:on_touch_pressed(x, y, ...)
   self.touched_view = touched_node and touched_node.active_view
 end
 
+
 ---Handle touch release events.
 ---Clears the touched view tracking.
 function RootView:on_touch_released(x, y, ...)
   self.touched_view = nil
 end
+
 
 ---Handle touch movement events (swipe gestures, etc.).
 ---Routes to touched view or handles divider/tab dragging.
@@ -590,11 +594,13 @@ function RootView:on_touch_moved(x, y, dx, dy, ...)
   self.touched_view:on_touch_moved(x, y, dx, dy, ...)
 end
 
+
 ---Forward IME text editing events to the active view.
 ---Called during IME composition for text input.
 function RootView:on_ime_text_editing(...)
   core.active_view:on_ime_text_editing(...)
 end
+
 
 ---Handle window focus lost events.
 ---Forces redraw so cursors can be hidden when window is inactive.
