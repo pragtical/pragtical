@@ -5,6 +5,12 @@ local Node = require "core.node"
 local View = require "core.view"
 local DocView = require "core.docview"
 
+---@class core.rootview.overlay.to
+---@field x number
+---@field y number
+---@field w number
+---@field h number
+
 ---@class core.rootview.overlay
 ---@field x number
 ---@field y number
@@ -14,7 +20,7 @@ local DocView = require "core.docview"
 ---@field opacity number
 ---@field base_color renderer.color
 ---@field color renderer.color
----@field to core.view.position
+---@field to core.rootview.overlay.to
 
 ---@class core.rootview.mousegrab
 ---@field view core.view
@@ -83,7 +89,9 @@ function RootView:get_active_node()
 end
 
 
----@return core.node node
+---Find the primary node in the tree recursively.
+---@param node core.node Node to search from
+---@return core.node node The primary node
 local function get_primary_node(node)
   if node.is_primary_node then
     return node
@@ -119,8 +127,10 @@ function RootView:get_primary_node()
 end
 
 
----@param node core.node
----@return core.node node
+---Find next available unlocked node to become primary.
+---Searches recursively through the tree for unlocked leaf nodes.
+---@param node core.node Node to search from
+---@return core.node? node Next unlocked leaf node, or nil if none found
 local function select_next_primary_node(node)
   if node.is_primary_node then return end
   if node.type ~= "leaf" then
@@ -250,6 +260,8 @@ end
 
 ---Get the base color for a drag overlay.
 ---Internal helper to fetch color from style based on overlay type.
+---@param overlay core.rootview.overlay The overlay to get color for
+---@return renderer.color color The base color from style
 function RootView:get_overlay_base_color(overlay)
   if overlay == self.drag_overlay then
     return style.drag_overlay
@@ -261,6 +273,8 @@ end
 
 ---Show or hide a drag overlay with color reset.
 ---Internal helper for managing drag visual feedback state.
+---@param overlay core.rootview.overlay The overlay to show/hide
+---@param status boolean True to show, false to hide
 function RootView:set_show_overlay(overlay, status)
   overlay.visible = status
   if status then -- reset colors
@@ -343,6 +357,10 @@ end
 
 ---Resize split node children when dragging divider.
 ---Tries resizing locked nodes first, falls back to proportional divider adjustment.
+---@param node core.node The split node being resized
+---@param axis string "x" or "y"
+---@param value number New size value for the split
+---@param delta number Mouse movement delta
 local function resize_child_node(node, axis, value, delta)
   local accept_resize = node.a:resize(axis, value)
   if not accept_resize then
@@ -588,6 +606,7 @@ end
 
 ---Animate drag overlay position and opacity smoothly.
 ---Internal helper for tab/split drag visual feedback.
+---@param overlay core.rootview.overlay The overlay to animate
 function RootView:interpolate_drag_overlay(overlay)
   self:move_towards(overlay, "x", overlay.to.x, nil, "tab_drag")
   self:move_towards(overlay, "y", overlay.to.y, nil, "tab_drag")
@@ -617,6 +636,12 @@ end
 
 ---Set drag overlay target position and size.
 ---If immediate is true, jumps to position instantly instead of animating.
+---@param overlay core.rootview.overlay The overlay to position
+---@param x number Target x coordinate
+---@param y number Target y coordinate
+---@param w number Target width
+---@param h number Target height
+---@param immediate boolean? If true, jump to position without animation
 function RootView:set_drag_overlay(overlay, x, y, w, h, immediate)
   overlay.to.x = x
   overlay.to.y = y
@@ -636,6 +661,15 @@ end
 
 ---Calculate overlay rectangle for a split type.
 ---Returns modified x, y, w, h for showing where split will occur.
+---@param split_type string "left", "right", "up", or "down"
+---@param x number Original x coordinate
+---@param y number Original y coordinate
+---@param w number Original width
+---@param h number Original height
+---@return number x Modified x coordinate
+---@return number y Modified y coordinate
+---@return number w Modified width
+---@return number h Modified height
 local function get_split_sizes(split_type, x, y, w, h)
   if split_type == "left" then
     w = w * .5
@@ -703,6 +737,7 @@ end
 
 ---Draw a drag overlay rectangle with current opacity.
 ---Shows where tab/split will land when dropped.
+---@param ov core.rootview.overlay The overlay to draw
 function RootView:draw_drag_overlay(ov)
   if ov.opacity > 0 then
     renderer.draw_rect(ov.x, ov.y, ov.w, ov.h, ov.color)
