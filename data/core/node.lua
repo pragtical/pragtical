@@ -6,11 +6,35 @@ local Object = require "core.object"
 local EmptyView = require "core.emptyview"
 local View = require "core.view"
 
+---@class core.node.lock
+---@field x boolean
+---@field y boolean
+
+---@alias core.node.type "leaf" | "hsplit" | "vsplit"
+
 ---Represents a container in the UI layout tree.
 ---Nodes can be either "leaf" (contains views/tabs) or split (contains two child nodes).
 ---The root node forms a binary tree structure that defines the editor's layout.
 ---@class core.node : core.object
 ---@overload fun(type?: string):core.node
+---@field type core.node.type
+---@field position core.view.position
+---@field size core.view.position
+---@field views core.view[]
+---@field divider number
+---@field active_view core.view
+---@field hovered_close integer
+---@field hovered_tab integer?
+---@field hovered_scroll_button integer
+---@field tab_shift number
+---@field tab_offset integer
+---@field tab_width number
+---@field a core.node?
+---@field b core.node?
+---@field locked core.node.lock?
+---@field resizable boolean?
+---@field is_primary_node boolean?
+---@field move_towards function
 local Node = Object:extend()
 
 function Node:__tostring() return "Node" end

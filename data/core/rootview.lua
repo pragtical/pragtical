@@ -5,6 +5,21 @@ local Node = require "core.node"
 local View = require "core.view"
 local DocView = require "core.docview"
 
+---@class core.rootview.overlay
+---@field x number
+---@field y number
+---@field w number
+---@field h number
+---@field visible boolean
+---@field opacity number
+---@field base_color renderer.color
+---@field color renderer.color
+---@field to core.view.position
+
+---@class core.rootview.mousegrab
+---@field view core.view
+---@field button core.view.mousebutton
+
 ---Top-level view managing the entire UI layout.
 ---Coordinates the node tree, handles drag & drop, routes events to child views.
 ---@class core.rootview : core.view
@@ -12,6 +27,15 @@ local DocView = require "core.docview"
 ---@field super core.view
 ---@field root_node core.node
 ---@field mouse core.view.position
+---@field drag_overlay core.rootview.overlay
+---@field drag_overlay_tab core.rootview.overlay
+---@field grab core.rootview.mousegrab?
+---@field deferred_draws table[]
+---@field overlapping_view core.view?
+---@field touched_view core.view?
+---@field defer_open_docs table[]
+---@field first_dnd_processed boolean
+---@field first_update_done boolean
 local RootView = View:extend()
 
 function RootView:__tostring() return "RootView" end
