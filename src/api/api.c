@@ -14,9 +14,16 @@ int luaopen_diff(lua_State *L);
 int luaopen_canvas(lua_State* L);
 int luaopen_tokenizer(lua_State *L);
 
+#ifdef PRAGTICAL_NET
+  int luaopen_net(lua_State* L);
+  #define LUA_NET { "net",  luaopen_net  },
+#else
+  #define LUA_NET
+#endif
+
 #ifdef PRAGTICAL_REPL_HISTORY
-  #define LUA_REPL { "repl",  luaopen_linenoise  },
   int luaopen_linenoise(lua_State *L);
+  #define LUA_REPL { "repl",  luaopen_linenoise  },
 #else
   #define LUA_REPL
 #endif
@@ -56,6 +63,7 @@ static const luaL_Reg libs[] = {
   { "diff",       luaopen_diff       },
   { "canvas",     luaopen_canvas     },
   { "tokenizer",  luaopen_tokenizer  },
+  LUA_NET
   LUA_REPL
   LUA53_COMPATIBILITY
   { NULL, NULL }
