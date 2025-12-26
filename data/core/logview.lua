@@ -6,6 +6,9 @@ local style = require "core.style"
 local View = require "core.view"
 
 
+---Count number of lines in text.
+---@param text string Text to count lines in
+---@return integer count Number of lines
 local function lines(text)
   if text == "" then return 0 end
   local l = 1
@@ -16,9 +19,21 @@ local function lines(text)
 end
 
 
+---Cache for item height calculations.
 local item_height_result = {}
 
 
+---@class core.logview.item_height
+---@field normal number Height when collapsed
+---@field expanded number Height when expanded
+---@field current number Current animated height
+---@field target number Target height for animation
+
+
+---Get or calculate height information for a log item.
+---Results are cached for performance.
+---@param item table Log item from core.log_items
+---@return core.logview.item_height height Height information
 local function get_item_height(item)
   local h = item_height_result[item]
   if not h then
@@ -33,6 +48,16 @@ local function get_item_height(item)
   return h
 end
 
+
+---Log message viewer with expandable entries.
+---Displays messages from core.log_items in reverse chronological order.
+---Click to expand/collapse, ctrl+click to copy to clipboard.
+---@class core.logview : core.view
+---@overload fun():core.logview
+---@field super core.view
+---@field last_item table? Last log item seen (for detecting new entries)
+---@field expanding core.logview.item_height[] Queue of items currently animating
+---@field yoffset number Vertical offset for slide-in animation of new items
 local LogView = View:extend()
 
 function LogView:__tostring() return "LogView" end
@@ -40,6 +65,7 @@ function LogView:__tostring() return "LogView" end
 LogView.context = "session"
 
 
+---Constructor - initializes the log viewer.
 function LogView:new()
   LogView.super.new(self)
   self.last_item = core.log_items[#core.log_items]
@@ -51,17 +77,25 @@ function LogView:new()
 end
 
 
+---Get the view name for display.
+---@return string name Always returns "Log"
 function LogView:get_name()
   return "Log"
 end
 
 
+---Check if a log item is currently expanded.
+---@param item table Log item to check
+---@return boolean expanded True if item is expanded
 local function is_expanded(item)
   local item_height = get_item_height(item)
   return item_height.target == item_height.expanded
 end
 
 
+---Toggle expansion state of a log item.
+---Adds item to animation queue for smooth expand/collapse.
+---@param item table Log item to toggle
 function LogView:expand_item(item)
   item = get_item_height(item)
   item.target = item.target == item.expanded and item.normal or item.expanded
@@ -69,6 +103,9 @@ function LogView:expand_item(item)
 end
 
 
+---Iterate over all log items with their screen positions.
+---Items are yielded in reverse chronological order (newest first).
+---@return fun(): integer, table, number, number, number, number iterator Iterator yielding: index, item, x, y, width, height
 function LogView:each_item()
   local x, y = self:get_content_offset()
   y = y + style.padding.y + self.yoffset
@@ -83,6 +120,8 @@ function LogView:each_item()
 end
 
 
+---Get the total scrollable height of the log.
+---@return number height Total height in pixels
 function LogView:get_scrollable_size()
   local _, y_off = self:get_content_offset()
   local last_y, last_h = 0, 0
@@ -96,6 +135,13 @@ function LogView:get_scrollable_size()
 end
 
 
+---Handle mouse press events for item expansion and copying.
+---Click to expand/collapse, ctrl+click to copy to clipboard.
+---@param button core.view.mousebutton
+---@param px number Screen x coordinate
+---@param py number Screen y coordinate
+---@param clicks integer Number of clicks
+---@return boolean handled Always returns true
 function LogView:on_mouse_pressed(button, px, py, clicks)
   if LogView.super.on_mouse_pressed(self, button, px, py, clicks) then
     return true
@@ -123,12 +169,16 @@ function LogView:on_mouse_pressed(button, px, py, clicks)
 end
 
 
+---Handle DPI scale changes.
+---Resets cached item heights so they recalculate with new font sizes.
 function LogView:on_scale_change()
   -- reset item sizes
   item_height_result = {}
 end
 
 
+---Update the log view each frame.
+---Handles: new item detection, scroll adjustment, expansion animations.
 function LogView:update()
   local item = core.log_items[#core.log_items]
   if self.last_item ~= item then
@@ -161,6 +211,14 @@ function LogView:update()
 end
 
 
+---Draw multiline text with line wrapping.
+---@param font renderer.font Font to use
+---@param text string Text to draw (may contain newlines)
+---@param x number Starting x coordinate
+---@param y number Starting y coordinate
+---@param color renderer.color Text color
+---@return number x Final x coordinate after last line
+---@return number y Final y coordinate after last line
 local function draw_text_multiline(font, text, x, y, color)
   local th = font:get_height()
   local resx = x
@@ -171,8 +229,13 @@ local function draw_text_multiline(font, text, x, y, color)
   return resx, y
 end
 
--- this is just to get a date string that's consistent
+
+---Sample date string for width calculation.
 local datestr = os.date()
+
+
+---Draw the log view.
+---Renders log items with icons, timestamps, and expandable content.
 function LogView:draw()
   self:draw_background(style.background)
 
