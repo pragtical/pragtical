@@ -36,6 +36,7 @@ local Scrollbar = require "core.scrollbar"
 
 ---Base view.
 ---@class core.view : core.object
+---@overload fun():core.view
 ---@field context core.view.context
 ---@field super core.object
 ---@field position core.view.position
@@ -55,6 +56,9 @@ function View:__tostring() return "View" end
 -- terminated. The context "application" is for functional UI elements.
 View.context = "application"
 
+---Constructor - initializes a new view instance.
+---Override this in subclasses and always call super constructor first:
+---`MyView.super.new(self)`
 function View:new()
   self.position = { x = 0, y = 0 }
   self.size = { x = 0, y = 0 }
@@ -66,6 +70,16 @@ function View:new()
   self.current_scale = SCALE
 end
 
+
+---Smoothly animate a value towards a destination.
+---Use this for animations instead of direct assignment.
+---@param t table Table containing the value
+---@param k string|number Key in table
+---@param dest number Target value
+---@param rate? number Animation speed (0-1, default 0.5, higher = faster)
+---@param name? string Transition name (for config.disabled_transitions)
+---@overload fun(self: core.view, k: string|number, dest: number, rate?: number, name?: string)
+---Example: `self:move_towards(self.scroll, "y", 100, 0.3, "scroll")` or `self:move_towards("gutter_width", 100)`
 function View:move_towards(t, k, dest, rate, name)
   if type(t) ~= "table" then
     return self:move_towards(self, t, k, dest, rate, name)
@@ -91,57 +105,76 @@ function View:move_towards(t, k, dest, rate, name)
 end
 
 
+---Called when view is requested to close (e.g., tab close button).
+---Override to show confirmation dialogs for unsaved changes.
+---Example: `core.command_view:enter("Save?", {submit = do_close})`
+---@param do_close function Call this function to actually close the view
 function View:try_close(do_close)
   do_close()
 end
 
 
----@return string
+---Get the name displayed in the view's tab.
+---Override to show document name, file path, etc.
+---@return string name
 function View:get_name()
   return "---"
 end
 
 
----@return number
+---Get the total scrollable height of the view's content.
+---Used by scrollbar to calculate thumb size and position.
+---@return number height Height in pixels (default: infinite)
 function View:get_scrollable_size()
   return math.huge
 end
 
----@return number
+---Get the total scrollable width of the view's content.
+---Used by horizontal scrollbar.
+---@return number width Width in pixels (default: 0, no horizontal scroll)
 function View:get_h_scrollable_size()
   return 0
 end
 
 
+---Whether this view accepts text input (enables IME).
+---Override and return true for text editors and input fields.
 function View:supports_text_input()
   return false
 end
 
----@param x number
----@param y number
----@return boolean
+---Check if a screen point overlaps either scrollbar.
+---Useful for determining cursor style or handling clicks.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean overlaps True if point is over vertical or horizontal scrollbar
 function View:scrollbar_overlaps_point(x, y)
   return not (not (self.v_scrollbar:overlaps(x, y) or self.h_scrollbar:overlaps(x, y)))
 end
 
 
----@return boolean
+---Check if user is currently dragging either scrollbar.
+---@return boolean dragging True if scrollbar drag is in progress
 function View:scrollbar_dragging()
   return self.v_scrollbar.dragging or self.h_scrollbar.dragging
 end
 
 
----@return boolean
+---Check if mouse is hovering over either scrollbar track.
+---@return boolean hovering True if mouse is over scrollbar
 function View:scrollbar_hovering()
   return self.v_scrollbar.hovering.track or self.h_scrollbar.hovering.track
 end
 
 
+---Handle mouse button press events.
+---Override to handle clicks. Return true to consume event and prevent propagation.
+---Base implementation handles scrollbar clicks.
 ---@param button core.view.mousebutton
----@param x number
----@param y number
----@param clicks integer
----return boolean
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param clicks integer Number of consecutive clicks (configurable with config.max_clicks)
+---@return boolean? consumed True to consume event, false/nil to propagate
 function View:on_mouse_pressed(button, x, y, clicks)
   if not self.scrollable then return end
   local result = self.v_scrollbar:on_mouse_pressed(button, x, y, clicks)
@@ -161,9 +194,11 @@ function View:on_mouse_pressed(button, x, y, clicks)
 end
 
 
+---Handle mouse button release events.
+---Override to handle click completion. Base implementation handles scrollbar.
 ---@param button core.view.mousebutton
----@param x number
----@param y number
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
 function View:on_mouse_released(button, x, y)
   if not self.scrollable then return end
   self.v_scrollbar:on_mouse_released(button, x, y)
@@ -171,10 +206,13 @@ function View:on_mouse_released(button, x, y)
 end
 
 
----@param x number
----@param y number
----@param dx number
----@param dy number
+---Handle mouse movement events.
+---Override for hover effects, drag operations, etc.
+---Base implementation handles scrollbar dragging.
+---@param x number Current screen x coordinate
+---@param y number Current screen y coordinate
+---@param dx number Delta x since last move
+---@param dy number Delta y since last move
 function View:on_mouse_moved(x, y, dx, dy)
   if not self.scrollable then return end
   local result
@@ -207,6 +245,8 @@ function View:on_mouse_moved(x, y, dx, dy)
 end
 
 
+---Called when mouse leaves the view's area.
+---Override to clear hover states. Base implementation notifies scrollbars.
 function View:on_mouse_left()
   if not self.scrollable then return end
   self.v_scrollbar:on_mouse_left()
@@ -214,50 +254,71 @@ function View:on_mouse_left()
 end
 
 
----@param filename string
----@param x number
----@param y number
----@return boolean
+---Handle file drop events (drag and drop from OS).
+---Override to handle dropped files. Return true to consume event.
+---@param filename string Absolute path to dropped file
+---@param x number Screen x where file was dropped
+---@param y number Screen y where file was dropped
+---@return boolean consumed True to consume event, false to propagate
 function View:on_file_dropped(filename, x, y)
   return false
 end
 
 
----@param text string
+---Handle text input events (typing, IME composition).
+---Override for text editing. Called after IME composition completes.
+---@param text string Input text (may be multiple characters)
 function View:on_text_input(text)
   -- no-op
 end
 
 
+---Handle IME (Input Method Editor) text composition events.
+---Override for IME support in text editors. Called during composition.
+---@param text string Composition text being edited
+---@param start number Start position of selection within composition
+---@param length number Length of selection within composition
 function View:on_ime_text_editing(text, start, length)
   -- no-op
 end
 
 
----@param y number @Vertical scroll delta; positive is "up"
----@param x number @Horizontal scroll delta; positive is "left"
----@return boolean @Capture event
+---Handle mouse wheel scroll events.
+---Override for custom scroll behavior. Base implementation does nothing.
+---@param y number Vertical scroll delta; positive is "up"
+---@param x number Horizontal scroll delta; positive is "left"
+---@return boolean? consumed True to consume event
 function View:on_mouse_wheel(y, x)
   -- no-op
 end
 
----Can be overriden to listen for scale change events to apply
----any neccesary changes in sizes, padding, etc...
----@param new_scale number
----@param prev_scale number
+
+---Called when DPI scale changes (display moved, zoom changed, etc.).
+---Override to adjust sizes, padding, or other scale-dependent values.
+---@param new_scale number New scale factor (e.g., 1.0, 1.5, 2.0)
+---@param prev_scale number Previous scale factor
 function View:on_scale_change(new_scale, prev_scale) end
 
+
+---Get the content bounds in content coordinates (accounting for scroll).
+---@return number x1 Left edge
+---@return number y1 Top edge
+---@return number x2 Right edge
+---@return number y2 Bottom edge
 function View:get_content_bounds()
   local x = self.scroll.x
   local y = self.scroll.y
   return x, y, x + self.size.x, y + self.size.y
 end
 
----@param x number
----@param y number
----@param dx number
----@param dy number
----@param i number
+
+---Handle touch move events (touchscreen/trackpad gestures).
+---Override for touch-specific behavior. Base implementation handles scrolling.
+---@param x number Current touch x coordinate
+---@param y number Current touch y coordinate
+---@param dx number Delta x since last position
+---@param dy number Delta y since last position
+---@param i number Touch finger/pointer index
 function View:on_touch_moved(x, y, dx, dy, i)
   if not self.scrollable then return end
   if self.dragging_scrollbar then
@@ -271,8 +332,10 @@ function View:on_touch_moved(x, y, dx, dy, i)
 end
 
 
----@return number x
----@return number y
+---Get the top-left corner of content area in screen coordinates.
+---Accounts for scroll offset. Use for drawing content at correct position.
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
 function View:get_content_offset()
   local x = common.round(self.position.x - self.scroll.x)
   local y = common.round(self.position.y - self.scroll.y)
@@ -280,6 +343,8 @@ function View:get_content_offset()
 end
 
 
+---Clamp scroll position to valid range (0 to max scrollable size).
+---Called automatically by update(). Override get_scrollable_size() to customize.
 function View:clamp_scroll_position()
   local max = self:get_scrollable_size() - self.size.y
   self.scroll.to.y = common.clamp(self.scroll.to.y, 0, max)
@@ -289,6 +354,8 @@ function View:clamp_scroll_position()
 end
 
 
+---Update scrollbar positions and sizes.
+---Called automatically by update(). Rarely needs to be called manually.
 function View:update_scrollbar()
   local v_scrollable = self:get_scrollable_size()
   self.v_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, v_scrollable)
@@ -306,6 +373,9 @@ function View:update_scrollbar()
 end
 
 
+---Called every frame to update view state.
+---Override to add custom update logic. Always call super.update(self) first.
+---Handles: scale changes, scroll animation, scrollbar updates.
 function View:update()
   if self.current_scale ~= SCALE then
     self:on_scale_change(SCALE, self.current_scale)
@@ -320,6 +390,8 @@ function View:update()
 end
 
 
+---Draw a solid background color for the entire view.
+---Commonly called at the start of draw() methods.
 ---@param color renderer.color
 function View:draw_background(color)
   local x, y = self.position.x, self.position.y
@@ -328,12 +400,19 @@ function View:draw_background(color)
 end
 
 
+---Draw the view's scrollbars.
+---Commonly called at the end of draw() methods.
 function View:draw_scrollbar()
   self.v_scrollbar:draw()
   self.h_scrollbar:draw()
 end
 
 
+---Called every frame to render the view.
+---Override to draw custom content. Typical pattern:
+---1. Call self:draw_background(color)
+---2. Draw your content
+---3. Call self:draw_scrollbar()
 function View:draw()
 end
 

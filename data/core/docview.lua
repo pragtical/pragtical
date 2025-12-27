@@ -9,14 +9,48 @@ local View = require "core.view"
 
 local CACHE_LINE_LEN = 500
 
+---@class core.docview.position
+---@field line integer
+---@field col integer
+---@field offset number
+
+---@class core.docview.ime_selection
+---@field from integer
+---@field size integer
+
+---View for editing documents with syntax highlighting and text editing.
+---Extends View to provide text editing capabilities including selection,
+---scrolling, IME support, and rendering with syntax highlighting.
 ---@class core.docview : core.view
+---@overload fun(doc: core.doc):core.docview
 ---@field super core.view
+---@field doc core.doc
+---@field font string
+---@field last_x_offset core.docview.position
+---@field ime_selection core.docview.ime_selection
+---@field ime_status boolean
+---@field hovering_gutter boolean
+---@field cache_font renderer.font
+---@field cache_font_size number
+---@field cache_indent_size integer
+---@field mouse_selecting table?
+---@field last_line1 integer
+---@field last_col1 integer
+---@field last_line2 integer
+---@field last_col2 integer
 local DocView = View:extend()
 
 function DocView:__tostring() return "DocView" end
 
 DocView.context = "session"
 
+---Helper to move cursor vertically while preserving horizontal offset.
+---@param dv core.docview
+---@param line integer Current line
+---@param col integer Current column
+---@param offset integer Line offset (-1 for up, 1 for down)
+---@return integer line New line number
+---@return integer col New column number
 local function move_to_line_offset(dv, line, col, offset)
   local xo = dv.last_x_offset
   if xo.line ~= line or xo.col ~= col then
@@ -58,6 +92,8 @@ DocView.translate = {
 }
 
 
+---Constructor - initializes a document view.
+---@param doc core.doc Document to display
 function DocView:new(doc)
   DocView.super.new(self)
   self.cursor = "ibeam"
@@ -79,6 +115,9 @@ function DocView:new(doc)
 end
 
 
+---Attempt to close the view, prompting to save if document is dirty.
+---Shows "Unsaved Changes" dialog if this is the last view of a dirty document.
+---@param do_close function Callback to execute when close is confirmed
 function DocView:try_close(do_close)
   if self.doc:is_dirty()
   and #core.get_views_referencing_doc(self.doc) == 1 then
@@ -104,6 +143,8 @@ function DocView:try_close(do_close)
 end
 
 
+---Get the display name for the tab (filename with * if dirty).
+---@return string name Document name with asterisk if modified
 function DocView:get_name()
   local post = self.doc:is_dirty() and "*" or ""
   local name = self.doc:get_name()
@@ -111,6 +152,8 @@ function DocView:get_name()
 end
 
 
+---Get the full filename path for display (with home directory encoded).
+---@return string filename Full path or name with asterisk if modified
 function DocView:get_filename()
   if self.doc.abs_filename then
     local post = self.doc:is_dirty() and "*" or ""
@@ -120,6 +163,8 @@ function DocView:get_filename()
 end
 
 
+---Get the total scrollable height of the document.
+---@return number height Total height in pixels
 function DocView:get_scrollable_size()
   if not config.scroll_past_end then
     local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
@@ -128,21 +173,31 @@ function DocView:get_scrollable_size()
   return self:get_line_height() * (#self.doc.lines - 1) + self.size.y
 end
 
+
+---Get the scrollable width (infinite for horizontal scrolling).
+---@return number width Always returns math.huge
 function DocView:get_h_scrollable_size()
   return math.huge
 end
 
 
+---Get the font used for rendering text.
+---@return renderer.font font The code font
 function DocView:get_font()
   return style[self.font]
 end
 
 
+---Get the line height in pixels.
+---@return integer height Line height including line spacing
 function DocView:get_line_height()
   return math.floor(self:get_font():get_height() * config.line_height)
 end
 
 
+---Get the gutter width (line numbers area).
+---@return number width Total gutter width
+---@return number padding Padding within gutter
 function DocView:get_gutter_width()
   local padding = style.padding.x * 2
   if config.show_line_numbers then
@@ -152,6 +207,11 @@ function DocView:get_gutter_width()
 end
 
 
+---Get the screen position of a line (and optionally column).
+---@param line integer Line number
+---@param col? integer Optional column number
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
 function DocView:get_line_screen_position(line, col)
   local x, y = self:get_content_offset()
   local lh = self:get_line_height()
@@ -164,6 +224,9 @@ function DocView:get_line_screen_position(line, col)
   end
 end
 
+
+---Get the vertical offset for centering text within a line.
+---@return number offset Y offset to center text in line height
 function DocView:get_line_text_y_offset()
   local lh = self:get_line_height()
   local th = self:get_font():get_height()
@@ -224,6 +287,9 @@ function DocView:get_visible_cols_range(line, extra_cols)
 end
 
 
+---Get the range of visible lines in the current viewport.
+---@return integer minline First visible line
+---@return integer maxline Last visible line
 function DocView:get_visible_line_range()
   local x, y, x2, y2 = self:get_content_bounds()
   local lh = self:get_line_height()
@@ -233,6 +299,11 @@ function DocView:get_visible_line_range()
 end
 
 
+---Get the horizontal pixel offset for a column position.
+---Accounts for tabs, syntax highlighting fonts, and caches long lines.
+---@param line integer Line number
+---@param col integer Column number (byte offset)
+---@return number offset Horizontal pixel offset
 function DocView:get_col_x_offset(line, col)
   local column = 1
   local xoffset = 0
@@ -290,6 +361,11 @@ function DocView:get_col_x_offset(line, col)
 end
 
 
+---Get the column at a horizontal pixel offset.
+---Inverse of get_col_x_offset. Accounts for variable-width fonts.
+---@param line integer Line number
+---@param x number Horizontal pixel offset
+---@return integer col Column number (byte offset)
 function DocView:get_x_offset_col(line, x)
   local line_text = self.doc.lines[line]
   local line_len = #line_text
@@ -339,6 +415,11 @@ function DocView:get_x_offset_col(line, x)
 end
 
 
+---Convert screen coordinates to document line/column.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return integer line Line number
+---@return integer col Column number
 function DocView:resolve_screen_position(x, y)
   local ox, oy = self:get_line_screen_position(1)
   local line = math.floor((y - oy) / self:get_line_height()) + 1
@@ -348,6 +429,10 @@ function DocView:resolve_screen_position(x, y)
 end
 
 
+---Scroll to center a line in the viewport.
+---@param line integer Line number to scroll to
+---@param ignore_if_visible? boolean Don't scroll if line already visible
+---@param instant? boolean Jump immediately without animation
 function DocView:scroll_to_line(line, ignore_if_visible, instant)
   local min, max = self:get_visible_line_range()
   if not (ignore_if_visible and line > min and line < max) then
@@ -362,11 +447,18 @@ function DocView:scroll_to_line(line, ignore_if_visible, instant)
 end
 
 
+---Check if this view accepts text input.
+---@return boolean accepts Always returns true for DocView
 function DocView:supports_text_input()
   return true
 end
 
 
+---Scroll to make a position visible with context padding.
+---Ensures the position is visible with surrounding context lines.
+---@param line integer Line number
+---@param col integer Column number
+---@param instant? boolean Jump immediately without animation
 function DocView:scroll_to_make_visible(line, col, instant)
   local _, oy = self:get_content_offset()
   local _, ly = self:get_line_screen_position(line, col)
@@ -404,6 +496,11 @@ function DocView:scroll_to_make_visible(line, col, instant)
   end
 end
 
+
+---Handle mouse movement for cursor changes and text selection.
+---Updates cursor icon, gutter hover state, and extends selection if dragging.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
 function DocView:on_mouse_moved(x, y, ...)
   DocView.super.on_mouse_moved(self, x, y, ...)
 
@@ -438,6 +535,17 @@ function DocView:on_mouse_moved(x, y, ...)
 end
 
 
+---Adjust selection based on snap type (word, line).
+---@param doc core.doc Document
+---@param snap_type string Snap type: "word" or "lines"
+---@param line1 integer Start line
+---@param col1 integer Start column
+---@param line2 integer End line
+---@param col2 integer End column
+---@return integer line1 Adjusted start line
+---@return integer col1 Adjusted start column
+---@return integer line2 Adjusted end line
+---@return integer col2 Adjusted end column
 function DocView:mouse_selection(doc, snap_type, line1, col1, line2, col2)
   local swap = line2 < line1 or line2 == line1 and col2 <= col1
   if swap then
@@ -456,6 +564,13 @@ function DocView:mouse_selection(doc, snap_type, line1, col1, line2, col2)
 end
 
 
+---Handle mouse press for text selection and gutter clicks.
+---Supports single/double click, shift-selection, and gutter line selection.
+---@param button core.view.mousebutton
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param clicks integer Number of clicks
+---@return boolean? handled True if event was handled
 function DocView:on_mouse_pressed(button, x, y, clicks)
   if button == "left" then self.doc:clear_search_selections() end
   if button ~= "left" or not self.hovering_gutter then
@@ -480,17 +595,26 @@ function DocView:on_mouse_pressed(button, x, y, clicks)
 end
 
 
+---Handle mouse release to end text selection.
 function DocView:on_mouse_released(...)
   DocView.super.on_mouse_released(self, ...)
   self.mouse_selecting = nil
 end
 
 
+---Handle text input from keyboard.
+---@param text string Input text
 function DocView:on_text_input(text)
   self.doc:clear_search_selections()
   self.doc:text_input(text)
 end
 
+
+---Handle IME text composition events.
+---Updates IME decoration and scrolls to keep composition visible.
+---@param text string Composition text
+---@param start integer Selection start within composition
+---@param length integer Selection length within composition
 function DocView:on_ime_text_editing(text, start, length)
   self.doc:clear_search_selections()
   self.doc:ime_text_editing(text, start, length)
@@ -506,8 +630,9 @@ function DocView:on_ime_text_editing(text, start, length)
   self:scroll_to_make_visible(line1, col + start)
 end
 
----Update the composition bounding box that the system IME
----will consider when drawing its interface
+
+---Update IME composition window location.
+---Sets the bounding box for the system IME composition window.
 function DocView:update_ime_location()
   if not self.ime_status then return end
 
@@ -533,6 +658,9 @@ function DocView:update_ime_location()
   ime.set_location(x + x1, y, x2 - x1, h)
 end
 
+
+---Update the view state each frame.
+---Handles cache invalidation, auto-scrolling to caret, and blink timing.
 function DocView:update()
   -- clear cache if font or indent size changed
   local font = self:get_font()
@@ -576,12 +704,20 @@ function DocView:update()
 end
 
 
+---Draw the current line highlight bar.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
 function DocView:draw_line_highlight(x, y)
   local lh = self:get_line_height()
   renderer.draw_rect(x, y, self.size.x, lh, style.line_highlight)
 end
 
 
+---Draw the text content of a line with syntax highlighting.
+---@param line integer Line number
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return integer height Line height
 function DocView:draw_line_text(line, x, y)
   local default_font = self:get_font()
   local tx, ty = x, y + self:get_line_text_y_offset()
@@ -649,6 +785,12 @@ function DocView:draw_line_text(line, x, y)
   return self:get_line_height()
 end
 
+
+---Draw the caret at a position.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param line integer Line number (for overwrite mode char width)
+---@param col integer Column number (for overwrite mode char width)
 function DocView:draw_caret(x, y, line, col)
   local lh = self:get_line_height()
   if self.doc.overwrite then
@@ -659,6 +801,12 @@ function DocView:draw_caret(x, y, line, col)
   end
 end
 
+
+---Draw a complete line including highlight and selections.
+---@param line integer Line number
+  ---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return integer height Line height
 function DocView:draw_line_body(line, x, y)
   -- draw highlight if any selection ends on this line
   local draw_highlight = false
@@ -705,6 +853,12 @@ function DocView:draw_line_body(line, x, y)
 end
 
 
+---Draw the gutter with line numbers.
+---@param line integer Line number
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param width number Gutter width
+---@return integer height Line height
 function DocView:draw_line_gutter(line, x, y, width)
   local lh = self:get_line_height()
   if config.show_line_numbers then
@@ -722,6 +876,11 @@ function DocView:draw_line_gutter(line, x, y, width)
 end
 
 
+---Draw IME composition decoration (underline and selection).
+---@param line1 integer Start line
+---@param col1 integer Start column
+---@param line2 integer End line
+---@param col2 integer End column
 function DocView:draw_ime_decoration(line1, col1, line2, col2)
   local x, y = self:get_line_screen_position(line1)
   local line_size = math.max(1, SCALE)
@@ -746,6 +905,8 @@ function DocView:draw_ime_decoration(line1, col1, line2, col2)
 end
 
 
+---Draw overlay elements (carets, IME decoration).
+---Called after main text to draw on top.
 function DocView:draw_overlay()
   if core.active_view == self then
     local minline, maxline = self:get_visible_line_range()
@@ -768,6 +929,9 @@ function DocView:draw_overlay()
   end
 end
 
+
+---Draw the entire document view.
+---Renders background, gutters, text, selections, carets, and scrollbars.
 function DocView:draw()
   self:draw_background(style.background)
   local _, indent_size = self.doc:get_indent_info()

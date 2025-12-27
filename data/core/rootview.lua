@@ -5,14 +5,49 @@ local Node = require "core.node"
 local View = require "core.view"
 local DocView = require "core.docview"
 
+---@class core.rootview.overlay.to
+---@field x number
+---@field y number
+---@field w number
+---@field h number
+
+---@class core.rootview.overlay
+---@field x number
+---@field y number
+---@field w number
+---@field h number
+---@field visible boolean
+---@field opacity number
+---@field base_color renderer.color
+---@field color renderer.color
+---@field to core.rootview.overlay.to
+
+---@class core.rootview.mousegrab
+---@field view core.view
+---@field button core.view.mousebutton
+
+---Top-level view managing the entire UI layout.
+---Coordinates the node tree, handles drag & drop, routes events to child views.
 ---@class core.rootview : core.view
+---@overload fun():core.rootview
 ---@field super core.view
 ---@field root_node core.node
 ---@field mouse core.view.position
+---@field drag_overlay core.rootview.overlay
+---@field drag_overlay_tab core.rootview.overlay
+---@field grab core.rootview.mousegrab?
+---@field deferred_draws table[]
+---@field overlapping_view core.view?
+---@field touched_view core.view?
+---@field defer_open_docs table[]
+---@field first_dnd_processed boolean
+---@field first_update_done boolean
 local RootView = View:extend()
 
 function RootView:__tostring() return "RootView" end
 
+---Constructor - initializes the root node tree and UI state.
+---Called automatically by core at startup.
 function RootView:new()
   RootView.super.new(self)
   self.root_node = Node()
@@ -35,12 +70,18 @@ function RootView:new()
 end
 
 
+---Queue a drawing operation to execute after main scene is rendered.
+---Useful for overlays, tooltips, or drag indicators that should draw on top.
+---@param fn function Function to call for drawing
+---@param ... any Arguments to pass to the function
 function RootView:defer_draw(fn, ...)
   table.insert(self.deferred_draws, 1, { fn = fn, ... })
 end
 
 
----@return core.node
+---Get the node containing the currently active view.
+---Falls back to primary node if active view not found.
+---@return core.node node Node containing active view or primary node
 function RootView:get_active_node()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
@@ -48,7 +89,9 @@ function RootView:get_active_node()
 end
 
 
----@return core.node
+---Find the primary node in the tree recursively.
+---@param node core.node Node to search from
+---@return core.node node The primary node
 local function get_primary_node(node)
   if node.is_primary_node then
     return node
@@ -59,7 +102,10 @@ local function get_primary_node(node)
 end
 
 
----@return core.node
+---Get the active node, ensuring it's not locked.
+---If active node is locked, switches to primary node instead.
+---Use this when adding new views to ensure they go to an editable node.
+---@return core.node node Unlocked node suitable for adding views
 function RootView:get_active_node_default()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
@@ -73,14 +119,18 @@ function RootView:get_active_node_default()
 end
 
 
----@return core.node
+---Get the primary node (main document editing area).
+---Primary node is where documents are opened by default.
+---@return core.node node The primary node
 function RootView:get_primary_node()
   return get_primary_node(self.root_node)
 end
 
 
----@param node core.node
----@return core.node
+---Find next available unlocked node to become primary.
+---Searches recursively through the tree for unlocked leaf nodes.
+---@param node core.node Node to search from
+---@return core.node? node Next unlocked leaf node, or nil if none found
 local function select_next_primary_node(node)
   if node.is_primary_node then return end
   if node.type ~= "leaf" then
@@ -94,14 +144,19 @@ local function select_next_primary_node(node)
 end
 
 
----@return core.node
+---Select a new primary node from available unlocked nodes.
+---Used when closing the current primary node.
+---@return core.node node Next available unlocked node to be primary
 function RootView:select_next_primary_node()
   return select_next_primary_node(self.root_node)
 end
 
 
----@param doc core.doc
----@return core.docview
+---Open a document in the active node.
+---If document is already open, switches to that view instead.
+---Creates a new DocView and adds it as a tab in the active node.
+---@param doc core.doc Document to open
+---@return core.docview view The view displaying the document
 function RootView:open_doc(doc)
   local node = self:get_active_node_default()
   for i, view in ipairs(node.views) do
@@ -118,52 +173,56 @@ function RootView:open_doc(doc)
 end
 
 
----@param keep_active boolean
+---Close all document views in the node tree.
+---Used when closing a project or switching workspaces.
+---@param keep_active boolean If true, keeps the currently active view open
 function RootView:close_all_docviews(keep_active)
   self.root_node:close_all_docviews(keep_active)
 end
 
 
----Obtain mouse grab.
----
----This means that mouse movements will be sent to the specified view, even when
----those occur outside of it.
----There can't be multiple mouse grabs, even for different buttons.
----@see RootView:ungrab_mouse
----@param button core.view.mousebutton
----@param view core.view
+---Capture mouse input for a specific view.
+---All mouse events for the specified button will be routed to this view,
+---even when the mouse moves outside the view's bounds.
+---Only one grab can be active per button at a time.
+---Common use: drag operations, scrollbar dragging, text selection.
+---@param button core.view.mousebutton Button to grab
+---@param view core.view View that should receive mouse events
 function RootView:grab_mouse(button, view)
   assert(self.grab == nil)
   self.grab = {view = view, button = button}
 end
 
 
----Release mouse grab.
----
----The specified button *must* be the last button that grabbed the mouse.
----@see RootView:grab_mouse
----@param button core.view.mousebutton
+---Release mouse grab for the specified button.
+---Button must match the button that was grabbed.
+---After release, normal mouse event routing resumes.
+---@param button core.view.mousebutton Button to release (must match grabbed button)
 function RootView:ungrab_mouse(button)
   assert(self.grab and self.grab.button == button)
   self.grab = nil
 end
 
 
----Function to intercept mouse pressed events on the active view.
----Do nothing by default.
+---Hook function called before mouse pressed events reach the active view.
+---Override this to intercept or modify mouse press behavior globally.
+---Default implementation does nothing.
 ---@param button core.view.mousebutton
----@param x number
----@param y number
----@param clicks integer
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param clicks integer Number of clicks
 function RootView.on_view_mouse_pressed(button, x, y, clicks)
 end
 
 
+---Handle mouse press events and route to appropriate targets.
+---Manages: divider dragging, tab clicking/dragging, view activation, event routing.
+---Overrides base View implementation to handle complex UI interactions.
 ---@param button core.view.mousebutton
----@param x number
----@param y number
----@param clicks integer
----@return boolean
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param clicks integer Number of clicks
+---@return boolean handled True if event was handled
 function RootView:on_mouse_pressed(button, x, y, clicks)
   -- If there is a grab, release it first
   if self.grab then
@@ -199,6 +258,10 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
 end
 
 
+---Get the base color for a drag overlay.
+---Internal helper to fetch color from style based on overlay type.
+---@param overlay core.rootview.overlay The overlay to get color for
+---@return renderer.color color The base color from style
 function RootView:get_overlay_base_color(overlay)
   if overlay == self.drag_overlay then
     return style.drag_overlay
@@ -208,6 +271,10 @@ function RootView:get_overlay_base_color(overlay)
 end
 
 
+---Show or hide a drag overlay with color reset.
+---Internal helper for managing drag visual feedback state.
+---@param overlay core.rootview.overlay The overlay to show/hide
+---@param status boolean True to show, false to hide
 function RootView:set_show_overlay(overlay, status)
   overlay.visible = status
   if status then -- reset colors
@@ -222,9 +289,12 @@ function RootView:set_show_overlay(overlay, status)
 end
 
 
+---Handle mouse button release events.
+---Manages: mouse grab release, divider drag completion, tab drop/rearrange.
+---Handles complex tab drag-and-drop logic (split, move, reorder).
 ---@param button core.view.mousebutton
----@param x number
----@param y number
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
 function RootView:on_mouse_released(button, x, y, ...)
   if self.grab then
     if self.grab.button == button then
@@ -285,6 +355,12 @@ function RootView:on_mouse_released(button, x, y, ...)
 end
 
 
+---Resize split node children when dragging divider.
+---Tries resizing locked nodes first, falls back to proportional divider adjustment.
+---@param node core.node The split node being resized
+---@param axis string "x" or "y"
+---@param value number New size value for the split
+---@param delta number Mouse movement delta
 local function resize_child_node(node, axis, value, delta)
   local accept_resize = node.a:resize(axis, value)
   if not accept_resize then
@@ -296,10 +372,13 @@ local function resize_child_node(node, axis, value, delta)
 end
 
 
----@param x number
----@param y number
----@param dx number
----@param dy number
+---Handle mouse movement events and route appropriately.
+---Manages: grabbed view routing, divider dragging, tab drag start, cursor changes.
+---Updates overlapping_view for hover state tracking.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param dx number Delta x since last move
+---@param dy number Delta y since last move
 function RootView:on_mouse_moved(x, y, dx, dy)
   self.mouse.x, self.mouse.y = x, y
 
@@ -364,6 +443,8 @@ function RootView:on_mouse_moved(x, y, dx, dy)
 end
 
 
+---Called when mouse leaves the root view area.
+---Notifies the currently overlapping view to clear hover states.
 function RootView:on_mouse_left()
   if self.overlapping_view then
     self.overlapping_view:on_mouse_left()
@@ -371,10 +452,13 @@ function RootView:on_mouse_left()
 end
 
 
----@param filename string
----@param x number
----@param y number
----@return boolean
+---Handle file/folder drop events from OS.
+---Supports: opening files, adding projects, showing dialogs.
+---Files are deferred if nagview is visible to avoid locked node errors.
+---@param filename string Absolute path to dropped file/folder
+---@param x number Screen x where dropped
+---@param y number Screen y where dropped
+---@return boolean handled True if event was handled
 function RootView:on_file_dropped(filename, x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
   local result = node and node.active_view:on_file_dropped(filename, x, y)
@@ -425,10 +509,13 @@ function RootView:on_file_dropped(filename, x, y)
   return true
 end
 
+
+---Process deferred file drops (files dropped while nagview was active).
+---Called during update() to safely open files when nagview is dismissed.
 function RootView:process_defer_open_docs()
   if core.active_view == core.nag_view then return end
   for _, drop in ipairs(self.defer_open_docs) do
-    -- file dragged into lite-xl, try to open it
+    -- file dragged into editor, try to open it
     local filename, x, y = table.unpack(drop)
     local ok, doc = core.try(core.open_doc, filename)
     if ok then
@@ -441,6 +528,7 @@ function RootView:process_defer_open_docs()
 end
 
 
+---Forward mouse wheel events to the view under the mouse.
 function RootView:on_mouse_wheel(...)
   local x, y = self.mouse.x, self.mouse.y
   local node = self.root_node:get_child_overlapping_point(x, y)
@@ -448,19 +536,29 @@ function RootView:on_mouse_wheel(...)
 end
 
 
+---Forward text input events to the currently active view.
 function RootView:on_text_input(...)
   core.active_view:on_text_input(...)
 end
 
+
+---Handle touch press events (touchscreen/trackpad).
+---Tracks which view is being touched for subsequent touch events.
 function RootView:on_touch_pressed(x, y, ...)
   local touched_node = self.root_node:get_child_overlapping_point(x, y)
   self.touched_view = touched_node and touched_node.active_view
 end
 
+
+---Handle touch release events.
+---Clears the touched view tracking.
 function RootView:on_touch_released(x, y, ...)
   self.touched_view = nil
 end
 
+
+---Handle touch movement events (swipe gestures, etc.).
+---Routes to touched view or handles divider/tab dragging.
 function RootView:on_touch_moved(x, y, dx, dy, ...)
   if not self.touched_view then return end
   if core.active_view == core.nag_view then
@@ -496,16 +594,25 @@ function RootView:on_touch_moved(x, y, dx, dy, ...)
   self.touched_view:on_touch_moved(x, y, dx, dy, ...)
 end
 
+
+---Forward IME text editing events to the active view.
+---Called during IME composition for text input.
 function RootView:on_ime_text_editing(...)
   core.active_view:on_ime_text_editing(...)
 end
 
+
+---Handle window focus lost events.
+---Forces redraw so cursors can be hidden when window is inactive.
 function RootView:on_focus_lost(...)
   -- We force a redraw so documents can redraw without the cursor.
   core.redraw = true
 end
 
 
+---Animate drag overlay position and opacity smoothly.
+---Internal helper for tab/split drag visual feedback.
+---@param overlay core.rootview.overlay The overlay to animate
 function RootView:interpolate_drag_overlay(overlay)
   self:move_towards(overlay, "x", overlay.to.x, nil, "tab_drag")
   self:move_towards(overlay, "y", overlay.to.y, nil, "tab_drag")
@@ -517,6 +624,9 @@ function RootView:interpolate_drag_overlay(overlay)
 end
 
 
+---Update the entire UI tree each frame.
+---Manages: node layout, drag overlays, deferred file drops.
+---Called automatically by core every frame.
 function RootView:update()
   Node.copy_position_and_size(self.root_node, self)
   self.root_node:update()
@@ -530,6 +640,14 @@ function RootView:update()
 end
 
 
+---Set drag overlay target position and size.
+---If immediate is true, jumps to position instantly instead of animating.
+---@param overlay core.rootview.overlay The overlay to position
+---@param x number Target x coordinate
+---@param y number Target y coordinate
+---@param w number Target width
+---@param h number Target height
+---@param immediate boolean? If true, jump to position without animation
 function RootView:set_drag_overlay(overlay, x, y, w, h, immediate)
   overlay.to.x = x
   overlay.to.y = y
@@ -547,6 +665,17 @@ function RootView:set_drag_overlay(overlay, x, y, w, h, immediate)
 end
 
 
+---Calculate overlay rectangle for a split type.
+---Returns modified x, y, w, h for showing where split will occur.
+---@param split_type string "left", "right", "up", or "down"
+---@param x number Original x coordinate
+---@param y number Original y coordinate
+---@param w number Original width
+---@param h number Original height
+---@return number x Modified x coordinate
+---@return number y Modified y coordinate
+---@return number w Modified width
+---@return number h Modified height
 local function get_split_sizes(split_type, x, y, w, h)
   if split_type == "left" then
     w = w * .5
@@ -563,6 +692,9 @@ local function get_split_sizes(split_type, x, y, w, h)
 end
 
 
+---Update drag overlay position during tab drag.
+---Shows visual feedback for where tab will land (split or reorder).
+---Called during update() when dragging tabs.
 function RootView:update_drag_overlay()
   if not (self.dragged_node and self.dragged_node.dragging) then return end
   local over = self.root_node:get_child_overlapping_point(self.mouse.x, self.mouse.y)
@@ -597,6 +729,8 @@ function RootView:update_drag_overlay()
 end
 
 
+---Draw the currently dragged tab floating under the cursor.
+---Visual feedback during tab drag operations.
 function RootView:draw_grabbed_tab()
   local dn = self.dragged_node
   local _,_, w, h = dn.node:get_tab_rect(dn.idx)
@@ -607,6 +741,9 @@ function RootView:draw_grabbed_tab()
 end
 
 
+---Draw a drag overlay rectangle with current opacity.
+---Shows where tab/split will land when dropped.
+---@param ov core.rootview.overlay The overlay to draw
 function RootView:draw_drag_overlay(ov)
   if ov.opacity > 0 then
     renderer.draw_rect(ov.x, ov.y, ov.w, ov.h, ov.color)
@@ -614,6 +751,8 @@ function RootView:draw_drag_overlay(ov)
 end
 
 
+---Render the entire UI each frame.
+---Draw order: 1) node tree, 2) deferred draws, 3) drag overlays, 4) cursor update
 function RootView:draw()
   self.root_node:draw()
   while #self.deferred_draws > 0 do

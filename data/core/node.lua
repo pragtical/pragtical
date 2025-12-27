@@ -6,11 +6,41 @@ local Object = require "core.object"
 local EmptyView = require "core.emptyview"
 local View = require "core.view"
 
+---@class core.node.lock
+---@field x boolean
+---@field y boolean
+
+---@alias core.node.type "leaf" | "hsplit" | "vsplit"
+
+---Represents a container in the UI layout tree.
+---Nodes can be either "leaf" (contains views/tabs) or split (contains two child nodes).
+---The root node forms a binary tree structure that defines the editor's layout.
 ---@class core.node : core.object
+---@overload fun(type?: string):core.node
+---@field type core.node.type
+---@field position core.view.position
+---@field size core.view.position
+---@field views core.view[]
+---@field divider number
+---@field active_view core.view
+---@field hovered_close integer
+---@field hovered_tab integer?
+---@field hovered_scroll_button integer
+---@field tab_shift number
+---@field tab_offset integer
+---@field tab_width number
+---@field a core.node?
+---@field b core.node?
+---@field locked core.node.lock?
+---@field resizable boolean?
+---@field is_primary_node boolean?
+---@field move_towards function
 local Node = Object:extend()
 
 function Node:__tostring() return "Node" end
 
+---Constructor - creates a new node.
+---@param type? string Node type: "leaf" (contains views), "hsplit", or "vsplit"
 function Node:new(type)
   self.type = type or "leaf"
   self.position = { x = 0, y = 0 }
@@ -28,6 +58,9 @@ function Node:new(type)
 end
 
 
+---Call a method on both child nodes (for split nodes only).
+---@param fn string Method name to call on children
+---@param ... any Arguments to pass to the method
 function Node:propagate(fn, ...)
   self.a[fn](self.a, ...)
   self.b[fn](self.b, ...)
@@ -78,6 +111,10 @@ function Node:on_touch_moved(...)
 end
 
 
+---Replace this node's contents with another node's contents.
+---Transfers all properties from source node to this node.
+---Used during split/merge operations to restructure the tree.
+---@param node core.node Source node to consume
 function Node:consume(node)
   for k, _ in pairs(self) do self[k] = nil end
   for k, v in pairs(node) do self[k] = v   end
@@ -86,12 +123,14 @@ end
 
 local type_map = { up="vsplit", down="vsplit", left="hsplit", right="hsplit" }
 
--- The "locked" argument below should be in the form {x = <boolean>, y = <boolean>}
--- and it indicates if the node want to have a fixed size along the axis where the
--- boolean is true. If not it will be expanded to take all the available space.
--- The "resizable" flag indicates if, along the "locked" axis the node can be resized
--- by the user. If the node is marked as resizable their view should provide a
--- set_target_size method.
+---Split this leaf node in a direction, creating two child nodes.
+---Converts this node from "leaf" to "hsplit" or "vsplit" containing two children.
+---The original content stays in one child, new view (if provided) goes in the other.
+---@param dir string Direction to split: "up", "down", "left", or "right"
+---@param view? core.view Optional view to add to the new split
+---@param locked? table Optional {x=boolean, y=boolean} to lock the new node's size
+---@param resizable? boolean If true, locked node can be resized by user (needs set_target_size)
+---@return core.node new_node The newly created child node
 function Node:split(dir, view, locked, resizable)
   assert(self.type == "leaf", "Tried to split non-leaf node")
   local node_type = assert(type_map[dir], "Invalid direction")
@@ -115,6 +154,12 @@ function Node:split(dir, view, locked, resizable)
   return self.b
 end
 
+
+---Remove a view from this node.
+---If this is the last view, may collapse the node or replace with EmptyView.
+---Handles primary node logic and tree restructuring.
+---@param root core.node The root node of the tree
+---@param view core.view View to remove
 function Node:remove_view(root, view)
   if #self.views > 1 then
     local idx = self:get_view_idx(view)
@@ -161,6 +206,11 @@ function Node:remove_view(root, view)
   core.last_active_view = nil
 end
 
+
+---Close a view with confirmation.
+---Calls view:try_close() which may show save dialogs before removing.
+---@param root core.node The root node of the tree
+---@param view core.view View to close
 function Node:close_view(root, view)
   local do_close = function()
     self:remove_view(root, view)
@@ -169,11 +219,18 @@ function Node:close_view(root, view)
 end
 
 
+---Close the currently active view in this node.
+---@param root core.node The root node of the tree
 function Node:close_active_view(root)
   self:close_view(root, self.active_view)
 end
 
 
+---Add a view to this leaf node as a new tab.
+---Automatically removes EmptyView if present.
+---Sets the new view as active.
+---@param view core.view View to add
+---@param idx? integer Optional position to insert (default: end)
 function Node:add_view(view, idx)
   assert(self.type == "leaf", "Tried to add view to non-leaf node")
   assert(not self.locked, "Tried to add view to locked node")
@@ -189,6 +246,9 @@ function Node:add_view(view, idx)
 end
 
 
+---Set the active view in this leaf node.
+---Updates global active view and notifies the previously active view.
+---@param view core.view View to make active
 function Node:set_active_view(view)
   assert(self.type == "leaf", "Tried to set active view on non-leaf node")
   local last_active_view = self.active_view
@@ -200,6 +260,9 @@ function Node:set_active_view(view)
 end
 
 
+---Get the index of a view in this node's view list.
+---@param view core.view View to find
+---@return integer? idx Index of the view, or nil if not found
 function Node:get_view_idx(view)
   for i, v in ipairs(self.views) do
     if v == view then return i end
@@ -207,6 +270,10 @@ function Node:get_view_idx(view)
 end
 
 
+---Find the node containing a specific view.
+---Recursively searches this node and its children.
+---@param view core.view View to search for
+---@return core.node? node The node containing the view, or nil if not found
 function Node:get_node_for_view(view)
   for _, v in ipairs(self.views) do
     if v == view then return self end
@@ -217,6 +284,9 @@ function Node:get_node_for_view(view)
 end
 
 
+---Find the parent node of this node in the tree.
+---@param root core.node Root node to search from
+---@return core.node? parent The parent node, or nil if this is root or not found
 function Node:get_parent_node(root)
   if root.a == self or root.b == self then
     return root
@@ -226,6 +296,10 @@ function Node:get_parent_node(root)
 end
 
 
+---Collect all views from this node and its children.
+---Recursively gathers views from the entire subtree.
+---@param t? table Optional table to append results to
+---@return table views List of all views in this subtree
 function Node:get_children(t)
   t = t or {}
   for _, view in ipairs(self.views) do
@@ -237,8 +311,9 @@ function Node:get_children(t)
 end
 
 
--- return the width including the padding space and separately
--- the padding space itself
+---Calculate scroll button width and padding.
+---@return number width Total button width including padding
+---@return number pad Padding amount
 local function get_scroll_button_width()
   local w = style.icon_font:get_width(">")
   local pad = w
@@ -246,6 +321,11 @@ local function get_scroll_button_width()
 end
 
 
+---Check if a point overlaps any resizable divider in the tree.
+---Recursively searches for dividers that can be dragged.
+---@param px number Screen x coordinate
+---@param py number Screen y coordinate
+---@return core.node? node The node whose divider is under the point, or nil
 function Node:get_divider_overlapping_point(px, py)
   if self.type ~= "leaf" then
     local axis = self.type == "hsplit" and "x" or "y"
@@ -264,11 +344,17 @@ function Node:get_divider_overlapping_point(px, py)
 end
 
 
+---Get the number of tabs currently visible (not scrolled out of view).
+---@return integer count Number of visible tabs
 function Node:get_visible_tabs_number()
   return math.min(#self.views - self.tab_offset + 1, config.max_tabs)
 end
 
 
+---Get the index of the tab under a screen point.
+---@param px number Screen x coordinate
+---@param py number Screen y coordinate
+---@return integer? idx Tab index, or nil if not over any tab
 function Node:get_tab_overlapping_point(px, py)
   if not self:should_show_tabs() then return nil end
   local tabs_number = self:get_visible_tabs_number()
@@ -280,6 +366,9 @@ function Node:get_tab_overlapping_point(px, py)
 end
 
 
+---Determine if tabs should be shown for this node.
+---Based on config settings, number of views, and drag state.
+---@return boolean show True if tabs should be displayed
 function Node:should_show_tabs()
   if self.locked then return false end
   local dn = core.root_view.dragged_node
@@ -295,6 +384,12 @@ function Node:should_show_tabs()
 end
 
 
+---Calculate the position of a tab's close button.
+---@param x number Tab x position
+---@param w number Tab width
+---@return number cx Close button x position
+---@return number cw Close button width
+---@return number pad Padding amount
 local function close_button_location(x, w)
   local cw = style.icon_font:get_width("C")
   local pad = style.padding.x / 2
@@ -302,6 +397,10 @@ local function close_button_location(x, w)
 end
 
 
+---Get which scroll button (left/right) is under a point.
+---@param px number Screen x coordinate
+---@param py number Screen y coordinate
+---@return integer? idx Button index (1=left, 2=right), or nil
 function Node:get_scroll_button_index(px, py)
   if #self.views == 1 then return end
   for i = 1, 2 do
@@ -313,6 +412,10 @@ function Node:get_scroll_button_index(px, py)
 end
 
 
+---Update hover state for tabs, close buttons, and scroll buttons.
+---Sets hovered_tab, hovered_close, and hovered_scroll_button fields.
+---@param px number Screen x coordinate
+---@param py number Screen y coordinate
 function Node:tab_hovered_update(px, py)
   self.hovered_close = 0
   self.hovered_scroll_button = 0
@@ -331,6 +434,11 @@ function Node:tab_hovered_update(px, py)
 end
 
 
+---Find the deepest leaf node at a screen point.
+---Recursively traverses split nodes to find the leaf under the point.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return core.node node The leaf node at this point
 function Node:get_child_overlapping_point(x, y)
   local child
   if self.type == "leaf" then
@@ -343,7 +451,11 @@ function Node:get_child_overlapping_point(x, y)
   return child:get_child_overlapping_point(x, y)
 end
 
--- returns: total height, text padding, top margin
+
+---Calculate tab bar vertical dimensions.
+---@return number height Total tab height
+---@return number padding Vertical padding
+---@return number margin Top margin
 local function get_tab_y_sizes()
   local height = style.font:get_height()
   local padding = style.padding.y
@@ -351,6 +463,14 @@ local function get_tab_y_sizes()
   return height + (padding * 2) + margin, padding, margin
 end
 
+
+---Get the rectangle for a scroll button.
+---@param index integer Button index (1=left, 2=right)
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
+---@return number w Width
+---@return number h Height
+---@return number pad Padding amount
 function Node:get_scroll_button_rect(index)
   local w, pad = get_scroll_button_width()
   local h = get_tab_y_sizes()
@@ -359,6 +479,13 @@ function Node:get_scroll_button_rect(index)
 end
 
 
+---Get the rectangle for a tab.
+---@param idx integer Tab index
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
+---@return number w Width
+---@return number h Height
+---@return number margin_y Top margin
 function Node:get_tab_rect(idx)
   local maxw = self.size.x
   local x0 = self.position.x
@@ -369,6 +496,11 @@ function Node:get_tab_rect(idx)
 end
 
 
+---Get the rectangle for this node's divider (for split nodes).
+---@return number? x Screen x coordinate, or nil for leaf nodes
+---@return number? y Screen y coordinate, or nil for leaf nodes
+---@return number? w Width, or nil for leaf nodes
+---@return number? h Height, or nil for leaf nodes
 function Node:get_divider_rect()
   local x, y = self.position.x, self.position.y
   if self.type == "hsplit" then
@@ -379,8 +511,11 @@ function Node:get_divider_rect()
 end
 
 
--- Return two values for x and y axis and each of them is either falsy or a number.
--- A falsy value indicate no fixed size along the corresponding direction.
+---Get the locked size of this node.
+---Returns fixed sizes for locked nodes, nil for proportionally-sized nodes.
+---For split nodes, combines child locked sizes.
+---@return number? sx Locked width, or nil if not locked on x-axis
+---@return number? sy Locked height, or nil if not locked on y-axis
 function Node:get_locked_size()
   if self.type == "leaf" then
     if self.locked then
@@ -413,14 +548,24 @@ function Node:get_locked_size()
 end
 
 
+---Copy position and size from one node to another.
+---@param dst core.node Destination node
+---@param src core.node Source node
 function Node.copy_position_and_size(dst, src)
   dst.position.x, dst.position.y = src.position.x, src.position.y
   dst.size.x, dst.size.y = src.size.x, src.size.y
 end
 
 
--- calculating the sizes is the same for hsplits and vsplits, except the x/y
--- axis are swapped; this function lets us use the same code for both
+---Calculate child node sizes for a split.
+---Handles both hsplit and vsplit by swapping x/y axes.
+---@param self core.node The split node
+---@param x string Axis being split ("x" or "y")
+---@param y string Perpendicular axis ("y" or "x")
+---@param x1 number? Locked size of first child on split axis
+---@param x2 number? Locked size of second child on split axis
+---@param y1? number Locked size of first child on perpendicular axis (unused)
+---@param y2? number Locked size of second child on perpendicular axis (unused)
 local function calc_split_sizes(self, x, y, x1, x2, y1, y2)
   local ds = ((x1 and x1 < 1) or (x2 and x2 < 1)) and 0 or style.divider_size
   local n = x1 and x1 + ds or (x2 and self.size[x] - x2 or math.floor(self.size[x] * self.divider))
@@ -435,6 +580,9 @@ local function calc_split_sizes(self, x, y, x1, x2, y1, y2)
 end
 
 
+---Update position and size of this node and its children.
+---Recursively calculates layout for the entire subtree.
+---Accounts for tabs, locked sizes, and divider positions.
 function Node:update_layout()
   if self.type == "leaf" then
     local av = self.active_view
@@ -459,6 +607,8 @@ function Node:update_layout()
 end
 
 
+---Ensure the active view's tab is visible (not scrolled out of view).
+---Adjusts tab_offset if needed to bring active tab into view.
 function Node:scroll_tabs_to_visible()
   local index = self:get_view_idx(self.active_view)
   if index then
@@ -474,6 +624,9 @@ function Node:scroll_tabs_to_visible()
 end
 
 
+---Scroll the tab bar left or right.
+---Used when clicking scroll buttons.
+---@param dir integer Direction: 1=left, 2=right
 function Node:scroll_tabs(dir)
   local view_index = self:get_view_idx(self.active_view)
   if dir == 1 then
@@ -497,6 +650,9 @@ function Node:scroll_tabs(dir)
 end
 
 
+---Calculate the target width for tabs.
+---Adjusts based on number of visible tabs and available space.
+---@return number width Target tab width in pixels
 function Node:target_tab_width()
   local n = self:get_visible_tabs_number()
   local w = self.size.x
@@ -507,6 +663,9 @@ function Node:target_tab_width()
 end
 
 
+---Update this node and its children.
+---For leaf nodes: updates active view, tab hover state, and tab animations.
+---For split nodes: recursively updates both children.
 function Node:update()
   if self.type == "leaf" then
     self:scroll_tabs_to_visible()
@@ -521,6 +680,16 @@ function Node:update()
   end
 end
 
+
+---Draw a tab's title text with ellipsis if needed.
+---@param view core.view View whose name to display
+---@param font renderer.font Font to use
+---@param is_active boolean Whether this is the active tab
+---@param is_hovered boolean Whether mouse is over this tab
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param w number Width
+---@param h number Height
 function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
   local text = view and view:get_name() or ""
   local dots_width = font:get_width("…")
@@ -542,6 +711,20 @@ function Node:draw_tab_title(view, font, is_active, is_hovered, x, y, w, h)
   common.draw_text(font, color, text, align, x, y, w, h)
 end
 
+
+---Draw tab borders and background.
+---@param view core.view View for this tab
+---@param is_active boolean Whether this is the active tab
+---@param is_hovered boolean Whether mouse is over this tab
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param w number Width
+---@param h number Height
+---@param standalone boolean If true, draw standalone tab (during drag)
+---@return number x Adjusted x for content area
+---@return number y Adjusted y for content area
+---@return number w Adjusted width for content area
+---@return number h Adjusted height for content area
 function Node:draw_tab_borders(view, is_active, is_hovered, x, y, w, h, standalone)
   -- Tabs deviders
   local ds = style.divider_size
@@ -562,6 +745,17 @@ function Node:draw_tab_borders(view, is_active, is_hovered, x, y, w, h, standalo
   return x + ds, y, w - ds*2, h
 end
 
+
+---Draw a complete tab (borders, title, close button).
+---@param view core.view View for this tab
+---@param is_active boolean Whether this is the active tab
+---@param is_hovered boolean Whether mouse is over this tab
+---@param is_close_hovered boolean Whether mouse is over close button
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param w number Width
+---@param h number Height
+---@param standalone boolean If true, draw standalone tab (during drag)
 function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h, standalone)
   local _, padding_y, margin_y = get_tab_y_sizes()
   x, y, w, h = self:draw_tab_borders(view, is_active, is_hovered, x, y + margin_y, w, h - margin_y, standalone)
@@ -580,6 +774,8 @@ function Node:draw_tab(view, is_active, is_hovered, is_close_hovered, x, y, w, h
   core.pop_clip_rect()
 end
 
+
+---Draw the entire tab bar including all visible tabs and scroll buttons.
 function Node:draw_tabs()
   local _, y, w, h, scroll_padding = self:get_scroll_button_rect(1)
   local x = self.position.x
@@ -614,6 +810,9 @@ function Node:draw_tabs()
 end
 
 
+---Draw this node and its children.
+---For leaf nodes: draws tabs (if shown) and active view.
+---For split nodes: draws divider and recursively draws children.
 function Node:draw()
   if self.type == "leaf" then
     if self:should_show_tabs() then
@@ -633,6 +832,8 @@ function Node:draw()
 end
 
 
+---Check if this node is empty (no views or only EmptyView).
+---@return boolean empty True if node contains no real content
 function Node:is_empty()
   if self.type == "leaf" then
     return #self.views == 0 or (#self.views == 1 and self.views[1]:is(EmptyView))
@@ -642,6 +843,10 @@ function Node:is_empty()
 end
 
 
+---Check if a point is in the tab bar area.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean in_tabs True if point is over the tab bar
 function Node:is_in_tab_area(x, y)
   if not self:should_show_tabs() then return false end
   local _, ty, _, th = self:get_scroll_button_rect(1)
@@ -649,6 +854,9 @@ function Node:is_in_tab_area(x, y)
 end
 
 
+---Close all document views (views with context="session").
+---Used when closing a project. May collapse empty nodes.
+---@param keep_active boolean If true, keep the active view open
 function Node:close_all_docviews(keep_active)
   local node_active_view = self.active_view
   local lost_active_view = false
@@ -688,8 +896,11 @@ function Node:close_all_docviews(keep_active)
   end
 end
 
--- Returns true for nodes that accept either "proportional" resizes (based on the
--- node.divider) or "locked" resizable nodes (along the resize axis).
+
+---Check if this node can be resized along an axis.
+---Returns true for proportional nodes or locked resizable nodes.
+---@param axis string Axis to check: "x" or "y"
+---@return boolean resizable True if node accepts resize on this axis
 function Node:is_resizable(axis)
   if self.type == 'leaf' then
     return not self.locked or not self.locked[axis] or self.resizable
@@ -701,13 +912,19 @@ function Node:is_resizable(axis)
 end
 
 
--- Return true iff it is a locked pane along the rezise axis and is
--- declared "resizable".
+---Check if this is a locked node that can be resized by the user.
+---@param axis string Axis to check: "x" or "y"
+---@return boolean resizable True if locked and resizable on this axis
 function Node:is_locked_resizable(axis)
   return self.locked and self.locked[axis] and self.resizable
 end
 
 
+---Resize this node to a target size.
+---For locked nodes, calls view:set_target_size().
+---For proportional nodes, adjusts divider position.
+---@param axis string Axis to resize: "x" or "y"
+---@param value number Target size in pixels
 function Node:resize(axis, value)
   -- the application works fine with non-integer values but to have pixel-perfect
   -- placements of view elements, like the scrollbar, we round the value to be
@@ -750,6 +967,11 @@ function Node:resize(axis, value)
 end
 
 
+---Determine where a point falls for drag-to-split operations.
+---Divides the node into regions: tab, left, right, up, down, middle.
+---@param mouse_x number Screen x coordinate
+---@param mouse_y number Screen y coordinate
+---@return string split_type One of: "tab", "left", "right", "up", "down", "middle"
 function Node:get_split_type(mouse_x, mouse_y)
   local x, y = self.position.x, self.position.y
   local w, h = self.size.x, self.size.y
@@ -779,6 +1001,17 @@ function Node:get_split_type(mouse_x, mouse_y)
 end
 
 
+---Calculate where a dragged tab would be inserted.
+---Returns the tab index and overlay position for visual feedback.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param dragged_node core.node Node being dragged from
+---@param dragged_index integer Index of tab being dragged
+---@return integer tab_index Index where tab would be inserted
+---@return number tab_x Overlay x position
+---@return number tab_y Overlay y position
+---@return number tab_w Overlay width
+---@return number tab_h Overlay height
 function Node:get_drag_overlay_tab_position(x, y, dragged_node, dragged_index)
   local tab_index = self:get_tab_overlapping_point(x, y)
   if not tab_index then
