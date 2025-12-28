@@ -651,7 +651,11 @@ end
 ---@param path string
 ---@return string|nil
 function common.dirname(path)
-  return path:match("(.+)["..PATHSEP.."][^"..PATHSEP.."]+$")
+  local dirname = path:match("(.+)["..PATHSEP.."][^"..PATHSEP.."]+$")
+  if not dirname and PLATFORM ~= "Windows" and path:sub(1, 1) == PATHSEP then
+    return PATHSEP
+  end
+  return dirname
 end
 
 
