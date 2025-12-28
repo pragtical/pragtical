@@ -26,13 +26,16 @@ config.plugins.scale = common.merge({
 local scale_steps = 0.05
 local current_scale = SCALE
 local current_code_scale = SCALE
-local user_scale = tonumber(os.getenv("PRAGTICAL_SCALE"))
+local user_scale = tonumber(
+  os.getenv("PRAGTICAL_SCALE") or os.getenv("PRAGTICAL_SCALE_RESTART")
+)
 
 ---@class plugins.scale
 local scale = {}
 
 function scale.set(scale)
   if current_scale == scale then return end
+  system.setenv("PRAGTICAL_SCALE_RESTART", scale)
 
   scale = common.clamp(scale, 0.2, 6)
 
@@ -87,6 +90,7 @@ end
 
 function scale.set_code(scale)
   if current_code_scale == scale then return end
+  system.setenv("PRAGTICAL_SCALE_CODE_RESTART", scale)
 
   scale = common.clamp(scale, 0.2, 6)
 
@@ -249,10 +253,16 @@ if config.plugins.scale.use_mousewheel then
   }
 end
 
--- Apply custom PRAGTICAL_SCALE if set by user
+-- Apply previous scale on restart set on PRAGTICAL_SCALE_RESTART and
+-- PRAGTICAL_SCALE_CODE_RESTART or custom PRAGTICAL_SCALE if set by user
 if user_scale then
-  scale.set(user_scale)
-  scale.set_code(user_scale)
+  -- to prevent issues on restart we defer it
+  core.add_thread(function()
+    scale.set(user_scale)
+    scale.set_code(
+      tonumber(os.getenv("PRAGTICAL_SCALE_CODE_RESTART")) or user_scale
+    )
+  end)
 end
 
 
