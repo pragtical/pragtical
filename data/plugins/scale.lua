@@ -27,7 +27,7 @@ local scale_steps = 0.05
 local current_scale = SCALE
 local current_code_scale = SCALE
 local user_scale = tonumber(
-  os.getenv("PRAGTICAL_SCALE") or os.getenv("PRAGTICAL_SCALE_RESTART")
+  os.getenv("PRAGTICAL_SCALE_RESTART") or os.getenv("PRAGTICAL_SCALE")
 )
 
 ---@class plugins.scale
