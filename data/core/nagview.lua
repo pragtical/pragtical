@@ -11,12 +11,42 @@ local UNDERLINE_MARGIN = common.round(1 * SCALE)
 
 local noop = function() end
 
+---@class core.nagview.option
+---@field text string Button text
+---@field default_yes? boolean True if this is the default "yes" option
+
+---@class core.nagview.queue_item
+---@field title string Dialog title
+---@field message string Dialog message text
+---@field options core.nagview.option[] Available button options
+---@field on_selected? fun(option: core.nagview.option) Callback when option selected
+
+---Modal dialog view for confirmations and alerts.
+---Displays a message with buttons, dims the background, and captures focus.
+---Multiple dialogs queue automatically.
 ---@class core.nagview : core.view
+---@overload fun():core.nagview
 ---@field super core.view
+---@field size core.view.position View size
+---@field show_height number Animated height for slide-in effect
+---@field force_focus boolean Whether to force focus on this view
+---@field queue core.nagview.queue_item[] Queued dialogs waiting to show
+---@field target_height number Target height for current message
+---@field on_mouse_pressed_root function? Saved RootView.on_mouse_pressed for restoration
+---@field new_on_mouse_pressed_root function? New RootView.on_mouse_pressed for validation
+---@field dim_alpha number Alpha for background dimming [0-1]
+---@field visible boolean Whether dialog is currently visible
+---@field title string? Current dialog title
+---@field message string? Current dialog message
+---@field options core.nagview.option[]? Current dialog options
+---@field on_selected function? Current dialog selection callback
+---@field hovered_item integer? Index of currently hovered button
+---@field underline_progress number Animation progress for hover underline [0-1]
 local NagView = View:extend()
 
 function NagView:__tostring() return "NagView" end
 
+---Constructor - initializes the modal dialog view.
 function NagView:new()
   NagView.super.new(self)
   self.size.y = 0
@@ -30,32 +60,52 @@ function NagView:new()
   self.visible = false
 end
 
+
+---Get the current dialog title.
+---@return string? title Current title or nil if no dialog active
 function NagView:get_title()
   return self.title
 end
 
--- The two methods below are duplicated from DocView
+
+---Get line height for text rendering.
+---Duplicated from DocView for independence.
+---@return integer height Line height in pixels
 function NagView:get_line_height()
   return math.floor(style.font:get_height() * config.line_height)
 end
 
+
+---Get vertical offset to center text within line height.
+---Duplicated from DocView for independence.
+---@return number offset Y offset in pixels
 function NagView:get_line_text_y_offset()
   local lh = self:get_line_height()
   local th = style.font:get_height()
   return (lh - th) / 2
 end
 
--- Buttons height without padding
+
+---Get button area height (excluding top/bottom view padding).
+---Includes internal button padding and borders.
+---@return number height Button height in pixels
 function NagView:get_buttons_height()
   local lh = style.font:get_height()
   local bt_padding = lh / 2
   return lh + 2 * BORDER_WIDTH + 2 * bt_padding
 end
 
+
+---Get target height for the nagview content (including top/bottom padding).
+---@return number height Total target height in pixels
 function NagView:get_target_height()
   return self.target_height + 2 * style.padding.y
 end
 
+
+---Get scrollable size when message is taller than window.
+---Adjusts view size and enables scrolling if needed.
+---@return number height Scrollable height (0 if not scrollable)
 function NagView:get_scrollable_size()
   local w, h = system.get_window_size(core.window)
   if self.visible and self:get_target_height() > h then
@@ -65,6 +115,8 @@ function NagView:get_scrollable_size()
   return 0
 end
 
+
+---Draw semi-transparent overlay to dim content behind the dialog.
 function NagView:dim_window_content()
   local ox, oy = self:get_content_offset()
   oy = oy + self.show_height
@@ -76,6 +128,10 @@ function NagView:dim_window_content()
   end)
 end
 
+
+---Change which button is currently hovered.
+---Resets underline animation when hover changes.
+---@param i integer? Button index to hover (nil to clear)
 function NagView:change_hovered(i)
   if i ~= self.hovered_item then
     self.hovered_item = i
@@ -84,6 +140,10 @@ function NagView:change_hovered(i)
   end
 end
 
+
+---Iterate over dialog option buttons with their positions.
+---Buttons are yielded right-to-left.
+---@return fun(): integer, core.nagview.option, number, number, number, number iterator Iterator yielding: index, option, x, y, width, height
 function NagView:each_option()
   return coroutine.wrap(function()
     if not self.options then return end
@@ -98,11 +158,15 @@ function NagView:each_option()
       bw = style.font:get_width(opt.text) + 2 * BORDER_WIDTH + style.padding.x
 
       ox = ox - bw - style.padding.x
-      coroutine.yield(i, opt, ox,oy,bw,bh)
+      coroutine.yield(i, opt, ox, oy, bw, bh)
     end
   end)
 end
 
+
+---Handle mouse movement to update button hover states.
+---@param mx number Screen x coordinate
+---@param my number Screen y coordinate
 function NagView:on_mouse_moved(mx, my, ...)
   if not self.visible then return end
   core.set_active_view(self)
@@ -115,6 +179,10 @@ function NagView:on_mouse_moved(mx, my, ...)
   end
 end
 
+
+---Register mouse press hook to intercept clicks globally.
+---Ensures dialog captures clicks even outside its bounds.
+---@param self core.nagview
 local function register_mouse_pressed(self)
   if self.on_mouse_pressed_root then return end
   -- RootView is loaded locally to avoid NagView and RootView being
@@ -134,6 +202,10 @@ local function register_mouse_pressed(self)
   self.new_on_mouse_pressed_root = RootView.on_mouse_pressed
 end
 
+
+---Unregister mouse press hook and restore original handler.
+---Validates hook hasn't been overwritten by other code before restoring.
+---@param self core.nagview
 local function unregister_mouse_pressed(self)
   local RootView = require "core.rootview"
   if
@@ -150,6 +222,13 @@ local function unregister_mouse_pressed(self)
   end
 end
 
+
+---Handle mouse press events on dialog buttons.
+---@param button core.view.mousebutton
+---@param mx number Screen x coordinate
+---@param my number Screen y coordinate
+---@param clicks integer Number of clicks
+---@return boolean handled True if event was handled
 function NagView:on_mouse_pressed(button, mx, my, clicks)
   if not self.visible then return false end
   if NagView.super.on_mouse_pressed(self, button, mx, my, clicks) then return true end
@@ -162,6 +241,9 @@ function NagView:on_mouse_pressed(button, mx, my, clicks)
   return true
 end
 
+
+---Handle text input for keyboard shortcuts (Y/N).
+---@param text string Input text
 function NagView:on_text_input(text)
   if not self.visible then return end
   if text:lower() == "y" then
@@ -171,6 +253,9 @@ function NagView:on_text_input(text)
   end
 end
 
+
+---Update the nagview each frame.
+---Handles animations for show/hide, dimming, and button hover underline.
 function NagView:update()
   if not self.visible and self.show_height <= 0 then return end
   NagView.super.update(self)
@@ -194,6 +279,10 @@ function NagView:update()
   end
 end
 
+
+---Draw the nagview message, buttons, and background dimming.
+---Internal rendering function called via defer_draw.
+---@param self core.nagview
 local function draw_nagview_message(self)
   self:dim_window_content()
 
@@ -239,7 +328,7 @@ local function draw_nagview_message(self)
       renderer.draw_rect(lx,ly,uw,UNDERLINE_WIDTH, style.nagbar_text)
     end
 
-    common.draw_text(style.font, style.nagbar_text, opt.text, "center", fx,fy,fw,fh)
+    common.draw_text(style.font, style.nagbar_text, opt.text, "center", fx, fy, fw, fh)
   end
 
   self:draw_scrollbar()
@@ -247,6 +336,9 @@ local function draw_nagview_message(self)
   core.pop_clip_rect()
 end
 
+
+---Draw the nagview.
+---Defers actual rendering to draw_nagview_message.
 function NagView:draw()
   if (not self.visible and self.show_height <= 0) or not self.title then
     return
@@ -254,6 +346,11 @@ function NagView:draw()
   core.root_view:defer_draw(draw_nagview_message, self)
 end
 
+
+---Handle DPI scale changes.
+---Updates border widths and recalculates target height.
+---@param new_scale number New DPI scale
+---@param old_scale number Previous DPI scale
 function NagView:on_scale_change(new_scale, old_scale)
   BORDER_WIDTH = common.round(1 * new_scale)
   UNDERLINE_WIDTH = common.round(2 * new_scale)
@@ -264,6 +361,9 @@ function NagView:on_scale_change(new_scale, old_scale)
   )
 end
 
+
+---Calculate height needed to display the message text.
+---@return number height Message height in pixels
 function NagView:get_message_height()
   local h = 0
   for str in string.gmatch(self.message, "(.-)\n") do
@@ -272,6 +372,9 @@ function NagView:get_message_height()
   return h
 end
 
+
+---Show the next dialog from the queue.
+---Dequeues and displays the next waiting dialog, or hides if queue is empty.
 function NagView:next()
   local opts = table.remove(self.queue, 1) or {}
   if opts.title and opts.message and opts.options then
@@ -299,6 +402,13 @@ function NagView:next()
   end
 end
 
+
+---Queue and optionally show a dialog.
+---If no dialog is currently showing, displays immediately. Otherwise queues it.
+---@param title string Dialog title
+---@param message string Dialog message text
+---@param options core.nagview.option[] Button options
+---@param on_select? fun(option: core.nagview.option) Callback when button is clicked
 function NagView:show(title, message, options, on_select)
   local opts = {}
   opts.title = assert(title, "No title")
@@ -308,5 +418,6 @@ function NagView:show(title, message, options, on_select)
   table.insert(self.queue, opts)
   if not self.visible then self:next() end
 end
+
 
 return NagView
