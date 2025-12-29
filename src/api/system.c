@@ -1547,15 +1547,24 @@ static int f_get_display_info(lua_State* L) {
   if (display_id == 0)
     return luaL_error(L, "Getting primary display failed: %s", SDL_GetError());
 
-  float default_scale = SDL_GetDisplayContentScale(display_id);
-  if (default_scale == 0.0f)
+  float current_scale = SDL_GetDisplayContentScale(display_id);
+  if (current_scale == 0.0f)
     return luaL_error(L, "Getting display scale failed: %s", SDL_GetError());
 
   const SDL_DisplayMode* mode = SDL_GetDesktopDisplayMode(display_id);
   if (!mode)
     return luaL_error(L, "Getting display mode failed: %s", SDL_GetError());
 
-  lua_pushnumber(L, mode->pixel_density);
+  float default_scale = mode->pixel_density;
+
+  /* On wayland SDL_GetDisplayContentScale seems to always return 1 but
+     mode->pixel_density is properly set to user scale so we flip the values */
+  if (current_scale == 1 && default_scale != 1) {
+    default_scale = current_scale;
+    current_scale = mode->pixel_density;
+  }
+
+  lua_pushnumber(L, current_scale);
   lua_pushnumber(L, round(mode->refresh_rate));
   lua_pushnumber(L, mode->w);
   lua_pushnumber(L, mode->h);
