@@ -45,7 +45,7 @@ local function open_file(use_dialog, label, selection_callback)
       if status == "accept" then
       	for _, filename in ipairs(result --[[ @as string[] ]]) do
           if not selection_callback then
-            core.root_view:open_doc(core.open_doc(filename))
+            core.open_file(filename)
           else
             selection_callback(filename)
           end
@@ -64,7 +64,7 @@ local function open_file(use_dialog, label, selection_callback)
     text = default_text,
     submit = function(text)
       if not selection_callback then
-        core.root_view:open_doc(core.open_doc(filename))
+        core.open_file(filename)
       else
         selection_callback(filename)
       end
