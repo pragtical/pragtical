@@ -373,7 +373,7 @@ command.add(nil, {
           local filename = core.current_project():absolute_path(
             common.home_expand(text)
           )
-          core.root_view:open_doc(core.open_doc(filename))
+          core.open_file(filename)
           return
         end
         text = suggestion.text
@@ -386,9 +386,7 @@ command.add(nil, {
               if project_name == common.basename(project.path) then
                 local file = project.path .. PATHSEP .. file_path
                 if is_file(file) then
-                  core.root_view:open_doc(
-                    core.open_doc(project.path .. PATHSEP .. file_path)
-                  )
+                  core.open_file(project.path .. PATHSEP .. file_path)
                   return
                 end
               end
@@ -398,9 +396,7 @@ command.add(nil, {
         local file = core.projects[1]:absolute_path(
           common.home_expand(text)
         )
-        if is_file(file) then
-          core.root_view:open_doc(core.open_doc(file))
-        end
+        if is_file(file) then core.open_file(file) end
       end,
       suggest = function(text)
         local results = {}

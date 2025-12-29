@@ -1210,6 +1210,20 @@ function core.open_image(filename)
 end
 
 
+---Opens the given file path in the root view.
+---If the given file is a supported image, it will open it in the image viewer;
+---otherwise, it will open it as a normal text file.
+---@param filename string Path to the file to open
+---@return core.imageview|core.docview
+function core.open_file(filename)
+  local view = core.open_image(filename)
+  if not view then
+    return core.root_view:open_doc(core.open_doc(filename))
+  end
+  return view
+end
+
+
 function core.custom_log(level, show, backtrace, fmt, ...)
   local text = string.format(fmt, ...)
   if show then
