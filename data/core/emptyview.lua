@@ -283,6 +283,8 @@ function EmptyView:update()
 
     self.prev_size.x = self.size.x
     self.prev_size.y = self.size.y
+
+    EmptyView.super.update(self)
   end
 end
 
