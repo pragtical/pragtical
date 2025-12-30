@@ -4,9 +4,13 @@
 #include <stdbool.h>
 #include "renderer.h"
 
-#define RENCACHE_CELLS_X 80
-#define RENCACHE_CELLS_Y 50
-#define RENCACHE_CELL_SIZE 96
+/* These values represent the maximum size that can be tracked by rencache
+   7680x4320 = 8k resolution, we use a common divisor for the size of regions
+   that will be dirty checked.
+*/
+#define RENCACHE_CELL_SIZE 60 /* common divisor of width and height */
+#define RENCACHE_CELLS_X (7680 / RENCACHE_CELL_SIZE) /* 128 cells */
+#define RENCACHE_CELLS_Y (4320 / RENCACHE_CELL_SIZE) /* 72 cells */
 
 typedef struct {
   uint8_t *command_buf;
