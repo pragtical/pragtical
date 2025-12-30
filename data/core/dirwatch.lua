@@ -60,7 +60,7 @@ end
 ---Using this function on individual files is possible, but discouraged as it can cause
 ---system resource exhaustion.
 ---@param path string The path to watch. This should be an absolute path.
----@param unwatch? boolean If true, the path is removed from the watch list.
+---@param unwatch? boolean If false, the path is removed from the watch list.
 function DirWatch:watch(path, unwatch)
   if unwatch == false then return self:unwatch(path) end
   local info = system.get_file_info(path)
