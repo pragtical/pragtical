@@ -102,6 +102,14 @@ end
 function Object:__call(...)
   local obj = setmetatable({}, self)
   obj:new(...)
+  -- allow automatic calling of __gc on objects for older lua versions
+  if LUA_VERSION == 5.1 then
+    local proxy = newproxy(true)
+    getmetatable(proxy).__gc = function()
+      if obj.__gc then obj:__gc() end
+    end
+    obj.__gc_proxy = proxy
+  end
   return obj
 end
 
