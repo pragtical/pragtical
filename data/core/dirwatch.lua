@@ -180,4 +180,14 @@ function DirWatch:check(change_callback, scan_time, wait_time)
 end
 
 
+---Unwatch all files/directories that weren't manually unwatch.
+function DirWatch:__gc()
+  if self.monitor:mode() == "multiple"then
+    for path, watched in pairs(self.watched) do
+      if watched then self:unwatch(path) end
+    end
+  end
+end
+
+
 return DirWatch
