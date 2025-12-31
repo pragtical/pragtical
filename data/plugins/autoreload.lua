@@ -130,7 +130,7 @@ Doc.load = function(self, ...)
   core.add_thread(function()
     -- apply autoreload only to ui loaded documents
     if #core.get_views_referencing_doc(self) > 0 then
-      if not times[self] then watch:watch(self.abs_filename, true) end
+      if not times[self] then watch:watch(self.abs_filename) end
       update_time(self)
     end
   end)
@@ -141,7 +141,7 @@ Doc.save = function(self, ...)
   local res = save(self, ...)
   -- if starting with an unsaved document with a filename.
   if #core.get_views_referencing_doc(self) > 0 then
-    if not times[self] then watch:watch(self.abs_filename, true) end
+    if not times[self] then watch:watch(self.abs_filename) end
     update_time(self)
   end
   return res

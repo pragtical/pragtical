@@ -44,9 +44,9 @@ end
 ---
 ---Adding a directory using this function will not report child changes.
 ---@param path string
----@param  unwatch? boolean If true, remove this directory from the watch list.
-function DirWatch:scan(path, unwatch)
-  if unwatch == false then return self:unwatch(path) end
+---@param  watch? boolean If false, remove this directory from the watch list.
+function DirWatch:scan(path, watch)
+  if watch == false then return self:unwatch(path) end
   self.scanned[path] = system.get_file_info(path).modified
 end
 
@@ -60,9 +60,9 @@ end
 ---Using this function on individual files is possible, but discouraged as it can cause
 ---system resource exhaustion.
 ---@param path string The path to watch. This should be an absolute path.
----@param unwatch? boolean If true, the path is removed from the watch list.
-function DirWatch:watch(path, unwatch)
-  if unwatch == false then return self:unwatch(path) end
+---@param watch? boolean If false, the path is removed from the watch list.
+function DirWatch:watch(path, watch)
+  if watch == false then return self:unwatch(path) end
   local info = system.get_file_info(path)
   if not info then return end
   if not self.watched[path] and not self.scanned[path] then
@@ -177,6 +177,16 @@ function DirWatch:check(change_callback, scan_time, wait_time)
     end
   end
   return had_change
+end
+
+
+---Unwatch all files/directories that weren't manually unwatch.
+function DirWatch:__gc()
+  if self.monitor:mode() == "multiple" then
+    for path, watched in pairs(self.watched) do
+      if watched then self:unwatch(path) end
+    end
+  end
 end
 
 
