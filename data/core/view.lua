@@ -71,6 +71,63 @@ function View:new()
 end
 
 
+---Serialize this view into a persistable state table.
+---
+---This method is called when the editor is saving workspace/session state.
+---The returned table must contain only plain Lua data (no functions,
+---userdata, metatables, or cyclic references).
+---
+---Returning `nil` indicates that this view should NOT be restored when
+---reloading the workspace.
+---
+---@return table? state
+function View:get_state()
+  return nil
+end
+
+
+---Create and initialize a new view instance from a previously saved state.
+---
+---This function is called when restoring workspace/session state.
+---Implementations are responsible for:
+---  * creating the view instance
+---  * applying any persisted state
+---
+---If loading the instance failed nil will be returned.
+---
+---@param state table
+---@return core.view? view
+function View.from_state(state)
+  return nil
+end
+
+
+---Returns the module path of this view.
+---
+---This method resolves the Lua module name that loaded the concrete view
+---class (for example `"core.view"`).
+---
+---If the view class cannot be associated with any loaded module, `nil`
+---is returned.
+---
+---@return string? path
+function View:get_module()
+  local cls = getmetatable(self)
+
+  -- cache module name on the class, not the instance
+  if not cls._module_name then
+    for name, mod in pairs(package.loaded) do
+      if mod == cls then
+        cls._module_name = name
+        break
+      end
+    end
+  end
+
+  return cls._module_name
+end
+
+
 ---Smoothly animate a value towards a destination.
 ---Use this for animations instead of direct assignment.
 ---@param t table Table containing the value
