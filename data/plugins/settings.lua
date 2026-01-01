@@ -976,7 +976,6 @@ end
 ---@return table<integer, string>
 local function get_installed_plugins()
   local files, ordered = {}, {}
-
   for _, root_dir in ipairs {DATADIR, USERDIR} do
     local plugin_dir = root_dir .. "/plugins"
     for _, filename in ipairs(system.list_dir(plugin_dir) or {}) do
@@ -1347,6 +1346,15 @@ function Settings:new()
   self.core_sections = FoldingBook(self.core)
   self.core_sections.border.width = 0
   self.core_sections.scrollable = false
+
+  if command.is_valid("plugin-manager:show") then
+    ---@type widget.button
+    self.plugin_button = Button(self.plugins, "Plugin Manager")
+    self.plugin_button:set_icon("p")
+    self.plugin_button:set_tooltip("Open Plugin Manager")
+    self.plugin_button:set_position(style.padding.x, style.padding.y)
+    function self.plugin_button:on_click() command.perform("plugin-manager:show") end
+  end
 
   self.plugin_sections = FoldingBook(self.plugins)
   self.plugin_sections.border.width = 0
@@ -2085,7 +2093,14 @@ function Settings:update()
         section.parent.size.x - (style.padding.x),
         section:get_real_height()
       )
-      section:set_position(style.padding.x / 2, 0)
+
+      if section == self.plugin_sections and command.is_valid("plugin-manager:show") then
+        -- accomodate plugin manager button
+        section:set_position(style.padding.x / 2, self.plugin_button:get_bottom() + style.padding.y)
+      else
+        section:set_position(style.padding.x / 2, 0)
+      end
+
       for _, pane in ipairs(section.panes) do
         local prev_child = nil
         for pos=#pane.container.childs, 1, -1 do

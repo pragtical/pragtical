@@ -23,8 +23,13 @@ function ToolbarView:new()
     {symbol = "S", command = "doc:save"},
     {symbol = "L", command = "core:find-file"},
     {symbol = "B", command = "core:find-command"},
-    {symbol = "P", command = "core:open-user-module"},
   }
+
+  if command.is_valid("plugin-manager:show") then
+    table.insert(self.toolbar_commands, {symbol = "p", command = "plugin-manager:show"})
+  end
+
+  table.insert(self.toolbar_commands, {symbol = "P", command = "core:open-user-module"})
 end
 
 
