@@ -1508,12 +1508,10 @@ function core.step(next_frame_time)
   -- update
   local stats_config = config.draw_stats
   local uncapped = stats_config == "uncapped"
-  local priority_event = event_received
-    and event_received:match("^[tk][e]") -- key event reduce input latency
-    or event_received == "mousewheel"    -- scroll event keep smooth
+  local priority_event = event_received and event_received ~= "mousemoved"
   core.root_view.size.x, core.root_view.size.y = width, height
   if uncapped or priority_event or next_frame_time < system.get_time() then
-      core.root_view:update()
+    core.root_view:update()
   end
 
   -- Skip drawing if there is time left before next frame, unless, an event is
