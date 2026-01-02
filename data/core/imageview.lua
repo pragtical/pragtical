@@ -47,6 +47,8 @@ local SUPPORTED_EXTENSIONS = {
   xv = true
 }
 
+---@alias core.imageview.zoommode "fit" | "fixed"
+
 ---An image view that allows zooming in and out an image.
 ---@class core.imageview : core.view
 ---@field super core.view
@@ -59,23 +61,21 @@ local SUPPORTED_EXTENSIONS = {
 ---@field width number
 ---@field height number
 ---@field errmsg string?
----@overload fun(path:string):core.imageview
+---@overload fun(path:string,zoom_mode:core.imageview.zoommode,zoom_scale:number):core.imageview
 ---@diagnostic disable-next-line
 local ImageView = View:extend()
-
-ImageView.context = "application"
 
 function ImageView:__tostring() return "ImageView" end
 
 ---Constructor
 ---@param path? string
-function ImageView:new(path)
+function ImageView:new(path, zoom_mode, zoom_scale)
   ImageView.super.new(self)
 
   self.scrollable = true
   self.prev_size = {x = self.size.x, y = self.size.y}
-  self.zoom_mode = "fit"
-  self.zoom_scale = 1
+  self.zoom_mode = zoom_mode or "fit"
+  self.zoom_scale = zoom_scale or 1
   self.width = 0
   self.height = 0
   self.errmsg = nil
@@ -83,6 +83,32 @@ function ImageView:new(path)
   self.bg_color = config.images_background_color or { common.color "#ffffff" }
 
   self:load(path)
+end
+
+function ImageView:get_state()
+  return {
+    path = self.path,
+    zoom_mode = self.zoom_mode,
+    zoom_scale = self.zoom_scale,
+    width = self.width,
+    height = self.height,
+    scroll = {
+      x = self.scroll.x,
+      y = self.scroll.y,
+      to = { x = self.scroll.to.x, y = self.scroll.to.y }
+    },
+  }
+end
+
+function ImageView.from_state(state)
+  if system.get_file_info(state.path) then
+    local iv = ImageView(state.path, state.zoom_mode, state.zoom_scale)
+    iv.scroll = state.scroll
+    iv.width = state.width
+    iv.height = state.height
+    return iv
+  end
+  return nil
 end
 
 ---Loads the given image into the view.

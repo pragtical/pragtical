@@ -1,8 +1,6 @@
 -- mod-version:3
 local core = require "core"
 local common = require "core.common"
-local DocView = require "core.docview"
-local LogView = require "core.logview"
 local storage = require "core.storage"
 
 local STORAGE_MODULE = "ws"
@@ -51,59 +49,36 @@ local function get_unlocked_root(node)
 end
 
 
+---@param view core.view
 local function save_view(view)
-  local mt = getmetatable(view)
-  if mt == DocView then
+  local state = view:get_state()
+  local module = view:get_module()
+  if state and module then
     return {
-      type = "doc",
+      module = module,
       active = (core.active_view == view),
-      filename = view.doc.filename,
-      selection = { view.doc:get_selection() },
-      scroll = { x = view.scroll.to.x, y = view.scroll.to.y },
-      crlf = view.doc.crlf,
-      text = view.doc.new_file and view.doc:get_text(1, 1, math.huge, math.huge)
+      state = state,
     }
-  end
-  if mt == LogView then return end
-  for name, mod in pairs(package.loaded) do
-    if mod == mt then
-      return {
-        type = "view",
-        active = (core.active_view == view),
-        module = name,
-        scroll = { x = view.scroll.to.x, y = view.scroll.to.y, to = { x = view.scroll.to.x, y = view.scroll.to.y } },
-      }
-    end
   end
 end
 
 
 local function load_view(t)
-  if t.type == "doc" then
-    local dv
-    if not t.filename then
-      -- document not associated to a file
-      dv = DocView(core.open_doc())
-    else
-      -- we have a filename, try to read the file
-      local ok, doc = pcall(core.open_doc, t.filename)
-      if ok then
-        dv = DocView(doc)
-      end
+  t.module = t.module or (t.type == "doc" and "core.docview")
+  if t.module then
+    local View = require(t.module)
+    -- compatibility with old state data
+    if t.scroll then
+      t.state = {
+        scroll = t.scroll,
+        filename = t.filename,
+        selection = t.selection,
+        crlf = t.crlf,
+        text = t.text
+      }
     end
-    if dv and dv.doc then
-      if dv.doc.new_file and t.text then
-        dv.doc:insert(1, 1, t.text)
-        dv.doc.crlf = t.crlf
-      end
-      dv.doc:set_selection(table.unpack(t.selection))
-      dv.last_line1, dv.last_col1, dv.last_line2, dv.last_col2 = dv.doc:get_selection()
-      dv.scroll.x, dv.scroll.to.x = t.scroll.x, t.scroll.x
-      dv.scroll.y, dv.scroll.to.y = t.scroll.y, t.scroll.y
-    end
-    return dv
+    return View and View.from_state(t.state)
   end
-  return require(t.module)()
 end
 
 
@@ -141,9 +116,6 @@ local function load_node(node, t)
         node:add_view(view)
         if t.active_view == i then
           active_view = view
-        end
-        if not view:is(DocView) then
-          view.scroll = v.scroll
         end
       end
     end

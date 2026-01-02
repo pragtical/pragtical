@@ -115,6 +115,43 @@ function DocView:new(doc)
 end
 
 
+function DocView:get_state()
+  return {
+    filename = self.doc.filename,
+    selection = { self.doc:get_selection() },
+    scroll = { x = self.scroll.to.x, y = self.scroll.to.y },
+    crlf = self.doc.crlf,
+    text = self.doc.new_file and self.doc:get_text(1, 1, math.huge, math.huge)
+  }
+end
+
+
+function DocView.from_state(state)
+  local dv
+  if not state.filename then
+    -- document not associated to a file
+    dv = DocView(core.open_doc())
+  else
+    -- we have a filename, try to read the file
+    local ok, doc = pcall(core.open_doc, state.filename)
+    if ok then
+      dv = DocView(doc)
+    end
+  end
+  if dv and dv.doc then
+    if dv.doc.new_file and state.text then
+      dv.doc:insert(1, 1, state.text)
+      dv.doc.crlf = state.crlf
+    end
+    dv.doc:set_selection(table.unpack(state.selection))
+    dv.last_line1, dv.last_col1, dv.last_line2, dv.last_col2 = dv.doc:get_selection()
+    dv.scroll.x, dv.scroll.to.x = state.scroll.x, state.scroll.x
+    dv.scroll.y, dv.scroll.to.y = state.scroll.y, state.scroll.y
+  end
+  return dv
+end
+
+
 ---Attempt to close the view, prompting to save if document is dirty.
 ---Shows "Unsaved Changes" dialog if this is the last view of a dirty document.
 ---@param do_close function Callback to execute when close is confirmed
