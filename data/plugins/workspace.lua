@@ -64,8 +64,21 @@ end
 
 
 local function load_view(t)
-  local View = require(t.module)
-  return View and View.from_state(t.state)
+  t.module = t.module or (t.type == "doc" and "core.docview")
+  if t.module then
+    local View = require(t.module)
+    -- compatibility with old state data
+    if t.scroll then
+      t.state = {
+        scroll = t.scroll,
+        filename = t.filename,
+        selection = t.selection,
+        crlf = t.crlf,
+        text = t.text
+      }
+    end
+    return View and View.from_state(t.state)
+  end
 end
 
 
