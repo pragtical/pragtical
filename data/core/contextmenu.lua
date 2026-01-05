@@ -72,7 +72,6 @@ local function update_items_size(items, update_binding)
     local lw, lh = get_item_size(item)
     width = math.max(width, lw)
     height = height + lh
-    core.log("%s %d %d", item, width, height)
   end
   width = width + style.padding.x * 2
   items.width, items.height = width, height
