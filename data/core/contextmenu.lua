@@ -63,20 +63,19 @@ local function get_item_size(item)
   return lw, lh
 end
 
-local function update_items_size(itemset, update_binding)
+local function update_items_size(items, update_binding)
   local width, height = 0, 0
-  for _, itemsetentry in ipairs(itemset) do 
-    for _, item in ipairs(itemsetentry.items) do
-      if update_binding and item ~= DIVIDER then
-        item.info = keymap.get_binding(item.command)
-      end
-      local lw, lh = get_item_size(item)
-      width = math.max(width, lw)
-      height = height + lh
+  for _, item in ipairs(items) do
+    if update_binding and item ~= DIVIDER then
+      item.info = keymap.get_binding(item.command)
     end
-    width = width + style.padding.x * 2
-    itemsetentry.items.width, itemsetentry.items.height = width, height
+    local lw, lh = get_item_size(item)
+    width = math.max(width, lw)
+    height = height + lh
+    core.log("%s %d %d", item, width, height)
   end
+  width = width + style.padding.x * 2
+  items.width, items.height = width, height
 end
 
 ---Registers a list of items into the context menu with a predicate.
@@ -84,8 +83,8 @@ end
 ---@param items core.contextmenu.item[]
 function ContextMenu:register(predicate, items)
   predicate = command.generate_predicate(predicate)
+  update_items_size(items, true)
   table.insert(self.itemset, { predicate = predicate, items = items })
-  update_items_size(self.itemset, true)
 end
 
 ---Shows the context menu.
@@ -97,6 +96,7 @@ function ContextMenu:show(x, y)
   local items_list = { width = 0, height = 0 }
   for _, items in ipairs(self.itemset) do
     if items.predicate(x, y) then
+      update_items_size(items.items)
       items_list.width = math.max(items_list.width, items.items.width)
       items_list.height = items_list.height
       for _, subitems in ipairs(items.items) do
