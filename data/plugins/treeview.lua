@@ -986,7 +986,7 @@ command.add(
     local item = treeitem()
     if item then
       local is_image, ext = ImageView.is_supported(item.abs_filename)
-      if is_image and ext == "svg" then
+      if is_image and (ext == "svg" or ext == "xpm") then
         return (core.active_view == view or menu.show_context_menu), item
       end
     end
