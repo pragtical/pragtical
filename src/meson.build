@@ -158,6 +158,28 @@ if get_option('repl_history')
     pragtical_cargs += '-DPRAGTICAL_REPL_HISTORY'
 endif
 
+# enable networking support
+if get_option('net')
+    pragtical_deps += dependency('SDL3_net', 'sdl3-net', fallback: ['sdl3_net', 'sdl3_net_dep'],
+        default_options: default_fallback_options + ['default_library=static']
+    )
+
+    pragtical_deps += [
+        dependency('mbedtls', fallback: ['mbedtls', 'mbedtls_dep'],
+            default_options: default_fallback_options + ['default_library=static']
+        ),
+        dependency('mbedx509', fallback: ['mbedtls', 'mbedx509_dep'],
+            default_options: default_fallback_options + ['default_library=static']
+        ),
+        dependency('mbedcrypto', fallback: ['mbedtls', 'mbedcrypto_dep'],
+            default_options: default_fallback_options + ['default_library=static']
+        )
+    ]
+
+    pragtical_sources += 'api/net.c'
+    pragtical_cargs += '-DPRAGTICAL_NET'
+endif
+
 executable('pragtical',
     pragtical_sources + pragtical_rc,
     include_directories: pragtical_includes,
