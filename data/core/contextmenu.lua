@@ -95,6 +95,7 @@ function ContextMenu:show(x, y)
   local items_list = { width = 0, height = 0 }
   for _, items in ipairs(self.itemset) do
     if items.predicate(x, y) then
+      update_items_size(items.items)
       items_list.width = math.max(items_list.width, items.items.width)
       items_list.height = items_list.height
       for _, subitems in ipairs(items.items) do
