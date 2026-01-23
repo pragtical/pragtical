@@ -9,7 +9,7 @@ on:
     inputs:
       version:
         description: Release Version
-        default: v3.8.1
+        default: v3.8.2
         required: true
 
 

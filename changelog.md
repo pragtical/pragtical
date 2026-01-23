@@ -1,5 +1,80 @@
 # Changes Log
 
+## [3.8.2] - 2026-01-24
+
+### New Features
+
+* Add view state save/load support
+  ([#409](https://github.com/pragtical/pragtical/pull/409))
+
+### Enhancements
+
+* Documentation
+  ([#396](https://github.com/pragtical/pragtical/pull/396))
+
+* Open images in viewer from open file operations
+  ([#403](https://github.com/pragtical/pragtical/pull/403))
+
+* core.step: deprioritize only the mousemove event
+  ([#407](https://github.com/pragtical/pragtical/pull/407))
+
+* Add xpm as additional open as text format
+  ([#410](https://github.com/pragtical/pragtical/pull/410))
+
+### UI Enhancements
+
+* scale plugin: keep current scale state on restart
+  ([#401](https://github.com/pragtical/pragtical/pull/401))
+
+* Reduce rencache cell size for better dirty detect
+  ([#405](https://github.com/pragtical/pragtical/pull/405))
+
+* add button for opening plugin manager from settings and toolbarview
+  ([#408](https://github.com/pragtical/pragtical/pull/408))
+
+* Made plugin manager button more subtle on settings ui
+  ([40b0287e](https://github.com/pragtical/pragtical/commit/40b0287e333dafe95d028531d7c33d68b7aa6f34))
+
+### Fixes
+
+* common.dirname: treat leading / as directory name
+  ([#400](https://github.com/pragtical/pragtical/pull/400))
+
+* Reorder current/default scales on get_display_info
+  ([#402](https://github.com/pragtical/pragtical/pull/402))
+
+* EmptyView: re-update childs on size/pos changes
+  ([#404](https://github.com/pragtical/pragtical/pull/404))
+
+* DirMonitor: fix doc comment error
+  ([#406](https://github.com/pragtical/pragtical/pull/406))
+
+* fix: context menu not properly sized
+  ([#411](https://github.com/pragtical/pragtical/pull/411))
+
+### Build System
+
+* CI: really use profiler data when compiling with clang
+  ([30c734ab](https://github.com/pragtical/pragtical/commit/30c734abd630d188ff98fb19ea5d208ee2c15b64))
+
+* CI: always use optimization level 3
+  ([ac6395f8](https://github.com/pragtical/pragtical/commit/ac6395f8a10683c08feba611bb327207d624812e))
+
+* Build luajit subproject in amalgamation mode.
+  ([#390](https://github.com/pragtical/pragtical/pull/390))
+
+* LuaJIT subproject: install additional lua modules
+  ([#391](https://github.com/pragtical/pragtical/pull/391))
+
+* Update colors subproject for more monokai variations
+  ([#392](https://github.com/pragtical/pragtical/pull/392))
+
+* Update SDL and SDL_image to v3.4.0
+  ([#413](https://github.com/pragtical/pragtical/pull/413))
+
+* CI: fix polyfill-glibc on Linux AArch64 (bumps required glibc to v2.29)
+  ([ed651cea](https://github.com/pragtical/pragtical/commit/ed651cea3acf58d1ec8863f88276895ffd70e484))
+
 ## [3.8.1] - 2025-12-16
 
 ### Fixes
@@ -214,7 +289,7 @@
 * fix(treeview): avoid crashing if creating a new file errors out
   ([#2184](https://github.com/lite-xl/lite-xl/pull/2184))
 
-* Rearrange Plugin Loading and SDL Initialization (#1881)
+* Rearrange Plugin Loading and SDL Initialization
   ([#1881](https://github.com/lite-xl/lite-xl/pull/1881))
 
 * Added generic storage system and use on workspace plugin
@@ -3040,6 +3115,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.2]: https://github.com/pragtical/pragtical/releases/tag/v3.8.2
 [3.8.1]: https://github.com/pragtical/pragtical/releases/tag/v3.8.1
 [3.8.0]: https://github.com/pragtical/pragtical/releases/tag/v3.8.0
 [3.7.1]: https://github.com/pragtical/pragtical/releases/tag/v3.7.1
