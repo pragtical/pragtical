@@ -1,6 +1,6 @@
-project('sdl3_image', 'c', version: '3.2.4')
+project('sdl3_image', 'c', version: '3.4.0')
 
-sdl_dep = dependency('sdl3', version: '>=3.2.4')
+sdl_dep = dependency('sdl3', version: '>=3.4.0')
 
 img_args = []
 img_dependencies = [sdl_dep]
@@ -77,10 +77,12 @@ endif
 
 # WEBP - seems to require more effort since it is not working :-(
 webp_dep = dependency('libwebp', required: false)
+webpmux_dep = dependency('libwebpmux', required: false)
 webpdemux_dep = dependency('libwebpdemux', required: false)
-if webp_dep.found() and webpdemux_dep.found()
+if webp_dep.found() and webpdemux_dep.found() and webpmux_dep.found()
   img_args += '-DLOAD_WEBP'
   img_args += '-DLOAD_WEBP_DYNAMIC="@0@webp@1@"'.format(libprefix, libext)
+  img_args += '-DLOAD_WEBPMUX_DYNAMIC="@0@webpmux@1@"'.format(libprefix, libext)
   img_args += '-DLOAD_WEBPDEMUX_DYNAMIC="@0@webpdemux@1@"'.format(libprefix, libext)
 endif
 
