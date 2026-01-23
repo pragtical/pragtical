@@ -87,6 +87,9 @@ polyfill_glibc() {
   local arch
   arch=$(get_platform_arch)
 
+  local target_glibc
+  target_glibc=2.17
+
   if [ ! -e "polyfill-glibc" ]; then
     if ! wget -O "polyfill-glibc" "https://github.com/pragtical/polyfill-glibc/releases/download/binaries/polyfill-glibc.${arch}" ; then
       echo "Could not download polyfill-glibc for the arch '${arch}'."
@@ -104,13 +107,16 @@ polyfill_glibc() {
     echo "__isoc23_strtoul@GLIBC_2.38 strtoul" >> $symbols
     echo "__isoc23_strtoull@GLIBC_2.38 strtoull" >> $symbols
     rename_symbols="--rename-dynamic-symbols=${symbols}"
+
+    # because of posix_spawn_file_actions_addchdir_np we need to target newer
+    target_glibc=2.29
   fi
 
   local binary_path="$1"
   echo "======================================================================="
   echo "Polyfill GLIBC on: ${binary_path}"
   echo "======================================================================="
-  ./polyfill-glibc --target-glibc=2.17 $rename_symbols "$binary_path"
+  ./polyfill-glibc --target-glibc=$target_glibc $rename_symbols "$binary_path"
 }
 
 if [[ $(get_platform_name) == "UNSUPPORTED-OS" ]]; then
