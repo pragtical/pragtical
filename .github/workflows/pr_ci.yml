@@ -39,6 +39,9 @@ jobs:
         run: sudo apt-get update
       - name: Install Dependencies
         run: bash scripts/install-dependencies.sh --debug
+      - name: Lua Unit Tests
+        run: |
+          busted
       - name: Build
         run: |
           bash --version
@@ -89,6 +92,9 @@ jobs:
         uses: jwlawson/actions-setup-cmake@v2
       - name: Install Dependencies
         run: bash scripts/install-dependencies.sh --debug
+      - name: Lua Unit Tests
+        run: |
+          busted
       - name: Build
         run: |
           bash --version
