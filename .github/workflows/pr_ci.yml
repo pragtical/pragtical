@@ -41,7 +41,7 @@ jobs:
         run: bash scripts/install-dependencies.sh --debug
       - name: Lua Unit Tests
         run: |
-          busted
+          ~/.luarocks/bin/busted
       - name: Build
         run: |
           bash --version
@@ -94,7 +94,7 @@ jobs:
         run: bash scripts/install-dependencies.sh --debug
       - name: Lua Unit Tests
         run: |
-          busted
+          ~/.luarocks/bin/busted
       - name: Build
         run: |
           bash --version
