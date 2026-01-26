@@ -1,0 +1,9 @@
+[wrap-git]
+url = https://github.com/libsdl-org/SDL_net.git
+revision = main
+depth = 1
+patch_directory = sdl3_net
+
+[provide]
+sdl3_net = sdl3_net_dep
+sdl3-net = sdl3_net_dep

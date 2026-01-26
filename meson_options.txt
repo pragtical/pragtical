@@ -10,3 +10,4 @@ option('extra_languages', type : 'boolean', value : true, description: 'Include 
 option('ppm', type : 'boolean', value : true, description: 'Include the plugin manager')
 option('jit', type : 'boolean', value : true, description: 'Use luajit')
 option('repl_history', type : 'boolean', value : true, description: 'Enable history and completion support on REPL')
+option('net', type : 'boolean', value : true, description: 'Enable networking support using SDL3_net and mbedtls')
