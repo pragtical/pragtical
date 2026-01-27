@@ -128,6 +128,26 @@ function View:get_module()
 end
 
 
+local function move_constant(val, dest, duration, start_value, acceleration)
+  local distance = math.abs(dest - start_value)
+  local speed = distance / (core.fps * duration) -- px per second
+  speed = acceleration * speed
+  if val < dest then
+    val = math.min(val + speed, dest)
+  elseif val > dest then
+    val = math.max(val - speed, dest)
+  end
+  return val
+end
+
+---Estimate conversion from lerp rate to duration in seconds.
+local function lerp_duration(rate)
+  if rate < 0.1 or rate > 1 then return rate end --already in seconds?
+  local threshold = 0.01 -- 99% from destination
+  local frames = math.log(threshold) / math.log(1 - rate)
+  return frames / config.fps
+end
+
 ---Smoothly animate a value towards a destination.
 ---Use this for animations instead of direct assignment.
 ---@param t table Table containing the value
@@ -144,19 +164,49 @@ function View:move_towards(t, k, dest, rate, name)
   local val = t[k]
   -- we use epsilon comparison in case dest is inconsistent
   if math.abs(dest - val) < 1e-8 then return end
-  if
-    not config.transitions
-    or math.abs(val - dest) < 0.5
-    or config.disabled_transitions[name]
-  then
+  if not config.transitions or config.disabled_transitions[name] or config.fps < 30 then
     t[k] = dest
   else
-    rate = rate or 0.5
-    if core.fps ~= 60 or config.animation_rate ~= 1 then
-      local dt = 60 / core.fps
-      rate = 1 - common.clamp(1 - rate, 1e-8, 1 - 1e-8)^(config.animation_rate * dt)
+    local constant_scroll = name == "scroll"
+      and self.doc
+      and config.scroll_animation_type == "constant"
+    local constant_general = name ~= "scroll"
+      and config.animation_type == "constant"
+    -- Timed Constant Velocity with Acceleration
+    if constant_scroll or constant_general then
+      local mk = "move_data_"..k
+      if not t[mk] or t[mk][2] ~= (dest > val and "f" or "b") then
+        t[mk] = {
+          val,                                 -- starting position
+          dest > val and "f" or "b",           -- direction
+          dest,                                -- final destination
+          1,                                   -- acceleration
+          rate and lerp_duration(rate) or 0.15 -- rate
+        }
+      elseif math.abs(t[mk][3] - dest) >= 1 then
+        t[mk][1] = val
+        t[mk][3] = dest
+        t[mk][4] = math.min(t[mk][4] + 0.2, 3)  -- increase acceleration
+      else
+        t[mk][4] = math.max(t[mk][4] - 0.2, 1) -- decrease acceleration
+      end
+      rate = constant_scroll and 0.5 or t[mk][5]
+      if config.animation_rate ~= 1 then
+        rate = common.clamp(rate, 1e-8, 1 - 1e-8) ^ config.animation_rate
+      end
+      val = move_constant(val, dest, rate, t[mk][1], t[mk][4])
+      t[k] = val
+      if math.abs(dest - val) < 1e-8 then t[mk] = nil end
+    -- Classic Linear Interpolation
+    else
+      rate = rate or 0.2
+      if core.fps ~= 60 or config.animation_rate ~= 1 then
+        local dt = 60 / core.fps
+        rate = 1 - common.clamp(1 - rate, 1e-8, 1 - 1e-8)^(config.animation_rate * dt)
+      end
+      val = common.lerp(val, dest, rate)
+      t[k] = math.abs(val - dest) < 0.5 and dest or val
     end
-    t[k] = common.lerp(val, dest, rate)
   end
   core.redraw = true
 end

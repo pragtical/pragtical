@@ -317,6 +317,28 @@ settings.add("Graphics",
       step = 0.1
     },
     {
+      label = "Animation Type",
+      description = "The type of animation system used on general transitions.",
+      path = "animation_type",
+      type = settings.type.SELECTION,
+      default = "constant",
+      values = {
+        {"Constant Velocity", "constant"},
+        {"Linear Interpolation", "lerp"}
+      }
+    },
+    {
+      label = "Editor Scroll Animation Type",
+      description = "The type of animation system used on the editor scroll transition.",
+      path = "scroll_animation_type",
+      type = settings.type.SELECTION,
+      default = "constant",
+      values = {
+        {"Constant Velocity with Acceleration", "constant"},
+        {"Linear Interpolation", "lerp"}
+      }
+    },
+    {
       label = "Animate Mouse Drag Scroll",
       description = "Causes higher cpu usage but smoother scroll transition.",
       path = "animate_drag_scroll",
@@ -467,7 +489,7 @@ settings.add("User Interface",
       description = "The amount to scroll when using the mouse wheel.",
       path = "mouse_wheel_scroll",
       type = settings.type.NUMBER,
-      default = 50,
+      default = 70,
       min = 10,
       max = 200,
       get_value = function(value)
