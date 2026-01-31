@@ -945,16 +945,11 @@ function common.open_in_system(resource)
     or platform:find("serenity", 1, true)
   then
     launcher = "open %q"
-  elseif platform:find("amiga", 1, true) then
+  elseif platform:find("amigaos", 1, true) then
     if is_url(resource) then
-      launcher = "urlopen %q"
+      launcher = "URLOpen %q"
     else
-      local rtype = system.get_file_info(resource)
-      if rtype and rtype.type == "file" then
-        launcher = "Multiview %q"
-      elseif rtype and rtype.type == "dir" then
-        launcher = "WBRUN %q SHOW=all VIEWBY=name"
-      end
+      launcher = "WBRun %q SHOW=all VIEWBY=name"
     end
   else
     launcher = "xdg-open %q"
