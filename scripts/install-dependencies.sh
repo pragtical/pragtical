@@ -37,11 +37,15 @@ main() {
   fi
 
   if [[ "$OSTYPE" == "linux"* ]]; then
-    sudo apt-get install -qq libfuse2 ninja-build wayland-protocols libsdl2-dev libfreetype6 llvm-14
+    sudo apt-get install -qq libfuse2 ninja-build wayland-protocols libsdl2-dev libfreetype6 llvm-14 luarocks
     pip3 install meson
+      luarocks --local install busted
+      luarocks --local install luacov
   elif [[ "$OSTYPE" == "darwin"* ]]; then
-    brew install bash ninja sdl2 coreutils # coreutils for grealpath
+    brew install bash ninja sdl2 coreutils luarocks # coreutils for grealpath
     pip3 install meson
+    luarocks --local install busted
+    luarocks --local install luacov
     cd ~; npm install appdmg; cd -
     ~/node_modules/appdmg/bin/appdmg.js --version
   elif [[ "$OSTYPE" == "msys" ]]; then

@@ -1,0 +1,5 @@
+modules = {
+   ["common"] = "data/core/common.lua"
+}
+reporter = "html"
+reportfile = "luacov.report.html"

@@ -1,0 +1,10 @@
+return {
+  _all = {
+    coverage = true,
+    lpath = "data/?.lua;data/?/init.lua;"
+  },
+  default = {
+    verbose = true,
+    lpath = "data/?.lua;data/?/init.lua;"
+  }
+}
