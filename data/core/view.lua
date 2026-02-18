@@ -186,9 +186,9 @@ function View:move_towards(t, k, dest, rate, name)
       elseif math.abs(t[mk][3] - dest) >= 1 then
         t[mk][1] = val
         t[mk][3] = dest
-        t[mk][4] = math.min(t[mk][4] + 0.2, 3)  -- increase acceleration
+        t[mk][4] = math.min(t[mk][4] + 0.5, 4)  -- increase acceleration
       else
-        t[mk][4] = math.max(t[mk][4] - 0.2, 1) -- decrease acceleration
+        t[mk][4] = math.max(t[mk][4] - 0.125, 1) -- decrease acceleration
       end
       rate = constant_scroll and 0.5 or t[mk][5]
       if config.animation_rate ~= 1 then
