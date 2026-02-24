@@ -77,6 +77,10 @@ get_default_build_dir() {
 }
 
 polyfill_glibc() {
+  if [[ true ]]; then # Disable polyfill for now since giving issues with linenoise
+    return
+  fi
+
   local platform
   platform=$(get_platform_name)
 
