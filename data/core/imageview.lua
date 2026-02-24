@@ -76,6 +76,7 @@ function ImageView:new(path, zoom_mode, zoom_scale)
   self.prev_size = {x = self.size.x, y = self.size.y}
   self.zoom_mode = zoom_mode or "fit"
   self.zoom_scale = zoom_scale or 1
+  self.mouse = { x = 0, y = 0 }
   self.width = 0
   self.height = 0
   self.errmsg = nil
@@ -154,15 +155,13 @@ function ImageView:scale_image()
     end
   end
 
-  -- the renderer cells can not handle more than 8k so we limit the
-  -- zoom to around 4k just to be on the safe side...
-  local max_dim = 4096
-  local max_scale_w = max_dim / img_w
-  local max_scale_h = max_dim / img_h
-  local max_allowed_scale = math.min(max_scale_w, max_scale_h)
-  if self.zoom_scale > max_allowed_scale then
-    self.zoom_scale = max_allowed_scale
-  end
+  -- the renderer cache cells can not handle more than 8k so we limit the
+  -- zoom to not exceed the maximum width or height, preventing a crash...
+  local max_w = 7680
+  local max_h = 4320
+  local max_scale_w, max_scale_h = max_w / img_w, max_h / img_h
+  local max_scale = math.min(max_scale_w, max_scale_h)
+  if self.zoom_scale > max_scale then self.zoom_scale = max_scale end
 
   self.zoom_scale = tonumber(string.format("%.2f", self.zoom_scale))
     or self.zoom_scale
@@ -270,6 +269,7 @@ end
 
 function ImageView:on_mouse_moved(x, y, dx, dy)
   if not ImageView.super.on_mouse_moved(self, x, y, dx, dy) then
+    self.mouse.x, self.mouse.y = x, y
     if self.mouse_pressed then
       self.scroll.to.x = self.scroll.to.x - dx
       self.scroll.to.y = self.scroll.to.y - dy
@@ -280,11 +280,43 @@ function ImageView:on_mouse_moved(x, y, dx, dy)
   return true
 end
 
+---Calculate current offset of scaled image.
+---@param scaled core.imageview
+---@return number ox
+---@return number oy
+local function get_scaled_image_offset(self)
+  local iw, ih = self.image_scaled:get_size()
+  return
+    iw < self.size.x and (self.size.x - iw) / 2 or 0,
+    ih < self.size.y and (self.size.y - ih) / 2 or 0
+end
+
 function ImageView:on_mouse_wheel(d)
   for _, val in pairs(keymap.modkeys) do
     if val then return false end
   end
+
+  if not self.image then return false end
+
+  -- Mouse position relative to view
+  local mx = self.mouse.x - self.position.x
+  local my = self.mouse.y - self.position.y
+
+  local ox, oy = get_scaled_image_offset(self)
+
+  -- Convert screen -> image space (before zoom)
+  local img_x = (mx + self.scroll.x - ox) / self.zoom_scale
+  local img_y = (my + self.scroll.y - oy) / self.zoom_scale
+
   if d > 0 then self:zoom_in() else self:zoom_out() end
+
+  ox, oy = get_scaled_image_offset(self)
+
+  -- Adjust scroll so cursor stays over same pixel
+  self.scroll.to.x = img_x * self.zoom_scale - mx + ox
+  self.scroll.to.y = img_y * self.zoom_scale - my + oy
+  self.scroll.x, self.scroll.y = self.scroll.to.x, self.scroll.to.y
+
   return true
 end
 

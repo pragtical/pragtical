@@ -9,8 +9,10 @@
    that will be dirty checked.
 */
 #define RENCACHE_CELL_SIZE 60 /* common divisor of width and height */
-#define RENCACHE_CELLS_X (7680 / RENCACHE_CELL_SIZE) /* 128 cells */
-#define RENCACHE_CELLS_Y (4320 / RENCACHE_CELL_SIZE) /* 72 cells */
+/* 128 X cells */
+#define RENCACHE_CELLS_X (7680 / RENCACHE_CELL_SIZE)
+/* 72 Y cells with additional 1 cell padding to prevent hash crash */
+#define RENCACHE_CELLS_Y ((4320 + RENCACHE_CELL_SIZE) / RENCACHE_CELL_SIZE)
 
 typedef struct {
   uint8_t *command_buf;
