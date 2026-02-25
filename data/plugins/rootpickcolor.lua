@@ -31,20 +31,37 @@ end
 
 local function draw_color_box()
   local spacing = 30
-  renderer.draw_rect(
-    cx + spacing - style.divider_size, cy - style.divider_size,
-    (spacing * SCALE) + (style.divider_size * 2),
-    (spacing * SCALE) + (style.divider_size * 2),
-    style.text
-  )
+  local size = spacing * SCALE
+  local border = style.divider_size
 
   color = core.window:get_color(cx, cy)
 
+  -- Default position: right of cursor
+  local bx = cx + spacing
+  local by = cy
+
+  -- Flip to left of cursor if overflowing right edge
+  if bx + size + border * 2 > core.root_view.size.x then
+    bx = cx - spacing - size
+  end
+
+  -- Keep color preview fully visible when reaching window bottom
+  if by + size + border * 2 > core.root_view.size.y then
+    by = core.root_view.size.y - size - border
+  end
+
+  -- Keep color preview fully visible when reaching window top
+  if by <= 1 then by = border end
+
+  -- Draw Border
   renderer.draw_rect(
-    cx + spacing, cy,
-    spacing * SCALE, spacing * SCALE,
-    color
+    bx - border, by - border,
+    size + border * 2, size + border * 2,
+    style.text
   )
+
+  -- Draw Color Fill
+  renderer.draw_rect(bx, by, size, size, color)
 end
 
 local rootview_draw = RootView.draw
