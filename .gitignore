@@ -20,6 +20,8 @@ compile_commands.json
 error.txt
 pragtical*
 Pragtical*
+luacov.stats.out
+luacov.report.html
 
 !resources/windows/*.diff
 !resources/windows/*.exe.manifest.in
