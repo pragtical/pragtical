@@ -6,6 +6,7 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local StatusView = require "core.statusview"
+local DocView = require "core.docview"
 
 ---Configuration options for `findfile` plugin.
 ---@class config.plugins.findfile
@@ -50,6 +51,7 @@ config.plugins.findfile = common.merge({
 local project_files = {}
 local refresh_files = false
 local matching_files = 0
+local line_number = nil
 local project_total_files = 0
 local multiple_projects = false
 local loading_text = ""
@@ -303,6 +305,23 @@ local function is_file(file_path)
   return false
 end
 
+local function open_file_in_project(project, path)
+  local filename = project:absolute_path(
+    common.home_expand(path)
+  )
+  if is_file(filename) then
+    local line_num = line_number or 1
+    local view = core.open_file(filename)
+
+    if view:is(DocView) then
+      local doc = view.doc
+      local line = math.min(line_num, math.max(1, #doc.lines))
+      doc:set_selection(line_num, 1, line_num, 1)
+      view:scroll_to_line(line_num, true, true)
+    end
+  end
+end
+
 local function get_visited_files()
   local files = {}
   for _, file in ipairs(core.visited_files) do
@@ -370,11 +389,8 @@ command.add(nil, {
       submit = function(text, suggestion)
         if not suggestion then
           if text == "" then return end
-          local filename = core.current_project():absolute_path(
-            common.home_expand(text)
-          )
-          core.open_file(filename)
-          return
+          local path = text:gsub(":(%d*)$", "") -- Remove any trailing colon and digits - line number is stored when suggesting
+          return open_file_in_project(core.current_project(), path)
         end
         text = suggestion.text
         if multiple_projects then
@@ -384,21 +400,24 @@ command.add(nil, {
           if project_name then
             for _, project in ipairs(core.projects) do
               if project_name == common.basename(project.path) then
-                local file = project.path .. PATHSEP .. file_path
-                if is_file(file) then
-                  core.open_file(project.path .. PATHSEP .. file_path)
-                  return
-                end
+                return open_file_in_project(project, file_path)
               end
             end
           end
         end
-        local file = core.projects[1]:absolute_path(
-          common.home_expand(text)
-        )
-        if is_file(file) then core.open_file(file) end
+        -- Default to the first project if project not found by name
+        open_file_in_project(core.projects[1], text)
       end,
       suggest = function(text)
+        -- Remove line number from path and store for later use (e.g., "filename.lua:42" becomes "filename.lua")
+        local filename, ln = text:match("^(.-):(%d*)$")
+        if filename then
+          text = filename
+          line_number = tonumber(ln)
+        else
+          line_number = nil
+        end
+
         local results = {}
 
         if coroutine_running and #project_files == 0 then
