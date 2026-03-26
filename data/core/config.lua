@@ -340,6 +340,16 @@ config.dirmonitor_backend = nil
 ---@type boolean
 config.use_system_file_picker = system.get_sandbox() ~= "none"
 
+---Controls how the caret column is displayed in the status bar.
+---
+---When set to `"char"`, the column is based on the number of characters
+---from the start of the line (UTF-8 aware).
+---When set to `"byte"`, the column is based on the raw byte offset.
+---
+---Defaults to `"char"`.
+---@type "char" | "byte"
+config.caret_column_mode = "char"
+
 -- holds the plugins real config table
 local plugins_config = {}
 
