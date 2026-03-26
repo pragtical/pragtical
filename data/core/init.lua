@@ -541,8 +541,18 @@ function core.init()
     core.log_quiet("Opening project %q from directory %s", pname, pdir)
   end
 
-  for _, filename in ipairs(files) do
-    core.root_view:open_doc(core.open_doc(filename))
+  if #files > 0 then
+    -- defer file loading to ensure all plugins are loaded first,
+    -- fixes issues like with linewrapping been enabled by default
+    -- but not applied when opening editor with "open with"
+    -- see: https://github.com/pragtical/pragtical/issues/423
+    core.add_thread(function()
+      -- allow workspace plugin to do its thing first to prevent duplicate files
+      coroutine.yield()
+      for _, filename in ipairs(files) do
+        core.open_file(filename)
+      end
+    end)
   end
 
   if not plugins_success then
