@@ -842,6 +842,17 @@ settings.add("Status Bar",
       default = 5,
       min = 1,
       max = 30
+    },
+    {
+      label = "Caret Column Mode",
+      description = "Controls how the caret column is displayed in the status bar.",
+      path = "caret_column_mode",
+      type = settings.type.SELECTION,
+      default = "char",
+      values = {
+        {"Character", "char"},
+        {"Byte", "byte"}
+      }
     }
   }
 )

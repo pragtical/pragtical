@@ -236,6 +236,9 @@ function StatusView:register_docview_items()
     get_item = function()
       local dv = core.active_view
       local line, col = dv.doc:get_selection()
+      if config.caret_column_mode == "char" then
+        col = dv.doc.lines[line]:ulen(1, col, true)
+      end
       local tab_type, indent_size = dv.doc:get_indent_info()
       -- Calculating tabs when the doc is using the "hard" indent type.
       local ntabs = 0
