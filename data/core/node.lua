@@ -55,6 +55,7 @@ function Node:new(type)
   self.tab_offset = 1
   self.tab_width = style.tab_width
   self.move_towards = View.move_towards
+  self.hovered_scroll_button = 0
 end
 
 
