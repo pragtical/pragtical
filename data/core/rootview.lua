@@ -234,7 +234,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
     self.dragged_divider = div
     return true
   end
-  if node.hovered_scroll_button > 0 then
+  if node.hovered_scroll_button and node.hovered_scroll_button > 0 then
     node:scroll_tabs(node.hovered_scroll_button)
     return true
   end

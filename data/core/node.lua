@@ -25,7 +25,7 @@ local View = require "core.view"
 ---@field active_view core.view
 ---@field hovered_close integer
 ---@field hovered_tab integer?
----@field hovered_scroll_button integer
+---@field hovered_scroll_button integer?
 ---@field tab_shift number
 ---@field tab_offset integer
 ---@field tab_width number
