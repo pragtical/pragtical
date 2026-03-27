@@ -515,7 +515,23 @@ static int f_set_window_mode(lua_State *L) {
 
 static int f_set_window_bordered(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**) luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
-  SDL_SetWindowBordered(window_renderer->cache.window, lua_toboolean(L, 2));
+  SDL_Window *win = window_renderer->cache.window;
+  bool bordered = lua_toboolean(L, 2);
+#if defined(SDL_PLATFORM_WINDOWS)
+  // Hack on windows to force drawing of TitleView.
+  // If maximized and removing borders, force a state "reset".
+  // Fixes: https://github.com/pragtical/pragtical/issues/425
+  bool was_maximized = (SDL_GetWindowFlags(win) & SDL_WINDOW_MAXIMIZED);
+  if (was_maximized && !bordered) {
+    SDL_RestoreWindow(win);
+    SDL_SetWindowBordered(win, bordered);
+    SDL_MaximizeWindow(win);
+  } else {
+    SDL_SetWindowBordered(win, bordered);
+  }
+#else
+  SDL_SetWindowBordered(win, bordered);
+#endif
   return 0;
 }
 
