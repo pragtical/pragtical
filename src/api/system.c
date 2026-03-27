@@ -1126,6 +1126,7 @@ static int f_load_native_plugin(lua_State *L) {
   lua_pop(L, 2);
 
   const char *basename = strrchr(name, '.');
+  bool has_dot = basename != NULL;
   basename = !basename ? name : basename + 1;
   snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_pragtical_%s", basename);
   int (*ext_entrypoint) (lua_State *L, void* (*)(const char*));
@@ -1139,6 +1140,15 @@ static int f_load_native_plugin(lua_State *L) {
     snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_%s", basename);
     int (*entrypoint)(lua_State *L);
     *(void**)(&entrypoint) = SDL_LoadFunction(library, entrypoint_name);
+    if (has_dot && !entrypoint) {
+      // Allow loading libraries like term.core from term/core.so by adding
+      // support for entry functions like luaopen_term_core
+      char fullname[128]; strcpy(fullname, name);
+      char* dot = NULL;
+      while((dot = strstr(fullname, "."))) *dot = '_';
+      snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_%s", fullname);
+      *(void**)(&entrypoint) = SDL_LoadFunction(library, entrypoint_name);
+    }
     if (!entrypoint)
       return luaL_error(L, "Unable to load %s: Can't find %s(lua_State *L, void *XL)", name, entrypoint_name);
     result = entrypoint(L);
