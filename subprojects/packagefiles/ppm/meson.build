@@ -34,13 +34,15 @@ elif get_option('wrap_mode') != 'forcefallback' and not is_msys
 
     ppm_lua_c = configure_file(
         capture: false,
-        command: [lua_exe, '-e', 'f = string.dump(assert(load(io.lines("@INPUT0@", "L"), "=ppm.lua"))) io.open("@OUTPUT0@", "wb"):write("unsigned char ppm_luac[] = \"" .. f:gsub(".", function (c) return string.format("\\\x%02X",string.byte(c)) end) .. "\";unsigned int ppm_luac_len = " .. #f .. ";")'],
+        command: [lua_exe, '-e', 'f = assert(io.open("@INPUT0@", "rb")):read("*a") io.open("@OUTPUT0@", "wb"):write("unsigned char ppm_luac[] = \"" .. f:gsub(".", function (c) return string.format("\\\x%02X",string.byte(c)) end) .. "\";unsigned int ppm_luac_len = " .. #f .. ";")'],
         input: files('src/ppm.lua'),
         output: 'ppm.lua.c'
     )
 
     # Special checking for lua dependency due to distro differences
     lua_names = [
+        'lua5.5', # Debian
+        'lua-5.5', # FreeBSD
         'lua5.4', # Debian
         'lua-5.4', # FreeBSD
         'lua',    # Fedora
