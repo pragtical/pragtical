@@ -1,5 +1,5 @@
 [wrap-git]
 url = https://github.com/pragtical/colors.git
-revision = 30e77ff78b03565e86b70cb8b7ad81371bbd684a
+revision = 6a50f112e56795415beff6cfeb764d1fc784c8f7
 depth = 1
 patch_directory = colors

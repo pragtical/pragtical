@@ -1,5 +1,54 @@
 # Changes Log
 
+## [3.8.3] - 2026-03-29
+
+### New Features
+
+* Open file at line
+  ([#428](https://github.com/pragtical/pragtical/pull/428))
+
+* StatusView doc:position show col in characters
+  ([#432](https://github.com/pragtical/pragtical/pull/432))
+
+### Enhancements
+
+* ImageView: zoom using mouse position
+  ([#420](https://github.com/pragtical/pragtical/pull/420))
+
+* rootpickcolor: keep color preview always visible
+  ([#421](https://github.com/pragtical/pragtical/pull/421))
+
+* Allow loading namespaced native lua libraries
+  ([#436](https://github.com/pragtical/pragtical/pull/436))
+
+### Fixes
+
+* Fixes in open_in_system() for AmigaOS 4
+  ([#416](https://github.com/pragtical/pragtical/pull/416))
+
+* Widgets: update for SearchReplaceList crash fix
+  ([#418](https://github.com/pragtical/pragtical/pull/418))
+
+* Update widget for latest hover fix
+  ([#433](https://github.com/pragtical/pragtical/pull/433))
+
+* Check node hovered_scroll_button is set on rootview
+  ([#434](https://github.com/pragtical/pragtical/pull/434))
+
+* Defer startup file loading after plugins loaded
+  ([#430](https://github.com/pragtical/pragtical/pull/430))
+
+* Fix borderless on maximized window (Windows)
+  ([#435](https://github.com/pragtical/pragtical/pull/435))
+
+### Build System
+
+* CI: disable polyfill_glibc - issues with linenoise
+  ([#419](https://github.com/pragtical/pragtical/pull/419))
+
+* ppm subproject: don't use lua bytecode
+  ([#438](https://github.com/pragtical/pragtical/pull/438))
+
 ## [3.8.2] - 2026-01-24
 
 ### New Features
@@ -3115,6 +3164,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.3]: https://github.com/pragtical/pragtical/releases/tag/v3.8.3
 [3.8.2]: https://github.com/pragtical/pragtical/releases/tag/v3.8.2
 [3.8.1]: https://github.com/pragtical/pragtical/releases/tag/v3.8.1
 [3.8.0]: https://github.com/pragtical/pragtical/releases/tag/v3.8.0
