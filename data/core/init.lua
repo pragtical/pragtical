@@ -1779,107 +1779,136 @@ function collectgarbage(opt, ...)
   return ret
 end
 
+-- Run-loop state shared between core.run() (setup) and core.run_step() (per-frame).
+-- All of these were local variables inside the old core.run() while-loop.
+local run_next_step       = nil
+local run_skip_no_focus   = 0
+local run_burst_events    = 0
+local run_has_focus       = true
+local run_next_frame_time = 0
+
+---Set up the run-loop state.  Called once from C (SDL_AppInit → init_lua_state)
+---via the init_code that also calls core.init().  SDL_AppIterate then drives the
+---loop by calling core.run_step() on every frame.
 function core.run()
   scale = require "plugins.scale"
-  local next_step
-  local skip_no_focus = 0
-  local burst_events = 0
-  local has_focus = true
-  local next_frame_time = system.get_time() + 1 / config.fps
-  while true do
-    local now = system.get_time()
-    local uncapped = config.draw_stats == "uncapped"
-    core.frame_start = now
+  run_next_step       = nil
+  run_skip_no_focus   = 0
+  run_burst_events    = 0
+  run_has_focus       = true
+  run_next_frame_time = system.get_time() + 1 / config.fps
+end
 
-    -- start a new 1s cycle
-    if core.frame_start >= cycle_end_time then
-      cycle_end_time = core.frame_start + (core.co_max_time * core.fps)
-      main_loop_time = 0
-      has_focus = system.window_has_focus(core.window)
-    end
+---Execute one frame of the main loop.
+---
+---Called by C's SDL_AppIterate on every frame.
+---
+---@return boolean  true to keep running, false to quit or restart.
+function core.run_step()
+  local now     = system.get_time()
+  local uncapped = config.draw_stats == "uncapped"
+  core.frame_start = now
 
-    -- run all coroutine tasks
-    local time_to_wake = run_threads()
-    local threads_end_time = system.get_time() - now
-    now = now + threads_end_time
-
-    -- respect coroutines redraw requests
-    if has_focus or core.redraw then
-      skip_no_focus = core.frame_start + 5
-      next_step = nil
-    end
-
-    -- set the run mode
-    if
-      not has_focus
-      and skip_no_focus < core.frame_start
-      and core.background_threads > 0
-    then
-      run_threads_mode = "background"
-    else
-      run_threads_mode = "all"
-    end
-
-    if run_threads_mode == "background" then
-      -- run background threads, no drawing or events processing
-      next_step = nil
-      if system.wait_event(time_to_wake) then
-        skip_no_focus = now + 5
-      end
-    else
-      -- listen events and perform drawing as needed
-      local did_redraw = false
-      if not next_step or now >= next_step then
-        did_redraw = core.step(next_frame_time)
-        now = system.get_time()
-        next_step = nil
-      end
-      if core.restart_request or core.quit_request then break end
-      if not did_redraw then
-        if has_focus or core.background_threads > 0 or skip_no_focus > now then
-          if not next_step then -- compute the time until the next blink
-            local t = now - core.blink_start
-            local h = config.blink_period / 2
-            local dt = math.ceil(t / h) * h - t
-            local cursor_time_to_wake = dt + 1 / core.fps
-            next_step = now + cursor_time_to_wake
-          end
-          local nframe = next_frame_time - system.get_time()
-          nframe = nframe > 0 and nframe or (1/core.fps)
-          local b = (uncapped and burst_events > now) and rendering_speed or nframe
-          if system.wait_event(math.min(next_step - now, time_to_wake, b)) then
-            next_step = nil
-            -- burst event processing speed to reduce input lag
-            burst_events = now + 3
-          end
-        else
-          system.wait_event()
-          -- allow normal rendering for up to 5 seconds after receiving event
-          -- to let any animations render smoothly
-          skip_no_focus = system.get_time() + 5
-          -- perform a step when we're not in focus in case we get an event
-          next_step = nil
-        end
-      else -- if we redrew, then make sure we only draw at most FPS/sec
-        local elapsed = now - core.frame_start
-        local next_frame = math.max(0, 1 / core.fps - elapsed)
-        next_frame_time = now + next_frame
-        next_step = next_step or next_frame_time
-        system.sleep(math.min(uncapped and 0 or 1, next_frame, time_to_wake))
-      end
-    end
-
-    -- run the garbage collector on request
-    if core.collect_garbage then
-      collectgarbage("collect")
-      core.collect_garbage = false
-    end
-
-    -- Update the loop run time
-    main_loop_time = main_loop_time + (
-      (system.get_time() - core.frame_start) - threads_end_time
-    )
+  -- start a new 1s cycle
+  if core.frame_start >= cycle_end_time then
+    cycle_end_time  = core.frame_start + (core.co_max_time * core.fps)
+    main_loop_time  = 0
+    run_has_focus   = system.window_has_focus(core.window)
   end
+
+  -- run all coroutine tasks
+  local time_to_wake   = run_threads()
+  local threads_end_time = system.get_time() - now
+  now = now + threads_end_time
+
+  -- respect coroutines redraw requests
+  if run_has_focus or core.redraw then
+    run_skip_no_focus = core.frame_start + 5
+    run_next_step     = nil
+  end
+
+  -- detect events that arrived via SDL_AppEvent before this iteration
+  -- and use them to enable burst-rendering mode
+  if system.has_pending_events() then
+    run_next_step     = nil
+    run_burst_events  = now + 3
+  end
+
+  -- set the run mode
+  if
+    not run_has_focus
+    and run_skip_no_focus < core.frame_start
+    and core.background_threads > 0
+  then
+    run_threads_mode = "background"
+  else
+    run_threads_mode = "all"
+  end
+
+  if run_threads_mode == "background" then
+    -- run background threads, no drawing or events processing
+    run_next_step = nil
+    -- Cap sleep to 100 ms so focus / event changes are noticed quickly
+    system.sleep(math.min(time_to_wake, 0.1))
+  else
+    -- listen events and perform drawing as needed
+    local did_redraw = false
+    if not run_next_step or now >= run_next_step then
+      did_redraw    = core.step(run_next_frame_time)
+      now           = system.get_time()
+      run_next_step = nil
+    end
+    if core.restart_request or core.quit_request then return false end
+    if not did_redraw then
+      if run_has_focus or core.background_threads > 0 or run_skip_no_focus > now then
+        if not run_next_step then -- compute the time until the next blink
+          local t  = now - core.blink_start
+          local h  = config.blink_period / 2
+          local dt = math.ceil(t / h) * h - t
+          local cursor_time_to_wake = dt + 1 / core.fps
+          run_next_step = now + cursor_time_to_wake
+        end
+        local nframe = run_next_frame_time - system.get_time()
+        nframe = nframe > 0 and nframe or (1/core.fps)
+        local b = (uncapped and run_burst_events > now) and rendering_speed or nframe
+        -- Sleep instead of SDL_WaitEvent: SDL3 callbacks prohibit blocking waits
+        -- inside SDL_AppIterate.  Any events that arrive during this sleep will
+        -- be delivered via SDL_AppEvent on the next callback iteration.
+        local sleep_time = math.min(run_next_step - now, time_to_wake, b)
+        if sleep_time > 0 then
+          system.sleep(sleep_time)
+        end
+      else
+        -- No focus and nothing to do: sleep briefly to avoid spinning.
+        -- SDL will call SDL_AppEvent when input arrives.
+        system.sleep(0.1)
+        -- allow normal rendering for up to 5 seconds after receiving event
+        -- to let any animations render smoothly
+        run_skip_no_focus = system.get_time() + 5
+        -- perform a step when we're not in focus in case we get an event
+        run_next_step = nil
+      end
+    else -- if we redrew, then make sure we only draw at most FPS/sec
+      local elapsed    = now - core.frame_start
+      local next_frame = math.max(0, 1 / core.fps - elapsed)
+      run_next_frame_time = now + next_frame
+      run_next_step = run_next_step or run_next_frame_time
+      system.sleep(math.min(uncapped and 0 or 1, next_frame, time_to_wake))
+    end
+  end
+
+  -- run the garbage collector on request
+  if core.collect_garbage then
+    collectgarbage("collect")
+    core.collect_garbage = false
+  end
+
+  -- Update the loop run time
+  main_loop_time = main_loop_time + (
+    (system.get_time() - core.frame_start) - threads_end_time
+  )
+
+  return true
 end
 
 

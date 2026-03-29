@@ -54,6 +54,7 @@ ffi.cdef [[
   double system_get_time_ffi();
   bool system_wait_event_ffi(double n);
   void system_sleep_ffi(double s);
+  bool system_has_pending_events_ffi(void);
 ]]
 
 renderer.draw_rect_lua = renderer.draw_rect
@@ -135,3 +136,6 @@ system.get_wait_event_lua = system.wait_event
 function system.wait_event(timeout)
   return ffi.C.system_wait_event_ffi(timeout or -1)
 end
+
+system.has_pending_events_lua = system.has_pending_events
+system.has_pending_events = ffi.C.system_has_pending_events_ffi

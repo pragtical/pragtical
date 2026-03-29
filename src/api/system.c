@@ -15,6 +15,7 @@
 #include "../renwindow.h"
 #include "arena_allocator.h"
 #include "custom_events.h"
+#include "system_events.h"
 #ifdef _WIN32
   #include <direct.h>
   #include <windows.h>
@@ -162,15 +163,106 @@ static void push_win32_error(lua_State *L, DWORD rc) {
 }
 #endif
 
+/* ---------------------------------------------------------------------------
+ * Internal event queue for SDL3 main-callback mode.
+ *
+ * When SDL_MAIN_USE_CALLBACKS is active the SDL event loop calls
+ * SDL_AppEvent() for every pending event *before* calling SDL_AppIterate().
+ * By the time our Lua code runs there are no more events left in SDL's own
+ * queue, so SDL_PollEvent() would always return 0.
+ *
+ * To preserve the existing poll_event / wait_event Lua API we maintain our
+ * own ring buffer.  SDL_AppEvent() pushes events here; f_poll_event() pops
+ * from here instead of calling SDL_PollEvent().  Mouse-motion and
+ * finger-motion events are coalesced on the way in, mirroring what the old
+ * SDL_PeepEvents() loop used to do in f_poll_event().
+ * ------------------------------------------------------------------------- */
+
+/* 256 slots give plenty of headroom for a full key-repeat burst plus several
+ * pending mouse-motion and touch events without allocating heap memory. */
+#define SYSTEM_EVENT_QUEUE_SIZE 256
+
+static SDL_Event system_event_queue[SYSTEM_EVENT_QUEUE_SIZE];
+static int       system_event_queue_read  = 0;
+static int       system_event_queue_count = 0;
+
+void system_push_event(const SDL_Event *event) {
+  /* Coalesce consecutive mouse-motion events for the same window */
+  if (event->type == SDL_EVENT_MOUSE_MOTION) {
+    for (int i = system_event_queue_count - 1; i >= 0; i--) {
+      int idx = (system_event_queue_read + i) % SYSTEM_EVENT_QUEUE_SIZE;
+      if (system_event_queue[idx].type == SDL_EVENT_MOUSE_MOTION &&
+          system_event_queue[idx].motion.windowID == event->motion.windowID) {
+        system_event_queue[idx].motion.x    = event->motion.x;
+        system_event_queue[idx].motion.y    = event->motion.y;
+        system_event_queue[idx].motion.xrel += event->motion.xrel;
+        system_event_queue[idx].motion.yrel += event->motion.yrel;
+        return;
+      }
+    }
+  /* Coalesce consecutive finger-motion events for the same finger */
+  } else if (event->type == SDL_EVENT_FINGER_MOTION) {
+    for (int i = system_event_queue_count - 1; i >= 0; i--) {
+      int idx = (system_event_queue_read + i) % SYSTEM_EVENT_QUEUE_SIZE;
+      if (system_event_queue[idx].type == SDL_EVENT_FINGER_MOTION &&
+          system_event_queue[idx].tfinger.fingerID == event->tfinger.fingerID) {
+        system_event_queue[idx].tfinger.x  = event->tfinger.x;
+        system_event_queue[idx].tfinger.y  = event->tfinger.y;
+        system_event_queue[idx].tfinger.dx += event->tfinger.dx;
+        system_event_queue[idx].tfinger.dy += event->tfinger.dy;
+        return;
+      }
+    }
+  }
+
+  if (system_event_queue_count < SYSTEM_EVENT_QUEUE_SIZE) {
+    int write_idx = (system_event_queue_read + system_event_queue_count)
+                    % SYSTEM_EVENT_QUEUE_SIZE;
+    system_event_queue[write_idx] = *event;
+    system_event_queue_count++;
+  } else {
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                "system event queue full; dropping event type 0x%x", event->type);
+  }
+}
+
+void system_flush_events(uint32_t type) {
+  int new_read  = system_event_queue_read;
+  int new_count = 0;
+  for (int i = 0; i < system_event_queue_count; i++) {
+    int src = (system_event_queue_read + i) % SYSTEM_EVENT_QUEUE_SIZE;
+    if (system_event_queue[src].type != type) {
+      int dst = (new_read + new_count) % SYSTEM_EVENT_QUEUE_SIZE;
+      if (src != dst)
+        system_event_queue[dst] = system_event_queue[src];
+      new_count++;
+    }
+  }
+  system_event_queue_read  = new_read;
+  system_event_queue_count = new_count;
+}
+
+bool system_has_pending_events(void) {
+  return system_event_queue_count > 0;
+}
+
+static bool system_event_pop(SDL_Event *event) {
+  if (system_event_queue_count == 0) return false;
+  *event = system_event_queue[system_event_queue_read];
+  system_event_queue_read  = (system_event_queue_read + 1) % SYSTEM_EVENT_QUEUE_SIZE;
+  system_event_queue_count--;
+  return true;
+}
+
+
 static int f_poll_event(lua_State *L) {
   char buf[16];
   float mx, my;
   int w, h;
   SDL_Event e;
-  SDL_Event event_plus;
 
 top:
-  if ( !SDL_PollEvent(&e) ) {
+  if ( !system_event_pop(&e) ) {
     return 0;
   }
 
@@ -230,6 +322,7 @@ top:
       ** several KEYDOWN events for the `tab` key; we flush all keydown
       ** events on focus so these are discarded */
       SDL_FlushEvent(SDL_EVENT_KEY_DOWN);
+      system_flush_events(SDL_EVENT_KEY_DOWN);
       goto top;
 
 
@@ -252,6 +345,7 @@ top:
       ** keydown handler? In any case, flushing the quit event here too helped. */
       if ((e.key.key == SDLK_W) && (e.key.mod & SDL_KMOD_GUI)) {
         SDL_FlushEvent(SDL_EVENT_QUIT);
+        system_flush_events(SDL_EVENT_QUIT);
       }
 #endif
       lua_pushstring(L, "keypressed");
@@ -266,6 +360,7 @@ top:
       ** Thanks to mathewmariani, taken from his lite-macos github repository. */
       if ((e.key.key == SDLK_W) && (e.key.mod & SDL_KMOD_GUI)) {
         SDL_FlushEvent(SDL_EVENT_QUIT);
+        system_flush_events(SDL_EVENT_QUIT);
       }
 #endif
       lua_pushstring(L, "keyreleased");
@@ -309,13 +404,8 @@ top:
 
     case SDL_EVENT_MOUSE_MOTION:
       {
-        SDL_PumpEvents();
-        while (SDL_PeepEvents(&event_plus, 1, SDL_GETEVENT, SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
-          e.motion.x = event_plus.motion.x;
-          e.motion.y = event_plus.motion.y;
-          e.motion.xrel += event_plus.motion.xrel;
-          e.motion.yrel += event_plus.motion.yrel;
-        }
+        /* Motion events are already coalesced by system_push_event(); no need
+         * to pump / peek the SDL queue here. */
         RenWindow* window_renderer = ren_find_window_from_id(e.motion.windowID);
         lua_pushstring(L, "mousemoved");
         lua_pushnumber(L, e.motion.x * (window_renderer ? window_renderer->scale_x : 0));
@@ -358,13 +448,7 @@ top:
 
     case SDL_EVENT_FINGER_MOTION:
       {
-        SDL_PumpEvents();
-        while (SDL_PeepEvents(&event_plus, 1, SDL_GETEVENT, SDL_EVENT_FINGER_MOTION, SDL_EVENT_FINGER_MOTION) > 0) {
-          e.tfinger.x = event_plus.tfinger.x;
-          e.tfinger.y = event_plus.tfinger.y;
-          e.tfinger.dx += event_plus.tfinger.dx;
-          e.tfinger.dy += event_plus.tfinger.dy;
-        }
+        /* Finger-motion events are already coalesced by system_push_event(). */
         RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
         SDL_GetWindowSize(window_renderer->cache.window, &w, &h);
 
@@ -435,13 +519,26 @@ top:
 
 static int f_wait_event(lua_State *L) {
   int nargs = lua_gettop(L);
+
+  /* If events are already pending in our queue, return immediately. */
+  if (system_has_pending_events()) {
+    lua_pushboolean(L, true);
+    return 1;
+  }
+
+  /* In SDL3 callback mode SDL_WaitEvent / SDL_WaitEventTimeout must not be
+   * called from SDL_AppIterate.  Use SDL_Delay as a non-blocking substitute
+   * so that the callback loop can still deliver events on the next iteration.
+   * Indefinite waits are capped at 100 ms to keep the editor responsive. */
   if (nargs >= 1) {
     double n = luaL_checknumber(L, 1);
     if (n < 0) n = 0;
-    lua_pushboolean(L, SDL_WaitEventTimeout(NULL, n * 1000));
+    if (n > 0) SDL_Delay((Uint32)(n * 1000));
   } else {
-    lua_pushboolean(L, SDL_WaitEvent(NULL));
+    SDL_Delay(100);
   }
+
+  lua_pushboolean(L, system_has_pending_events());
   return 1;
 }
 
@@ -475,6 +572,12 @@ static int f_set_cursor(lua_State *L) {
   }
   SDL_SetCursor(cursor);
   return 0;
+}
+
+
+static int f_has_pending_events(lua_State *L) {
+  lua_pushboolean(L, system_has_pending_events());
+  return 1;
 }
 
 
@@ -1605,6 +1708,7 @@ static int f_get_display_info(lua_State* L) {
 static const luaL_Reg lib[] = {
   { "poll_event",            f_poll_event            },
   { "wait_event",            f_wait_event            },
+  { "has_pending_events",    f_has_pending_events    },
   { "set_cursor",            f_set_cursor            },
   { "get_scale",             f_get_scale             },
   { "set_window_title",      f_set_window_title      },
