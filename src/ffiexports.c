@@ -33,7 +33,7 @@
 #include "renderer.h"
 #include "rencache.h"
 #include "renwindow.h"
-#include "api/system_events.h"
+#include "system_events.h"
 
 #if defined(_WIN32)
   #define EXPORT __declspec(dllexport)

@@ -5,7 +5,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "api/api.h"
-#include "api/system_events.h"
+#include "system_events.h"
 #include "renderer.h"
 #include "custom_events.h"
 
@@ -122,7 +122,6 @@ typedef struct {
  * (it only sets up the run-loop state); SDL_AppIterate drives the loop by
  * calling core.run_step() on every frame. */
 static const char *init_code =
-  "local core\n"
   "local os_exit = os.exit\n"
   "os.exit = function(code, close)\n"
   "  os_exit(code, close == nil and true or close)\n"
@@ -189,15 +188,9 @@ static bool init_lua_state(AppState *app) {
   }
   lua_setglobal(app->L, "EXEFILE");
 
-#ifdef SDL_PLATFORM_APPLE
-  enable_momentum_scroll();
-  #ifdef MACOS_USE_BUNDLE
-    set_macos_bundle_resources(app->L);
-  #endif
+#ifdef MACOS_USE_BUNDLE
+  set_macos_bundle_resources(app->L);
 #endif
-
-  SDL_SetEventEnabled(SDL_EVENT_TEXT_INPUT, true);
-  SDL_SetEventEnabled(SDL_EVENT_TEXT_EDITING, true);
 
   if (luaL_loadstring(app->L, init_code)) {
     fprintf(stderr, "internal error when starting the application\n");
@@ -260,6 +253,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   app->has_restarted = 0;
   app->L            = NULL;
   *appstate = app;
+
+#ifdef SDL_PLATFORM_APPLE
+  enable_momentum_scroll();
+#endif
+
+  SDL_SetEventEnabled(SDL_EVENT_TEXT_INPUT, true);
+  SDL_SetEventEnabled(SDL_EVENT_TEXT_EDITING, true);
 
   if (!init_lua_state(app))
     return SDL_APP_FAILURE;

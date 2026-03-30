@@ -1850,6 +1850,10 @@ function core.run_step()
     run_next_step = nil
     -- Cap sleep to 100 ms so focus / event changes are noticed quickly
     system.sleep(math.min(time_to_wake, 0.1))
+    -- allow normal rendering when the mouse moves over the window
+    if system.has_pending_events() then
+      run_skip_no_focus = now + 5
+    end
   else
     -- listen events and perform drawing as needed
     local did_redraw = false
