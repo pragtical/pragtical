@@ -847,17 +847,17 @@ system.show_fatal_error = function(title, message)
 end
 
 --------------------------------------------------------------------------------
--- Override core.run to destroy ipc session file on exit.
+-- Override core.exit to destroy ipc session file on exit.
 --------------------------------------------------------------------------------
-local core_run = core.run
+local core_exit = core.exit
 
-core.run = function()
-  core_run()
-  ipc:stop()
+core.exit = function(quit_fn, force)
+  if force then ipc:stop() end
+  core_exit(quit_fn, force)
 end
 
 --------------------------------------------------------------------------------
--- Override system.get_time temporarily as first function called on core.run
+-- Override system.get_time temporarily as first function called on core.run_step
 -- to allow settings gui to properly load ipc config options as signal
 -- core.open_file and core.change_directory.
 --------------------------------------------------------------------------------
