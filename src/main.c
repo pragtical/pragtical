@@ -122,6 +122,7 @@ typedef struct {
  * (it only sets up the run-loop state); SDL_AppIterate drives the loop by
  * calling core.run_step() on every frame. */
 static const char *init_code =
+  "core = false\n"
   "local os_exit = os.exit\n"
   "os.exit = function(code, close)\n"
   "  os_exit(code, close == nil and true or close)\n"
