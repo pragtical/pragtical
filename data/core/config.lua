@@ -55,9 +55,9 @@ config.message_timeout = 5
 
 ---The number of pixels scrolled per-step.
 ---
----Defaults to 50 * SCALE.
+---Defaults to 70 * SCALE.
 ---@type number
-config.mouse_wheel_scroll = 50 * SCALE
+config.mouse_wheel_scroll = 70 * SCALE
 
 ---Enables/disables transitions when scrolling with the scrollbar.
 ---When enabled, the scrollbar will have inertia and slowly move towards the cursor.
@@ -258,6 +258,22 @@ config.disabled_transitions = {
   ---Disables transitions when a notification is shown.
   statusbar = false,
 }
+
+---@alias config.animationtype
+---| "constant" # Time based constant velocity with acceleration support.
+---| "lerp" # Linear Interpolation, starts fast ends slow.
+
+---The type of algorithm employed on general transitions.
+---
+---Defaults to "constant".
+---@type config.animationtype
+config.animation_type = "constant"
+
+---The type of algorithm employed on the code editor scroll transition.
+---
+---Defaults to "constant".
+---@type config.animationtype
+config.scroll_animation_type = "constant"
 
 ---The rate of all transitions.
 ---
