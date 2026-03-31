@@ -116,6 +116,7 @@ typedef struct {
   int        argc;
   char     **argv;
   int        has_restarted;
+  int        core_run_step_ref;
 } AppState;
 
 /* Lua init-code: loads and starts the core.  core.run() is now non-blocking
@@ -198,6 +199,19 @@ static bool init_lua_state(AppState *app) {
     return false;
   }
   lua_pcall(app->L, 0, 0, 0);
+
+  /* store reference to core.run_setup for faster lookup on SDL_AppIterate */
+  app->core_run_step_ref = -1;
+  lua_getglobal(app->L, "core");
+  if (lua_istable(app->L, -1)) {
+    lua_getfield(app->L, -1, "run_step");
+    lua_remove(app->L, -2);
+    if (lua_isfunction(app->L, -1)) {
+      app->core_run_step_ref = luaL_ref(app->L, LUA_REGISTRYINDEX);
+    }
+  }
+  lua_pop(app->L, 1);
+
   return true;
 }
 
@@ -249,10 +263,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     fprintf(stderr, "Out of memory\n");
     return SDL_APP_FAILURE;
   }
-  app->argc         = argc;
-  app->argv         = argv;
-  app->has_restarted = 0;
-  app->L            = NULL;
+  app->L                 = NULL;
+  app->argc              = argc;
+  app->argv              = argv;
+  app->has_restarted     = 0;
+  app->core_run_step_ref = -1;
   *appstate = app;
 
 #ifdef SDL_PLATFORM_APPLE
@@ -282,19 +297,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   /* Call core.run_step() — one frame of the main loop.
    * Returns true  → keep running
    * Returns false → quit or restart */
-  lua_getglobal(app->L, "core");
-  if (!lua_istable(app->L, -1)) {
-    lua_pop(app->L, 1);
-    return SDL_APP_FAILURE;
-  }
-  lua_getfield(app->L, -1, "run_step");
-  lua_remove(app->L, -2); /* remove 'core' table */
-
-  if (!lua_isfunction(app->L, -1)) {
-    lua_pop(app->L, 1);
+  if (app->core_run_step_ref == -1) {
+    fprintf(stderr, "Error: core.run_step not found or invalid\n");
     return SDL_APP_FAILURE;
   }
 
+  lua_rawgeti(app->L, LUA_REGISTRYINDEX, app->core_run_step_ref);
   if (lua_pcall(app->L, 0, 1, 0) != LUA_OK) {
     const char *errmsg = lua_tostring(app->L, -1);
     lua_pop(app->L, 1);
