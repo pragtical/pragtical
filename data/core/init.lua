@@ -1780,7 +1780,6 @@ function collectgarbage(opt, ...)
 end
 
 -- Run-loop state shared between core.run() (setup) and core.run_step() (per-frame).
--- All of these were local variables inside the old core.run() while-loop.
 local run_next_step       = nil
 local run_skip_no_focus   = 0
 local run_burst_events    = 0
