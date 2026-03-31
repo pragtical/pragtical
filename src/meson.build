@@ -16,6 +16,7 @@ pragtical_sources = [
     'api/utils/lxlauxlib.c',
     'arena_allocator.c',
     'custom_events.c',
+    'system_events.c',
     'renderer.c',
     'renwindow.c',
     'rencache.c',

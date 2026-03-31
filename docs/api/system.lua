@@ -94,6 +94,14 @@ function system.poll_event() end
 function system.wait_event(timeout) end
 
 ---
+---Check whether there are any pending events in the internal event queue
+---without blocking. Useful for detecting user-input bursts to temporarily
+---boost rendering speed and reduce input lag.
+---
+---@return boolean pending True if at least one event is queued, false otherwise.
+function system.has_pending_events() end
+
+---
 ---Change the cursor type displayed on screen.
 ---
 ---@param type string | "arrow" | "ibeam" | "sizeh" | "sizev" | "hand"

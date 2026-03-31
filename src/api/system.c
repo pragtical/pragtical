@@ -15,6 +15,7 @@
 #include "../renwindow.h"
 #include "arena_allocator.h"
 #include "custom_events.h"
+#include "../system_events.h"
 #ifdef _WIN32
   #include <direct.h>
   #include <windows.h>
@@ -162,15 +163,15 @@ static void push_win32_error(lua_State *L, DWORD rc) {
 }
 #endif
 
+
 static int f_poll_event(lua_State *L) {
   char buf[16];
   float mx, my;
   int w, h;
   SDL_Event e;
-  SDL_Event event_plus;
 
 top:
-  if ( !SDL_PollEvent(&e) ) {
+  if ( !system_event_pop(&e) ) {
     return 0;
   }
 
@@ -230,6 +231,7 @@ top:
       ** several KEYDOWN events for the `tab` key; we flush all keydown
       ** events on focus so these are discarded */
       SDL_FlushEvent(SDL_EVENT_KEY_DOWN);
+      system_flush_events(SDL_EVENT_KEY_DOWN);
       goto top;
 
 
@@ -252,6 +254,7 @@ top:
       ** keydown handler? In any case, flushing the quit event here too helped. */
       if ((e.key.key == SDLK_W) && (e.key.mod & SDL_KMOD_GUI)) {
         SDL_FlushEvent(SDL_EVENT_QUIT);
+        system_flush_events(SDL_EVENT_QUIT);
       }
 #endif
       lua_pushstring(L, "keypressed");
@@ -266,6 +269,7 @@ top:
       ** Thanks to mathewmariani, taken from his lite-macos github repository. */
       if ((e.key.key == SDLK_W) && (e.key.mod & SDL_KMOD_GUI)) {
         SDL_FlushEvent(SDL_EVENT_QUIT);
+        system_flush_events(SDL_EVENT_QUIT);
       }
 #endif
       lua_pushstring(L, "keyreleased");
@@ -309,13 +313,8 @@ top:
 
     case SDL_EVENT_MOUSE_MOTION:
       {
-        SDL_PumpEvents();
-        while (SDL_PeepEvents(&event_plus, 1, SDL_GETEVENT, SDL_EVENT_MOUSE_MOTION, SDL_EVENT_MOUSE_MOTION) > 0) {
-          e.motion.x = event_plus.motion.x;
-          e.motion.y = event_plus.motion.y;
-          e.motion.xrel += event_plus.motion.xrel;
-          e.motion.yrel += event_plus.motion.yrel;
-        }
+        /* Motion events are already coalesced by system_push_event(); no need
+         * to pump / peek the SDL queue here. */
         RenWindow* window_renderer = ren_find_window_from_id(e.motion.windowID);
         lua_pushstring(L, "mousemoved");
         lua_pushnumber(L, e.motion.x * (window_renderer ? window_renderer->scale_x : 0));
@@ -358,13 +357,7 @@ top:
 
     case SDL_EVENT_FINGER_MOTION:
       {
-        SDL_PumpEvents();
-        while (SDL_PeepEvents(&event_plus, 1, SDL_GETEVENT, SDL_EVENT_FINGER_MOTION, SDL_EVENT_FINGER_MOTION) > 0) {
-          e.tfinger.x = event_plus.tfinger.x;
-          e.tfinger.y = event_plus.tfinger.y;
-          e.tfinger.dx += event_plus.tfinger.dx;
-          e.tfinger.dy += event_plus.tfinger.dy;
-        }
+        /* Finger-motion events are already coalesced by system_push_event(). */
         RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
         SDL_GetWindowSize(window_renderer->cache.window, &w, &h);
 
@@ -435,13 +428,26 @@ top:
 
 static int f_wait_event(lua_State *L) {
   int nargs = lua_gettop(L);
+
+  /* If events are already pending in our queue, return immediately. */
+  if (system_has_pending_events()) {
+    lua_pushboolean(L, true);
+    return 1;
+  }
+
+  /* In SDL3 callback mode SDL_WaitEvent / SDL_WaitEventTimeout must not be
+   * called from SDL_AppIterate.  Use SDL_Delay as a non-blocking substitute
+   * so that the callback loop can still deliver events on the next iteration.
+   * Indefinite waits are capped at 100 ms to keep the editor responsive. */
   if (nargs >= 1) {
     double n = luaL_checknumber(L, 1);
     if (n < 0) n = 0;
-    lua_pushboolean(L, SDL_WaitEventTimeout(NULL, n * 1000));
+    if (n > 0) SDL_Delay((Uint32)(n * 1000));
   } else {
-    lua_pushboolean(L, SDL_WaitEvent(NULL));
+    SDL_Delay(100);
   }
+
+  lua_pushboolean(L, system_has_pending_events());
   return 1;
 }
 
@@ -475,6 +481,12 @@ static int f_set_cursor(lua_State *L) {
   }
   SDL_SetCursor(cursor);
   return 0;
+}
+
+
+static int f_has_pending_events(lua_State *L) {
+  lua_pushboolean(L, system_has_pending_events());
+  return 1;
 }
 
 
@@ -1605,6 +1617,7 @@ static int f_get_display_info(lua_State* L) {
 static const luaL_Reg lib[] = {
   { "poll_event",            f_poll_event            },
   { "wait_event",            f_wait_event            },
+  { "has_pending_events",    f_has_pending_events    },
   { "set_cursor",            f_set_cursor            },
   { "get_scale",             f_get_scale             },
   { "set_window_title",      f_set_window_title      },

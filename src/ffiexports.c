@@ -33,6 +33,7 @@
 #include "renderer.h"
 #include "rencache.h"
 #include "renwindow.h"
+#include "system_events.h"
 
 #if defined(_WIN32)
   #define EXPORT __declspec(dllexport)
@@ -96,7 +97,20 @@ EXPORT void system_sleep_ffi(double ms)
 }
 
 EXPORT bool system_wait_event_ffi(double n) {
-  if (n != -1)
-    return SDL_WaitEventTimeout(NULL, (n < 0 ? 0 : n) * 1000);
-  return SDL_WaitEvent(NULL);
+  /* Return immediately when events are already queued. */
+  if (system_has_pending_events()) return true;
+
+  /* In SDL3 callback mode we cannot block with SDL_WaitEvent.
+   * Sleep for the requested duration (capped to 100 ms for the indefinite
+   * case) and re-check for events that may have been pushed concurrently. */
+  if (n == -1)
+    SDL_Delay(100);
+  else if (n > 0)
+    SDL_Delay((Uint32)(n * 1000));
+
+  return system_has_pending_events();
+}
+
+EXPORT bool system_has_pending_events_ffi(void) {
+  return system_has_pending_events();
 }
