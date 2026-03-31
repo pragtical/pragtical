@@ -296,8 +296,23 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   }
 
   if (lua_pcall(app->L, 0, 1, 0) != LUA_OK) {
-    fprintf(stderr, "Error in core.run_step: %s\n", lua_tostring(app->L, -1));
+    const char *errmsg = lua_tostring(app->L, -1);
     lua_pop(app->L, 1);
+    fprintf(stderr, "Error in core.run_step: %s\n", errmsg);
+
+    lua_getglobal(app->L, "system");
+    lua_getfield(app->L, -1, "show_fatal_error");
+    lua_remove(app->L, -2); /* remove 'system' table */
+    lua_pushstring(app->L, "Pragtical internal error");
+    lua_pushfstring(
+      app->L,
+      "    An internal error occurred in a critical part of the application.\n\n"
+      "    Error: %s",
+      errmsg
+    );
+    lua_call(app->L, 2, 0);
+    lua_pop(app->L, 1);
+
     return SDL_APP_FAILURE;
   }
 
@@ -338,4 +353,3 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   free_custom_events();
   ren_free();
 }
-
