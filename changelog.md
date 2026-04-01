@@ -1,5 +1,27 @@
 # Changes Log
 
+## [3.8.4] - 2026-03-31
+
+### New Features
+
+* Additional time based transition for scroll
+  ([#360](https://github.com/pragtical/pragtical/pull/360))
+
+### Enhancements
+
+* Port main.c to SDL3 main-callbacks API
+  ([#437](https://github.com/pragtical/pragtical/pull/437))
+
+### Fixes
+
+* widget: fix SearchReplaceList expand/contract
+  ([#439](https://github.com/pragtical/pragtical/pull/439))
+
+### Build System
+
+* Update sdl3 wrap to v3.4.2
+  ([#440](https://github.com/pragtical/pragtical/pull/440))
+
 ## [3.8.3] - 2026-03-29
 
 ### New Features
@@ -3164,6 +3186,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.4]: https://github.com/pragtical/pragtical/releases/tag/v3.8.4
 [3.8.3]: https://github.com/pragtical/pragtical/releases/tag/v3.8.3
 [3.8.2]: https://github.com/pragtical/pragtical/releases/tag/v3.8.2
 [3.8.1]: https://github.com/pragtical/pragtical/releases/tag/v3.8.1
