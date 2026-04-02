@@ -1,5 +1,20 @@
 # Changes Log
 
+## [3.8.5] - 2026-04-02
+
+### Fixes
+
+* Fixes pixelated font on full hinting
+  ([#445](https://github.com/pragtical/pragtical/pull/445))
+
+### Widgets
+
+* widget: force redraw on container repositioning
+  ([#442](https://github.com/pragtical/pragtical/pull/442))
+
+* widget: force redraw when running animations
+  ([#443](https://github.com/pragtical/pragtical/pull/443))
+
 ## [3.8.4] - 2026-03-31
 
 ### New Features
@@ -3186,6 +3201,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.5]: https://github.com/pragtical/pragtical/releases/tag/v3.8.5
 [3.8.4]: https://github.com/pragtical/pragtical/releases/tag/v3.8.4
 [3.8.3]: https://github.com/pragtical/pragtical/releases/tag/v3.8.3
 [3.8.2]: https://github.com/pragtical/pragtical/releases/tag/v3.8.2
