@@ -1260,7 +1260,8 @@ local function merge_plugin_settings(plugin_name, options)
       local path = "plugins." .. plugin_name .. "." .. option.path
       local saved_value = get_config_value(settings.config, path)
       if type(saved_value) ~= "nil" then
-        if option.type == settings.type.FONT or option.type == "font" then
+        local otype = type(option.type) == "string" and option.type:lower() or ""
+        if option.type == settings.type.FONT or otype == "font" then
           merge_font_settings(option, path, saved_value)
         else
           set_config_value(config, path, saved_value)
@@ -1284,7 +1285,8 @@ local function merge_settings()
       if type(option.path) == "string" then
         local saved_value = get_config_value(settings.config, option.path)
         if type(saved_value) ~= "nil" then
-          if option.type == settings.type.FONT or option.type == "font" then
+          local otype = type(option.type) == "string" and option.type:lower() or ""
+          if option.type == settings.type.FONT or otype == "font" then
             merge_font_settings(option, option.path, saved_value)
           else
             set_config_value(config, option.path, saved_value)
