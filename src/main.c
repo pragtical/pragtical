@@ -232,8 +232,8 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 #endif
 
 #ifdef __linux__
-  /* Use wayland by default if SDL_VIDEODRIVER not set and session type wayland */
-  if (getenv("SDL_VIDEODRIVER") == NULL) {
+  /* Use wayland by default if SDL_VIDEO_DRIVER not set and session type wayland */
+  if (getenv("SDL_VIDEO_DRIVER") == NULL) {
     const char *session_type = getenv("XDG_SESSION_TYPE");
     if (session_type && strcmp(session_type, "wayland") == 0) {
       SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "wayland");
