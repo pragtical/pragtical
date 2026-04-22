@@ -1077,7 +1077,7 @@ int video_init(void) {
     SDL_EnableScreenSaver();
     SDL_SetHint(SDL_HINT_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR, "0");
     SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
-    SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "1");
+    SDL_SetHint(SDL_HINT_IME_IMPLEMENTED_UI, "composition");
     /* This hint tells SDL to respect borderless window as a normal window.
     ** For example, the window will sit right on top of the taskbar instead
     ** of obscuring it. */
