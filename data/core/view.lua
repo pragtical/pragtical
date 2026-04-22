@@ -488,11 +488,14 @@ function View:update()
     self:on_scale_change(SCALE, self.current_scale)
     self.current_scale = SCALE
   end
-
-  self:clamp_scroll_position()
-  self:move_towards(self.scroll, "x", self.scroll.to.x, 0.2, "scroll")
-  self:move_towards(self.scroll, "y", self.scroll.to.y, 0.2, "scroll")
   if not self.scrollable then return end
+  self:clamp_scroll_position()
+  if self.scroll.x ~= self.scroll.to.x then
+    self:move_towards(self.scroll, "x", self.scroll.to.x, 0.2, "scroll")
+  end
+  if self.scroll.y ~= self.scroll.to.y then
+    self:move_towards(self.scroll, "y", self.scroll.to.y, 0.2, "scroll")
+  end
   self:update_scrollbar()
 end
 
