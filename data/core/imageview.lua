@@ -313,9 +313,14 @@ function ImageView:on_mouse_wheel(d)
   ox, oy = get_scaled_image_offset(self)
 
   -- Adjust scroll so cursor stays over same pixel
-  self.scroll.to.x = img_x * self.zoom_scale - mx + ox
-  self.scroll.to.y = img_y * self.zoom_scale - my + oy
-  self.scroll.x, self.scroll.y = self.scroll.to.x, self.scroll.to.y
+  if self.width > self.size.x then
+    self.scroll.to.x = img_x * self.zoom_scale - mx + ox
+    self.scroll.x = self.scroll.to.x
+  end
+  if self.height > self.size.y then
+    self.scroll.to.y = img_y * self.zoom_scale - my + oy
+    self.scroll.y = self.scroll.to.y
+  end
 
   return true
 end
