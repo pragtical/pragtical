@@ -1,1 +1,1 @@
-project('sdl3', version : '3.4.0', license : 'zlib')
+project('sdl3', version : '3.4.4', license : 'zlib')
