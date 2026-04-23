@@ -243,9 +243,13 @@ if not get_option('source-only')
 
         if host_machine.system() == 'windows'
             # Force LIBICONV because detection seems to fail on msys2
-            sdl_options.add_cmake_defines({
-                'HAVE_ICONV': '1', 'HAVE_LIBICONV': '1'
-            })
+            if cc.find_library('iconv', required: false).found()
+                sdl_options.add_cmake_defines({
+                    'HAVE_ICONV': '1', 'HAVE_LIBICONV': '1'
+                })
+            else
+                warning('LIBICONV not found, various encoding conversions may fail')
+            endif
         endif
 
         sdl = cmake.subproject('sdl3', options: sdl_options)
