@@ -9,6 +9,9 @@ local View = require "core.view"
 
 local CACHE_LINE_LEN = 500
 
+local IME_VIEW = nil
+local IME_STATE = {line1 = 0, col1 = 0, line2 = 0, col2 = 0, w = 0, h = 0}
+
 ---@class core.docview.position
 ---@field line integer
 ---@field col integer
@@ -671,9 +674,29 @@ end
 ---Update IME composition window location.
 ---Sets the bounding box for the system IME composition window.
 function DocView:update_ime_location()
-  if not self.ime_status then return end
+  if core.active_view ~= self then return end
 
   local line1, col1, line2, col2 = self.doc:get_selection(true)
+  if
+    not self.ime_status and core.active_view == IME_VIEW
+    and
+    IME_STATE.line1 == line1 and IME_STATE.col1 == col1
+    and
+    IME_STATE.line2 == line2 and IME_STATE.col2 == col2
+    and
+    IME_STATE.w == self.size.x and IME_STATE.h == self.size.y
+  then
+    return
+  end
+
+  IME_VIEW = self
+  IME_STATE.line1 = line1
+  IME_STATE.col1 = col1
+  IME_STATE.line2 = line2
+  IME_STATE.col2 = col2
+  IME_STATE.w = self.size.x
+  IME_STATE.h = self.size.y
+
   local x, y = self:get_line_screen_position(line1)
   local h = self:get_line_height()
   local col = math.min(col1, col2)
