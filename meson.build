@@ -237,9 +237,20 @@ if not get_option('source-only')
             'SDL_X11': sdl_x11, 'SDL_WAYLAND': sdl_wayland,
             'SDL_TESTS': 'OFF', 'SDL_X11_XTEST': 'OFF',
             'SDL_OPENGL': sdl_opengl, 'SDL_OPENGLES': sdl_opengles,
-            'SDL_DIRECTX': 'ON', 'SDL_EXAMPLES': 'OFF',
+            'SDL_DIRECTX': 'ON', 'SDL_EXAMPLES': 'OFF', 'SDL_LIBICONV': 'ON',
             'SDL_VENDOR_INFO': 'pragtical'
         })
+
+        if host_machine.system() == 'windows'
+            # Force LIBICONV because detection seems to fail on msys2
+            if cc.find_library('iconv', required: false).found()
+                sdl_options.add_cmake_defines({
+                    'HAVE_ICONV': '1', 'HAVE_LIBICONV': '1'
+                })
+            else
+                warning('LIBICONV not found, various encoding conversions may fail')
+            endif
+        endif
 
         sdl = cmake.subproject('sdl3', options: sdl_options)
         sdl_dep = sdl.dependency('SDL3-static')

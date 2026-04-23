@@ -124,6 +124,7 @@ if host_machine.system() == 'windows'
         pragtical_deps += cc.find_library('imm32', required: true)
         pragtical_deps += cc.find_library('setupapi', required: true)
         pragtical_deps += cc.find_library('version', required: true)
+        pragtical_deps += cc.find_library('iconv', required: false)
     endif
 elif host_machine.system() == 'darwin'
     pragtical_sources += 'bundle_open.m'
