@@ -1,4 +1,4 @@
-project('sdl3_image', 'c', version: '3.4.0')
+project('sdl3_image', 'c', version: '3.4.2')
 
 sdl_dep = dependency('sdl3', version: '>=3.4.0')
 
