@@ -1,5 +1,12 @@
 # Changes Log
 
+## [3.8.7] - 2026-04-24
+
+### Fixes
+
+* Fix non-scrollable skipping affecting statusview
+  ([#462](https://github.com/pragtical/pragtical/pull/462))
+
 ## [3.8.6] - 2026-04-23
 
 ### Fixes
@@ -3233,6 +3240,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.7]: https://github.com/pragtical/pragtical/releases/tag/v3.8.7
 [3.8.6]: https://github.com/pragtical/pragtical/releases/tag/v3.8.6
 [3.8.5]: https://github.com/pragtical/pragtical/releases/tag/v3.8.5
 [3.8.4]: https://github.com/pragtical/pragtical/releases/tag/v3.8.4
