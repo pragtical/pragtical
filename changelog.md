@@ -1,5 +1,37 @@
 # Changes Log
 
+## [3.8.6] - 2026-04-23
+
+### Fixes
+
+* settings ui: ignore case on font string type
+  ([#448](https://github.com/pragtical/pragtical/pull/448))
+
+* Switch from SDL_VIDEODRIVER to SDL_VIDEO_DRIVER
+  ([#450](https://github.com/pragtical/pragtical/pull/450))
+
+* DocView: keep IME area always updated
+  ([#451](https://github.com/pragtical/pragtical/pull/451))
+
+### Enhancements
+
+* scrollbar: reduce move_towards calling
+  ([#452](https://github.com/pragtical/pragtical/pull/452))
+
+* ImageView: reposition scrollbars when needed
+  ([#459](https://github.com/pragtical/pragtical/pull/459))
+
+### Build System
+
+* build: force libiconv on sdl3 cmake subproject
+  ([#457](https://github.com/pragtical/pragtical/pull/457))
+
+* Update sdl to v3.4.4
+  ([#458](https://github.com/pragtical/pragtical/pull/458))
+
+* Update sdl_image subproject to v3.4.2
+  ([#461](https://github.com/pragtical/pragtical/pull/461))
+
 ## [3.8.5] - 2026-04-02
 
 ### Fixes
@@ -3201,6 +3233,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.8.6]: https://github.com/pragtical/pragtical/releases/tag/v3.8.6
 [3.8.5]: https://github.com/pragtical/pragtical/releases/tag/v3.8.5
 [3.8.4]: https://github.com/pragtical/pragtical/releases/tag/v3.8.4
 [3.8.3]: https://github.com/pragtical/pragtical/releases/tag/v3.8.3
