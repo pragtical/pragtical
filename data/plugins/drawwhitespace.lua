@@ -221,6 +221,10 @@ function DocView:draw_line_text(idx, x, y)
     return draw_line_text(self, idx, x, y)
   end
 
+  if not self.drawwhitespace_selections then
+    self.drawwhitespace_selections = {}
+  end
+
   local font = (self:get_font() or style.syntax_fonts["whitespace"] or style.syntax_fonts["comment"])
   local ty = y + self:get_line_text_y_offset()
   local tx
