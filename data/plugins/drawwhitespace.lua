@@ -216,6 +216,8 @@ function DocView:draw_line_text(idx, x, y)
   if
     not config.plugins.drawwhitespace.enabled
     or
+    not self.drawwhitespace_selections
+    or
     getmetatable(self) ~= DocView
   then
     return draw_line_text(self, idx, x, y)
