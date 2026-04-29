@@ -70,14 +70,28 @@ package_plugin_manager() {
   local file="ppm.${arch}-${platform}"
   if [[ $platform == "windows" ]]; then
     file="$file.exe"
+  elif [[ $platform == "macos" ]]; then
+    if [[ $arch == "arm64" ]]; then
+      arch="aarch64"
+    fi
+    file="ppm.${arch}-darwin"
   fi
   if [ ! -e "$file" ]; then
-    if ! wget -O "$file" "https://github.com/pragtical/plugin-manager/releases/download/continuous/${file}" ; then
-      echo "Could not download PPM for the arch '${arch}'."
-      return
+    if which wget ; then
+      if ! wget -O "$file" "https://github.com/pragtical/plugin-manager/releases/download/continuous/${file}" ; then
+        echo "Could not download PPM for the arch '${arch}'."
+        return
+      fi
+    elif which curl ; then
+      if ! curl -L -o "$file" "https://github.com/pragtical/plugin-manager/releases/download/continuous/${file}" ; then
+        echo "Could not download PPM for the arch '${arch}'."
+        return
+      fi
     else
-      chmod 0755 "$file"
+      echo "Could not download PPM: 'wget' or 'curl' not found."
+      return
     fi
+    chmod 0755 "$file"
   fi
   cp -av "subprojects/ppm/libraries" "${data_dir}/"
   cp -av "subprojects/ppm/plugins/plugin_manager" "${data_dir}/plugins/"
