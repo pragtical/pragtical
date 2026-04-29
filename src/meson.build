@@ -166,17 +166,51 @@ if get_option('net')
         default_options: default_fallback_options + ['default_library=static']
     )
 
-    pragtical_deps += [
-        dependency('mbedtls', fallback: ['mbedtls', 'mbedtls_dep'],
-            default_options: default_fallback_options + ['default_library=static']
-        ),
-        dependency('mbedx509', fallback: ['mbedtls', 'mbedx509_dep'],
-            default_options: default_fallback_options + ['default_library=static']
-        ),
-        dependency('mbedcrypto', fallback: ['mbedtls', 'mbedcrypto_dep'],
-            default_options: default_fallback_options + ['default_library=static']
-        )
-    ]
+    use_system_mbedtls = get_option('wrap_mode') != 'forcefallback'
+
+    mbedtls_dep = disabler()
+    mbedx509_dep = disabler()
+    tfpsacrypto_dep = disabler()
+    system_mbedtls_ok = false
+
+    if use_system_mbedtls
+        mbedtls_dep = dependency('mbedtls', version: '>=4.0.0', required: false)
+        mbedx509_dep = dependency('mbedx509', version: '>=4.0.0', required: false)
+        tfpsacrypto_dep = dependency('tfpsacrypto', required: false)
+        system_mbedtls_ok = mbedtls_dep.found() and mbedx509_dep.found() and tfpsacrypto_dep.found()
+    endif
+
+    if not use_system_mbedtls or not system_mbedtls_ok
+        cmake = import('cmake')
+
+        mbedtls_build_type = 'Release'
+        if get_option('buildtype') == 'debug'
+            mbedtls_build_type = 'Debug'
+        endif
+
+        mbedtls_options = cmake.subproject_options()
+        mbedtls_options.add_cmake_defines({
+            'CMAKE_BUILD_TYPE': mbedtls_build_type,
+            'CMAKE_POSITION_INDEPENDENT_CODE': 'ON',
+            'DISABLE_PACKAGE_CONFIG_AND_INSTALL': 'ON',
+            'ENABLE_PROGRAMS': 'OFF',
+            'ENABLE_TESTING': 'OFF',
+            'GEN_FILES': 'OFF',
+            'USE_SHARED_MBEDTLS_LIBRARY': 'OFF',
+            'USE_STATIC_MBEDTLS_LIBRARY': 'ON'
+        })
+
+        mbedtls = cmake.subproject('mbedtls', options: mbedtls_options)
+        mbedtls_dep = mbedtls.dependency('mbedtls')
+        mbedx509_dep = mbedtls.dependency('mbedx509')
+        tfpsacrypto_dep = mbedtls.dependency('tfpsacrypto')
+
+        meson.override_dependency('mbedtls', mbedtls_dep)
+        meson.override_dependency('mbedx509', mbedx509_dep)
+        meson.override_dependency('tfpsacrypto', tfpsacrypto_dep)
+    endif
+
+    pragtical_deps += [mbedtls_dep, mbedx509_dep, tfpsacrypto_dep]
 
     pragtical_sources += 'api/net.c'
     pragtical_cargs += '-DPRAGTICAL_NET'

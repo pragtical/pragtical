@@ -5,10 +5,10 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#include <psa/crypto.h>
+
 #include <mbedtls/ssl.h>
 #include <mbedtls/x509_crt.h>
-#include <mbedtls/ctr_drbg.h>
-#include <mbedtls/entropy.h>
 #include <mbedtls/error.h>
 
 #define API_TYPE_NET_ADDRESS "NetAddress"
@@ -29,8 +29,6 @@ typedef struct Connection {
   bool is_ssl;
   mbedtls_ssl_context ssl;
   mbedtls_ssl_config conf;
-  mbedtls_ctr_drbg_context drbg;
-  mbedtls_entropy_context entropy;
   mbedtls_x509_crt cacert;
 } Connection;
 
@@ -199,24 +197,15 @@ static int f_open_tcp(lua_State* L) {
 
   int rc = 0;
   if (ssl) {
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS) {
+      rc = MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+      goto ssl_error;
+    }
+
     mbedtls_ssl_init(&self->ssl);
     mbedtls_ssl_config_init(&self->conf);
-    mbedtls_ctr_drbg_init(&self->drbg);
-    mbedtls_entropy_init(&self->entropy);
     mbedtls_x509_crt_init(&self->cacert);
-
-    const char *pers = "pragtical_sdl3_net_tls_client";
-
-    if (
-      (rc = mbedtls_ctr_drbg_seed(
-        &self->drbg,
-        mbedtls_entropy_func,
-        &self->entropy,
-        (const unsigned char *)pers,
-        strlen(pers)
-      )) != 0
-    )
-      goto ssl_error;
 
     if (
       (rc = mbedtls_ssl_config_defaults(
@@ -227,8 +216,6 @@ static int f_open_tcp(lua_State* L) {
       )) != 0
     )
       goto ssl_error;
-
-    mbedtls_ssl_conf_rng(&self->conf, mbedtls_ctr_drbg_random, &self->drbg);
 
     if (load_cacert_bundle(&self->cacert)) {
       mbedtls_ssl_conf_ca_chain(&self->conf, &self->cacert, NULL);
@@ -254,8 +241,6 @@ ssl_error:
   mbedtls_ssl_close_notify(&self->ssl);
   mbedtls_ssl_free(&self->ssl);
   mbedtls_ssl_config_free(&self->conf);
-  mbedtls_ctr_drbg_free(&self->drbg);
-  mbedtls_entropy_free(&self->entropy);
   mbedtls_x509_crt_free(&self->cacert);
   NET_DestroyStreamSocket(socket);
 
@@ -684,8 +669,6 @@ static int m_tcp_close(lua_State* L) {
       mbedtls_ssl_close_notify(&self->ssl);
       mbedtls_ssl_free(&self->ssl);
       mbedtls_ssl_config_free(&self->conf);
-      mbedtls_ctr_drbg_free(&self->drbg);
-      mbedtls_entropy_free(&self->entropy);
       mbedtls_x509_crt_free(&self->cacert);
     }
     NET_DestroyStreamSocket(self->socket);
