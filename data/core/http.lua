@@ -37,6 +37,15 @@ local common = require "core.common"
 ---@alias http.on_done_download fun(ok:boolean?, err:string?, filename:string?, info:http.response_info?)
 ---@alias http.on_progress fun(downloaded:integer, total:integer?)
 
+---@class http.sse.event
+---@field event string
+---@field data string
+---@field id string?
+---@field retry integer?
+
+---@alias http.on_sse_event fun(event:http.sse.event, info:http.response_info?)
+---@alias http.on_sse_done fun(ok:boolean?, err:string?, info:http.response_info?)
+
 ---@class http.request.fileparam
 ---@field filename string
 ---@field content_type string
@@ -208,6 +217,12 @@ local function prepare_body_and_headers(submit_type, params, body, headers)
   end
 
   error("Unsupported Content-Type: " .. tostring(submit_type))
+end
+
+---@param method http.method
+---@return boolean
+local function is_query_method(method)
+  return method == "GET" or method == "HEAD" or method == "OPTIONS"
 end
 
 -- Parse URL
@@ -505,6 +520,20 @@ end
 ---@field is_cancelled? fun():boolean
 ---@field private redirect_count? integer
 
+---@class http.sse.options
+---@field method? http.method
+---@field submit_type? http.request.submittype
+---@field params? table<string,http.request.param>
+---@field headers? table<string,string>
+---@field body? string
+---@field on_redirect? http.on_header
+---@field on_header? http.on_header
+---@field on_event http.on_sse_event
+---@field on_done http.on_sse_done
+---@field timeout? number
+---@field is_cancelled? fun():boolean
+---@field last_event_id? string
+
 ---Perform an HTTP request asynchronously.
 ---@param method http.method
 ---@param url string
@@ -783,6 +812,147 @@ local function body_request(method, url, submit_type, params, options)
   )
   options.body = body
   return http.request(method, url, options)
+end
+
+---Open a Server-Sent Events stream.
+---Supports normal SSE GET requests as well as POST-based SSE APIs.
+---@param url string
+---@param options http.sse.options
+function http.sse(url, options)
+  assert(type(options) == "table", "provide the options object")
+  assert(type(options.on_event) == "function", "provide the on_event callback")
+  assert(type(options.on_done) == "function", "provide the on_done callback")
+
+  local method = options.method or "GET"
+  local request_options = clone_options(options)
+  request_options.method = nil
+  request_options.submit_type = nil
+  request_options.params = nil
+  request_options.last_event_id = nil
+
+  request_options.headers = clone_options(options.headers)
+  if not request_options.headers.accept and not request_options.headers.Accept then
+    request_options.headers.Accept = "text/event-stream"
+  end
+  if options.last_event_id and not request_options.headers["Last-Event-ID"] then
+    request_options.headers["Last-Event-ID"] = options.last_event_id
+  end
+
+  local on_event = request_options.on_event
+  local on_done = request_options.on_done
+  request_options.on_event = nil
+
+  local pending = ""
+  local current_data = {}
+  local current_info
+  local current_event_name
+  local current_event_id = options.last_event_id
+  local current_retry
+
+  local function reset_event()
+    current_data = {}
+    current_event_name = nil
+    current_retry = nil
+  end
+
+  local function dispatch_event()
+    if #current_data == 0 then
+      reset_event()
+      return
+    end
+
+    on_event({
+      event = current_event_name or "message",
+      data = table.concat(current_data, "\n"),
+      id = current_event_id,
+      retry = current_retry
+    }, current_info)
+    reset_event()
+  end
+
+  local function process_line(line)
+    if line == "" then
+      dispatch_event()
+      return
+    end
+
+    if line:sub(1, 1) == ":" then
+      return
+    end
+
+    local field, value = line:match("^([^:]+):?(.*)$")
+    if not field then
+      return
+    end
+    if value:sub(1, 1) == " " then
+      value = value:sub(2)
+    end
+
+    if field == "event" then
+      current_event_name = value
+    elseif field == "data" then
+      current_data[#current_data + 1] = value
+    elseif field == "id" then
+      if not value:find("\0", 1, true) then
+        current_event_id = value
+      end
+    elseif field == "retry" then
+      local retry = tonumber(value)
+      if retry and retry >= 0 then
+        current_retry = retry
+      end
+    end
+  end
+
+  request_options.on_header = function(info)
+    current_info = info
+    if options.on_header then
+      options.on_header(info)
+    end
+  end
+
+  request_options.on_chunk = function(chunk)
+    pending = pending .. chunk
+
+    while true do
+      local idx = pending:find("\n", 1, true)
+      if not idx then break end
+
+      local line = pending:sub(1, idx - 1)
+      pending = pending:sub(idx + 1)
+      if line:sub(-1) == "\r" then
+        line = line:sub(1, -2)
+      end
+
+      process_line(line)
+    end
+  end
+
+  request_options.on_done = function(ok, err, _, info)
+    if ok then
+      if #pending > 0 then
+        local line = pending
+        if line:sub(-1) == "\r" then
+          line = line:sub(1, -2)
+        end
+        process_line(line)
+      end
+      dispatch_event()
+    end
+    on_done(ok, err, info)
+  end
+
+  if is_query_method(method) then
+    return query_request(method, url, options.params, request_options)
+  end
+
+  return body_request(
+    method,
+    url,
+    options.submit_type or "application/json",
+    options.params,
+    request_options
+  )
 end
 
 ---HTTP GET
