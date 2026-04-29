@@ -24,10 +24,17 @@ local common = require "core.common"
 ---| "application/json"
 ---| "text/plain"
 
----@alias http.on_header fun(info:{status:integer, headers:table<string,string>})
+---@alias http.header_value string|string[]
+
+---@class http.response_info
+---@field status integer
+---@field headers table<string,http.header_value>
+---@field url string
+
+---@alias http.on_header fun(info:http.response_info)
 ---@alias http.on_chunk fun(chunk:string)
----@alias http.on_done fun(ok:boolean?, err:string?, result:string|table|nil)
----@alias http.on_done_download fun(ok:boolean?, err:string?, filename:string?)
+---@alias http.on_done fun(ok:boolean?, err:string?, result:string|table|nil, info:http.response_info?)
+---@alias http.on_done_download fun(ok:boolean?, err:string?, filename:string?, info:http.response_info?)
 ---@alias http.on_progress fun(downloaded:integer, total:integer?)
 
 ---@class http.request.fileparam
@@ -42,10 +49,57 @@ local common = require "core.common"
 local MAX_REDIRECTS = 5
 
 ---Flag to check if CA bundle is been download before processing a request.
-local DOWNLOADING_CACERT_BUNDLE=false
+local DOWNLOADING_CACERT_BUNDLE = false
 
 ---Default user agent used on all requests.
-http.user_agent = "Pragtical/"..VERSION
+http.user_agent = "Pragtical/" .. VERSION
+
+---@param value any
+---@return any
+local function clone_value(value)
+  if type(value) ~= "table" then
+    return value
+  end
+
+  local copy = {}
+  for k, v in pairs(value) do
+    copy[k] = clone_value(v)
+  end
+  return copy
+end
+
+---@param options table|nil
+---@return table
+local function clone_options(options)
+  return clone_value(options or {})
+end
+
+---@param headers table<string,http.header_value>
+---@param key string
+---@param value string
+local function append_header_value(headers, key, value)
+  local existing = headers[key]
+  if existing == nil then
+    headers[key] = value
+  elseif type(existing) == "table" then
+    existing[#existing + 1] = value
+  else
+    headers[key] = { existing, value }
+  end
+end
+
+---@param headers table<string,http.header_value>?
+---@param key string
+---@return string?
+local function get_header_value(headers, key)
+  if not headers then return nil end
+
+  local value = headers[key]
+  if type(value) == "table" then
+    return value[#value]
+  end
+  return value
+end
 
 -- URL encode
 ---@param str string
@@ -62,7 +116,7 @@ local function encode_query(params)
   if not params then return "" end
   local t = {}
   for k, v in pairs(params) do
-    t[#t+1] = urlencode(k) .. "=" .. urlencode(tostring(v))
+    t[#t + 1] = urlencode(k) .. "=" .. urlencode(tostring(v))
   end
   return table.concat(t, "&")
 end
@@ -97,7 +151,7 @@ local function encode_multipart(params, boundary)
         data = value.data
       end
 
-      parts[#parts+1] =
+      parts[#parts + 1] =
         "--" .. boundary .. "\r\n" ..
         string.format(
           'Content-Disposition: form-data; name="%s"; filename="%s"\r\n',
@@ -109,7 +163,7 @@ local function encode_multipart(params, boundary)
         ) ..
         data .. "\r\n"
     else
-      parts[#parts+1] =
+      parts[#parts + 1] =
         "--" .. boundary .. "\r\n" ..
         string.format(
           'Content-Disposition: form-data; name="%s"\r\n\r\n',
@@ -119,7 +173,7 @@ local function encode_multipart(params, boundary)
     end
   end
 
-  parts[#parts+1] = "--" .. boundary .. "--\r\n"
+  parts[#parts + 1] = "--" .. boundary .. "--\r\n"
   return table.concat(parts)
 end
 
@@ -128,7 +182,7 @@ end
 ---@param body? string
 ---@param headers? table<string,string>
 local function prepare_body_and_headers(submit_type, params, body, headers)
-  headers = headers or {}
+  headers = clone_options(headers)
 
   if body then
     return body, headers
@@ -141,16 +195,13 @@ local function prepare_body_and_headers(submit_type, params, body, headers)
   if submit_type == "application/x-www-form-urlencoded" then
     headers["Content-Type"] = submit_type
     return encode_query(params), headers
-
   elseif submit_type == "multipart/form-data" then
     local boundary = random_boundary()
     headers["Content-Type"] = submit_type .. "; boundary=" .. boundary
     return encode_multipart(params, boundary), headers
-
   elseif submit_type == "application/json" then
     headers["Content-Type"] = submit_type
     return json.encode(params), headers
-
   elseif submit_type == "text/plain" then
     headers["Content-Type"] = submit_type
     return tostring(params), headers
@@ -171,14 +222,86 @@ local function parse_url(url)
   return { protocol = protocol, host = host, port = port, path = path }
 end
 
+---@param protocol string
+---@param host string
+---@param port integer
+---@return string
+local function build_origin(protocol, host, port)
+  local default_port = protocol == "https" and 443 or 80
+  if port == default_port then
+    return protocol .. "://" .. host
+  end
+  return protocol .. "://" .. host .. ":" .. port
+end
+
+---@param base_path string
+---@param relative_path string
+---@return string
+local function resolve_relative_path(base_path, relative_path)
+  local dir = base_path:gsub("[^/]*$", "")
+  if dir == "" then dir = "/" end
+
+  local path = relative_path:sub(1, 1) == "/" and relative_path or (dir .. relative_path)
+  local trailing_slash = path:sub(-1) == "/"
+  local segments = {}
+
+  for segment in path:gmatch("[^/]+") do
+    if segment == ".." then
+      if #segments > 0 then
+        table.remove(segments)
+      end
+    elseif segment ~= "." and segment ~= "" then
+      segments[#segments + 1] = segment
+    end
+  end
+
+  local normalized = "/" .. table.concat(segments, "/")
+  if trailing_slash and normalized ~= "/" then
+    normalized = normalized .. "/"
+  end
+  return normalized
+end
+
+---@param parsed table
+---@param location string
+---@return string
+local function resolve_redirect_url(parsed, location)
+  if location:match("^[%a][%w+%.%-]*://") then
+    return location
+  end
+
+  if location:sub(1, 2) == "//" then
+    return parsed.protocol .. ":" .. location
+  end
+
+  local origin = build_origin(parsed.protocol, parsed.host, parsed.port)
+  local base_path = parsed.path:match("^[^?#]*") or "/"
+
+  if location:sub(1, 1) == "/" then
+    return origin .. location
+  end
+
+  if location:sub(1, 1) == "?" or location:sub(1, 1) == "#" then
+    return origin .. base_path .. location
+  end
+
+  local location_path, location_suffix = location:match("^([^?#]*)(.*)$")
+  return origin .. resolve_relative_path(base_path, location_path) .. location_suffix
+end
+
 -- Resolve hostname
 ---@param hostname string
+---@param should_abort? fun():string?
 ---@return net.address? addr
 ---@return string? err
-local function resolve_host(hostname)
+local function resolve_host(hostname, should_abort)
   local addr, err = net.resolve_address(hostname)
   if not addr then return nil, err end
+
   while true do
+    local abort_err = should_abort and should_abort()
+    if abort_err then return nil, abort_err end
+
     local status, err2 = addr:get_status()
     if status == "success" then return addr end
     if status == "failure" then return nil, err2 or "failed to resolve host" end
@@ -190,108 +313,180 @@ end
 ---@param method http.method
 ---@param path string
 ---@param host string
+---@param port integer
+---@param protocol string
 ---@param headers table<string,string>?
 ---@param body string?
 ---@return string
-local function build_request(method, path, host, headers, body)
+local function build_request(method, path, host, port, protocol, headers, body)
   headers = headers or {}
   local normalized = {}
-  for k, v in pairs(headers) do normalized[k:lower()] = v end
+  for k, v in pairs(headers) do
+    normalized[k:lower()] = v
+  end
+
   if not normalized["user-agent"] and http.user_agent then
     normalized["user-agent"] = http.user_agent
   end
 
+  local host_header = build_origin(protocol, host, port):gsub("^https?://", "")
   local req = { string.format("%s %s HTTP/1.1", method, path) }
-  req[#req+1] = "Host: "..host
-  req[#req+1] = "Connection: close"
-  if body then req[#req+1] = "Content-Length: "..#body end
-  for k, v in pairs(normalized) do
-    local header_name = k:gsub(
-      "(%a)([%w%-]*)",
-      function(first, rest)
-        return first:upper() .. rest:lower()
-      end
-    )
-    req[#req+1] = header_name..": "..v
+  req[#req + 1] = "Host: " .. host_header
+  req[#req + 1] = "Connection: close"
+  if body then
+    req[#req + 1] = "Content-Length: " .. #body
   end
-  req[#req+1] = ""
-  req[#req+1] = body or ""
+
+  for k, v in pairs(normalized) do
+    local header_name = k:gsub("(%a)([%w%-]*)", function(first, rest)
+      return first:upper() .. rest:lower()
+    end)
+    req[#req + 1] = header_name .. ": " .. v
+  end
+
+  req[#req + 1] = ""
+  req[#req + 1] = body or ""
   return table.concat(req, "\r\n")
 end
 
 -- Write all data
 ---@param conn net.tcp
 ---@param data string
-local function write_all(conn, data)
+---@param should_abort? fun():string?
+---@return boolean?, string?
+local function write_all(conn, data, should_abort)
   local total_sent = 0
   while total_sent < #data do
-    local ok, _ = conn:write(data:sub(total_sent+1))
-    if not ok then coroutine.yield(0.05) else total_sent = #data end
+    local abort_err = should_abort and should_abort()
+    if abort_err then return nil, abort_err end
+
+    local ok = conn:write(data:sub(total_sent + 1))
+    if not ok then
+      coroutine.yield(0.05)
+    else
+      total_sent = #data
+    end
   end
+
   while true do
+    local abort_err = should_abort and should_abort()
+    if abort_err then return nil, abort_err end
+
     local pending = conn:wait_until_drained(0)
     if pending == 0 then break end
     coroutine.yield(0.05)
   end
+
+  return true
 end
 
--- Read exactly n bytes
 ---@param conn net.tcp
----@param n integer
----@return string? data
----@return string? err
-local function read_n(conn, n)
-  local buf, read_bytes = {}, 0
-  while read_bytes < n do
-    local chunk, err = conn:read(n - read_bytes)
-    if err then return nil, err end
-    if chunk and #chunk > 0 then
-      buf[#buf+1] = chunk
-      read_bytes = read_bytes + #chunk
-    else
-      coroutine.yield(0.01)
-    end
-  end
-  return table.concat(buf)
-end
+---@param should_abort? fun():string?
+---@return table
+local function make_reader(conn, should_abort)
+  local buffer = ""
 
--- Read a line (CRLF)
----@param conn net.tcp
----@return string? line
----@return string? err
-local function read_line(conn)
-  local line = {}
-  while true do
-    local c, err = conn:read(1)
-    if err then return nil, err end
-    if c and #c > 0 then
-      line[#line+1] = c
-      if #line >= 2 and line[#line-1] == "\r" and line[#line] == "\n" then
-        return table.concat(line, "", 1, #line-2)
+  local function wait_for_data(size)
+    while #buffer < size do
+      local abort_err = should_abort and should_abort()
+      if abort_err then return nil, abort_err end
+
+      local chunk, err = conn:read(math.max(4096, size - #buffer))
+      if err then return nil, err end
+
+      if chunk and #chunk > 0 then
+        buffer = buffer .. chunk
+      else
+        coroutine.yield(0.01)
       end
-    else
-      coroutine.yield(0.01)
     end
+
+    return true
   end
+
+  return {
+    read_n = function(_, n)
+      local ok, err = wait_for_data(n)
+      if not ok then return nil, err end
+
+      local data = buffer:sub(1, n)
+      buffer = buffer:sub(n + 1)
+      return data
+    end,
+
+    read_line = function(_)
+      while true do
+        local idx = buffer:find("\r\n", 1, true)
+        if idx then
+          local line = buffer:sub(1, idx - 1)
+          buffer = buffer:sub(idx + 2)
+          return line
+        end
+
+        local abort_err = should_abort and should_abort()
+        if abort_err then return nil, abort_err end
+
+        local chunk, err = conn:read(4096)
+        if err then return nil, err end
+
+        if chunk and #chunk > 0 then
+          buffer = buffer .. chunk
+        else
+          coroutine.yield(0.01)
+        end
+      end
+    end,
+
+    read_chunk = function(_, max_len)
+      if #buffer > 0 then
+        local data = buffer:sub(1, max_len)
+        buffer = buffer:sub(#data + 1)
+        return data
+      end
+
+      while true do
+        local abort_err = should_abort and should_abort()
+        if abort_err then return nil, abort_err end
+
+        local chunk, err = conn:read(max_len)
+        if err then return nil, err end
+
+        if chunk and #chunk > 0 then
+          return chunk
+        end
+
+        local status = conn:get_status()
+        if status == "failure" then
+          return nil
+        end
+        coroutine.yield(0.01)
+      end
+    end
+  }
 end
 
 -- Parse HTTP response headers
 ---@param header_lines string[]
 ---@return integer? status
----@return table<string,string> headers
+---@return table<string,http.header_value> headers
 local function parse_http_response_headers(header_lines)
   if #header_lines == 0 then return nil, {} end
+
   local status_line = header_lines[1]
   local _, _, status = status_line:find("HTTP/%d+%.%d+ (%d%d%d)")
   local headers = {}
+
   for i = 2, #header_lines do
     local k, v = header_lines[i]:match("^([%w%-]+):%s*(.+)$")
-    if k and v then headers[k:lower()] = v end
+    if k and v then
+      append_header_value(headers, k:lower(), v)
+    end
   end
+
   return tonumber(status), headers
 end
 
----@param content_type string
+---@param content_type string?
 local function is_json_content_type(content_type)
   if not content_type then return false end
   return content_type:find("application/json", 1, true)
@@ -306,6 +501,8 @@ end
 ---@field on_chunk? http.on_chunk
 ---@field on_done http.on_done
 ---@field decode_json? boolean (default: true)
+---@field timeout? number
+---@field is_cancelled? fun():boolean
 ---@field private redirect_count? integer
 
 ---Perform an HTTP request asynchronously.
@@ -322,6 +519,8 @@ function http.request(method, url, options)
   local on_header = options.on_header
   local on_chunk = options.on_chunk
   local on_done = options.on_done
+  local timeout = options.timeout
+  local is_cancelled = options.is_cancelled
 
   local want_stream = type(on_chunk) == "function"
   local auto_decode = options.decode_json ~= false
@@ -335,61 +534,123 @@ function http.request(method, url, options)
   local redirect_count = options.redirect_count or 0
 
   if redirect_count > MAX_REDIRECTS then
-    on_done(nil, "too many redirects")
+    on_done(false, "too many redirects")
     return
   end
 
   core.add_background_thread(function()
-    local parsed, errurl = parse_url(url)
-    if not parsed then on_done(nil, errurl) return end
+    local start_time = system.get_time()
+    local function should_abort()
+      if type(is_cancelled) == "function" and is_cancelled() then
+        return "request cancelled"
+      end
+      if timeout and system.get_time() - start_time >= timeout then
+        return "request timed out"
+      end
+    end
 
-    local addr, errhost = resolve_host(parsed.host)
-    if not addr then on_done(nil, errhost) return end
+    local parsed, errurl = parse_url(url)
+    if not parsed then
+      on_done(false, errurl)
+      return
+    end
+
+    local addr, errhost = resolve_host(parsed.host, should_abort)
+    if not addr then
+      on_done(false, errhost)
+      return
+    end
 
     while DOWNLOADING_CACERT_BUNDLE and parsed.protocol == "https" do
+      local abort_err = should_abort()
+      if abort_err then
+        on_done(false, abort_err)
+        return
+      end
       coroutine.yield(0.5)
     end
 
     local conn, errtcp = net.open_tcp(addr, parsed.port, parsed.protocol == "https")
-    if not conn then on_done(nil, errtcp) return end
+    if not conn then
+      on_done(false, errtcp)
+      return
+    end
 
     while true do
+      local abort_err = should_abort()
+      if abort_err then
+        conn:close()
+        on_done(false, abort_err)
+        return
+      end
+
       local status, errstatus = conn:get_status()
       if status == "success" then break end
       if status == "failure" then
-        conn:close() on_done(nil, errstatus or "failed to connect")
+        conn:close()
+        on_done(false, errstatus or "failed to connect")
         return
       end
       coroutine.yield(0.05)
     end
 
-    local req_str = build_request(method, parsed.path, parsed.host, headers, body)
-    write_all(conn, req_str)
+    local req_str = build_request(
+      method, parsed.path, parsed.host, parsed.port, parsed.protocol, headers, body
+    )
+    local sent, write_err = write_all(conn, req_str, should_abort)
+    if not sent then
+      conn:close()
+      on_done(false, write_err)
+      return
+    end
 
+    local reader = make_reader(conn, should_abort)
     local header_lines = {}
     while true do
-      local line, errread = read_line(conn)
-      if errread then conn:close() on_done(nil, errread) return end
-      if not line then coroutine.yield(0.01)
-      else if line == "" then break end header_lines[#header_lines+1] = line end
+      local line, errread = reader:read_line()
+      if errread then
+        conn:close()
+        on_done(false, errread)
+        return
+      end
+      if line == "" then break end
+      header_lines[#header_lines + 1] = line
     end
 
     local status_code, response_headers = parse_http_response_headers(header_lines)
-    if not status_code then conn:close() on_done(nil, "invalid HTTP response") return end
-
-    if on_redirect then on_redirect({status=status_code, headers=response_headers}) end
-
-    if status_code >= 300 and status_code < 400 and response_headers["location"] then
+    if not status_code then
       conn:close()
-      local new_url = response_headers["location"]
-      local new_method = method
-      if status_code == 303 then new_method = "GET" body = nil end
-      ---@diagnostic disable-next-line
-      options.redirect_count = redirect_count + 1
-      return http.request(new_method, new_url, options)
+      on_done(false, "invalid HTTP response")
+      return
     end
 
-    if on_header then on_header({status=status_code, headers=response_headers}) end
+    local response_info = {
+      status = status_code,
+      headers = response_headers,
+      url = url
+    }
+
+    if on_redirect then
+      on_redirect(response_info)
+    end
+
+    local location = get_header_value(response_headers, "location")
+    if status_code >= 300 and status_code < 400 and location then
+      conn:close()
+
+      local new_method = method
+      local new_options = clone_options(options)
+      if status_code == 303 then
+        new_method = "GET"
+        new_options.body = nil
+      end
+      new_options.redirect_count = redirect_count + 1
+      return http.request(new_method, resolve_redirect_url(parsed, location), new_options)
+    end
+
+    if on_header then
+      on_header(response_info)
+    end
 
     local ok, errmsg
     local function internal_chunk_cb(chunk)
@@ -401,64 +662,95 @@ function http.request(method, url, options)
       coroutine.yield(0)
     end
 
-    if response_headers["transfer-encoding"] == "chunked" then
+    if get_header_value(response_headers, "transfer-encoding") == "chunked" then
       while true do
-        local line, err1 = read_line(conn)
-        if not line then ok, errmsg = false, err1 break end
-        local size = tonumber(line:match("^[0-9A-Fa-f]+"),16)
-        if size == 0 then break end
-        local data, err2 = read_n(conn, size)
-        if not data then ok, errmsg = false, err2 break end
+        local line, err1 = reader:read_line()
+        if not line then
+          ok, errmsg = false, err1
+          break
+        end
+
+        local size = tonumber(line:match("^[0-9A-Fa-f]+"), 16)
+        if not size then
+          ok, errmsg = false, "invalid chunk size"
+          break
+        end
+
+        if size == 0 then
+          while true do
+            local trailer, trailer_err = reader:read_line()
+            if trailer_err then
+              ok, errmsg = false, trailer_err
+            end
+            if trailer_err or trailer == "" then break end
+          end
+          break
+        end
+
+        local data, err2 = reader:read_n(size)
+        if not data then
+          ok, errmsg = false, err2
+          break
+        end
+
         internal_chunk_cb(data)
-        read_line(conn)
+
+        local _, line_err = reader:read_line()
+        if line_err then
+          ok, errmsg = false, line_err
+          break
+        end
       end
-    elseif response_headers["content-length"] then
-      local remaining = tonumber(response_headers["content-length"])
+    elseif get_header_value(response_headers, "content-length") then
+      local remaining = tonumber(get_header_value(response_headers, "content-length"))
       while remaining > 0 do
         local to_read = math.min(4096, remaining)
-        local data, err = read_n(conn, to_read)
-        if not data then ok, errmsg = false, err break end
+        local data, err = reader:read_n(to_read)
+        if not data then
+          ok, errmsg = false, err
+          break
+        end
         remaining = remaining - #data
         internal_chunk_cb(data)
       end
     else
       while true do
-        local data, err = conn:read(4096)
-        if err then ok, errmsg = false, err break end
-        if not data or #data == 0 then
-          coroutine.yield(0.01)
-        else
-          internal_chunk_cb(data)
+        local data, err = reader:read_chunk(4096)
+        if err then
+          ok, errmsg = false, err
+          break
         end
+        if not data then break end
+        internal_chunk_cb(data)
       end
     end
 
     conn:close()
     if ok == false then
-      on_done(false, errmsg)
+      on_done(false, errmsg, nil, response_info)
       return
     end
 
     if want_stream then
-      on_done(true)
+      on_done(true, nil, nil, response_info)
       return
     end
 
     body = table.concat(response_chunks)
     local result = body
 
-    local ct = response_headers["content-type"]
+    local ct = get_header_value(response_headers, "content-type")
     if auto_decode and is_json_content_type(ct) then
-      local decoded, jerr =json.decode(body)
+      local decoded, jerr = json.decode(body)
       if decoded then
         result = decoded
       else
-        on_done(false, "json decode error: " .. tostring(jerr))
+        on_done(false, "json decode error: " .. tostring(jerr), nil, response_info)
         return
       end
     end
 
-    on_done(true, nil, result)
+    on_done(true, nil, result, response_info)
   end)
 end
 
@@ -470,6 +762,7 @@ local function query_request(method, url, params, options)
   assert(type(options) == "table", "provide the options object")
   assert(type(options.on_done) == "function", "provide the on_done callback")
 
+  options = clone_options(options)
   url = append_query(url, params or {})
   return http.request(method, url, options)
 end
@@ -483,6 +776,7 @@ local function body_request(method, url, submit_type, params, options)
   assert(type(options) == "table", "provide the options object")
   assert(type(options.on_done) == "function", "provide the on_done callback")
 
+  options = clone_options(options)
   local body
   body, options.headers = prepare_body_and_headers(
     submit_type, params, options.body, options.headers
@@ -557,6 +851,8 @@ end
 ---@field directory? string Path to save the downloaded file
 ---@field on_done http.on_done_download
 ---@field on_progress? http.on_progress
+---@field timeout? number
+---@field is_cancelled? fun():boolean
 
 ---Download a file asynchronously with optional progress tracking.
 ---@param url string File URL
@@ -574,8 +870,9 @@ function http.download(url, options)
   local f, total_downloaded, total_size = nil, 0, nil
 
   local function header_cb(info)
-    if info.status ~= 200 then return end
-    local cd = info.headers["content-disposition"]
+    if info.status < 200 or info.status >= 300 then return end
+
+    local cd = get_header_value(info.headers, "content-disposition")
     if cd and not filename then
       filename = cd:match('filename="?([^"]+)"?')
     end
@@ -584,10 +881,12 @@ function http.download(url, options)
     end
     if directory then
       common.mkdirp(directory)
-      filename = directory:gsub(PATHSEP.."+$","")..PATHSEP..filename
+      filename = directory:gsub(PATHSEP .. "+$", "") .. PATHSEP .. filename
     end
-    if info.headers["content-length"] then
-      total_size = tonumber(info.headers["content-length"])
+
+    local content_length = get_header_value(info.headers, "content-length")
+    if content_length then
+      total_size = tonumber(content_length)
     end
     f = assert(io.open(filename, "wb"))
   end
@@ -601,13 +900,28 @@ function http.download(url, options)
     end
   end
 
-  local function done_cb_inner(ok, err)
-    if f then f:close() end
-    on_done(ok, err, filename)
+  local function done_cb_inner(ok, err, _, info)
+    if f then
+      f:close()
+      f = nil
+    end
+
+    if ok and info and (info.status < 200 or info.status >= 300) then
+      ok = false
+      err = "HTTP " .. tostring(info.status)
+    end
+
+    if not ok and filename then
+      os.remove(filename)
+    end
+
+    on_done(ok, err, filename, info)
   end
 
   http.get(url, nil, {
     headers = headers,
+    timeout = options.timeout,
+    is_cancelled = options.is_cancelled,
     on_header = header_cb,
     on_chunk = chunk_cb,
     on_done = done_cb_inner
@@ -623,7 +937,7 @@ if capath == nil then
   if not userca_info or userca_info.modified + two_weeks < os.time() then
     http.download("https://curl.se/ca/cacert.pem", {
       directory = USERDIR,
-      on_progress = function ()
+      on_progress = function()
         DOWNLOADING_CACERT_BUNDLE = true
       end,
       on_done = function(ok, errmsg)
