@@ -69,6 +69,13 @@ static int sdl_mbedtls_recv(void *ctx, unsigned char *buf, size_t len) {
   return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
 }
 
+static bool is_ssl_retryable_read(int rc) {
+  return
+    rc == MBEDTLS_ERR_SSL_WANT_READ ||
+    rc == MBEDTLS_ERR_SSL_WANT_WRITE ||
+    rc == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET;
+}
+
 bool load_cacert_bundle(mbedtls_x509_crt *cacert) {
   // load previous or path to custom bundle like https://curl.se/ca/cacert.pem
   if (
@@ -646,7 +653,7 @@ static int m_tcp_read(lua_State* L) {
     int rc = mbedtls_ssl_read(&self->ssl, (unsigned char*) data, max_len);
     if (rc >= 0) {
       lua_pushlstring(L, data, rc);
-    } else if (rc == MBEDTLS_ERR_SSL_WANT_READ) {
+    } else if (is_ssl_retryable_read(rc)) {
       lua_pushstring(L, "");
     } else {
       char errbuf[128];

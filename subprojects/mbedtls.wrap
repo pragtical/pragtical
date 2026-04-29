@@ -3,6 +3,7 @@ directory = mbedtls-4.1.0
 source_url = https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-4.1.0/mbedtls-4.1.0.tar.bz2
 source_filename = mbedtls-4.1.0.tar.bz2
 source_hash = 377a09cf8eb81b5fb2707045e5522d5489d3309fed5006c9874e60558fc81d10
+patch_directory = mbedtls
 
 [provide]
 tfpsacrypto = tfpsacrypto_dep
