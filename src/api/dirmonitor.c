@@ -121,9 +121,12 @@ static int f_dirmonitor_gc(lua_State* L) {
   struct dirmonitor* monitor = luaL_checkudata(L, 1, API_TYPE_DIRMONITOR);
   SDL_LockMutex(monitor->mutex);
   monitor->length = -1;
-  monitor->backend->deinit(monitor->internal);
   SDL_UnlockMutex(monitor->mutex);
-  SDL_WaitThread(monitor->thread, NULL);
+  monitor->backend->deinit(monitor->internal);
+  if (monitor->thread) {
+    SDL_WaitThread(monitor->thread, NULL);
+    monitor->thread = NULL;
+  }
   SDL_free(monitor->internal);
   SDL_DestroyMutex(monitor->mutex);
   return 0;

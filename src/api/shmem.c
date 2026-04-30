@@ -1,20 +1,21 @@
 /*
- * Crossplatform implementation of shared memory objects.
+ * Cross-platform shared memory key/value store.
  *
- * References:
- *
- * POSIX Naming conventions:
- *   1. man shm_open
- *   2. man 7 sem_overview
- *
- * Windows Naming conventions:
- *   1. https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createfilemappinga
+ * The Lua API exposes a namespace with a fixed entry capacity. Internally,
+ * each namespace is backed by a single shared-memory region plus one
+ * cross-process mutex. Keeping all metadata and values in one mapping avoids
+ * the per-entry mapping, resize and unlink races from the previous design.
  */
 
 #include "api.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
+
 #include <SDL3/SDL.h>
 
 #ifdef _WIN32
@@ -24,31 +25,63 @@
   typedef HANDLE shmem_mutex_handle;
 #else
   #include <errno.h>
-  #include <unistd.h>
+  #include <fcntl.h>
+  #include <signal.h>
+  #include <semaphore.h>
   #include <sys/mman.h>
   #include <sys/stat.h>
-  #include <fcntl.h>
-  #include <semaphore.h>
+  #include <unistd.h>
 
   typedef int shmem_handle;
-  typedef sem_t* shmem_mutex_handle;
+  typedef sem_t *shmem_mutex_handle;
 #endif
 
 #define SHMEM_NAME_LEN 124
 #define SHMEM_NS_LEN 251
+#define SHMEM_PATH_LEN 1024
+#define SHMEM_MAGIC 0x50475348u
+#define SHMEM_VERSION 3u
+#define SHMEM_INITIAL_DATA_CAPACITY 4096u
+#define SHMEM_OWNER_SLOTS 32u
+
+typedef struct {
+  char name[SHMEM_NAME_LEN];
+  size_t offset;
+  size_t size;
+} shmem_entry;
+
+typedef struct {
+  uint64_t pid;
+  uint32_t refs;
+  uint32_t reserved;
+} shmem_owner;
+
+typedef struct {
+  uint32_t magic;
+  uint32_t version;
+  int32_t refcount;
+  uint32_t reserved;
+  size_t size;
+  size_t capacity;
+  size_t data_capacity;
+  size_t data_used;
+  shmem_owner owners[SHMEM_OWNER_SLOTS];
+  shmem_entry entries[];
+} shmem_namespace;
 
 typedef struct {
   shmem_handle handle;
-  /* reminder: when the shmem_object is used as a namespace handle the name is
-   * no longer than SHMEM_NAME_LEN, but when the shmem_object is used as
-   * entry_handles then a length of SHMEM_NS_LEN is used to accomodate the
-   * namespace name and entry item name.
-   */
   char name[SHMEM_NS_LEN];
+#if defined(_WIN32) || defined(__APPLE__)
+#ifdef _WIN32
+  HANDLE file_handle;
+#endif
+  char path[SHMEM_PATH_LEN];
+#endif
   size_t size;
-  void* map;
+  void *map;
   bool created;
-} shmem_object;
+} shmem_region;
 
 typedef struct {
   shmem_mutex_handle handle;
@@ -56,28 +89,27 @@ typedef struct {
 } shmem_mutex;
 
 typedef struct {
-  char name[SHMEM_NAME_LEN];
-  size_t size;
-} shmem_entry;
-
-typedef struct {
-  int refcount;
-  size_t size;
-  size_t capacity;
-  shmem_entry entries[];
-} shmem_namespace;
-
-typedef struct {
-  shmem_object* handle;
-  shmem_mutex* mutex;
-  shmem_namespace* namespace;
-  size_t entry_handles_loaded;
-  shmem_object* entry_handles[];
+  shmem_region *region;
+  shmem_mutex *mutex;
+  shmem_namespace *namespace;
 } shmem_container;
 
-static Uint32 shmem_hash_string(const char* value) {
+typedef struct {
+  shmem_container *container;
+} l_shmem_container;
+
+typedef struct {
+  shmem_container *container;
+  size_t position;
+} l_shmem_state;
+
+#define L_SHMEM_SELF(L, idx) ( \
+  (l_shmem_container *) luaL_checkudata(L, idx, API_TYPE_SHARED_MEMORY) \
+)->container
+
+static Uint32 shmem_hash_string(const char *value) {
   Uint32 hash = 2166136261u;
-  for (const unsigned char* ptr = (const unsigned char*) value; *ptr; ptr++) {
+  for (const unsigned char *ptr = (const unsigned char *) value; *ptr; ptr++) {
     hash ^= *ptr;
     hash *= 16777619u;
   }
@@ -85,7 +117,9 @@ static Uint32 shmem_hash_string(const char* value) {
 }
 
 static inline void shmem_ns_name(
-  char* ns_name, size_t ns_name_size, const char* name
+  char *ns_name,
+  size_t ns_name_size,
+  const char *name
 ) {
 #ifdef _WIN32
   snprintf(ns_name, ns_name_size, "%s", name);
@@ -94,24 +128,7 @@ static inline void shmem_ns_name(
 #endif
 }
 
-static inline void shmem_ns_entry_name(
-  char* ns_name, shmem_container* container, const char* entry_name
-) {
-#ifdef _WIN32
-  const char* ns = container->handle->name;
-  snprintf(ns_name, SHMEM_NS_LEN, "%.*s.%s", (int)strlen(ns), ns, entry_name);
-#else
-  snprintf(
-    ns_name,
-    SHMEM_NS_LEN,
-    "/pgent-%08x-%08x",
-    shmem_hash_string(container->handle->name),
-    shmem_hash_string(entry_name)
-  );
-#endif
-}
-
-static inline void shmem_mutex_name(char* mutex_name, const char* name) {
+static inline void shmem_mutex_name(char *mutex_name, const char *name) {
 #ifdef _WIN32
   snprintf(mutex_name, SHMEM_NS_LEN, "%s_%s", name, "mutex");
 #else
@@ -119,180 +136,463 @@ static inline void shmem_mutex_name(char* mutex_name, const char* name) {
 #endif
 }
 
-static inline bool shmem_name_valid(const char* name) {
+static inline bool shmem_name_valid(const char *name) {
   if (
     strlen(name) >= SHMEM_NAME_LEN
-    ||
-    strstr(name, "/") != NULL
-    ||
-    strstr(name, "\\") != NULL
-  )
+    || strstr(name, "/") != NULL
+    || strstr(name, "\\") != NULL
+  ) {
     return false;
+  }
 
   return true;
 }
 
-static shmem_object* shmem_open_internal(
-  const char* name,
+static inline size_t shmem_namespace_header_size(size_t capacity) {
+  return sizeof(shmem_namespace) + (capacity * sizeof(shmem_entry));
+}
+
+static inline char *shmem_namespace_data(shmem_container *container) {
+  return ((char *) container->namespace)
+    + shmem_namespace_header_size(container->namespace->capacity);
+}
+
+static uint64_t shmem_current_pid(void) {
+#ifdef _WIN32
+  return (uint64_t) GetCurrentProcessId();
+#else
+  return (uint64_t) getpid();
+#endif
+}
+
+static bool shmem_process_alive(uint64_t pid) {
+#ifdef _WIN32
+  HANDLE process = OpenProcess(
+    SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+    FALSE,
+    (DWORD) pid
+  );
+  if (process == NULL) {
+    return GetLastError() != ERROR_INVALID_PARAMETER;
+  }
+
+  DWORD status = WaitForSingleObject(process, 0);
+  CloseHandle(process);
+  return status == WAIT_TIMEOUT;
+#else
+  if (pid == 0) {
+    return false;
+  }
+
+  if (kill((pid_t) pid, 0) == 0 || errno == EPERM) {
+    return true;
+  }
+
+  return errno != ESRCH;
+#endif
+}
+
+static bool shmem_add_sizes(size_t left, size_t right, size_t *result) {
+  if (left > SIZE_MAX - right) {
+    SDL_SetError("shared memory region is too large");
+    return false;
+  }
+
+  *result = left + right;
+  return true;
+}
+
+static bool shmem_compute_header_size(size_t capacity, size_t *header_size) {
+  if (capacity == 0) {
+    SDL_SetError("capacity must be a positive integer");
+    return false;
+  }
+
+  if (capacity > SIZE_MAX / sizeof(shmem_entry)) {
+    SDL_SetError("capacity is too large");
+    return false;
+  }
+
+  *header_size = shmem_namespace_header_size(capacity);
+  return true;
+}
+
+static bool shmem_region_storage_size(size_t size, size_t *storage_size) {
+#ifdef _WIN32
+  *storage_size = size;
+  return true;
+#else
+  long page_size = sysconf(_SC_PAGESIZE);
+  size_t page_size_value;
+  size_t remainder;
+
+  if (page_size <= 0) {
+    SDL_SetError("failed to get shared memory page size");
+    return false;
+  }
+
+  page_size_value = (size_t) page_size;
+  remainder = size % page_size_value;
+  if (remainder == 0) {
+    *storage_size = size;
+    return true;
+  }
+
+  return shmem_add_sizes(size, page_size_value - remainder, storage_size);
+#endif
+}
+
+#if defined(_WIN32) || defined(__APPLE__)
+static bool shmem_region_path(char *path, size_t path_size, const char *name) {
+#ifdef _WIN32
+  char temp_path[MAX_PATH + 1];
+  DWORD temp_len = GetTempPathA(MAX_PATH, temp_path);
+  if (temp_len == 0 || temp_len > MAX_PATH) {
+    SDL_SetError("GetTempPath failed: %lu", GetLastError());
+    return false;
+  }
+#else
+  const char *temp_path = getenv("TMPDIR");
+  const char *separator = "";
+
+  if (temp_path == NULL || temp_path[0] == '\0') {
+    temp_path = "/tmp";
+  }
+
+  if (temp_path[strlen(temp_path) - 1] != '/') {
+    separator = "/";
+  }
+#endif
+
+#ifdef _WIN32
+  int written = snprintf(
+    path,
+    path_size,
+    "%spragtical-shmem-%08x.bin",
+    temp_path,
+    shmem_hash_string(name)
+  );
+#else
+  int written = snprintf(
+    path,
+    path_size,
+    "%s%spragtical-shmem-%08x.bin",
+    temp_path,
+    separator,
+    shmem_hash_string(name)
+  );
+#endif
+  if (written < 0 || (size_t) written >= path_size) {
+    SDL_SetError("shared memory path is too long");
+    return false;
+  }
+
+  return true;
+}
+#endif
+
+static bool shmem_region_remap(
+  shmem_region *region,
   size_t size,
-  bool resize_existing
+  bool resize_storage
 ) {
-  shmem_object* object = SDL_malloc(sizeof(shmem_object));
-  if (!object) {
+  size_t storage_size;
+
+  if (!shmem_region_storage_size(size, &storage_size)) {
+    return false;
+  }
+
+#ifdef _WIN32
+  if (region->map != NULL) {
+    UnmapViewOfFile(region->map);
+    region->map = NULL;
+  }
+  if (region->handle != NULL) {
+    CloseHandle(region->handle);
+    region->handle = NULL;
+  }
+
+  if (resize_storage) {
+    LARGE_INTEGER target_size;
+    target_size.QuadPart = (LONGLONG) storage_size;
+    if (!SetFilePointerEx(region->file_handle, target_size, NULL, FILE_BEGIN)
+        || !SetEndOfFile(region->file_handle)) {
+      SDL_SetError("failed to resize shared memory '%s': %lu", region->name, GetLastError());
+      return false;
+    }
+  }
+
+  region->handle = CreateFileMappingA(
+    region->file_handle, NULL, PAGE_READWRITE,
+    (DWORD) (storage_size >> 32), (DWORD) storage_size, NULL
+  );
+  if (region->handle == NULL) {
+    SDL_SetError(
+      "CreateFileMapping failed for '%s': %lu",
+      region->name,
+      GetLastError()
+    );
+    return false;
+  }
+
+  region->map = MapViewOfFile(
+    region->handle,
+    FILE_MAP_ALL_ACCESS,
+    0,
+    0,
+    storage_size
+  );
+  if (region->map == NULL) {
+    SDL_SetError("MapViewOfFile failed for '%s': %lu", region->name, GetLastError());
+    CloseHandle(region->handle);
+    region->handle = NULL;
+    return false;
+  }
+#else
+  if (region->map != NULL) {
+    munmap(region->map, region->size);
+    region->map = NULL;
+  }
+
+  if (resize_storage && ftruncate(region->handle, (off_t) storage_size) == -1) {
+    SDL_SetError("ftruncate failed for '%s': %s", region->name, strerror(errno));
+    return false;
+  }
+
+  region->map = mmap(
+    NULL,
+    storage_size,
+    PROT_READ | PROT_WRITE,
+    MAP_SHARED,
+    region->handle,
+    0
+  );
+  if (region->map == MAP_FAILED) {
+    region->map = NULL;
+    SDL_SetError("mmap failed for '%s': %s", region->name, strerror(errno));
+    return false;
+  }
+#endif
+
+  region->size = storage_size;
+  return true;
+}
+
+static shmem_region *shmem_region_open(const char *name, size_t minimum_size) {
+  shmem_region *region = SDL_calloc(1, sizeof(shmem_region));
+  if (!region) {
     SDL_OutOfMemory();
     return NULL;
   }
 
-  strcpy(object->name, name);
-  object->size = size;
-  object->created = false;
+  snprintf(region->name, sizeof(region->name), "%s", name);
 
 #ifdef _WIN32
-  object->handle = CreateFileMappingA(
-    INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, name
+  if (!shmem_region_path(region->path, sizeof(region->path), name)) {
+    goto shmem_region_open_error;
+  }
+
+  region->file_handle = CreateFileA(
+    region->path,
+    GENERIC_READ | GENERIC_WRITE,
+    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+    NULL,
+    OPEN_ALWAYS,
+    FILE_ATTRIBUTE_NORMAL,
+    NULL
   );
-
-  if (object->handle == NULL) {
-    SDL_SetError("CreateFileMapping failed for '%s': %lu", name, GetLastError());
-    goto shmem_open_error;
+  if (region->file_handle == INVALID_HANDLE_VALUE) {
+    SDL_SetError("CreateFile failed for '%s': %lu", region->path, GetLastError());
+    goto shmem_region_open_error;
   }
 
-  object->created = GetLastError() != ERROR_ALREADY_EXISTS;
+  region->created = GetLastError() != ERROR_ALREADY_EXISTS;
 
-  object->map = MapViewOfFile(
-    object->handle,
-    FILE_MAP_ALL_ACCESS,
-    0,
-    0,
-    (!object->created && !resize_existing) ? 0 : size
-  );
-
-  if (object->map == NULL) {
-    SDL_SetError("MapViewOfFile failed for '%s': %lu", name, GetLastError());
-    CloseHandle(object->handle);
-    goto shmem_open_error;
+  LARGE_INTEGER file_size;
+  if (!GetFileSizeEx(region->file_handle, &file_size)) {
+    SDL_SetError("GetFileSizeEx failed for '%s': %lu", region->path, GetLastError());
+    CloseHandle(region->file_handle);
+    goto shmem_region_open_error;
   }
 
-  if (!object->created && !resize_existing) {
-    MEMORY_BASIC_INFORMATION mapping_info;
-    if (VirtualQuery(object->map, &mapping_info, sizeof(mapping_info)) > 0) {
-      object->size = (size_t) mapping_info.RegionSize;
-    }
-  }
-#else
-  object->handle = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
-
-  if (object->handle == -1) {
-    if (errno != EEXIST) {
-      SDL_SetError("shm_open failed for '%s': %s", name, strerror(errno));
-      goto shmem_open_error;
-    }
-    object->handle = shm_open(name, O_RDWR, 0666);
-    if (object->handle == -1) {
-      SDL_SetError("shm_open failed for '%s': %s", name, strerror(errno));
-      goto shmem_open_error;
+  if (region->created) {
+    region->size = minimum_size;
+    if (!shmem_region_remap(region, minimum_size, true)) {
+      CloseHandle(region->file_handle);
+      goto shmem_region_open_error;
     }
   } else {
-    object->created = true;
+    region->size = (size_t) file_size.QuadPart;
+    if (region->size < minimum_size) {
+      SDL_SetError(
+        "shared memory region '%s' has incompatible capacity or layout",
+        name
+      );
+      CloseHandle(region->file_handle);
+      goto shmem_region_open_error;
+    }
+    if (!shmem_region_remap(region, region->size, false)) {
+      CloseHandle(region->file_handle);
+      goto shmem_region_open_error;
+    }
+  }
+#elif defined(__APPLE__)
+  if (!shmem_region_path(region->path, sizeof(region->path), name)) {
+    goto shmem_region_open_error;
   }
 
-  if (object->created || resize_existing) {
-    if (ftruncate(object->handle, size) == -1) {
-      SDL_SetError("ftruncate failed for '%s': %s", name, strerror(errno));
-      close(object->handle);
-      goto shmem_open_error;
+  region->handle = open(region->path, O_CREAT | O_EXCL | O_RDWR, 0666);
+  if (region->handle == -1) {
+    if (errno != EEXIST) {
+      SDL_SetError("open failed for '%s': %s", region->path, strerror(errno));
+      goto shmem_region_open_error;
     }
+
+    region->handle = open(region->path, O_RDWR, 0666);
+    if (region->handle == -1) {
+      SDL_SetError("open failed for '%s': %s", region->path, strerror(errno));
+      goto shmem_region_open_error;
+    }
+  } else {
+    region->created = true;
+  }
+
+  if (region->created) {
+    region->size = minimum_size;
   } else {
     struct stat st;
-    if (fstat(object->handle, &st) == -1) {
-      SDL_SetError("fstat failed for '%s': %s", name, strerror(errno));
-      close(object->handle);
-      goto shmem_open_error;
+    if (fstat(region->handle, &st) == -1) {
+      SDL_SetError("fstat failed for '%s': %s", region->path, strerror(errno));
+      close(region->handle);
+      goto shmem_region_open_error;
     }
-    object->size = st.st_size;
+    region->size = (size_t) st.st_size;
+    if (region->size < minimum_size) {
+      SDL_SetError(
+        "shared memory region '%s' has incompatible capacity or layout",
+        name
+      );
+      close(region->handle);
+      goto shmem_region_open_error;
+    }
   }
 
-  if (object->size == 0) {
-    SDL_SetError("shared memory object '%s' has invalid size 0", name);
-    close(object->handle);
-    goto shmem_open_error;
+  if (!shmem_region_remap(region, region->size, region->created)) {
+    close(region->handle);
+    goto shmem_region_open_error;
+  }
+#else
+  region->handle = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
+  if (region->handle == -1) {
+    if (errno != EEXIST) {
+      SDL_SetError("shm_open failed for '%s': %s", name, strerror(errno));
+      goto shmem_region_open_error;
+    }
+
+    region->handle = shm_open(name, O_RDWR, 0666);
+    if (region->handle == -1) {
+      SDL_SetError("shm_open failed for '%s': %s", name, strerror(errno));
+      goto shmem_region_open_error;
+    }
+  } else {
+    region->created = true;
   }
 
-  object->map = mmap(
-    NULL, object->size, PROT_READ | PROT_WRITE, MAP_SHARED, object->handle, 0
-  );
+  if (region->created) {
+    region->size = minimum_size;
+  } else {
+    struct stat st;
+    if (fstat(region->handle, &st) == -1) {
+      SDL_SetError("fstat failed for '%s': %s", name, strerror(errno));
+      close(region->handle);
+      goto shmem_region_open_error;
+    }
+    region->size = (size_t) st.st_size;
+    if (region->size < minimum_size) {
+      SDL_SetError(
+        "shared memory region '%s' has incompatible capacity or layout",
+        name
+      );
+      close(region->handle);
+      goto shmem_region_open_error;
+    }
+  }
 
-  if (object->map == MAP_FAILED) {
-    SDL_SetError("mmap failed for '%s': %s", name, strerror(errno));
-    close(object->handle);
-    goto shmem_open_error;
+  if (!shmem_region_remap(region, region->size, region->created)) {
+    close(region->handle);
+    goto shmem_region_open_error;
   }
 #endif
 
-  return object;
+  return region;
 
-shmem_open_error:
-  SDL_free(object);
+shmem_region_open_error:
+  SDL_free(region);
   return NULL;
 }
 
-shmem_object* shmem_open(const char* name, size_t size) {
-  return shmem_open_internal(name, size, false);
-}
-
-void shmem_close(shmem_object* object, bool unregister) {
+static void shmem_region_close(shmem_region *region, bool unregister) {
 #ifdef _WIN32
-  UnmapViewOfFile(object->map);
-  CloseHandle(object->handle);
+  if (region->map != NULL) {
+    UnmapViewOfFile(region->map);
+  }
+  if (region->handle != NULL) {
+    CloseHandle(region->handle);
+  }
+  CloseHandle(region->file_handle);
+  if (unregister) {
+    DeleteFileA(region->path);
+  }
+#elif defined(__APPLE__)
+  if (region->map != NULL) {
+    munmap(region->map, region->size);
+  }
+  close(region->handle);
+  if (unregister) {
+    unlink(region->path);
+  }
 #else
-  munmap(object->map, object->size);
-  close(object->handle);
-
-  if (unregister)
-    shm_unlink(object->name);
+  if (region->map != NULL) {
+    munmap(region->map, region->size);
+  }
+  close(region->handle);
+  if (unregister) {
+    shm_unlink(region->name);
+  }
 #endif
 
-  SDL_free(object);
+  SDL_free(region);
 }
 
-shmem_object* shmem_resize(shmem_object** object, size_t new_size) {
-  char name[SHMEM_NS_LEN];
-  strcpy(name, (*object)->name);
+static shmem_mutex *shmem_mutex_open(const char *name) {
+  shmem_mutex *mutex = SDL_malloc(sizeof(shmem_mutex));
+  if (!mutex) {
+    SDL_OutOfMemory();
+    return NULL;
+  }
 
-  shmem_close((*object), false);
-
-  *object = shmem_open_internal(name, new_size, true);
-
-  return *object;
-}
-
-shmem_mutex* shmem_mutex_open(const char* name) {
-  shmem_mutex* mutex = SDL_malloc(sizeof(shmem_mutex));
+  snprintf(mutex->name, sizeof(mutex->name), "%s", name);
 
 #ifdef _WIN32
   mutex->handle = CreateMutexA(NULL, FALSE, name);
   if (mutex->handle == NULL) {
     SDL_SetError("CreateMutex failed for '%s': %lu", name, GetLastError());
-    goto shmem_mutex_open_error;
+    SDL_free(mutex);
+    return NULL;
   }
 #else
   mutex->handle = sem_open(name, O_CREAT, 0666, 1);
   if (mutex->handle == SEM_FAILED) {
     SDL_SetError("sem_open failed for '%s': %s", name, strerror(errno));
-    goto shmem_mutex_open_error;
+    SDL_free(mutex);
+    return NULL;
   }
 #endif
 
-  strcpy(mutex->name, name);
-
   return mutex;
-
-shmem_mutex_open_error:
-  SDL_free(mutex);
-  return NULL;
 }
 
-void shmem_mutex_lock(shmem_mutex* mutex) {
+static void shmem_mutex_lock(shmem_mutex *mutex) {
 #ifdef _WIN32
   WaitForSingleObject(mutex->handle, INFINITE);
 #else
@@ -300,7 +600,7 @@ void shmem_mutex_lock(shmem_mutex* mutex) {
 #endif
 }
 
-void shmem_mutex_unlock(shmem_mutex* mutex) {
+static void shmem_mutex_unlock(shmem_mutex *mutex) {
 #ifdef _WIN32
   ReleaseMutex(mutex->handle);
 #else
@@ -308,408 +608,590 @@ void shmem_mutex_unlock(shmem_mutex* mutex) {
 #endif
 }
 
-void shmem_mutex_close(shmem_mutex* mutex, bool unregister) {
+static void shmem_mutex_close(shmem_mutex *mutex, bool unregister) {
 #ifdef _WIN32
   CloseHandle(mutex->handle);
 #else
   sem_close(mutex->handle);
-  if (unregister) sem_unlink(mutex->name);
+  if (unregister) {
+    sem_unlink(mutex->name);
+  }
 #endif
   SDL_free(mutex);
 }
 
-void shmem_container_entry_clear(shmem_container* container, bool unregister) {
-  for (size_t i=0; i < container->entry_handles_loaded; i++) {
-    if (container->entry_handles[i] != NULL) {
-      shmem_close(container->entry_handles[i], unregister);
-      container->entry_handles[i] = NULL;
-    }
-  }
-  container->entry_handles_loaded = 0;
-}
-
-void shmem_container_entry_remove(
-  shmem_container* container, const char* name, bool unregister
-)
-{
-  if (container->entry_handles_loaded > 0) {
-    for (size_t pos=0; pos < container->entry_handles_loaded; pos++) {
-      if (
-        container->entry_handles[pos]
-        &&
-        strcmp(container->entry_handles[pos]->name, name) == 0
-      ) {
-        shmem_close(container->entry_handles[pos], unregister);
-        container->entry_handles[pos] = NULL;
-
-        if ((pos + 1) != container->entry_handles_loaded) {
-          memmove(
-            container->entry_handles+pos,
-            container->entry_handles+pos+1,
-            sizeof(shmem_object*) * (container->entry_handles_loaded - (pos+1))
-          );
-        }
-
-        container->entry_handles_loaded--;
-        container->entry_handles[container->entry_handles_loaded] = NULL;
-        break;
-      }
-    }
-  }
-}
-
-shmem_object* shmem_container_entry_get(
-  shmem_container* container, size_t position, const char* name, size_t size
-)
-{
-  shmem_object* object = NULL;
-  size_t assigned_position = position;
-
-  if (container->entry_handles_loaded > 0) {
-    if (
-      position < container->entry_handles_loaded
-      &&
-      container->entry_handles[position]
-      &&
-      strcmp(container->entry_handles[position]->name, name) == 0
-    ) {
-      object = container->entry_handles[position];
-    } else {
-      for (size_t i=0; i<container->entry_handles_loaded; i++) {
-        if (
-          container->entry_handles[i]
-          &&
-          strcmp(container->entry_handles[i]->name, name) == 0
-        ) {
-          object = container->entry_handles[i];
-          assigned_position = i;
-          break;
-        }
-      }
-    }
-  }
-
-  if (!object) {
-    assigned_position = container->entry_handles_loaded;
-    object = shmem_open(name, size);
-    if (object) {
-      container->entry_handles[assigned_position] = object;
-      container->entry_handles_loaded++;
-    }
-  }
-
-  if (object && object->size != size)
-    container->entry_handles[assigned_position] = shmem_resize(&object, size);
-
-  return object;
-}
-
-void shmem_container_entry_gc(
-  shmem_container* container
-)
-{
-  shmem_mutex_lock(container->mutex);
-
-  if (container->entry_handles_loaded > container->namespace->size) {
-    if (container->namespace->size <= 0) {
-      shmem_container_entry_clear(container, true);
-    } else {
-      char ns_name[SHMEM_NS_LEN];
-
-      for (size_t i=0; i < container->entry_handles_loaded; i++) {
-        if (container->entry_handles[i] == NULL)
-          continue;
-
-        bool found = false;
-
-        for (size_t y=0; y < container->namespace->size; y++) {
-          shmem_ns_entry_name(
-            ns_name, container, container->namespace->entries[y].name
-          );
-
-          if (strcmp(ns_name, container->entry_handles[i]->name) == 0) {
-            found = true;
-            break;
-          }
-        }
-
-        if (!found) {
-          shmem_close(container->entry_handles[i], true);
-          container->entry_handles[i] = NULL;
-
-          if ((i + 1) != container->entry_handles_loaded) {
-            memmove(
-              container->entry_handles+i,
-              container->entry_handles+i+1,
-              sizeof(shmem_object*) * (container->entry_handles_loaded - (i+1))
-            );
-          }
-
-          container->entry_handles_loaded--;
-          container->entry_handles[container->entry_handles_loaded] = NULL;
-
-          if (container->entry_handles_loaded == 0)
-            break;
-
-          i--;
-        }
-      }
-    }
-  }
-
-  shmem_mutex_unlock(container->mutex);
-}
-
-long int shmem_container_ns_entries_find(
-  shmem_container* container,
-  const char* name
+static long int shmem_container_find_index(
+  shmem_container *container,
+  const char *name
 ) {
-  long int position = -1;
-
-  shmem_mutex_lock(container->mutex);
-  for (size_t i=0; i<container->namespace->size; i++) {
+  for (size_t i = 0; i < container->namespace->size; i++) {
     if (strcmp(container->namespace->entries[i].name, name) == 0) {
-      position = i;
+      return (long int) i;
+    }
+  }
+  return -1;
+}
+
+static void shmem_container_shift_offsets(
+  shmem_container *container,
+  size_t start_offset,
+  ptrdiff_t delta
+) {
+  for (size_t i = 0; i < container->namespace->size; i++) {
+    shmem_entry *entry = &container->namespace->entries[i];
+    if (entry->size > 0 && entry->offset > start_offset) {
+      entry->offset = (size_t) ((ptrdiff_t) entry->offset + delta);
+    }
+  }
+}
+
+static void shmem_namespace_sweep_dead_owners_locked(shmem_namespace *ns) {
+  int32_t live_refs = 0;
+
+  for (size_t i = 0; i < SHMEM_OWNER_SLOTS; i++) {
+    shmem_owner *owner = &ns->owners[i];
+
+    if (owner->pid == 0 || owner->refs == 0) {
+      owner->pid = 0;
+      owner->refs = 0;
+      owner->reserved = 0;
+      continue;
+    }
+
+    if (!shmem_process_alive(owner->pid)) {
+      owner->pid = 0;
+      owner->refs = 0;
+      owner->reserved = 0;
+      continue;
+    }
+
+    if ((uint64_t) INT32_MAX - (uint64_t) live_refs < owner->refs) {
+      live_refs = INT32_MAX;
+    } else {
+      live_refs += (int32_t) owner->refs;
+    }
+  }
+
+  ns->refcount = live_refs;
+}
+
+static bool shmem_namespace_register_owner_locked(shmem_namespace *ns) {
+  uint64_t pid = shmem_current_pid();
+  shmem_owner *empty_slot = NULL;
+
+  shmem_namespace_sweep_dead_owners_locked(ns);
+
+  for (size_t i = 0; i < SHMEM_OWNER_SLOTS; i++) {
+    shmem_owner *owner = &ns->owners[i];
+
+    if (owner->pid == pid) {
+      if (owner->refs == UINT32_MAX || ns->refcount == INT32_MAX) {
+        SDL_SetError("shared memory owner reference count overflow");
+        return false;
+      }
+
+      owner->refs++;
+      ns->refcount++;
+      return true;
+    }
+
+    if (owner->pid == 0 && empty_slot == NULL) {
+      empty_slot = owner;
+    }
+  }
+
+  if (empty_slot == NULL) {
+    SDL_SetError("too many processes are using this shared memory namespace");
+    return false;
+  }
+
+  empty_slot->pid = pid;
+  empty_slot->refs = 1;
+  empty_slot->reserved = 0;
+  if (ns->refcount < INT32_MAX) {
+    ns->refcount++;
+  }
+  return true;
+}
+
+static bool shmem_namespace_unregister_owner_locked(shmem_namespace *ns) {
+  uint64_t pid = shmem_current_pid();
+  bool has_live_owners = false;
+
+  shmem_namespace_sweep_dead_owners_locked(ns);
+
+  for (size_t i = 0; i < SHMEM_OWNER_SLOTS; i++) {
+    shmem_owner *owner = &ns->owners[i];
+
+    if (owner->pid != pid) {
+      continue;
+    }
+
+    if (owner->refs > 0) {
+      owner->refs--;
+      if (ns->refcount > 0) {
+        ns->refcount--;
+      }
+    }
+
+    if (owner->refs == 0) {
+      owner->pid = 0;
+      owner->reserved = 0;
+    }
+    break;
+  }
+
+  for (size_t i = 0; i < SHMEM_OWNER_SLOTS; i++) {
+    if (ns->owners[i].pid != 0 && ns->owners[i].refs > 0) {
+      has_live_owners = true;
       break;
     }
   }
-  shmem_mutex_unlock(container->mutex);
 
-  return position;
+  return !has_live_owners;
 }
 
-bool shmem_container_ns_entries_set(
-  shmem_container* container,
-  const char* name,
-  const char* value,
+static bool shmem_namespace_reset_locked(
+  shmem_container *container,
+  size_t capacity
+) {
+  size_t header_size;
+  size_t region_size;
+
+  if (!shmem_compute_header_size(capacity, &header_size)) {
+    return false;
+  }
+
+  if (!shmem_region_storage_size(header_size, &region_size)) {
+    return false;
+  }
+
+  if (container->region->size != region_size) {
+    if (!shmem_region_remap(container->region, header_size, true)) {
+      return false;
+    }
+    container->namespace = (shmem_namespace *) container->region->map;
+  }
+
+  memset(container->region->map, 0, container->region->size);
+  container->namespace->magic = SHMEM_MAGIC;
+  container->namespace->version = SHMEM_VERSION;
+  container->namespace->refcount = 0;
+  container->namespace->size = 0;
+  container->namespace->capacity = capacity;
+  container->namespace->data_capacity = 0;
+  container->namespace->data_used = 0;
+  return true;
+}
+
+static bool shmem_container_sync_region_locked(shmem_container *container) {
+  shmem_namespace *ns = container->namespace;
+  size_t header_size = shmem_namespace_header_size(ns->capacity);
+  size_t expected_size;
+  size_t region_size;
+
+  if (!shmem_add_sizes(header_size, ns->data_capacity, &expected_size)) {
+    return false;
+  }
+
+  if (!shmem_region_storage_size(expected_size, &region_size)) {
+    return false;
+  }
+
+  if (region_size != container->region->size) {
+    if (!shmem_region_remap(container->region, expected_size, false)) {
+      return false;
+    }
+    container->namespace = (shmem_namespace *) container->region->map;
+  }
+
+  return true;
+}
+
+static bool shmem_container_reserve_locked(
+  shmem_container *container,
+  size_t data_capacity
+) {
+  size_t header_size = shmem_namespace_header_size(container->namespace->capacity);
+  size_t next_capacity = container->namespace->data_capacity;
+  size_t required_size;
+
+  if (data_capacity <= next_capacity) {
+    return true;
+  }
+
+  if (next_capacity < SHMEM_INITIAL_DATA_CAPACITY) {
+    next_capacity = SHMEM_INITIAL_DATA_CAPACITY;
+  }
+
+  while (next_capacity < data_capacity) {
+    if (next_capacity > SIZE_MAX / 2) {
+      next_capacity = data_capacity;
+      break;
+    }
+    next_capacity *= 2;
+  }
+
+  if (!shmem_add_sizes(header_size, next_capacity, &required_size)) {
+    return false;
+  }
+
+  if (!shmem_region_remap(container->region, required_size, true)) {
+    return false;
+  }
+
+  container->namespace = (shmem_namespace *) container->region->map;
+  container->namespace->data_capacity = next_capacity;
+  return true;
+}
+
+static bool shmem_container_ns_entries_set(
+  shmem_container *container,
+  const char *name,
+  const char *value,
   size_t value_size
 ) {
   bool updated = false;
-  shmem_object* object = NULL;
-  long int pos = shmem_container_ns_entries_find(container, name);
-
-  shmem_container_entry_gc(container);
+  shmem_namespace *ns;
+  char *data;
+  size_t required_data_capacity;
 
   shmem_mutex_lock(container->mutex);
+  if (!shmem_container_sync_region_locked(container)) {
+    goto shmem_set_end;
+  }
 
-  char ns_name[SHMEM_NS_LEN];
-  shmem_ns_entry_name(ns_name, container, name);
+  ns = container->namespace;
+  data = shmem_namespace_data(container);
 
-  bool found = false;
-  if (pos == -1) {
-    pos = container->namespace->size;
+  long int pos = shmem_container_find_index(container, name);
+  size_t old_size = 0;
+  size_t old_offset = ns->data_used;
+  bool found = pos != -1;
 
-    if (pos < container->namespace->capacity) {
-      object = shmem_container_entry_get(
-        container, pos, ns_name, value_size
+  if (found) {
+    old_size = ns->entries[pos].size;
+    old_offset = ns->entries[pos].offset;
+  } else {
+    pos = (long int) ns->size;
+    if ((size_t) pos >= ns->capacity) {
+      SDL_SetError("shared memory namespace '%s' is full", container->region->name);
+      goto shmem_set_end;
+    }
+  }
+
+  required_data_capacity = ns->data_used - old_size + value_size;
+  if (!shmem_container_reserve_locked(container, required_data_capacity)) {
+    goto shmem_set_end;
+  }
+
+  ns = container->namespace;
+  data = shmem_namespace_data(container);
+
+  if (found) {
+    size_t tail_offset = old_offset + old_size;
+    size_t tail_size = ns->data_used - tail_offset;
+
+    if (value_size != old_size && tail_size > 0) {
+      memmove(
+        data + old_offset + value_size,
+        data + tail_offset,
+        tail_size
       );
     }
+
+    if (value_size != old_size) {
+      shmem_container_shift_offsets(
+        container,
+        old_offset,
+        (ptrdiff_t) value_size - (ptrdiff_t) old_size
+      );
+      ns->data_used = ns->data_used - old_size + value_size;
+    }
   } else {
-    object = shmem_container_entry_get(
-      container, pos, ns_name, value_size
-    );
-    found = true;
+    old_offset = ns->data_used;
+    ns->data_used += value_size;
   }
 
-  if (object) {
-    strcpy(container->namespace->entries[pos].name, name);
-    container->namespace->entries[pos].size = value_size;
-    memcpy(object->map, value, value_size);
-    updated = true;
-
-    if (!found)
-      container->namespace->size++;
+  snprintf(ns->entries[pos].name, sizeof(ns->entries[pos].name), "%s", name);
+  ns->entries[pos].offset = old_offset;
+  ns->entries[pos].size = value_size;
+  if (value_size > 0) {
+    memcpy(data + old_offset, value, value_size);
   }
 
+  if (!found) {
+    ns->size++;
+  }
+  updated = true;
+
+shmem_set_end:
   shmem_mutex_unlock(container->mutex);
-
   return updated;
 }
 
-char* shmem_container_ns_entries_get(
-  shmem_container* container,
-  const char* name,
-  size_t* data_len
+static char *shmem_container_ns_entries_get(
+  shmem_container *container,
+  const char *name,
+  size_t *data_len,
+  bool *found
 ) {
-  char* data = NULL;
+  char *copy = NULL;
+  shmem_namespace *ns = container->namespace;
+  char *data = shmem_namespace_data(container);
   *data_len = 0;
-
-  char ns_name[SHMEM_NS_LEN];
-  shmem_ns_entry_name(ns_name, container, name);
+  *found = false;
 
   shmem_mutex_lock(container->mutex);
-  for (size_t i=0; i<container->namespace->size; i++) {
-    if (strcmp(container->namespace->entries[i].name, name) == 0) {
-      shmem_object* object = shmem_container_entry_get(
-        container, i, ns_name, container->namespace->entries[i].size
-      );
-
-      if (object && container->namespace->entries[i].size > 0) {
-        data = SDL_malloc(container->namespace->entries[i].size);
-        memcpy(data, object->map, container->namespace->entries[i].size);
-        *data_len = container->namespace->entries[i].size;
-      }
-
-      break;
-    }
-  }
-  shmem_mutex_unlock(container->mutex);
-
-  return data;
-}
-
-char* shmem_container_ns_entries_get_by_position(
-  shmem_container* container,
-  size_t position,
-  char* name,
-  size_t* data_len
-) {
-  char* data = NULL;
-  *data_len = 0;
-
-  shmem_mutex_lock(container->mutex);
-  if (position >= container->namespace->size)
-    goto shmem_container_ns_size_end;
-
-  strcpy(name, container->namespace->entries[position].name);
-  size_t name_len = strlen(name);
-  size_t size = container->namespace->entries[position].size;
-
-  if (name_len <= 0 || size <= 0 || position >= container->namespace->size)
-    goto shmem_container_ns_size_end;
-
-  char ns_name[SHMEM_NS_LEN];
-  shmem_ns_entry_name(ns_name, container, name);
-
-  shmem_object* object = shmem_container_entry_get(
-    container, position, ns_name, size
-  );
-
-  if (object) {
-    data = SDL_malloc(size);
-    memcpy(data, object->map, size);
-    *data_len = size;
+  if (!shmem_container_sync_region_locked(container)) {
+    goto shmem_get_end;
   }
 
-shmem_container_ns_size_end:
-  shmem_mutex_unlock(container->mutex);
-  return data;
-}
+  ns = container->namespace;
+  data = shmem_namespace_data(container);
 
-void shmem_container_ns_entries_remove(
-  shmem_container* container,
-  const char* name
-) {
-  long int pos = shmem_container_ns_entries_find(container, name);
-
+  long int pos = shmem_container_find_index(container, name);
   if (pos != -1) {
-    shmem_mutex_lock(container->mutex);
+    shmem_entry *entry = &ns->entries[pos];
+    if (entry->size > 0) {
+      copy = SDL_malloc(entry->size);
+    }
+    if (!copy && entry->size > 0) {
+      SDL_OutOfMemory();
+      goto shmem_get_end;
+    }
 
-    if ((pos + 1) != container->namespace->size) {
+    if (entry->size > 0) {
+      memcpy(copy, data + entry->offset, entry->size);
+    }
+    *data_len = entry->size;
+    *found = true;
+  }
+
+shmem_get_end:
+  shmem_mutex_unlock(container->mutex);
+  return copy;
+}
+
+static char *shmem_container_ns_entries_get_by_position(
+  shmem_container *container,
+  size_t position,
+  char *name,
+  size_t *data_len,
+  bool *found
+) {
+  char *copy = NULL;
+  shmem_namespace *ns = container->namespace;
+  char *data = shmem_namespace_data(container);
+  *data_len = 0;
+  *found = false;
+
+  shmem_mutex_lock(container->mutex);
+  if (!shmem_container_sync_region_locked(container)) {
+    goto shmem_get_by_position_end;
+  }
+
+  ns = container->namespace;
+  data = shmem_namespace_data(container);
+
+  if (position < ns->size) {
+    shmem_entry *entry = &ns->entries[position];
+    snprintf(name, SHMEM_NAME_LEN, "%s", entry->name);
+
+    if (entry->size > 0) {
+      copy = SDL_malloc(entry->size);
+    }
+    if (!copy && entry->size > 0) {
+      SDL_OutOfMemory();
+      goto shmem_get_by_position_end;
+    }
+
+    if (entry->size > 0) {
+      memcpy(copy, data + entry->offset, entry->size);
+    }
+    *data_len = entry->size;
+    *found = true;
+  }
+
+shmem_get_by_position_end:
+  shmem_mutex_unlock(container->mutex);
+  return copy;
+}
+
+static void shmem_container_ns_entries_remove(
+  shmem_container *container,
+  const char *name
+) {
+  shmem_namespace *ns;
+  char *data;
+
+  shmem_mutex_lock(container->mutex);
+  if (!shmem_container_sync_region_locked(container)) {
+    goto shmem_remove_end;
+  }
+
+  ns = container->namespace;
+  data = shmem_namespace_data(container);
+
+  long int pos = shmem_container_find_index(container, name);
+  if (pos != -1) {
+    shmem_entry *entry = &ns->entries[pos];
+    size_t tail_offset = entry->offset + entry->size;
+    size_t tail_size = ns->data_used - tail_offset;
+
+    if (tail_size > 0) {
+      memmove(data + entry->offset, data + tail_offset, tail_size);
+    }
+
+    if (entry->size > 0) {
+      shmem_container_shift_offsets(container, entry->offset, -((ptrdiff_t) entry->size));
+      ns->data_used -= entry->size;
+    }
+
+    if ((size_t) pos + 1 < ns->size) {
       memmove(
-        container->namespace->entries+pos,
-        container->namespace->entries+pos+1,
-        sizeof(shmem_entry) * (container->namespace->size - (pos+1))
+        &ns->entries[pos],
+        &ns->entries[pos + 1],
+        sizeof(shmem_entry) * (ns->size - ((size_t) pos + 1))
       );
     }
 
-    container->namespace->size--;
-
-    shmem_mutex_unlock(container->mutex);
+    ns->size--;
+    memset(&ns->entries[ns->size], 0, sizeof(shmem_entry));
   }
 
-  char ns_name[SHMEM_NS_LEN];
-  shmem_ns_entry_name(ns_name, container, name);
-
-  shmem_container_entry_remove(container, ns_name, true);
-}
-
-void shmem_container_ns_entries_clear(shmem_container* container, bool unregister) {
-  shmem_mutex_lock(container->mutex);
-  if (unregister && container->namespace->size > 0) {
-    for (size_t i=0; i<container->namespace->size; i++) {
-      char ns_name[SHMEM_NS_LEN];
-      shmem_ns_entry_name(ns_name, container, container->namespace->entries[i].name);
-
-      strcpy(container->namespace->entries[i].name, "");
-      container->namespace->entries[i].size = 0;
-    }
-    container->namespace->size = 0;
-  }
-  shmem_container_entry_clear(container, unregister);
+shmem_remove_end:
   shmem_mutex_unlock(container->mutex);
 }
 
-size_t shmem_container_ns_get_size(shmem_container* container) {
+static void shmem_container_ns_entries_clear(
+  shmem_container *container
+) {
+  shmem_namespace *ns;
+
   shmem_mutex_lock(container->mutex);
-  size_t size = container->namespace->size;
+  if (!shmem_container_sync_region_locked(container)) {
+    goto shmem_clear_end;
+  }
+
+  ns = container->namespace;
+  memset(ns->entries, 0, ns->capacity * sizeof(shmem_entry));
+  ns->size = 0;
+  ns->data_used = 0;
+
+shmem_clear_end:
+  shmem_mutex_unlock(container->mutex);
+}
+
+static size_t shmem_container_ns_get_size(shmem_container *container) {
+  size_t size;
+  shmem_mutex_lock(container->mutex);
+  if (!shmem_container_sync_region_locked(container)) {
+    shmem_mutex_unlock(container->mutex);
+    return 0;
+  }
+  size = container->namespace->size;
   shmem_mutex_unlock(container->mutex);
   return size;
 }
 
-size_t shmem_container_ns_get_capacity(shmem_container* container) {
+static size_t shmem_container_ns_get_capacity(shmem_container *container) {
+  size_t capacity;
   shmem_mutex_lock(container->mutex);
-  size_t capacity = container->namespace->capacity;
+  if (!shmem_container_sync_region_locked(container)) {
+    shmem_mutex_unlock(container->mutex);
+    return 0;
+  }
+  capacity = container->namespace->capacity;
   shmem_mutex_unlock(container->mutex);
   return capacity;
 }
 
-shmem_container* shmem_container_open(const char* namespace, size_t capacity) {
-  shmem_container* container = SDL_malloc(
-    sizeof(shmem_container)
-    +
-    (capacity * sizeof(shmem_object*))
-  );
+static shmem_container *shmem_container_open(
+  const char *namespace_name,
+  size_t capacity
+) {
+  size_t header_size;
+  if (!shmem_compute_header_size(capacity, &header_size)) {
+    return NULL;
+  }
 
-  size_t ns_size = sizeof(shmem_namespace) + (capacity * sizeof(shmem_entry));
+  shmem_container *container = SDL_calloc(1, sizeof(shmem_container));
+  if (!container) {
+    SDL_OutOfMemory();
+    return NULL;
+  }
 
-  char ns_name[SHMEM_NAME_LEN];
-  shmem_ns_name(ns_name, sizeof(ns_name), namespace);
+  char region_name[SHMEM_NAME_LEN];
+  shmem_ns_name(region_name, sizeof(region_name), namespace_name);
 
-  shmem_object* object = shmem_open(ns_name, ns_size);
-
-  if (!object)
+  shmem_region *region = shmem_region_open(region_name, header_size);
+  if (!region) {
     goto shmem_container_open_error;
+  }
 
   char mutex_name[SHMEM_NS_LEN];
-  shmem_mutex_name(mutex_name, namespace);
+  shmem_mutex_name(mutex_name, namespace_name);
 
-  shmem_mutex* mutex = shmem_mutex_open(mutex_name);
-
+  shmem_mutex *mutex = shmem_mutex_open(mutex_name);
   if (!mutex) {
-    shmem_close(object, object->created);
+    shmem_region_close(region, region->created);
     goto shmem_container_open_error;
   }
 
-  container->handle = object;
-  container->namespace = object->map;
+  container->region = region;
   container->mutex = mutex;
-  container->entry_handles_loaded = 0;
-  memset(container->entry_handles, 0, capacity * sizeof(shmem_object*));
+  container->namespace = (shmem_namespace *) region->map;
 
-  shmem_namespace* ns = container->namespace;
-
-  shmem_mutex_lock(container->mutex);
-  if (!ns->refcount) {
-    ns->size = 0;
-    ns->capacity = capacity;
-    ns->refcount = 1;
-  } else if (ns->capacity != capacity) {
-    size_t existing_capacity = ns->capacity;
-    shmem_mutex_unlock(container->mutex);
-    shmem_mutex_close(mutex, false);
-    shmem_close(object, false);
-    SDL_SetError(
-      "shared memory container '%s' already exists with capacity %zu (requested %zu)",
-      namespace,
-      existing_capacity,
-      capacity
-    );
-    goto shmem_container_open_error;
+  shmem_mutex_lock(mutex);
+  if (region->created) {
+    if (!shmem_namespace_reset_locked(container, capacity)) {
+      shmem_mutex_unlock(mutex);
+      shmem_mutex_close(mutex, true);
+      shmem_region_close(region, true);
+      goto shmem_container_open_error;
+    }
   } else {
-    ns->refcount++;
+    shmem_namespace *ns = container->namespace;
+    bool needs_reset = false;
+
+    shmem_namespace_sweep_dead_owners_locked(ns);
+    needs_reset = ns->refcount == 0;
+
+    if (!needs_reset) {
+      size_t expected_size;
+      size_t expected_region_size;
+      if (
+        ns->magic != SHMEM_MAGIC
+        || ns->version != SHMEM_VERSION
+        || ns->capacity != capacity
+        || !shmem_add_sizes(header_size, ns->data_capacity, &expected_size)
+        || !shmem_region_storage_size(expected_size, &expected_region_size)
+        || expected_region_size != region->size
+      ) {
+        shmem_mutex_unlock(mutex);
+        shmem_mutex_close(mutex, false);
+        shmem_region_close(region, false);
+        SDL_SetError(
+          "shared memory container '%s' already exists with incompatible layout",
+          namespace_name
+        );
+        goto shmem_container_open_error;
+      }
+    } else if (!shmem_namespace_reset_locked(container, capacity)) {
+      shmem_mutex_unlock(mutex);
+      shmem_mutex_close(mutex, false);
+      shmem_region_close(region, false);
+      goto shmem_container_open_error;
+    }
   }
-  shmem_mutex_unlock(container->mutex);
+  if (!shmem_namespace_register_owner_locked(container->namespace)) {
+    shmem_mutex_unlock(mutex);
+    shmem_mutex_close(mutex, region->created);
+    shmem_region_close(region, region->created);
+    goto shmem_container_open_error;
+  }
+  shmem_mutex_unlock(mutex);
 
   return container;
 
@@ -718,226 +1200,186 @@ shmem_container_open_error:
   return NULL;
 }
 
-void shmem_container_close(shmem_container* container) {
+static void shmem_container_close(shmem_container *container) {
+  bool unregister = false;
+
   shmem_mutex_lock(container->mutex);
-  int refcount = --container->namespace->refcount;
+  unregister = shmem_namespace_unregister_owner_locked(container->namespace);
   shmem_mutex_unlock(container->mutex);
 
-  bool unregister = refcount <= 0;
-
-  shmem_container_ns_entries_clear(container, unregister);
   shmem_mutex_close(container->mutex, unregister);
-
-  shmem_close(container->handle, unregister);
-
+  shmem_region_close(container->region, unregister);
   SDL_free(container);
 }
 
-
-typedef struct {
-  shmem_container* container;
-} l_shmem_container;
-
-#define L_SHMEM_SELF(L, idx) ( \
-  (l_shmem_container*) luaL_checkudata(L, idx, API_TYPE_SHARED_MEMORY) \
-)->container
-
-typedef struct {
-  shmem_container* container;
-  size_t position;
-} l_shmem_state;
-
-
 static int l_shmem_pairs_iterator(lua_State *L) {
-  l_shmem_state *state = (l_shmem_state*)lua_touserdata(L, lua_upvalueindex(2));
+  l_shmem_state *state = (l_shmem_state *) lua_touserdata(L, lua_upvalueindex(2));
 
-  if (state->position < shmem_container_ns_get_size(state->container)) {
-    for (
-      size_t i=state->position;
-      i < shmem_container_ns_get_size(state->container);
-      i++
-    ) {
-      state->position++;
+  while (state->position < shmem_container_ns_get_size(state->container)) {
+    char name[SHMEM_NAME_LEN];
+    size_t data_len;
+    bool found;
+    char *data = shmem_container_ns_entries_get_by_position(
+      state->container,
+      state->position,
+      name,
+      &data_len,
+      &found
+    );
+    state->position++;
 
-      char name[SHMEM_NAME_LEN];
-      size_t data_len;
-      char* data = shmem_container_ns_entries_get_by_position(
-        state->container, i,
-        name, &data_len
-      );
-
-      if (data) {
-        lua_pushstring(L, name);
-        lua_pushlstring(L, data, data_len);
-
-        SDL_free(data);
-
-        return 2;
-      }
+    if (found) {
+      lua_pushstring(L, name);
+      lua_pushlstring(L, data ? data : "", data_len);
+      SDL_free(data);
+      return 2;
     }
   }
 
   return 0;
 }
 
-
-static int f_shmem_open(lua_State* L) {
-  const char* namespace = luaL_checkstring(L, 1);
+static int f_shmem_open(lua_State *L) {
+  const char *namespace_name = luaL_checkstring(L, 1);
   lua_Integer capacity_value = luaL_checkinteger(L, 2);
 
-  if (capacity_value <= 0)
+  if (capacity_value <= 0) {
     return luaL_error(L, "capacity must be a positive integer");
+  }
 
-  size_t capacity = (size_t) capacity_value;
-
-  if (!shmem_name_valid(namespace))
+  if (!shmem_name_valid(namespace_name)) {
     return luaL_error(
       L,
       "namespace can not be longer than %d characters or contain any '/' or '\\'",
       SHMEM_NAME_LEN - 1
     );
+  }
 
-  shmem_container* container = shmem_container_open(namespace, capacity);
+  shmem_container *container = shmem_container_open(
+    namespace_name,
+    (size_t) capacity_value
+  );
   if (!container) {
     lua_pushnil(L);
     lua_pushstring(L, SDL_GetError());
     return 2;
   }
 
-  l_shmem_container* self = lua_newuserdata(L, sizeof(l_shmem_container));
+  l_shmem_container *self = lua_newuserdata(L, sizeof(l_shmem_container));
   self->container = container;
   luaL_setmetatable(L, API_TYPE_SHARED_MEMORY);
-
   return 1;
 }
 
-
-static int m_shmem_set(lua_State* L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
-  const char* name = luaL_checkstring(L, 2);
+static int m_shmem_set(lua_State *L) {
+  shmem_container *self = L_SHMEM_SELF(L, 1);
+  const char *name = luaL_checkstring(L, 2);
   size_t value_len;
-  const char* value = luaL_checklstring(L, 3, &value_len);
+  const char *value = luaL_checklstring(L, 3, &value_len);
 
-  if (!shmem_name_valid(name))
+  if (!shmem_name_valid(name)) {
     return luaL_error(
       L,
       "name can not be longer than %d characters or contain any '/' or '\\'",
       SHMEM_NAME_LEN - 1
     );
+  }
 
-  lua_pushboolean(
-    L,
-    shmem_container_ns_entries_set(self, name, value, value_len)
-  );
-
+  lua_pushboolean(L, shmem_container_ns_entries_set(self, name, value, value_len));
   return 1;
 }
 
-
-static int m_shmem_get(lua_State* L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
-
-  char* data = NULL;
-  size_t data_len;
+static int m_shmem_get(lua_State *L) {
+  shmem_container *self = L_SHMEM_SELF(L, 1);
+  char *data = NULL;
+  size_t data_len = 0;
+  bool found = false;
 
   if (lua_type(L, 2) == LUA_TSTRING) {
-    const char* name = luaL_checkstring(L, 2);
-    data = shmem_container_ns_entries_get(self, name, &data_len);
+    const char *name = luaL_checkstring(L, 2);
+    data = shmem_container_ns_entries_get(self, name, &data_len, &found);
   } else if (lua_type(L, 2) == LUA_TNUMBER) {
-    char name[SHMEM_NAME_LEN];
     lua_Integer position = luaL_checkinteger(L, 2);
     if (position >= 1) {
+      char name[SHMEM_NAME_LEN];
       data = shmem_container_ns_entries_get_by_position(
         self,
         (size_t) (position - 1),
         name,
-        &data_len
+        &data_len,
+        &found
       );
     }
   } else {
     return luaL_typeerror(L, 2, "string or integer");
   }
 
-  if (data) {
-    lua_pushlstring(L, data, data_len);
+  if (found) {
+    lua_pushlstring(L, data ? data : "", data_len);
     SDL_free(data);
-  }
-  else
+  } else {
     lua_pushnil(L);
-
+  }
   return 1;
 }
 
-
-static int m_shmem_remove(lua_State* L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
-  const char* name = luaL_checkstring(L, 2);
+static int m_shmem_remove(lua_State *L) {
+  shmem_container *self = L_SHMEM_SELF(L, 1);
+  const char *name = luaL_checkstring(L, 2);
   shmem_container_ns_entries_remove(self, name);
   return 0;
 }
 
-
-static int m_shmem_clear(lua_State* L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
-  shmem_container_ns_entries_clear(self, true);
+static int m_shmem_clear(lua_State *L) {
+  shmem_container *self = L_SHMEM_SELF(L, 1);
+  shmem_container_ns_entries_clear(self);
   return 0;
 }
 
-
-static int m_shmem_size(lua_State* L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
-  lua_pushinteger(L, shmem_container_ns_get_size(self));
+static int m_shmem_size(lua_State *L) {
+  lua_pushinteger(L, shmem_container_ns_get_size(L_SHMEM_SELF(L, 1)));
   return 1;
 }
 
-
-static int m_shmem_capacity(lua_State* L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
-  lua_pushinteger(L, shmem_container_ns_get_capacity(self));
+static int m_shmem_capacity(lua_State *L) {
+  lua_pushinteger(L, shmem_container_ns_get_capacity(L_SHMEM_SELF(L, 1)));
   return 1;
 }
-
 
 static int mm_shmem_pairs(lua_State *L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
+  shmem_container *self = L_SHMEM_SELF(L, 1);
 
-  l_shmem_state *state;
-  state = (l_shmem_state*)lua_newuserdata(L, sizeof(l_shmem_state));
-
-  state->position = 0;
+  l_shmem_state *state = lua_newuserdata(L, sizeof(l_shmem_state));
   state->container = self;
+  state->position = 0;
 
   lua_pushcclosure(L, l_shmem_pairs_iterator, 2);
   return 1;
 }
 
-
-static int mm_shmem_gc(lua_State* L) {
-  shmem_container* self = L_SHMEM_SELF(L, 1);
-  shmem_container_close(self);
+static int mm_shmem_gc(lua_State *L) {
+  shmem_container_close(L_SHMEM_SELF(L, 1));
   return 0;
 }
 
-
 static const luaL_Reg shmem_lib[] = {
-  { "open",     f_shmem_open     },
-  {NULL, NULL}
+  { "open", f_shmem_open },
+  { NULL, NULL }
 };
 
 static const luaL_Reg shmem_class[] = {
-  { "set",      m_shmem_set      },
-  { "get",      m_shmem_get      },
-  { "remove",   m_shmem_remove   },
-  { "clear",    m_shmem_clear    },
-  { "size",     m_shmem_size     },
+  { "set", m_shmem_set },
+  { "get", m_shmem_get },
+  { "remove", m_shmem_remove },
+  { "clear", m_shmem_clear },
+  { "size", m_shmem_size },
   { "capacity", m_shmem_capacity },
-  { "__pairs",  mm_shmem_pairs   },
-  { "__gc",     mm_shmem_gc      },
-  {NULL, NULL}
+  { "__pairs", mm_shmem_pairs },
+  { "__gc", mm_shmem_gc },
+  { NULL, NULL }
 };
 
-
-int luaopen_shmem(lua_State* L) {
+int luaopen_shmem(lua_State *L) {
   luaL_newmetatable(L, API_TYPE_SHARED_MEMORY);
   luaL_setfuncs(L, shmem_class, 0);
   lua_pushvalue(L, -1);
