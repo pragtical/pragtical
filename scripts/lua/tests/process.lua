@@ -2,7 +2,7 @@ local test = require "core.test"
 
 local function shell_command(command)
   if PLATFORM == "Windows" then
-    return {"cmd", "/C", command}
+    return {"cmd", "/V:ON", "/C", command}
   end
   return {"sh", "-lc", command}
 end
@@ -38,7 +38,7 @@ test.describe("process", function()
 
   test.test("supports stdin pipes and environment overrides", function()
     local command = PLATFORM == "Windows"
-      and "set /p INPUT=& echo %PRAGTICAL_PROCESS_TEST_ENV%:%INPUT%"
+      and "set /p INPUT=& echo %PRAGTICAL_PROCESS_TEST_ENV%:!INPUT!"
       or "IFS= read -r INPUT; printf '%s:%s' \"$PRAGTICAL_PROCESS_TEST_ENV\" \"$INPUT\""
     local proc = process.start(shell_command(command), {
       stdin = process.REDIRECT_PIPE,
