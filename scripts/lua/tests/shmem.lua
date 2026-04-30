@@ -52,6 +52,52 @@ test.describe("shmem", function()
     memory:clear()
   end)
 
+  test.test("grows the shared region and remaps existing handles", function()
+    local namespace = unique_namespace("growth")
+    local memory, err = shmem.open(namespace, 2)
+    test.not_nil(memory, err)
+
+    local mirror, mirror_err = shmem.open(namespace, 2)
+    test.not_nil(mirror, mirror_err)
+
+    memory:clear()
+
+    local alpha = string.rep("a", 20000)
+    local beta = string.rep("b", 45000)
+
+    test.ok(memory:set("alpha", alpha))
+    test.equal(mirror:get("alpha"), alpha)
+
+    test.ok(mirror:set("beta", beta))
+    test.equal(memory:get("beta"), beta)
+
+    memory:clear()
+  end)
+
+  test.test("destroys the namespace after the last handle closes", function()
+    local namespace = unique_namespace("cleanup")
+    local memory, err = shmem.open(namespace, 2)
+    test.not_nil(memory, err)
+
+    local mirror, mirror_err = shmem.open(namespace, 2)
+    test.not_nil(mirror, mirror_err)
+
+    memory = nil
+    collectgarbage("collect")
+
+    local other, other_err = shmem.open(namespace, 4)
+    test.is_nil(other)
+    test.match(other_err, "capacity", nil, true)
+
+    mirror = nil
+    collectgarbage("collect")
+    collectgarbage("collect")
+
+    local reopened, reopened_err = shmem.open(namespace, 4)
+    test.not_nil(reopened, reopened_err)
+    reopened:clear()
+  end)
+
   test.test("rejects reopening a namespace with a different capacity", function()
     local namespace = unique_namespace("capacity")
     local memory, err = shmem.open(namespace, 2)
