@@ -85,15 +85,12 @@ static Uint32 shmem_hash_string(const char* value) {
 }
 
 static inline void shmem_ns_name(
-  char* ns_name, const char* name
+  char* ns_name, size_t ns_name_size, const char* name
 ) {
 #ifdef _WIN32
-  if (name[0] != '/')
-    snprintf(ns_name, SHMEM_NS_LEN, "/%s", name);
-  else
-    snprintf(ns_name, SHMEM_NS_LEN, "%s", name);
+  snprintf(ns_name, ns_name_size, "%s", name);
 #else
-  snprintf(ns_name, SHMEM_NS_LEN, "/pgshm-%08x", shmem_hash_string(name));
+  snprintf(ns_name, ns_name_size, "/pgshm-%08x", shmem_hash_string(name));
 #endif
 }
 
@@ -124,7 +121,7 @@ static inline void shmem_mutex_name(char* mutex_name, const char* name) {
 
 static inline bool shmem_name_valid(const char* name) {
   if (
-    strlen(name) > SHMEM_NAME_LEN
+    strlen(name) >= SHMEM_NAME_LEN
     ||
     strstr(name, "/") != NULL
     ||
@@ -667,7 +664,7 @@ shmem_container* shmem_container_open(const char* namespace, size_t capacity) {
   size_t ns_size = sizeof(shmem_namespace) + (capacity * sizeof(shmem_entry));
 
   char ns_name[SHMEM_NAME_LEN];
-  shmem_ns_name(ns_name, namespace);
+  shmem_ns_name(ns_name, sizeof(ns_name), namespace);
 
   shmem_object* object = shmem_open(ns_name, ns_size);
 
@@ -786,13 +783,18 @@ static int l_shmem_pairs_iterator(lua_State *L) {
 
 static int f_shmem_open(lua_State* L) {
   const char* namespace = luaL_checkstring(L, 1);
-  size_t capacity = luaL_checkinteger(L, 2);
+  lua_Integer capacity_value = luaL_checkinteger(L, 2);
+
+  if (capacity_value <= 0)
+    return luaL_error(L, "capacity must be a positive integer");
+
+  size_t capacity = (size_t) capacity_value;
 
   if (!shmem_name_valid(namespace))
     return luaL_error(
       L,
       "namespace can not be longer than %d characters or contain any '/' or '\\'",
-      SHMEM_NAME_LEN
+      SHMEM_NAME_LEN - 1
     );
 
   shmem_container* container = shmem_container_open(namespace, capacity);
@@ -820,7 +822,7 @@ static int m_shmem_set(lua_State* L) {
     return luaL_error(
       L,
       "name can not be longer than %d characters or contain any '/' or '\\'",
-      SHMEM_NAME_LEN
+      SHMEM_NAME_LEN - 1
     );
 
   lua_pushboolean(
