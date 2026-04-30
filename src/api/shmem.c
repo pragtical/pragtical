@@ -72,8 +72,10 @@ typedef struct {
 typedef struct {
   shmem_handle handle;
   char name[SHMEM_NS_LEN];
+#if defined(_WIN32) || defined(__APPLE__)
 #ifdef _WIN32
   HANDLE file_handle;
+#endif
   char path[SHMEM_PATH_LEN];
 #endif
   size_t size;
@@ -215,15 +217,54 @@ static bool shmem_compute_header_size(size_t capacity, size_t *header_size) {
   return true;
 }
 
+static bool shmem_region_storage_size(size_t size, size_t *storage_size) {
 #ifdef _WIN32
+  *storage_size = size;
+  return true;
+#else
+  long page_size = sysconf(_SC_PAGESIZE);
+  size_t page_size_value;
+  size_t remainder;
+
+  if (page_size <= 0) {
+    SDL_SetError("failed to get shared memory page size");
+    return false;
+  }
+
+  page_size_value = (size_t) page_size;
+  remainder = size % page_size_value;
+  if (remainder == 0) {
+    *storage_size = size;
+    return true;
+  }
+
+  return shmem_add_sizes(size, page_size_value - remainder, storage_size);
+#endif
+}
+
+#if defined(_WIN32) || defined(__APPLE__)
 static bool shmem_region_path(char *path, size_t path_size, const char *name) {
+#ifdef _WIN32
   char temp_path[MAX_PATH + 1];
   DWORD temp_len = GetTempPathA(MAX_PATH, temp_path);
   if (temp_len == 0 || temp_len > MAX_PATH) {
     SDL_SetError("GetTempPath failed: %lu", GetLastError());
     return false;
   }
+#else
+  const char *temp_path = getenv("TMPDIR");
+  const char *separator = "";
 
+  if (temp_path == NULL || temp_path[0] == '\0') {
+    temp_path = "/tmp";
+  }
+
+  if (temp_path[strlen(temp_path) - 1] != '/') {
+    separator = "/";
+  }
+#endif
+
+#ifdef _WIN32
   int written = snprintf(
     path,
     path_size,
@@ -231,6 +272,16 @@ static bool shmem_region_path(char *path, size_t path_size, const char *name) {
     temp_path,
     shmem_hash_string(name)
   );
+#else
+  int written = snprintf(
+    path,
+    path_size,
+    "%s%spragtical-shmem-%08x.bin",
+    temp_path,
+    separator,
+    shmem_hash_string(name)
+  );
+#endif
   if (written < 0 || (size_t) written >= path_size) {
     SDL_SetError("shared memory path is too long");
     return false;
@@ -245,6 +296,12 @@ static bool shmem_region_remap(
   size_t size,
   bool resize_storage
 ) {
+  size_t storage_size;
+
+  if (!shmem_region_storage_size(size, &storage_size)) {
+    return false;
+  }
+
 #ifdef _WIN32
   if (region->map != NULL) {
     UnmapViewOfFile(region->map);
@@ -257,7 +314,7 @@ static bool shmem_region_remap(
 
   if (resize_storage) {
     LARGE_INTEGER target_size;
-    target_size.QuadPart = (LONGLONG) size;
+    target_size.QuadPart = (LONGLONG) storage_size;
     if (!SetFilePointerEx(region->file_handle, target_size, NULL, FILE_BEGIN)
         || !SetEndOfFile(region->file_handle)) {
       SDL_SetError("failed to resize shared memory '%s': %lu", region->name, GetLastError());
@@ -267,7 +324,7 @@ static bool shmem_region_remap(
 
   region->handle = CreateFileMappingA(
     region->file_handle, NULL, PAGE_READWRITE,
-    (DWORD) (size >> 32), (DWORD) size, NULL
+    (DWORD) (storage_size >> 32), (DWORD) storage_size, NULL
   );
   if (region->handle == NULL) {
     SDL_SetError(
@@ -278,7 +335,13 @@ static bool shmem_region_remap(
     return false;
   }
 
-  region->map = MapViewOfFile(region->handle, FILE_MAP_ALL_ACCESS, 0, 0, size);
+  region->map = MapViewOfFile(
+    region->handle,
+    FILE_MAP_ALL_ACCESS,
+    0,
+    0,
+    storage_size
+  );
   if (region->map == NULL) {
     SDL_SetError("MapViewOfFile failed for '%s': %lu", region->name, GetLastError());
     CloseHandle(region->handle);
@@ -291,13 +354,18 @@ static bool shmem_region_remap(
     region->map = NULL;
   }
 
-  if (resize_storage && ftruncate(region->handle, (off_t) size) == -1) {
+  if (resize_storage && ftruncate(region->handle, (off_t) storage_size) == -1) {
     SDL_SetError("ftruncate failed for '%s': %s", region->name, strerror(errno));
     return false;
   }
 
   region->map = mmap(
-    NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, region->handle, 0
+    NULL,
+    storage_size,
+    PROT_READ | PROT_WRITE,
+    MAP_SHARED,
+    region->handle,
+    0
   );
   if (region->map == MAP_FAILED) {
     region->map = NULL;
@@ -306,7 +374,7 @@ static bool shmem_region_remap(
   }
 #endif
 
-  region->size = size;
+  region->size = storage_size;
   return true;
 }
 
@@ -367,6 +435,51 @@ static shmem_region *shmem_region_open(const char *name, size_t minimum_size) {
       CloseHandle(region->file_handle);
       goto shmem_region_open_error;
     }
+  }
+#elif defined(__APPLE__)
+  if (!shmem_region_path(region->path, sizeof(region->path), name)) {
+    goto shmem_region_open_error;
+  }
+
+  region->handle = open(region->path, O_CREAT | O_EXCL | O_RDWR, 0666);
+  if (region->handle == -1) {
+    if (errno != EEXIST) {
+      SDL_SetError("open failed for '%s': %s", region->path, strerror(errno));
+      goto shmem_region_open_error;
+    }
+
+    region->handle = open(region->path, O_RDWR, 0666);
+    if (region->handle == -1) {
+      SDL_SetError("open failed for '%s': %s", region->path, strerror(errno));
+      goto shmem_region_open_error;
+    }
+  } else {
+    region->created = true;
+  }
+
+  if (region->created) {
+    region->size = minimum_size;
+  } else {
+    struct stat st;
+    if (fstat(region->handle, &st) == -1) {
+      SDL_SetError("fstat failed for '%s': %s", region->path, strerror(errno));
+      close(region->handle);
+      goto shmem_region_open_error;
+    }
+    region->size = (size_t) st.st_size;
+    if (region->size < minimum_size) {
+      SDL_SetError(
+        "shared memory region '%s' has incompatible capacity or layout",
+        name
+      );
+      close(region->handle);
+      goto shmem_region_open_error;
+    }
+  }
+
+  if (!shmem_region_remap(region, region->size, region->created)) {
+    close(region->handle);
+    goto shmem_region_open_error;
   }
 #else
   region->handle = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
@@ -429,6 +542,14 @@ static void shmem_region_close(shmem_region *region, bool unregister) {
   CloseHandle(region->file_handle);
   if (unregister) {
     DeleteFileA(region->path);
+  }
+#elif defined(__APPLE__)
+  if (region->map != NULL) {
+    munmap(region->map, region->size);
+  }
+  close(region->handle);
+  if (unregister) {
+    unlink(region->path);
   }
 #else
   if (region->map != NULL) {
@@ -635,12 +756,17 @@ static bool shmem_namespace_reset_locked(
   size_t capacity
 ) {
   size_t header_size;
+  size_t region_size;
 
   if (!shmem_compute_header_size(capacity, &header_size)) {
     return false;
   }
 
-  if (container->region->size != header_size) {
+  if (!shmem_region_storage_size(header_size, &region_size)) {
+    return false;
+  }
+
+  if (container->region->size != region_size) {
     if (!shmem_region_remap(container->region, header_size, true)) {
       return false;
     }
@@ -662,12 +788,17 @@ static bool shmem_container_sync_region_locked(shmem_container *container) {
   shmem_namespace *ns = container->namespace;
   size_t header_size = shmem_namespace_header_size(ns->capacity);
   size_t expected_size;
+  size_t region_size;
 
   if (!shmem_add_sizes(header_size, ns->data_capacity, &expected_size)) {
     return false;
   }
 
-  if (expected_size != container->region->size) {
+  if (!shmem_region_storage_size(expected_size, &region_size)) {
+    return false;
+  }
+
+  if (region_size != container->region->size) {
     if (!shmem_region_remap(container->region, expected_size, false)) {
       return false;
     }
@@ -683,7 +814,7 @@ static bool shmem_container_reserve_locked(
 ) {
   size_t header_size = shmem_namespace_header_size(container->namespace->capacity);
   size_t next_capacity = container->namespace->data_capacity;
-  size_t region_size;
+  size_t required_size;
 
   if (data_capacity <= next_capacity) {
     return true;
@@ -701,11 +832,11 @@ static bool shmem_container_reserve_locked(
     next_capacity *= 2;
   }
 
-  if (!shmem_add_sizes(header_size, next_capacity, &region_size)) {
+  if (!shmem_add_sizes(header_size, next_capacity, &required_size)) {
     return false;
   }
 
-  if (!shmem_region_remap(container->region, region_size, true)) {
+  if (!shmem_region_remap(container->region, required_size, true)) {
     return false;
   }
 
@@ -744,6 +875,7 @@ static bool shmem_container_ns_entries_set(
   } else {
     pos = (long int) ns->size;
     if ((size_t) pos >= ns->capacity) {
+      SDL_SetError("shared memory namespace '%s' is full", container->region->name);
       goto shmem_set_end;
     }
   }
@@ -1028,12 +1160,14 @@ static shmem_container *shmem_container_open(
 
     if (!needs_reset) {
       size_t expected_size;
+      size_t expected_region_size;
       if (
         ns->magic != SHMEM_MAGIC
         || ns->version != SHMEM_VERSION
         || ns->capacity != capacity
         || !shmem_add_sizes(header_size, ns->data_capacity, &expected_size)
-        || expected_size != region->size
+        || !shmem_region_storage_size(expected_size, &expected_region_size)
+        || expected_region_size != region->size
       ) {
         shmem_mutex_unlock(mutex);
         shmem_mutex_close(mutex, false);
