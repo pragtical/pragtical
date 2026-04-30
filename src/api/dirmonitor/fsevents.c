@@ -25,9 +25,25 @@ static struct dirmonitor_internal* init_dirmonitor() {
   monitor->stream = NULL;
   monitor->changes = NULL;
   monitor->count = 0;
-  monitor->lock = NULL;
+  monitor->fds[0] = -1;
+  monitor->fds[1] = -1;
+  monitor->lock = SDL_CreateMutex();
 
   return monitor;
+}
+
+
+static void clear_monitor_changes(struct dirmonitor_internal* monitor) {
+  SDL_LockMutex(monitor->lock);
+  if (monitor->count > 0) {
+    for (size_t i = 0; i < monitor->count; i++) {
+      SDL_free(monitor->changes[i]);
+    }
+    SDL_free(monitor->changes);
+    monitor->changes = NULL;
+    monitor->count = 0;
+  }
+  SDL_UnlockMutex(monitor->lock);
 }
 
 
@@ -40,27 +56,27 @@ static void stop_monitor_stream(struct dirmonitor_internal* monitor) {
     FSEventStreamInvalidate(monitor->stream);
     FSEventStreamRelease(monitor->stream);
     monitor->stream = NULL;
-
-    SDL_LockMutex(monitor->lock);
-    write(monitor->fds[1], "", 1);
-    close(monitor->fds[0]);
-    close(monitor->fds[1]);
-    if (monitor->count > 0) {
-      for (size_t i = 0; i<monitor->count; i++) {
-        SDL_free(monitor->changes[i]);
-      }
-      SDL_free(monitor->changes);
-      monitor->changes = NULL;
-      monitor->count = 0;
-    }
-    SDL_UnlockMutex(monitor->lock);
-    SDL_DestroyMutex(monitor->lock);
   }
+
+  if (monitor->fds[1] != -1) {
+    write(monitor->fds[1], "", 1);
+  }
+  if (monitor->fds[0] != -1) {
+    close(monitor->fds[0]);
+    monitor->fds[0] = -1;
+  }
+  if (monitor->fds[1] != -1) {
+    close(monitor->fds[1]);
+    monitor->fds[1] = -1;
+  }
+
+  clear_monitor_changes(monitor);
 }
 
 
 static void deinit_dirmonitor(struct dirmonitor_internal* monitor) {
   stop_monitor_stream(monitor);
+  SDL_DestroyMutex(monitor->lock);
 }
 
 
@@ -111,7 +127,13 @@ static int get_changes_dirmonitor(
   int buffer_size
 ) {
   char response[1];
-  read(monitor->fds[0], response, 1);
+  if (monitor->fds[0] == -1) {
+    return 0;
+  }
+
+  if (read(monitor->fds[0], response, 1) <= 0 || monitor->fds[0] == -1) {
+    return 0;
+  }
 
   size_t results = 0;
   SDL_LockMutex(monitor->lock);
@@ -131,7 +153,7 @@ static int translate_changes_dirmonitor(
 ) {
   SDL_LockMutex(monitor->lock);
   if (monitor->count > 0) {
-    for (size_t i = 0; i<monitor->count; i++) {
+    for (size_t i = 0; i < monitor->count; i++) {
       change_callback(strlen(monitor->changes[i]), monitor->changes[i], L);
       SDL_free(monitor->changes[i]);
     }
@@ -147,8 +169,11 @@ static int translate_changes_dirmonitor(
 static int add_dirmonitor(struct dirmonitor_internal* monitor, const char* path) {
   stop_monitor_stream(monitor);
 
-  monitor->lock = SDL_CreateMutex();
-  pipe(monitor->fds);
+  if (pipe(monitor->fds) != 0) {
+    monitor->fds[0] = -1;
+    monitor->fds[1] = -1;
+    return -1;
+  }
 
   FSEventStreamContext context = {
     .info = monitor,
