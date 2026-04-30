@@ -2,6 +2,8 @@ local common = require "core.common"
 local test = require "core.test"
 
 local temp_root
+local gb18030_test_bytes = string.char(178, 226, 202, 212)
+local gb18030_test_text = "测试"
 
 test.describe("encoding", function()
   test.before_each(function(context)
@@ -48,6 +50,15 @@ test.describe("encoding", function()
     test.not_nil(charset, detect_err)
     test.match(charset, "UTF%-8")
     test.is_nil(bom)
+  end)
+
+  test.test("converts gb18030 text to utf8", function()
+    local converted, err = encoding.convert("UTF-8", "GB18030", gb18030_test_bytes, {
+      strict = false,
+      handle_from_bom = true
+    })
+    test.equal(converted, gb18030_test_text)
+    test.is_nil(err)
   end)
 
   test.test("detects utf16 files through the patched fallback", function(context)

@@ -1,8 +1,5 @@
 local test = require "core.test"
 
-local gb18030_test_bytes = string.char(178, 226, 202, 212)
-local gb18030_test_text = "测试"
-
 test.describe("string utf8 wrappers", function()
   test.test("export the documented string.u* helpers", function()
     local aliases = {
@@ -85,15 +82,6 @@ test.describe("string utf8 wrappers", function()
     local normalized, already_normal = string.unormalize_nfc("Cafe")
     test.equal(normalized, "Cafe")
     test.ok(already_normal)
-  end)
-
-  test.test("converts gb18030 text to utf8", function()
-    local converted, err = encoding.convert("UTF-8", "GB18030", gb18030_test_bytes, {
-      strict = false,
-      handle_from_bom = true
-    })
-    test.equal(converted, gb18030_test_text)
-    test.is_nil(err)
   end)
 end)
 
