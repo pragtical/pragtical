@@ -574,8 +574,6 @@ function test.is_nil(value, message)
   end
 end
 
-test["nil"] = test.is_nil
-
 ---Assert that a string matches a pattern.
 ---@param value string
 ---@param pattern string

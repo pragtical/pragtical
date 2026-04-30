@@ -46,7 +46,7 @@ test.describe("regex", function()
 
   test.test("reports invalid patterns and match offsets", function()
     local compiled, err = regex.compile("(")
-    test["nil"](compiled)
+    test.is_nil(compiled)
     test.not_nil(err)
 
     local start_idx, end_idx, c1s, c1e, c2s, c2e =

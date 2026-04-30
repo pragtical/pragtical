@@ -93,7 +93,7 @@ test.describe("string utf8 wrappers", function()
       handle_from_bom = true
     })
     test.equal(converted, gb18030_test_text)
-    test["nil"](err)
+    test.is_nil(err)
   end)
 end)
 

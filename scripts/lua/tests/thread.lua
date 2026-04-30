@@ -19,7 +19,7 @@ test.describe("thread", function()
     channel:pop()
     test.equal(channel:wait(), "second")
     channel:clear()
-    test["nil"](channel:first())
+    test.is_nil(channel:first())
     test.type(tostring(channel), "string")
   end)
 

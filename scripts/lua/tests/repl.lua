@@ -70,7 +70,7 @@ test.describe("repl", function()
       description = "duplicate",
       execute = function() end
     }
-    test["nil"](dup_ok)
+    test.is_nil(dup_ok)
     test.not_nil(dup_err)
   end)
 end)
