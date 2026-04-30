@@ -43,6 +43,10 @@ jobs:
         run: |
           bash --version
           bash scripts/build.sh --debug --forcefallback --portable
+      - name: Run Tests
+        run: |
+          source scripts/common.sh
+          SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Package
         if: ${{ matrix.config.cc == 'gcc' }}
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
@@ -93,6 +97,10 @@ jobs:
         run: |
           bash --version
           bash scripts/build.sh --bundle --debug --forcefallback
+      - name: Run Tests
+        run: |
+          source scripts/common.sh
+          SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Create DMG Image
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
       - name: Upload Artifact
@@ -150,6 +158,10 @@ jobs:
         run: |
           bash --version
           bash scripts/build.sh --debug --forcefallback
+      - name: Run Tests
+        run: |
+          source scripts/common.sh
+          SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Package
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
       - name: Upload Artifact

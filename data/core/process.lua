@@ -135,8 +135,13 @@ end
 ---@return integer|nil exit_code The exit code for this process, or nil if the wait timed out.
 function process:wait(timeout, scan)
   if not coroutine.isyieldable() then return self.process:wait(timeout) end
+  if timeout == nil or timeout == process.WAIT_INFINITE then
+    timeout = math.huge
+  elseif timeout == process.WAIT_DEADLINE then
+    return self.process:wait(timeout)
+  end
   local start = system.get_time()
-  while self.process:running() and (system.get_time() - start < (timeout or math.huge)) do
+  while self.process:running() and system.get_time() - start < timeout do
     coroutine.yield(scan or (1 / config.fps))
   end
   return self.process:returncode()

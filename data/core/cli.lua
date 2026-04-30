@@ -765,6 +765,77 @@ cli.register {
   end
 }
 
+-- Register test command
+cli.register {
+  command = "test",
+  description = "Run Lua test files against the Pragtical runtime.",
+  usage = "<tests_directory>",
+  exit_editor = false,
+  min_arguments = 1,
+  max_arguments = 1,
+  flags = {
+    {
+      name = "no-quit",
+      short_name = "n",
+      description = "Do not quit the editor after execution",
+      type = "empty"
+    }
+  },
+  arguments = {
+    tests_directory = "Directory or Lua test file to run"
+  },
+  execute = function(flags, arguments)
+    system.chdir(core.init_working_dir)
+
+    local quit = true
+    for _, flag in ipairs(flags) do
+      if flag.name == "no-quit" then
+        quit = false
+      end
+    end
+
+    local test_runner = require "core.test"
+    local target = system.absolute_path(arguments[1] or "")
+    local info = target and system.get_file_info(target)
+
+    if not target or not info then
+      print(cli.colorize(
+        string.format("Test path '%s' was not found.", arguments[1]),
+        "red"
+      ))
+      if quit then core.quit(true) end
+      return
+    end
+
+    local runner, errmsg = test_runner.run(target, {
+      on_result = function(item)
+        test_runner.report_item(item, {
+          colorize = cli.colorize
+        })
+      end,
+      on_complete = function(results, run_err)
+        if not results then
+          print(cli.colorize("Error running tests:", "red"))
+          print(run_err)
+          if quit then core.quit(true, 1) end
+          return
+        end
+
+        test_runner.report(results, {
+          colorize = cli.colorize,
+          show_items = false,
+          quit_on_finish = quit
+        })
+      end
+    })
+    if not runner then
+      print(cli.colorize("Error running tests:", "red"))
+      print(errmsg)
+      if quit then core.quit(true) end
+    end
+  end
+}
+
 -- Register run command
 cli.register {
   command = "run",
