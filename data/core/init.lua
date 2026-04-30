@@ -422,6 +422,10 @@ function core.init()
   --Set the maximum fps from display refresh rate.
   config.fps = DEFAULT_FPS
 
+  ---The process exit status used when the application quits.
+  ---@type integer
+  core.exit_status = 0
+
   ---The actual maximum frames per second that can be rendered.
   ---@type number
   core.fps = config.fps
@@ -655,7 +659,10 @@ function core.exit(quit_fn, force)
 end
 
 
-function core.quit(force)
+function core.quit(force, exit_code)
+  if type(exit_code) == "number" then
+    core.exit_status = exit_code
+  end
   core.exit(function() core.quit_request = true end, force)
 end
 

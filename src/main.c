@@ -332,6 +332,10 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     lua_getglobal(app->L, "core");
     lua_getfield(app->L, -1, "restart_request");
     bool restart = lua_toboolean(app->L, -1);
+    lua_pop(app->L, 1);
+
+    lua_getfield(app->L, -1, "exit_status");
+    int exit_status = (int)luaL_optinteger(app->L, -1, 0);
     lua_pop(app->L, 2);
 
     if (restart) {
@@ -344,7 +348,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       return SDL_APP_CONTINUE;
     }
 
-    return SDL_APP_SUCCESS;
+    return exit_status == 0 ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
   }
 
   return SDL_APP_CONTINUE;
