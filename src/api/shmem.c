@@ -630,6 +630,34 @@ static bool shmem_namespace_unregister_owner_locked(shmem_namespace *ns) {
   return !has_live_owners;
 }
 
+static bool shmem_namespace_reset_locked(
+  shmem_container *container,
+  size_t capacity
+) {
+  size_t header_size;
+
+  if (!shmem_compute_header_size(capacity, &header_size)) {
+    return false;
+  }
+
+  if (container->region->size != header_size) {
+    if (!shmem_region_remap(container->region, header_size, true)) {
+      return false;
+    }
+    container->namespace = (shmem_namespace *) container->region->map;
+  }
+
+  memset(container->region->map, 0, container->region->size);
+  container->namespace->magic = SHMEM_MAGIC;
+  container->namespace->version = SHMEM_VERSION;
+  container->namespace->refcount = 0;
+  container->namespace->size = 0;
+  container->namespace->capacity = capacity;
+  container->namespace->data_capacity = 0;
+  container->namespace->data_used = 0;
+  return true;
+}
+
 static bool shmem_container_sync_region_locked(shmem_container *container) {
   shmem_namespace *ns = container->namespace;
   size_t header_size = shmem_namespace_header_size(ns->capacity);
@@ -985,42 +1013,41 @@ static shmem_container *shmem_container_open(
 
   shmem_mutex_lock(mutex);
   if (region->created) {
-    memset(region->map, 0, region->size);
-    container->namespace->magic = SHMEM_MAGIC;
-    container->namespace->version = SHMEM_VERSION;
-    container->namespace->refcount = 0;
-    container->namespace->size = 0;
-    container->namespace->capacity = capacity;
-    container->namespace->data_capacity = 0;
-    container->namespace->data_used = 0;
-  } else {
-    shmem_namespace *ns = container->namespace;
-    size_t expected_size;
-    if (
-      ns->magic != SHMEM_MAGIC
-      || ns->version != SHMEM_VERSION
-      || ns->capacity != capacity
-    ) {
+    if (!shmem_namespace_reset_locked(container, capacity)) {
       shmem_mutex_unlock(mutex);
-      shmem_mutex_close(mutex, false);
-      shmem_region_close(region, false);
-      SDL_SetError(
-        "shared memory container '%s' already exists with incompatible layout",
-        namespace_name
-      );
+      shmem_mutex_close(mutex, true);
+      shmem_region_close(region, true);
       goto shmem_container_open_error;
     }
-    if (
-      !shmem_add_sizes(header_size, ns->data_capacity, &expected_size)
-      || expected_size != region->size
-    ) {
+  } else {
+    shmem_namespace *ns = container->namespace;
+    bool needs_reset = false;
+
+    shmem_namespace_sweep_dead_owners_locked(ns);
+    needs_reset = ns->refcount == 0;
+
+    if (!needs_reset) {
+      size_t expected_size;
+      if (
+        ns->magic != SHMEM_MAGIC
+        || ns->version != SHMEM_VERSION
+        || ns->capacity != capacity
+        || !shmem_add_sizes(header_size, ns->data_capacity, &expected_size)
+        || expected_size != region->size
+      ) {
+        shmem_mutex_unlock(mutex);
+        shmem_mutex_close(mutex, false);
+        shmem_region_close(region, false);
+        SDL_SetError(
+          "shared memory container '%s' already exists with incompatible layout",
+          namespace_name
+        );
+        goto shmem_container_open_error;
+      }
+    } else if (!shmem_namespace_reset_locked(container, capacity)) {
       shmem_mutex_unlock(mutex);
       shmem_mutex_close(mutex, false);
       shmem_region_close(region, false);
-      SDL_SetError(
-        "shared memory container '%s' already exists with incompatible layout",
-        namespace_name
-      );
       goto shmem_container_open_error;
     }
   }

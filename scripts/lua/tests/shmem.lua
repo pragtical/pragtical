@@ -81,21 +81,24 @@ test.describe("shmem", function()
 
     local mirror, mirror_err = shmem.open(namespace, 2)
     test.not_nil(mirror, mirror_err)
+    test.ok(memory:set("alpha", "stale"))
 
     memory = nil
     collectgarbage("collect")
 
     local other, other_err = shmem.open(namespace, 4)
     test.is_nil(other)
-    test.match(other_err, "capacity", nil, true)
+    test.match(other_err, "layout", nil, true)
 
     mirror = nil
     collectgarbage("collect")
     collectgarbage("collect")
 
-    local reopened, reopened_err = shmem.open(namespace, 4)
-    test.not_nil(reopened, reopened_err)
-    reopened:clear()
+    local reopened_same, reopened_same_err = shmem.open(namespace, 2)
+    test.not_nil(reopened_same, reopened_same_err)
+    test.equal(reopened_same:size(), 0)
+    test.is_nil(reopened_same:get("alpha"))
+    reopened_same:clear()
   end)
 
   test.test("rejects reopening a namespace with a different capacity", function()
