@@ -160,6 +160,41 @@ if get_option('repl_history')
     pragtical_cargs += '-DPRAGTICAL_REPL_HISTORY'
 endif
 
+# enable networking support
+if get_option('net')
+    pragtical_deps += dependency('SDL3_net', 'sdl3-net', fallback: ['sdl3_net', 'sdl3_net_dep'],
+        default_options: default_fallback_options + ['default_library=static']
+    )
+
+    use_system_mbedtls = get_option('wrap_mode') != 'forcefallback'
+
+    mbedtls_dep = disabler()
+    mbedx509_dep = disabler()
+    tfpsacrypto_dep = disabler()
+    system_mbedtls_ok = false
+
+    if use_system_mbedtls
+        mbedtls_dep = dependency('mbedtls', version: '>=4.0.0', required: false)
+        mbedx509_dep = dependency('mbedx509', version: '>=4.0.0', required: false)
+        tfpsacrypto_dep = dependency('tfpsacrypto', required: false)
+        system_mbedtls_ok = mbedtls_dep.found() and mbedx509_dep.found() and tfpsacrypto_dep.found()
+    endif
+
+    if not use_system_mbedtls or not system_mbedtls_ok
+        mbedtls = subproject('mbedtls',
+            default_options: default_fallback_options + ['default_library=static']
+        )
+        mbedtls_dep = mbedtls.get_variable('mbedtls_dep')
+        mbedx509_dep = mbedtls.get_variable('mbedx509_dep')
+        tfpsacrypto_dep = mbedtls.get_variable('tfpsacrypto_dep')
+    endif
+
+    pragtical_deps += [mbedtls_dep, mbedx509_dep, tfpsacrypto_dep]
+
+    pragtical_sources += 'api/net.c'
+    pragtical_cargs += '-DPRAGTICAL_NET'
+endif
+
 executable('pragtical',
     pragtical_sources + pragtical_rc,
     include_directories: pragtical_includes,
