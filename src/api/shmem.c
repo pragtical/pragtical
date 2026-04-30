@@ -23,6 +23,7 @@
   typedef HANDLE shmem_handle;
   typedef HANDLE shmem_mutex_handle;
 #else
+  #include <errno.h>
   #include <unistd.h>
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -46,6 +47,7 @@ typedef struct {
   char name[SHMEM_NS_LEN];
   size_t size;
   void* map;
+  bool created;
 } shmem_object;
 
 typedef struct {
@@ -133,41 +135,98 @@ static inline bool shmem_name_valid(const char* name) {
   return true;
 }
 
-shmem_object* shmem_open(const char* name, size_t size) {
+static shmem_object* shmem_open_internal(
+  const char* name,
+  size_t size,
+  bool resize_existing
+) {
   shmem_object* object = SDL_malloc(sizeof(shmem_object));
+  if (!object) {
+    SDL_OutOfMemory();
+    return NULL;
+  }
+
   strcpy(object->name, name);
   object->size = size;
+  object->created = false;
 
 #ifdef _WIN32
   object->handle = CreateFileMappingA(
     INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, size, name
   );
 
-  if (object->handle == NULL) goto shmem_open_error;
+  if (object->handle == NULL) {
+    SDL_SetError("CreateFileMapping failed for '%s': %lu", name, GetLastError());
+    goto shmem_open_error;
+  }
+
+  object->created = GetLastError() != ERROR_ALREADY_EXISTS;
 
   object->map = MapViewOfFile(
-    object->handle, FILE_MAP_ALL_ACCESS, 0, 0, size
+    object->handle,
+    FILE_MAP_ALL_ACCESS,
+    0,
+    0,
+    (!object->created && !resize_existing) ? 0 : size
   );
 
   if (object->map == NULL) {
+    SDL_SetError("MapViewOfFile failed for '%s': %lu", name, GetLastError());
     CloseHandle(object->handle);
     goto shmem_open_error;
   }
+
+  if (!object->created && !resize_existing) {
+    MEMORY_BASIC_INFORMATION mapping_info;
+    if (VirtualQuery(object->map, &mapping_info, sizeof(mapping_info)) > 0) {
+      object->size = (size_t) mapping_info.RegionSize;
+    }
+  }
 #else
-  object->handle = shm_open(name, O_CREAT | O_RDWR, 0666);
+  object->handle = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0666);
 
-  if (object->handle == -1) goto shmem_open_error;
+  if (object->handle == -1) {
+    if (errno != EEXIST) {
+      SDL_SetError("shm_open failed for '%s': %s", name, strerror(errno));
+      goto shmem_open_error;
+    }
+    object->handle = shm_open(name, O_RDWR, 0666);
+    if (object->handle == -1) {
+      SDL_SetError("shm_open failed for '%s': %s", name, strerror(errno));
+      goto shmem_open_error;
+    }
+  } else {
+    object->created = true;
+  }
 
-  if (ftruncate(object->handle, size) == -1) {
+  if (object->created || resize_existing) {
+    if (ftruncate(object->handle, size) == -1) {
+      SDL_SetError("ftruncate failed for '%s': %s", name, strerror(errno));
+      close(object->handle);
+      goto shmem_open_error;
+    }
+  } else {
+    struct stat st;
+    if (fstat(object->handle, &st) == -1) {
+      SDL_SetError("fstat failed for '%s': %s", name, strerror(errno));
+      close(object->handle);
+      goto shmem_open_error;
+    }
+    object->size = st.st_size;
+  }
+
+  if (object->size == 0) {
+    SDL_SetError("shared memory object '%s' has invalid size 0", name);
     close(object->handle);
     goto shmem_open_error;
   }
 
   object->map = mmap(
-    NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, object->handle, 0
+    NULL, object->size, PROT_READ | PROT_WRITE, MAP_SHARED, object->handle, 0
   );
 
   if (object->map == MAP_FAILED) {
+    SDL_SetError("mmap failed for '%s': %s", name, strerror(errno));
     close(object->handle);
     goto shmem_open_error;
   }
@@ -178,6 +237,10 @@ shmem_object* shmem_open(const char* name, size_t size) {
 shmem_open_error:
   SDL_free(object);
   return NULL;
+}
+
+shmem_object* shmem_open(const char* name, size_t size) {
+  return shmem_open_internal(name, size, false);
 }
 
 void shmem_close(shmem_object* object, bool unregister) {
@@ -201,7 +264,7 @@ shmem_object* shmem_resize(shmem_object** object, size_t new_size) {
 
   shmem_close((*object), false);
 
-  *object = shmem_open(name, new_size);
+  *object = shmem_open_internal(name, new_size, true);
 
   return *object;
 }
@@ -211,10 +274,16 @@ shmem_mutex* shmem_mutex_open(const char* name) {
 
 #ifdef _WIN32
   mutex->handle = CreateMutexA(NULL, FALSE, name);
-  if (mutex->handle == NULL) goto shmem_mutex_open_error;
+  if (mutex->handle == NULL) {
+    SDL_SetError("CreateMutex failed for '%s': %lu", name, GetLastError());
+    goto shmem_mutex_open_error;
+  }
 #else
   mutex->handle = sem_open(name, O_CREAT, 0666, 1);
-  if (mutex->handle == SEM_FAILED) goto shmem_mutex_open_error;
+  if (mutex->handle == SEM_FAILED) {
+    SDL_SetError("sem_open failed for '%s': %s", name, strerror(errno));
+    goto shmem_mutex_open_error;
+  }
 #endif
 
   strcpy(mutex->name, name);
@@ -285,6 +354,7 @@ void shmem_container_entry_remove(
         }
 
         container->entry_handles_loaded--;
+        container->entry_handles[container->entry_handles_loaded] = NULL;
         break;
       }
     }
@@ -300,6 +370,8 @@ shmem_object* shmem_container_entry_get(
 
   if (container->entry_handles_loaded > 0) {
     if (
+      position < container->entry_handles_loaded
+      &&
       container->entry_handles[position]
       &&
       strcmp(container->entry_handles[position]->name, name) == 0
@@ -377,9 +449,12 @@ void shmem_container_entry_gc(
           }
 
           container->entry_handles_loaded--;
+          container->entry_handles[container->entry_handles_loaded] = NULL;
 
           if (container->entry_handles_loaded == 0)
             break;
+
+          i--;
         }
       }
     }
@@ -496,6 +571,9 @@ char* shmem_container_ns_entries_get_by_position(
   *data_len = 0;
 
   shmem_mutex_lock(container->mutex);
+  if (position >= container->namespace->size)
+    goto shmem_container_ns_size_end;
+
   strcpy(name, container->namespace->entries[position].name);
   size_t name_len = strlen(name);
   size_t size = container->namespace->entries[position].size;
@@ -602,7 +680,7 @@ shmem_container* shmem_container_open(const char* namespace, size_t capacity) {
   shmem_mutex* mutex = shmem_mutex_open(mutex_name);
 
   if (!mutex) {
-    shmem_close(object, true);
+    shmem_close(object, object->created);
     goto shmem_container_open_error;
   }
 
@@ -619,6 +697,18 @@ shmem_container* shmem_container_open(const char* namespace, size_t capacity) {
     ns->size = 0;
     ns->capacity = capacity;
     ns->refcount = 1;
+  } else if (ns->capacity != capacity) {
+    size_t existing_capacity = ns->capacity;
+    shmem_mutex_unlock(container->mutex);
+    shmem_mutex_close(mutex, false);
+    shmem_close(object, false);
+    SDL_SetError(
+      "shared memory container '%s' already exists with capacity %zu (requested %zu)",
+      namespace,
+      existing_capacity,
+      capacity
+    );
+    goto shmem_container_open_error;
   } else {
     ns->refcount++;
   }
@@ -708,7 +798,7 @@ static int f_shmem_open(lua_State* L) {
   shmem_container* container = shmem_container_open(namespace, capacity);
   if (!container) {
     lua_pushnil(L);
-    lua_pushstring(L, "error initializing the shared memory container");
+    lua_pushstring(L, SDL_GetError());
     return 2;
   }
 
@@ -753,9 +843,15 @@ static int m_shmem_get(lua_State* L) {
     data = shmem_container_ns_entries_get(self, name, &data_len);
   } else if (lua_type(L, 2) == LUA_TNUMBER) {
     char name[SHMEM_NAME_LEN];
-    size_t position = luaL_checkinteger(L, 2);
-    position = position - 1 < 0 ? 0 : position - 1;
-    data = shmem_container_ns_entries_get_by_position(self, position, name, &data_len);
+    lua_Integer position = luaL_checkinteger(L, 2);
+    if (position >= 1) {
+      data = shmem_container_ns_entries_get_by_position(
+        self,
+        (size_t) (position - 1),
+        name,
+        &data_len
+      );
+    }
   } else {
     return luaL_typeerror(L, 2, "string or integer");
   }
