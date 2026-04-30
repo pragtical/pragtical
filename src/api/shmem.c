@@ -73,20 +73,51 @@ typedef struct {
   shmem_object* entry_handles[];
 } shmem_container;
 
+static Uint32 shmem_hash_string(const char* value) {
+  Uint32 hash = 2166136261u;
+  for (const unsigned char* ptr = (const unsigned char*) value; *ptr; ptr++) {
+    hash ^= *ptr;
+    hash *= 16777619u;
+  }
+  return hash;
+}
+
 static inline void shmem_ns_name(
   char* ns_name, const char* name
 ) {
+#ifdef _WIN32
   if (name[0] != '/')
-    sprintf(ns_name, "/%s", name);
+    snprintf(ns_name, SHMEM_NS_LEN, "/%s", name);
   else
-    sprintf(ns_name, "%s", name);
+    snprintf(ns_name, SHMEM_NS_LEN, "%s", name);
+#else
+  snprintf(ns_name, SHMEM_NS_LEN, "/pgshm-%08x", shmem_hash_string(name));
+#endif
 }
 
 static inline void shmem_ns_entry_name(
   char* ns_name, shmem_container* container, const char* entry_name
 ) {
+#ifdef _WIN32
   const char* ns = container->handle->name;
   snprintf(ns_name, SHMEM_NS_LEN, "%.*s.%s", (int)strlen(ns), ns, entry_name);
+#else
+  snprintf(
+    ns_name,
+    SHMEM_NS_LEN,
+    "/pgent-%08x-%08x",
+    shmem_hash_string(container->handle->name),
+    shmem_hash_string(entry_name)
+  );
+#endif
+}
+
+static inline void shmem_mutex_name(char* mutex_name, const char* name) {
+#ifdef _WIN32
+  snprintf(mutex_name, SHMEM_NS_LEN, "%s_%s", name, "mutex");
+#else
+  snprintf(mutex_name, SHMEM_NS_LEN, "/pgmtx-%08x", shmem_hash_string(name));
+#endif
 }
 
 static inline bool shmem_name_valid(const char* name) {
@@ -154,7 +185,7 @@ void shmem_close(shmem_object* object, bool unregister) {
   UnmapViewOfFile(object->map);
   CloseHandle(object->handle);
 #else
-  munmap(object->map, sizeof(object->size));
+  munmap(object->map, object->size);
   close(object->handle);
 
   if (unregister)
@@ -566,7 +597,7 @@ shmem_container* shmem_container_open(const char* namespace, size_t capacity) {
     goto shmem_container_open_error;
 
   char mutex_name[SHMEM_NS_LEN];
-  sprintf(mutex_name, "%s_%s", ns_name, "mutex");
+  shmem_mutex_name(mutex_name, namespace);
 
   shmem_mutex* mutex = shmem_mutex_open(mutex_name);
 
@@ -602,7 +633,7 @@ shmem_container_open_error:
 
 void shmem_container_close(shmem_container* container) {
   shmem_mutex_lock(container->mutex);
-  int refcount = container->namespace->refcount--;
+  int refcount = --container->namespace->refcount;
   shmem_mutex_unlock(container->mutex);
 
   bool unregister = refcount <= 0;
