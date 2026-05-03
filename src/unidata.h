@@ -6,7 +6,8 @@
 
 #ifndef utfint
 # define utfint utfint
-typedef unsigned int utfint;
+#include <stdint.h>
+typedef uint32_t utfint;
 #endif
 
 typedef struct range_table {

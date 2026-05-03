@@ -3,7 +3,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "unidata.h"
+#ifndef utfint
+  #define utfint utfint
+  typedef uint32_t utfint;
+#endif
 
 typedef struct {
   const char* string;
@@ -107,6 +110,12 @@ utf8_offset_t Lutf8_charpos(const char* s, size_t len, int64_t charpos, int64_t 
 int64_result_t Lutf8_offset(const char* s, size_t len, int64_t n, int64_t idx);
 utf8_offset_t Lutf8_next(const char* s, size_t len, int64_t offset, int64_t idx);
 utf8_offset_result_t Lutf8_codes(const char* s, size_t len, size_t n, int strict);
+
+int Lutf8_width_cp(utfint code, bool ambi_is_double, int default_width);
+size_t Lutf8_width(const char* s, size_t len, bool ambi_is_double, int default_width);
+utf8_offset_t Lutf8_widthindex(const char* s, size_t len, size_t location, int ambi_is_double, int default_width);
+int Lutf8_ncasecmp(const char* s1, size_t len1, const char* s2, size_t len2);
+
 void Lutf8_pattern_result_uninit(utf8_pattern_result_t* self);
 utf8_pattern_result_result_t Lutf8_find(
   const char* s, size_t len,
@@ -125,7 +134,3 @@ utf8_pattern_result_result_t Lutf8_match(
   const char* pattern, size_t pattern_len,
   int64_t offset
 );
-int Lutf8_width_cp(utfint code, bool ambi_is_double, int default_width);
-size_t Lutf8_width(const char* s, size_t len, bool ambi_is_double, int default_width);
-utf8_offset_t Lutf8_widthindex(const char* s, size_t len, size_t location, int ambi_is_double, int default_width);
-int Lutf8_ncasecmp(const char* s1, size_t len1, const char* s2, size_t len2);

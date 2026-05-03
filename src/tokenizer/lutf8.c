@@ -1,5 +1,5 @@
 /*
- * Integration of https://github.com/starwing/luautf8
+ * Adaptation of https://github.com/starwing/luautf8 for use without Lua
  *
  * MIT License
  *
@@ -26,10 +26,6 @@
 
 #include "lutf8.h"
 #include "unidata.h"
-
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
 
 #include <assert.h>
 #include <string.h>
@@ -534,7 +530,7 @@ string_buffer_t Lutf8_remove(const char* s, size_t len, size_t start, size_t end
   return b;
 }
 
-static utf8_offset_t push_offset(const char *s, const char *e, lua_Integer offset, lua_Integer idx) {
+static utf8_offset_t push_offset(const char *s, const char *e, int64_t offset, int64_t idx) {
   utf8_offset_t position = {0, 0};
   utfint ch = 0;
   const char *p;
