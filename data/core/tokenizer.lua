@@ -1,6 +1,7 @@
 local core = require "core"
 local config = require "core.config"
 local syntax = require "core.syntax"
+local native_tokenizer = require "tokenizer"
 
 ---Functionality to tokenize source code using syntax definitions.
 ---
@@ -24,7 +25,6 @@ local function push_token(t, type, text)
     table.insert(t, text)
   end
 end
-
 
 local function push_tokens(t, syn, pattern, full_text, find_results)
   if #find_results > 2 then
@@ -111,7 +111,7 @@ end
 ---@param base_syntax table @The initial base syntax (the syntax of the file)
 ---@param state string @The state of the tokenizer to extract from
 ---@return table @Array of syntaxes starting from the innermost one
-function tokenizer.extract_subsyntaxes(base_syntax, state)
+local function lua_extract_subsyntaxes(base_syntax, state)
   local current_syntax
   local t = {}
   repeat
@@ -237,8 +237,9 @@ end
 
 ---@param incoming_syntax table
 ---@param text string
----@param state string
-function tokenizer.tokenize(incoming_syntax, text, state, resume)
+---@param state? string
+---@param resume? table
+local function lua_tokenize(incoming_syntax, text, state, resume)
   local res
   local i = 1
 
@@ -409,6 +410,102 @@ function tokenizer.tokenize(incoming_syntax, text, state, resume)
   return res, state
 end
 
+local lua_tokenizer = {
+  tokenize = lua_tokenize,
+  extract_subsyntaxes = lua_extract_subsyntaxes,
+}
+
+local native_cache_field = "_tokenizer_native_cache"
+
+local function clear_native_cache_from_syntax(syn, visited)
+  if type(syn) ~= "table" or visited[syn] then return end
+  visited[syn] = true
+  syn[native_cache_field] = nil
+  for _, pattern in ipairs(syn.patterns or {}) do
+    if type(pattern.syntax) == "table" then
+      clear_native_cache_from_syntax(pattern.syntax, visited)
+    end
+  end
+end
+
+
+local active_tokenizer = lua_tokenizer
+local using_native = false
+
+---Enable or disable the native tokenizer backend.
+---
+---When enabled, tokenization is delegated to the native module. When disabled,
+---the pure Lua implementation in this file is used instead.
+---
+---@param enabled boolean
+---@return boolean enabled True when the native backend is active after the call.
+function tokenizer.set_use_native(enabled)
+  if enabled then
+    active_tokenizer = native_tokenizer
+    using_native = true
+    return true
+  end
+
+  active_tokenizer = lua_tokenizer
+  using_native = false
+  return false
+end
+
+
+---Check whether tokenization is currently using the native backend.
+---
+---@return boolean enabled True when the native tokenizer is active.
+function tokenizer.is_using_native()
+  return using_native
+end
+
+
+---Clear cached native syntax userdata for known syntaxes.
+---
+---This should be called when switching tokenizer backends so syntax tables are
+---reimported by the native tokenizer on their next use.
+---
+---@param root_syntax? table Optional syntax table to clear before clearing the global syntax registries.
+function tokenizer.clear_native_cache(root_syntax)
+  local visited = {}
+  clear_native_cache_from_syntax(root_syntax, visited)
+  clear_native_cache_from_syntax(syntax.plain_text_syntax, visited)
+  for _, syn in ipairs(syntax.items) do
+    clear_native_cache_from_syntax(syn, visited)
+  end
+  for _, doc in ipairs(core.docs or {}) do
+    clear_native_cache_from_syntax(doc.syntax, visited)
+  end
+end
+
+
+---Tokenize a single line of text for the given syntax and state.
+---
+---Returns tokens in the form `{ type, text, ... }`. When the tokenizer runs
+---out of time, a third return value is included with resume information that
+---can be passed back into this function to continue tokenizing the same line.
+---
+---@param incoming_syntax table The syntax to tokenize against.
+---@param text string The line text to tokenize.
+---@param state? string Current tokenizer state.
+---@param resume? table Resume information returned by a previous incomplete call.
+---@return string[] tokens Tokens in the form `{ type, text, ... }`.
+---@return string state Updated tokenizer state.
+---@return table? resume Resume data when tokenization yields before finishing.
+function tokenizer.tokenize(incoming_syntax, text, state, resume)
+  return active_tokenizer.tokenize(incoming_syntax, text, state, resume)
+end
+
+
+---Return the list of syntaxes active for a tokenizer state.
+---
+---@param base_syntax table The base syntax of the document.
+---@param state string Tokenizer state previously returned by `tokenize`.
+---@return table syntaxes Array of syntaxes starting from the innermost one.
+function tokenizer.extract_subsyntaxes(base_syntax, state)
+  return active_tokenizer.extract_subsyntaxes(base_syntax, state)
+end
+
 
 local function token_iter(state, i)
   i = i + 2
@@ -447,99 +544,8 @@ function tokenizer.each_token(t, scol)
   return token_iter, state, start - 2
 end
 
-local lua_tokenizer = {
-  tokenize = tokenizer.tokenize,
-  extract_subsyntaxes = tokenizer.extract_subsyntaxes,
-  each_token = tokenizer.each_token
-}
-
-local native_tokenizer = require "tokenizer"
-native_tokenizer.each_token = native_tokenizer.each_token or lua_tokenizer.each_token
-local active_tokenizer = lua_tokenizer
-local using_native = false
-local native_cache_field = "_tokenizer_native_cache"
-
-local function clear_native_cache_from_syntax(syn, visited)
-  if type(syn) ~= "table" or visited[syn] then return end
-  visited[syn] = true
-  syn[native_cache_field] = nil
-  for _, pattern in ipairs(syn.patterns or {}) do
-    if type(pattern.syntax) == "table" then
-      clear_native_cache_from_syntax(pattern.syntax, visited)
-    end
-  end
-end
-
----Enable or disable the native tokenizer backend.
----
----When enabled, tokenization is delegated to the native module. When disabled,
----the pure Lua implementation in this file is used instead.
----
----@param enabled boolean
----@return boolean enabled True when the native backend is active after the call.
-function tokenizer.set_use_native(enabled)
-  if enabled then
-    active_tokenizer = native_tokenizer
-    using_native = true
-    return true
-  end
-
-  active_tokenizer = lua_tokenizer
-  using_native = false
-  return false
-end
-
----Check whether tokenization is currently using the native backend.
----
----@return boolean enabled True when the native tokenizer is active.
-function tokenizer.is_using_native()
-  return using_native
-end
-
----Clear cached native syntax userdata for known syntaxes.
----
----This should be called when switching tokenizer backends so syntax tables are
----reimported by the native tokenizer on their next use.
----
----@param root_syntax? table Optional syntax table to clear before clearing the global syntax registries.
-function tokenizer.clear_native_cache(root_syntax)
-  local visited = {}
-  clear_native_cache_from_syntax(root_syntax, visited)
-  clear_native_cache_from_syntax(syntax.plain_text_syntax, visited)
-  for _, syn in ipairs(syntax.items) do
-    clear_native_cache_from_syntax(syn, visited)
-  end
-  for _, doc in ipairs(core.docs or {}) do
-    clear_native_cache_from_syntax(doc.syntax, visited)
-  end
-end
-
----Tokenize a single line of text for the given syntax and state.
----
----Returns tokens in the form `{ type, text, ... }`. When the tokenizer runs
----out of time, a third return value is included with resume information that
----can be passed back into this function to continue tokenizing the same line.
----
----@param incoming_syntax table The syntax to tokenize against.
----@param text string The line text to tokenize.
----@param state? string Current tokenizer state.
----@param resume? table Resume information returned by a previous incomplete call.
----@return string[] tokens Tokens in the form `{ type, text, ... }`.
----@return string state Updated tokenizer state.
----@return table? resume Resume data when tokenization yields before finishing.
-function tokenizer.tokenize(...)
-  return active_tokenizer.tokenize(...)
-end
-
----Return the list of syntaxes active for a tokenizer state.
----
----@param base_syntax table The base syntax of the document.
----@param state string Tokenizer state previously returned by `tokenize`.
----@return table syntaxes Array of syntaxes starting from the innermost one.
-function tokenizer.extract_subsyntaxes(...)
-  return active_tokenizer.extract_subsyntaxes(...)
-end
 
 tokenizer.set_use_native(config.enable_native_tokenizer)
+
 
 return tokenizer

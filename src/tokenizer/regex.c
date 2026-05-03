@@ -363,7 +363,6 @@ regex_match_result regex_pattern_gmatch(
       int index = 0;
       if (ovector_count > 1) index = 2;
 
-      int total = 0;
       int total_results = ovector_count * 2;
       size_t last_offset = 0;
       for (int i = index; i < total_results; i+=2) {
@@ -372,7 +371,6 @@ regex_match_result regex_pattern_gmatch(
         else
           regex_match_add_string(&result.val, subject+ovector[i], ovector[i+1] - ovector[i]);
         last_offset = ovector[i+1];
-        total++;
       }
 
       *offset = last_offset;
