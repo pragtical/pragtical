@@ -416,6 +416,8 @@ local lua_tokenizer = {
 }
 
 local native_cache_field = "_tokenizer_native_cache"
+local native_text_arena_field = "_tokenizer_native_text_arena"
+local native_token_arena_field = "_tokenizer_native_token_arena"
 
 local function clear_native_cache_from_syntax(syn, visited)
   if type(syn) ~= "table" or visited[syn] then return end
@@ -448,6 +450,8 @@ function tokenizer.set_use_native(enabled)
 
   active_tokenizer = lua_tokenizer
   using_native = false
+  tokenizer[native_text_arena_field] = nil
+  tokenizer[native_token_arena_field] = nil
   return false
 end
 

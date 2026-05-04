@@ -13,11 +13,22 @@ end
 test.describe("tokenizer", function()
   test.test("toggles the native module while keeping each_token", function()
     local original = config.enable_native_tokenizer
+    local syntax = {
+      patterns = {
+        { pattern = "%d+", type = "number" }
+      },
+      symbols = {}
+    }
     config.enable_native_tokenizer = true
     test.ok(tokenizer.set_use_native(true))
     test.equal(tokenizer.is_using_native(), true)
+    tokenizer.tokenize(syntax, "123", string.char(0))
+    test.type(tokenizer._tokenizer_native_text_arena, "userdata")
+    test.type(tokenizer._tokenizer_native_token_arena, "userdata")
     tokenizer.set_use_native(false)
     test.equal(tokenizer.is_using_native(), false)
+    test.equal(tokenizer._tokenizer_native_text_arena, nil)
+    test.equal(tokenizer._tokenizer_native_token_arena, nil)
     tokenizer.set_use_native(true)
     test.equal(tokenizer.is_using_native(), true)
     config.enable_native_tokenizer = original
@@ -42,6 +53,8 @@ test.describe("tokenizer", function()
 
     tokenizer.set_use_native(true)
     tokenizer.tokenize(syntax, [["123"]], string.char(0))
+    test.type(tokenizer._tokenizer_native_text_arena, "userdata")
+    test.type(tokenizer._tokenizer_native_token_arena, "userdata")
     test.type(syntax._tokenizer_native_cache, "userdata")
     test.type(nested._tokenizer_native_cache, "userdata")
 
@@ -85,6 +98,60 @@ test.describe("tokenizer", function()
     test.same(tokens, {
       "keyword", "static",
       "keyword", " const"
+    })
+  end)
+
+  test.test("tokenizes balanced quoted strings with matching delimiters", function()
+    local syntax = {
+      patterns = {
+        {
+          pattern = "@type%s+()%b\"\"",
+          type = { "annotation", "annotation.string" }
+        },
+        {
+          pattern = "|%s*()%b\"\"",
+          type = { "annotation.operator", "annotation.string" }
+        },
+        { pattern = "[%w%p]+", type = "comment" }
+      },
+      symbols = {}
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenizer.tokenize(syntax, '@type "all" | "background"', string.char(0))
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    test.same(tokens, {
+      "annotation", "@type ",
+      "annotation.string", '"all"',
+      "annotation.operator", " | ",
+      "annotation.string", '"background"'
+    })
+  end)
+
+  test.test("tokenizes balanced parentheses in Lua patterns", function()
+    local syntax = {
+      patterns = {
+        { pattern = "fun%s*%b()", type = "annotation.type" },
+        { pattern = "[%w%p]+", type = "comment" }
+      },
+      symbols = {}
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenizer.tokenize(
+      syntax,
+      'fun(status: "accept"|"cancel", result: string[]|string|nil)',
+      string.char(0)
+    )
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    test.same(tokens, {
+      "annotation.type", 'fun(status: "accept"|"cancel", result: string[]|string|nil)'
     })
   end)
 

@@ -12,6 +12,7 @@ pragtical_sources = [
     'api/canvas.c',
     'api/utf8.c',
     'api/tokenizer.c',
+    'tokenizer/arena.c',
     'tokenizer/regex.c',
     'tokenizer/lutf8.c',
     'api/encoding.c',

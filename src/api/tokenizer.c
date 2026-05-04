@@ -1,7 +1,7 @@
 #include "api.h"
-#include "../arena_allocator.h"
 #include "../tokenizer/lutf8.h"
 #include "../tokenizer/regex.h"
+#include "../tokenizer/arena.h"
 
 #include <SDL3/SDL.h>
 
@@ -14,10 +14,15 @@
 #include <string.h>
 
 #define API_TYPE_TOKENIZER_SYNTAX "TokenizerSyntax"
+#define API_TYPE_TOKENIZER_ARENA "TokenizerArena"
 #define TOKENIZER_SYNTAX_CACHE_FIELD "_tokenizer_native_cache"
+#define TOKENIZER_TEXT_ARENA_FIELD "_tokenizer_native_text_arena"
+#define TOKENIZER_TOKEN_ARENA_FIELD "_tokenizer_native_token_arena"
 
 static char tokenizer_syntax_map_key;
 static char tokenizer_syntax_get_key;
+static char tokenizer_text_arena_key;
+static char tokenizer_token_arena_key;
 
 typedef struct {
   char *data;
@@ -72,6 +77,11 @@ typedef struct {
 } TokenizerSyntaxUserdata;
 
 typedef struct {
+  Arena arena;
+  bool initialized;
+} TokenizerArenaUserdata;
+
+typedef struct {
   const char *text;
   size_t byte_len;
   size_t char_len;
@@ -106,7 +116,7 @@ typedef struct {
 } TokenizerTokenSpan;
 
 typedef struct {
-  lxl_arena *arena;
+  Arena *arena;
   TokenizerTokenSpan *items;
   size_t count;
   size_t cap;
@@ -226,6 +236,16 @@ static int tokenizer_syntax_gc(lua_State *L) {
   return 0;
 }
 
+static int tokenizer_arena_gc(lua_State *L) {
+  TokenizerArenaUserdata *ud =
+    (TokenizerArenaUserdata *) luaL_checkudata(L, 1, API_TYPE_TOKENIZER_ARENA);
+  if (ud->initialized) {
+    arena_free(&ud->arena);
+    ud->initialized = false;
+  }
+  return 0;
+}
+
 static size_t utf8_char_size(unsigned char c) {
   if (c < 0x80) return 1;
   if ((c & 0xE0) == 0xC0) return 2;
@@ -235,13 +255,19 @@ static size_t utf8_char_size(unsigned char c) {
 }
 
 static void tokenizer_text_uninit(TokenizerText *self) {
-  free(self->char_offsets);
   self->char_offsets = NULL;
+  self->text = NULL;
+  self->byte_len = 0;
   self->char_len = 0;
   self->is_ascii = false;
 }
 
-static void tokenizer_text_init(TokenizerText *self, const char *text, size_t byte_len) {
+static bool tokenizer_text_init(
+  TokenizerText *self,
+  Arena *arena,
+  const char *text,
+  size_t byte_len
+) {
   self->text = text;
   self->byte_len = byte_len;
   self->char_offsets = NULL;
@@ -259,16 +285,18 @@ static void tokenizer_text_init(TokenizerText *self, const char *text, size_t by
 
   if (self->is_ascii) {
     self->char_len = byte_len;
-    return;
+    return true;
   }
 
-  self->char_offsets = (size_t *) malloc(sizeof(size_t) * (byte_len + 2));
+  self->char_offsets = (size_t *) arena_alloc(arena, sizeof(size_t) * (byte_len + 2));
+  if (!self->char_offsets) return false;
   byte_pos = 1;
   while (byte_pos <= byte_len) {
     self->char_offsets[++self->char_len] = byte_pos;
     byte_pos += utf8_char_size((unsigned char) text[byte_pos - 1]);
   }
   self->char_offsets[self->char_len + 1] = byte_len + 1;
+  return true;
 }
 
 static size_t tokenizer_text_byte_at(const TokenizerText *self, lua_Integer char_index) {
@@ -451,8 +479,8 @@ static bool tokenizer_find_results_push_size(void *ctx, size_t value) {
   return tokenizer_find_results_push((TokenizerFindResults *) ctx, (lua_Integer) value);
 }
 
-static void tokenizer_token_buffer_init(lua_State *L, TokenizerTokenBuffer *self) {
-  self->arena = lxl_arena_init(L);
+static void tokenizer_token_buffer_init(TokenizerTokenBuffer *self, Arena *arena) {
+  self->arena = arena;
   self->items = NULL;
   self->count = 0;
   self->cap = 0;
@@ -460,7 +488,7 @@ static void tokenizer_token_buffer_init(lua_State *L, TokenizerTokenBuffer *self
 
 static bool tokenizer_token_buffer_reserve(TokenizerTokenBuffer *self, size_t cap) {
   if (cap <= self->cap) return true;
-  TokenizerTokenSpan *items = lxl_arena_malloc(self->arena, sizeof(TokenizerTokenSpan) * cap);
+  TokenizerTokenSpan *items = arena_alloc(self->arena, sizeof(TokenizerTokenSpan) * cap);
   if (!items) return false;
   if (self->items && self->count > 0) {
     memcpy(items, self->items, sizeof(TokenizerTokenSpan) * self->count);
@@ -811,6 +839,85 @@ static void tokenizer_import_types(lua_State *L, int pattern_idx, TokenizerPatte
     pattern->types.items[0] = tokenizer_string_dup_lua(L, -1);
   }
   lua_pop(L, 1);
+}
+
+static bool tokenizer_push_core_tokenizer(lua_State *L) {
+  lua_getglobal(L, "package");
+  if (!lua_istable(L, -1)) {
+    lua_pop(L, 1);
+    return false;
+  }
+  lua_getfield(L, -1, "loaded");
+  lua_remove(L, -2);
+  if (!lua_istable(L, -1)) {
+    lua_pop(L, 1);
+    return false;
+  }
+  lua_getfield(L, -1, "core.tokenizer");
+  lua_remove(L, -2);
+  if (lua_istable(L, -1)) return true;
+  lua_pop(L, 1);
+  return false;
+}
+
+static TokenizerArenaUserdata *tokenizer_push_registry_arena(
+  lua_State *L,
+  const void *registry_key,
+  size_t initial_capacity
+) {
+  lua_pushlightuserdata(L, (void *) registry_key);
+  lua_rawget(L, LUA_REGISTRYINDEX);
+  if (luaL_testudata(L, -1, API_TYPE_TOKENIZER_ARENA)) {
+    return (TokenizerArenaUserdata *) lua_touserdata(L, -1);
+  }
+  lua_pop(L, 1);
+
+  TokenizerArenaUserdata *ud =
+    (TokenizerArenaUserdata *) lua_newuserdata(L, sizeof(TokenizerArenaUserdata));
+  memset(ud, 0, sizeof(*ud));
+  if (!arena_init(&ud->arena, initial_capacity)) {
+    lua_pop(L, 1);
+    return NULL;
+  }
+  ud->initialized = true;
+  luaL_setmetatable(L, API_TYPE_TOKENIZER_ARENA);
+  lua_pushlightuserdata(L, (void *) registry_key);
+  lua_pushvalue(L, -2);
+  lua_rawset(L, LUA_REGISTRYINDEX);
+  return ud;
+}
+
+static TokenizerArenaUserdata *tokenizer_push_runtime_arena(
+  lua_State *L,
+  const char *field_name,
+  const void *registry_key,
+  size_t initial_capacity
+) {
+  if (tokenizer_push_core_tokenizer(L)) {
+    lua_getfield(L, -1, field_name);
+    if (luaL_testudata(L, -1, API_TYPE_TOKENIZER_ARENA)) {
+      TokenizerArenaUserdata *ud = (TokenizerArenaUserdata *) lua_touserdata(L, -1);
+      lua_remove(L, -2);
+      return ud;
+    }
+    lua_pop(L, 1);
+
+    TokenizerArenaUserdata *ud =
+      (TokenizerArenaUserdata *) lua_newuserdata(L, sizeof(TokenizerArenaUserdata));
+    memset(ud, 0, sizeof(*ud));
+    if (!arena_init(&ud->arena, initial_capacity)) {
+      lua_pop(L, 2);
+      return NULL;
+    }
+    ud->initialized = true;
+    luaL_setmetatable(L, API_TYPE_TOKENIZER_ARENA);
+    lua_pushvalue(L, -1);
+    lua_setfield(L, -3, field_name);
+    lua_remove(L, -2);
+    return ud;
+  }
+
+  return tokenizer_push_registry_arena(L, registry_key, initial_capacity);
 }
 
 static void tokenizer_import_symbols(lua_State *L, int syntax_idx, TokenizerSyntax *syntax) {
@@ -1199,10 +1306,36 @@ static int f_tokenizer_tokenize(lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   TokenizerSyntax *incoming_syntax = tokenizer_get_syntax_cache(L, 1);
 
+  TokenizerArenaUserdata *text_arena = tokenizer_push_runtime_arena(
+    L,
+    TOKENIZER_TEXT_ARENA_FIELD,
+    &tokenizer_text_arena_key,
+    4096
+  );
+  if (!text_arena) {
+    return luaL_error(L, "failed to initialize tokenizer text arena");
+  }
+  arena_reset(&text_arena->arena);
+  lua_pop(L, 1);
+
+  TokenizerArenaUserdata *token_arena = tokenizer_push_runtime_arena(
+    L,
+    TOKENIZER_TOKEN_ARENA_FIELD,
+    &tokenizer_token_arena_key,
+    4096
+  );
+  if (!token_arena) {
+    return luaL_error(L, "failed to initialize tokenizer token arena");
+  }
+  arena_reset(&token_arena->arena);
+  lua_pop(L, 1);
+
   size_t text_len_bytes = 0;
   const char *text_value = luaL_checklstring(L, 2, &text_len_bytes);
   TokenizerText text;
-  tokenizer_text_init(&text, text_value, text_len_bytes);
+  if (!tokenizer_text_init(&text, &text_arena->arena, text_value, text_len_bytes)) {
+    return luaL_error(L, "failed to allocate tokenizer text offsets");
+  }
 
   TokenizerState state;
   tokenizer_state_init_from_lua(L, 3, &state, true);
@@ -1210,7 +1343,7 @@ static int f_tokenizer_tokenize(lua_State *L) {
   TokenizerTokenBuffer tokens;
 
   if (incoming_syntax->pattern_count == 0) {
-    tokenizer_token_buffer_init(L, &tokens);
+    tokenizer_token_buffer_init(&tokens, &token_arena->arena);
     tokenizer_token_buffer_append(
       &tokens,
       "normal",
@@ -1236,10 +1369,10 @@ static int f_tokenizer_tokenize(lua_State *L) {
     tokenizer_state_uninit(&state);
     tokenizer_state_init_from_lua(L, -1, &state, true);
     lua_pop(L, 1);
-    tokenizer_token_buffer_init(L, &tokens);
+    tokenizer_token_buffer_init(&tokens, &token_arena->arena);
     tokenizer_token_buffer_init_from_resume(L, &tokens, &text, res_idx);
   } else {
-    tokenizer_token_buffer_init(L, &tokens);
+    tokenizer_token_buffer_init(&tokens, &token_arena->arena);
   }
 
   TokenizerCursor cursor;
@@ -1426,6 +1559,11 @@ static int f_tokenizer_tokenize(lua_State *L) {
 int luaopen_tokenizer(lua_State *L) {
   luaL_newmetatable(L, API_TYPE_TOKENIZER_SYNTAX);
   lua_pushcfunction(L, tokenizer_syntax_gc);
+  lua_setfield(L, -2, "__gc");
+  lua_pop(L, 1);
+
+  luaL_newmetatable(L, API_TYPE_TOKENIZER_ARENA);
+  lua_pushcfunction(L, tokenizer_arena_gc);
   lua_setfield(L, -2, "__gc");
   lua_pop(L, 1);
 

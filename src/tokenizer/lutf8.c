@@ -922,6 +922,24 @@ static const char *pattern_matchbalance(MatchState *ms, const char *s, const cha
   }
   if (ch != begin) return NULL;
 
+  s = utf8_safe_decode(s, &ch);
+  if (!s) {
+    ms->errmsg = "invalid UTF-8 in string";
+    return NULL;
+  }
+
+  if (begin == end) {
+    while (s < ms->src_end) {
+      s = utf8_safe_decode(s, &ch);
+      if (!s) {
+        ms->errmsg = "invalid UTF-8 in string";
+        return NULL;
+      }
+      if (ch == end) return s;
+    }
+    return NULL;
+  }
+
   int cont = 1;
   while (s < ms->src_end) {
     s = utf8_safe_decode(s, &ch);
