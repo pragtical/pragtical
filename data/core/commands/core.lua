@@ -75,6 +75,8 @@ local function open_file(use_dialog, label, selection_callback)
       )
     end,
     validate = function(text)
+      -- strip double quotes in case the user pasted the path
+      text = text:gsub("^\"*(.-)\"*$", "%1", 1)
       filename = root_dir == core.root_project().path and
         core.root_project():absolute_path(
           common.home_expand(text)
