@@ -549,7 +549,7 @@ function tokenizer.each_token(t, scol)
 end
 
 
-tokenizer.set_use_native(config.enable_native_tokenizer)
+tokenizer.set_use_native(config.native_tokenizer)
 
 
 return tokenizer

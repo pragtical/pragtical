@@ -12,14 +12,14 @@ end
 
 test.describe("tokenizer", function()
   test.test("toggles the native module while keeping each_token", function()
-    local original = config.enable_native_tokenizer
+    local original = config.native_tokenizer
     local syntax = {
       patterns = {
         { pattern = "%d+", type = "number" }
       },
       symbols = {}
     }
-    config.enable_native_tokenizer = true
+    config.native_tokenizer = true
     test.ok(tokenizer.set_use_native(true))
     test.equal(tokenizer.is_using_native(), true)
     tokenizer.tokenize(syntax, "123", string.char(0))
@@ -31,7 +31,7 @@ test.describe("tokenizer", function()
     test.equal(tokenizer._tokenizer_native_token_arena, nil)
     tokenizer.set_use_native(true)
     test.equal(tokenizer.is_using_native(), true)
-    config.enable_native_tokenizer = original
+    config.native_tokenizer = original
     tokenizer.set_use_native(original ~= false)
     test.type(tokenizer.each_token, "function")
   end)

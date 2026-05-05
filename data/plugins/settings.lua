@@ -803,7 +803,7 @@ settings.add("Development",
     {
       label = "Native Tokenizer",
       description = "Provides up to 24X better performance, disable if working with Lua based one.",
-      path = "enable_native_tokenizer",
+      path = "native_tokenizer",
       type = settings.type.TOGGLE,
       default = true,
       on_apply = function(enabled)

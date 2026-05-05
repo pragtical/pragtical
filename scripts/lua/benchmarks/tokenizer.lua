@@ -17,7 +17,7 @@ local function load_lua_tokenizer()
     end
     if name == "core.config" then
       local config = copy_table(require(name))
-      config.enable_native_tokenizer = false
+      config.native_tokenizer = false
       return config
     end
     return require(name)

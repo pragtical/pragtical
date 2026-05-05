@@ -121,7 +121,7 @@ config.symbol_pattern = "[%a_][%w_]*"
 ---
 ---Defaults to true.
 ---@type boolean
-config.enable_native_tokenizer = true
+config.native_tokenizer = true
 
 ---A list of characters that delimits a word.
 ---
