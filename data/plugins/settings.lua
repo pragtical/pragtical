@@ -2048,8 +2048,8 @@ function Settings:setup_about()
   ---@type widget.button
   local button = Button(self.about, "Visit Website")
   button:set_icon("G")
-  button:set_tooltip("Open https://pragtical.dev/")
-  function button:on_click() common.open_in_system("https://pragtical.dev/") end
+  button:set_tooltip("Open Pragtical Website", "core:view-website")
+  function button:on_click() command.perform "core:view-website" end
 
   ---@type widget.listbox
   local contributors = ListBox(self.about)
@@ -2062,6 +2062,14 @@ function Settings:setup_about()
 local contributors_list = {
   { "Rxi", "Lite Founder", "https://github.com/rxi" },
   { "Francesco Abbate", "Lite XL Founder", "https://github.com/franko" },
+  { "jgmdev", "Pragtical Founder, Core, Plugins", "https://github.com/jgmdev" },
+  { "AmerM137", "Pragtical Contributor, Colors, Ninja", "https://github.com/AmerM137" },
+  { "juliardi",	"Pragtical Contributor, Evangelist", "https://github.com/juliardi" },
+  { "Walkero", "Pragtical Amiga Port, Tests", "https://github.com/walkero-gr" },
+  { "Jan", "Pragtical Contributor", "https://github.com/Jan200101" },
+  { "tacf", "Pragtical Contributor", "https://github.com/tacf" },
+  { "detomastah", "Pragtical Contributor", "https://github.com/detomastah" },
+  { "acook", "Pragtical Contributor", "https://github.com/acook" },
   { "Adam Harrison", "Core", "https://github.com/adamharrison" },
   { "Andrea Zanellato", "CI, Website", "https://github.com/redtide" },
   { "Björn Buckwalter", "MacOS Support", "https://github.com/bjornbm" },
@@ -2072,9 +2080,7 @@ local contributors_list = {
   { "Dheisom Gomes", "Contributor", "https://github.com/dheisom" },
   { "Evgeny Petrovskiy", "Contributor", "https://github.com/eugenpt" },
   { "Ferdinand Prantl", "Contributor", "https://github.com/prantlf" },
-  { "Jan", "Build System", "https://github.com/Jan200101" },
   { "Janis-Leuenberger", "MacOS Support", "https://github.com/Janis-Leuenberger" },
-  { "Jefferson", "Contributor", "https://github.com/jgmdev" },
   { "Jipok", "Contributor", "https://github.com/Jipok" },
   { "Joshua Minor", "Contributor", "https://github.com/jminor" },
   { "George Linkovsky", "Contributor", "https://github.com/Timofffee" },
