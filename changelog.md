@@ -1,5 +1,39 @@
 # Changes Log
 
+## [3.9.0] - 2026-05-05
+
+### New Features
+
+* Native tokenizer implementation
+  ([#467](https://github.com/pragtical/pragtical/pull/467))
+
+### Fixes
+
+* drawwhitespace plugin: properly handle nil selections
+  ([#463](https://github.com/pragtical/pragtical/pull/463))
+
+* Ensure first update ran on views before draw
+  ([#469](https://github.com/pragtical/pragtical/pull/469))
+
+### Enhancements
+
+* Add testing framework and initial set of tests
+  ([#465](https://github.com/pragtical/pragtical/pull/465))
+
+* Compatible rewrite of shmem
+  ([#466](https://github.com/pragtical/pragtical/pull/466))
+
+* Trim double quotes from path on core:open-file
+  ([#470](https://github.com/pragtical/pragtical/pull/470))
+
+### Build System
+
+* Fix PPM not packaging into generated DMG's for mac
+  ([#464](https://github.com/pragtical/pragtical/pull/464))
+
+* Change meson cross files to ini added zig conf
+  ([#471](https://github.com/pragtical/pragtical/pull/471))
+
 ## [3.8.7] - 2026-04-24
 
 ### Fixes
@@ -3240,6 +3274,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.9.0]: https://github.com/pragtical/pragtical/releases/tag/v3.9.0
 [3.8.7]: https://github.com/pragtical/pragtical/releases/tag/v3.8.7
 [3.8.6]: https://github.com/pragtical/pragtical/releases/tag/v3.8.6
 [3.8.5]: https://github.com/pragtical/pragtical/releases/tag/v3.8.5

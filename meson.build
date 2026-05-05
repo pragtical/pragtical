@@ -1,6 +1,6 @@
 project('pragtical',
     ['c', 'cpp'],
-    version : '3.8.7',
+    version : '3.9.0',
     license : 'MIT',
     meson_version : '>= 0.63',
     default_options : [
@@ -243,12 +243,8 @@ if not get_option('source-only')
         })
 
         if host_machine.system() == 'windows'
-            # Force LIBICONV because detection seems to fail on msys2
-            if cc.find_library('iconv', required: false).found()
-                sdl_options.add_cmake_defines({
-                    'HAVE_ICONV': '1', 'HAVE_LIBICONV': '1'
-                })
-            else
+            # warn about the implications of missing iconv
+            if not cc.find_library('iconv', required: false).found()
                 warning('LIBICONV not found, various encoding conversions may fail')
             endif
         endif
