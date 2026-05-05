@@ -349,4 +349,12 @@ command.add(nil, {
       end
     })
   end,
+
+  ["core:view-documentation-help"] = function()
+    common.open_in_system("https://pragtical.dev/docs/intro")
+  end,
+
+  ["core:view-website"] = function()
+    common.open_in_system("https://pragtical.dev")
+  end,
 })

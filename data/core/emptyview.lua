@@ -92,16 +92,16 @@ function EmptyView:new()
 
   self.website = Button(self.center_container, "Website")
   self.website:set_icon("G")
-  self.website:set_tooltip("Visit the editor website")
+  self.website:set_tooltip("Visit the editor website", "core:view-website")
   self.website.on_click = function(_, pressed)
-    common.open_in_system("https://pragtical.dev")
+    command.perform "core:view-website"
   end
 
   self.docs = Button(self.center_container, "Documentation")
   self.docs:set_icon("?")
-  self.docs:set_tooltip("Visit the editor documentation")
+  self.docs:set_tooltip("Visit the editor documentation", "core:view-documentation-help")
   self.docs.on_click = function(_, pressed)
-    common.open_in_system("https://pragtical.dev/docs/intro")
+    command.perform "core:view-documentation-help"
   end
 
   self.first_update = true
