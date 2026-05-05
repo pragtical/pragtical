@@ -4,7 +4,7 @@ This folder contains resources that is used for building or packaging the projec
 
 ### Build
 
-- `cross/*.txt`: Meson [cross files][1] for cross-compiling pragtical on other platforms.
+- `cross/*.ini`: Meson [cross files][1] for cross-compiling pragtical on other platforms.
 
 ### Packaging
 
