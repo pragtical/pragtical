@@ -5,6 +5,7 @@ local common = require "core.common"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local style = require "core.style"
+local tokenizer = require "core.tokenizer"
 local View = require "core.view"
 local DocView = require "core.docview"
 
@@ -798,6 +799,22 @@ settings.add("Development",
       path = "log_slow_threads",
       type = settings.type.TOGGLE,
       default = false
+    },
+    {
+      label = "Native Tokenizer",
+      description = "Provides up to 24X better performance, disable if working with Lua based one.",
+      path = "native_tokenizer",
+      type = settings.type.TOGGLE,
+      default = true,
+      on_apply = function(enabled)
+        tokenizer.set_use_native(enabled)
+        tokenizer.clear_native_cache()
+        for _, doc in ipairs(core.docs) do
+          doc.highlighter:soft_reset()
+          doc:clear_cache(1, #doc.lines - 1)
+        end
+        core.redraw = true
+      end
     },
     {
       label = "Draw Stats",

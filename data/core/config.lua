@@ -117,6 +117,12 @@ config.ignore_files = {
 ---@type string
 config.symbol_pattern = "[%a_][%w_]*"
 
+---Enable the native tokenizer when available.
+---
+---Defaults to true.
+---@type boolean
+config.native_tokenizer = true
+
 ---A list of characters that delimits a word.
 ---
 ---The default is ``" \t\n/\\()\"':,.;<>~!@#$%^&*|+=[]{}`?-"``

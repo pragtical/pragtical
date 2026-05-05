@@ -12,6 +12,7 @@ int luaopen_utf8extra(lua_State* L);
 int luaopen_encoding(lua_State* L);
 int luaopen_diff(lua_State *L);
 int luaopen_canvas(lua_State* L);
+int luaopen_tokenizer(lua_State *L);
 
 #ifdef PRAGTICAL_REPL_HISTORY
   #define LUA_REPL { "repl",  luaopen_linenoise  },
@@ -54,6 +55,7 @@ static const luaL_Reg libs[] = {
   { "shmem",      luaopen_shmem      },
   { "diff",       luaopen_diff       },
   { "canvas",     luaopen_canvas     },
+  { "tokenizer",  luaopen_tokenizer  },
   LUA_REPL
   LUA53_COMPATIBILITY
   { NULL, NULL }
