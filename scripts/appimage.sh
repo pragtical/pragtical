@@ -163,7 +163,7 @@ main() {
   cross="${cross:-$CROSS_ARCH}"
   if [[ -n "$cross" ]]; then
     arch="${cross_arch}"
-    cross_file=("--cross-file" "resources/cross/linux-${arch}.txt")
+    cross_file=("--cross-file" "resources/cross/linux-${arch}.ini")
     # check if required cross-compile tools installed
     if ! which "$arch-linux-gnu-gcc" > /dev/null; then
       echo "Cross-compiler for '$arch' not found, please install '$arch-linux-gnu-gcc'"

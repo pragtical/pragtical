@@ -155,7 +155,7 @@ main() {
     fi
     platform="${cross_platform:-$platform}"
     arch="${cross_arch:-$arch}"
-    cross_file=("--cross-file" "${cross_file:-resources/cross/$platform-$arch.txt}")
+    cross_file=("--cross-file" "${cross_file:-resources/cross/$platform-$arch.ini}")
     # reload build_dir because platform and arch might change
     build_dir="$(get_default_build_dir "$platform" "$arch")"
   fi
