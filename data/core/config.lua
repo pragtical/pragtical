@@ -33,6 +33,20 @@ config.draw_stats = false
 ---@type "grid" | "solid" | "none"
 config.images_background_mode = "grid"
 
+---@alias config.markdownpreviewmode
+---| "right"
+---| "newtab"
+---| "bottom"
+---| "top"
+---| "left"
+
+---How markdown previews opened by `markdown-view:preview` should be placed
+---relative to the current document.
+---
+---Defaults to "right".
+---@type config.markdownpreviewmode
+config.markdown_preview_mode = "right"
+
 ---The color used for the background of transparent images when the
 ---background mode is set to solid.
 ---

@@ -15,6 +15,7 @@ local CommandView
 local NagView
 local DocView
 local ImageView
+local MarkdownView
 local Doc
 local Project
 
@@ -359,6 +360,7 @@ function core.init()
   Project = require "core.project"
   DocView = require "core.docview"
   ImageView = require "core.imageview"
+  MarkdownView = require "core.markdownview"
   Doc = require "core.doc"
 
   -- apply to default color scheme
@@ -1223,6 +1225,33 @@ function core.open_image(filename)
         view.errmsg and " Error: " .. view.errmsg or ""
       )
     end
+  end
+end
+
+
+---@param filename string
+---@return core.markdownview? markdown_view
+function core.open_markdown(filename)
+  ---@cast MarkdownView core.markdownview
+  if MarkdownView.is_supported(filename) then
+    local file = io.open(filename)
+    if not file then
+      return false
+    end
+    file:close()
+
+    local node = core.root_view:get_active_node_default()
+    for i, view in ipairs(node.views) do
+      if view.path == filename then
+        node:set_active_view(node.views[i])
+        return view
+      end
+    end
+
+    local view = MarkdownView(filename)
+    node:add_view(view)
+    core.root_view.root_node:update_layout()
+    return view
   end
 end
 

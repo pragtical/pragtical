@@ -1,7 +1,10 @@
 -- mod-version:3
+local core = require "core"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local ContextMenu = require "core.contextmenu"
+local DocView = require "core.docview"
+local MarkdownView = require "core.markdownview"
 local RootView = require "core.rootview"
 local config = require "core.config"
 
@@ -32,9 +35,12 @@ function RootView:draw(...)
   menu:draw()
 end
 
-command.add("core.docview!", {
-  ["context:show"] = function(dv)
-    menu:show(dv.position.x, dv.position.y)
+command.add(function()
+  local view = core.active_view
+  return view and (view:extends(DocView) or view:extends(MarkdownView)), view
+end, {
+  ["context:show"] = function(view)
+    menu:show(view.position.x, view.position.y)
   end
 })
 
@@ -67,6 +73,8 @@ local cmds = {
   { text = "Copy",    command = "doc:copy" },
   { text = "Paste",   command = "doc:paste" },
   ContextMenu.DIVIDER,
+  { text = "Preview Markdown", command = "markdown-view:preview" },
+  ContextMenu.DIVIDER,
   { text = "Find",    command = "find-replace:find"    },
   { text = "Replace", command = "find-replace:replace" }
 }
@@ -79,6 +87,10 @@ if config.plugins.scale ~= false and require("plugins.scale") then
 end
 
 menu:register("core.docview", cmds)
+
+menu:register("core.markdownview", {
+  { text = "View Raw", command = "markdown-view:view-raw" }
+})
 
 
 return menu

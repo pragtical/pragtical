@@ -1,0 +1,1482 @@
+local common = require "core.common"
+local core = require "core"
+local command = require "core.command"
+local config = require "core.config"
+local http = require "core.http"
+local style = require "core.style"
+local test = require "core.test"
+local DocView = require "core.docview"
+local MarkdownView = require "core.markdownview"
+
+local temp_root
+local project_temp_root
+
+local function write_file(path, content)
+  local file, err = io.open(path, "wb")
+  test.not_nil(file, err)
+  file:write(content)
+  file:close()
+end
+
+local function path_belongs_to_root(path, root)
+  if not (path and root) then
+    return false
+  end
+  path = common.normalize_path(path)
+  root = common.normalize_path(root)
+  return path == root or common.path_belongs_to(path, root)
+end
+
+local function path_is_in_test_roots(context, path)
+  return path and (
+    path_belongs_to_root(path, context.temp_root)
+    or path_belongs_to_root(path, context.project_temp_root)
+  )
+end
+
+local function close_test_views_and_docs(context)
+  local views = core.root_view.root_node:get_children()
+  for i = #views, 1, -1 do
+    local view = views[i]
+    local path = view.path or (view.doc and view.doc.abs_filename)
+    if path_is_in_test_roots(context, path) then
+      local node = core.root_view.root_node:get_node_for_view(view)
+      if node then
+        if view:extends(DocView) and view.doc:is_dirty() then
+          view.doc:clean()
+        end
+        node:remove_view(core.root_view.root_node, view)
+      end
+    end
+  end
+
+  for i = #core.docs, 1, -1 do
+    local doc = core.docs[i]
+    if path_is_in_test_roots(context, doc.abs_filename) then
+      table.remove(core.docs, i)
+      doc:on_close()
+    end
+  end
+end
+
+local function remove_test_path(path)
+  local ok, err
+  for _ = 1, 20 do
+    if not system.get_file_info(path) then
+      return true
+    end
+    collectgarbage("collect")
+    ok, err = common.rm(path, true)
+    if ok or not system.get_file_info(path) then
+      return true
+    end
+    system.sleep(0.05)
+  end
+  return false, err
+end
+
+test.describe("markdownview", function()
+  test.before_each(function(context)
+    temp_root = USERDIR
+      .. PATHSEP .. "markdownview-tests-"
+      .. system.get_process_id() .. "-"
+      .. math.floor(system.get_time() * 1000000)
+    local ok, err = common.mkdirp(temp_root)
+    test.ok(ok, err)
+    context.temp_root = temp_root
+
+    project_temp_root = core.root_project().path
+      .. PATHSEP .. "markdownview-tests-"
+      .. system.get_process_id() .. "-"
+      .. math.floor(system.get_time() * 1000000)
+    ok, err = common.mkdirp(project_temp_root)
+    test.ok(ok, err)
+    context.project_temp_root = project_temp_root
+  end)
+
+  test.after_each(function(context)
+    close_test_views_and_docs(context)
+    if PLATFORM ~= "Windows" then
+      if context.temp_root and system.get_file_info(context.temp_root) then
+        local ok, err = remove_test_path(context.temp_root)
+        test.ok(ok, err)
+      end
+      if context.project_temp_root and system.get_file_info(context.project_temp_root) then
+        local ok, err = remove_test_path(context.project_temp_root)
+        test.ok(ok, err)
+      end
+    end
+  end)
+
+  test.test("parses the supported markdown blocks", function()
+    test.ok(MarkdownView.is_supported("README.md"))
+    test.ok(MarkdownView.is_supported("README.markdown"))
+    test.not_ok(MarkdownView.is_supported("README.txt"))
+
+    local blocks = MarkdownView.parse_blocks([[
+# Heading
+
+Paragraph with **bold**, *italic*, [link](https://example.com) and `code`.
+
+- first item
+- second item
+
+> quoted text
+
+---
+
+```lua
+print("hello")
+```
+]])
+
+    test.equal(#blocks, 6)
+    test.equal(blocks[1].type, "heading")
+    test.equal(blocks[1].level, 1)
+    test.equal(blocks[2].type, "paragraph")
+    test.equal(blocks[3].type, "unordered_list")
+    test.equal(#blocks[3].items, 2)
+    test.equal(blocks[4].type, "quote")
+    test.equal(blocks[5].type, "rule")
+    test.equal(blocks[6].type, "code")
+    test.equal(blocks[6].info, "lua")
+    test.equal(blocks[6].lines[1], 'print("hello")')
+  end)
+
+  test.test("parses task list items", function()
+    local blocks = MarkdownView.parse_blocks([[
+- [ ] Open task
+- [x] Done task
+]])
+
+    test.equal(#blocks, 1)
+    test.equal(blocks[1].type, "unordered_list")
+    test.equal(#blocks[1].items, 2)
+    test.equal(blocks[1].items[1].checked, false)
+    test.equal(blocks[1].items[1].text, "Open task")
+    test.equal(blocks[1].items[2].checked, true)
+    test.equal(blocks[1].items[2].text, "Done task")
+  end)
+
+  test.test("parses nested list indentation", function()
+    local blocks = MarkdownView.parse_blocks([[
+- Parent
+  - Child
+    - Grandchild
+- Sibling
+]])
+
+    test.equal(#blocks, 1)
+    test.equal(blocks[1].type, "unordered_list")
+    test.equal(blocks[1].items[1].nesting, 0)
+    test.equal(blocks[1].items[2].nesting, 0)
+    test.equal(blocks[1].items[1].blocks[2].type, "unordered_list")
+    test.equal(blocks[1].items[1].blocks[2].items[1].text, "Child")
+    test.equal(blocks[1].items[1].blocks[2].items[1].blocks[2].type, "unordered_list")
+    test.equal(blocks[1].items[1].blocks[2].items[1].blocks[2].items[1].text, "Grandchild")
+  end)
+
+  test.test("parses nested list items after marker-aligned continuation indent", function()
+    local blocks = MarkdownView.parse_blocks([[
+*   Parent
+
+    *   Child
+    *   Sibling
+]])
+
+    test.equal(#blocks, 1)
+    test.equal(blocks[1].type, "unordered_list")
+    test.equal(blocks[1].items[1].blocks[2].type, "unordered_list")
+    test.equal(blocks[1].items[1].blocks[2].items[1].text, "Child")
+    test.equal(blocks[1].items[1].blocks[2].items[2].text, "Sibling")
+  end)
+
+  test.test("parses indented code blocks", function()
+    local blocks = MarkdownView.parse_blocks([[
+Paragraph
+
+    local x = 1
+    print(x)
+]])
+
+    test.equal(#blocks, 2)
+    test.equal(blocks[1].type, "paragraph")
+    test.equal(blocks[2].type, "code")
+    test.equal(blocks[2].lines[1], "local x = 1")
+    test.equal(blocks[2].lines[2], "print(x)")
+  end)
+
+  test.test("parses definition lists", function()
+    local blocks = MarkdownView.parse_blocks([[
+Term
+: first line
+  second line
+]])
+
+    test.equal(#blocks, 1)
+    test.equal(blocks[1].type, "definition_list")
+    test.equal(#blocks[1].items, 1)
+    test.equal(blocks[1].items[1].term, "Term")
+    test.equal(blocks[1].items[1].definitions[1].blocks[1].type, "paragraph")
+    test.equal(blocks[1].items[1].definitions[1].blocks[1].text, "first line second line")
+  end)
+
+  test.test("parses nested blockquotes", function()
+    local blocks = MarkdownView.parse_blocks([[
+> Parent
+> > Child
+]])
+
+    test.equal(#blocks, 1)
+    test.equal(blocks[1].type, "quote")
+    test.equal(blocks[1].blocks[1].type, "paragraph")
+    test.equal(blocks[1].blocks[1].text, "Parent")
+    test.equal(blocks[1].blocks[2].type, "quote")
+    test.equal(blocks[1].blocks[2].blocks[1].text, "Child")
+  end)
+
+  test.test("parses setext headings", function()
+    local blocks = MarkdownView.parse_blocks([[
+Heading One
+===================
+
+Heading Two
+-------------
+]])
+
+    test.equal(#blocks, 2)
+    test.equal(blocks[1].type, "heading")
+    test.equal(blocks[1].level, 1)
+    test.equal(blocks[1].text, "Heading One")
+    test.equal(blocks[2].type, "heading")
+    test.equal(blocks[2].level, 2)
+    test.equal(blocks[2].text, "Heading Two")
+  end)
+
+  test.test("skips html comments", function()
+    local blocks = MarkdownView.parse_blocks([[
+<!--                DO NOT EDIT THIS FILE MANUALLY                -->
+# Heading
+<!--
+multi-line
+comment
+-->
+Paragraph text.
+]])
+
+    test.equal(#blocks, 2)
+    test.equal(blocks[1].type, "heading")
+    test.equal(blocks[1].text, "Heading")
+    test.equal(blocks[2].type, "paragraph")
+    test.equal(blocks[2].text, "Paragraph text.")
+  end)
+
+  test.test("renders layout and restores file-backed state", function(context)
+    local path = context.temp_root .. PATHSEP .. "sample.md"
+    write_file(path, "# Title\n\nParagraph with `inline code`.\n")
+
+    local view = MarkdownView(path)
+    view.size.x = 420
+    view.size.y = 240
+
+    test.equal(view:get_name(), "sample.md Preview")
+    test.ok(view:get_scrollable_size() > 0)
+    test.ok(view:get_h_scrollable_size() > 0)
+
+    local state = view:get_state()
+    test.not_nil(state)
+    test.equal(state.path, path)
+
+    local restored = MarkdownView.from_state(state)
+    test.not_nil(restored)
+    restored.size.x = 420
+    restored.size.y = 240
+    test.equal(restored:get_name(), "sample.md Preview")
+    test.ok(restored:get_scrollable_size() > 0)
+  end)
+
+  test.test("syntax-colors fenced code blocks", function()
+    local view = MarkdownView([[
+```lua
+local lua_var = 1
+```
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local code_line
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" and command.tabbed then
+        code_line = command
+        break
+      end
+    end
+
+    test.not_nil(code_line)
+    local colors_by_text = {}
+    for _, fragment in ipairs(code_line.fragments) do
+      local text = fragment.text:match("^%s*(.-)%s*$")
+      if text ~= "" then
+        colors_by_text[text] = fragment.color
+      end
+    end
+
+    test.equal(MarkdownView.resolve_color(colors_by_text["local"]), style.syntax["keyword"])
+    test.equal(MarkdownView.resolve_color(colors_by_text["lua_var"]), style.syntax["normal"])
+    test.equal(MarkdownView.resolve_color(colors_by_text["="]), style.syntax["operator"])
+    test.equal(MarkdownView.resolve_color(colors_by_text["1"]), style.syntax["number"])
+  end)
+
+  test.test("uses updated style colors without rebuilding layout", function()
+    local view = MarkdownView("plain `code` [link](https://example.com)")
+    view.size.x = 420
+    view.size.y = 240
+    view.position.x = 0
+    view.position.y = 0
+    view:ensure_layout()
+
+    local original_text = style.text
+    local original_background2 = style.background2
+    local original_link = style.syntax["function"]
+    local new_text = { 10, 20, 30, 255 }
+    local new_background2 = { 40, 50, 60, 255 }
+    local new_link = { 70, 80, 90, 255 }
+    local captured_text_colors = {}
+    local captured_rect_colors = {}
+    local original_draw_text = renderer.draw_text
+    local original_draw_rect = renderer.draw_rect
+    local original_push_clip_rect = core.push_clip_rect
+    local original_pop_clip_rect = core.pop_clip_rect
+
+    style.text = new_text
+    style.background2 = new_background2
+    style.syntax["function"] = new_link
+    view.draw_background = function() end
+    view.draw_scrollbar = function() end
+    core.push_clip_rect = function() end
+    core.pop_clip_rect = function() end
+    renderer.draw_rect = function(_, _, _, _, color)
+      captured_rect_colors[#captured_rect_colors + 1] = color
+    end
+    renderer.draw_text = function(font, text, x, y, color, opts)
+      captured_text_colors[text] = color
+      return x + font:get_width(text, opts)
+    end
+
+    view:draw()
+
+    renderer.draw_text = original_draw_text
+    renderer.draw_rect = original_draw_rect
+    core.push_clip_rect = original_push_clip_rect
+    core.pop_clip_rect = original_pop_clip_rect
+    style.text = original_text
+    style.background2 = original_background2
+    style.syntax["function"] = original_link
+
+    test.equal(captured_text_colors["plain"], new_text)
+    test.equal(captured_text_colors["code"], new_text)
+    test.equal(captured_text_colors["link"], new_link)
+    test.ok(#captured_rect_colors > 0)
+    test.equal(captured_rect_colors[1], new_background2)
+  end)
+
+  test.test("renders strikethrough text", function()
+    local view = MarkdownView("~~gone~~ and ~~[linked](https://example.com)~~")
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local plain_fragment
+    local linked_fragment
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.text == "gone" then
+            plain_fragment = fragment
+          elseif fragment.url == "https://example.com" then
+            linked_fragment = fragment
+          end
+        end
+      end
+    end
+
+    test.not_nil(plain_fragment)
+    test.not_nil(linked_fragment)
+    test.equal(plain_fragment.font, view:get_font_cache().body.strikethrough)
+    test.equal(linked_fragment.font, view:get_font_cache().body.strikethrough)
+  end)
+
+  test.test("treats single tilde as plain text", function()
+    local view = MarkdownView("single ~ tilde")
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local found_tilde
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.text:find("~", 1, true) then
+            found_tilde = true
+          end
+        end
+      end
+    end
+
+    test.ok(found_tilde)
+  end)
+
+  test.test("treats lone exclamation as plain text", function()
+    local view = MarkdownView("Install and profit!")
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local found_exclamation
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.text:find("!", 1, true) then
+            found_exclamation = true
+          end
+        end
+      end
+    end
+
+    test.ok(found_exclamation)
+  end)
+
+  test.test("treats trailing backslash as plain text", function()
+    local view = MarkdownView("ends with slash\\")
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local found_backslash
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.text:find("\\", 1, true) then
+            found_backslash = true
+          end
+        end
+      end
+    end
+
+    test.ok(found_backslash)
+  end)
+
+  test.test("parses markdown tables", function()
+    local blocks = MarkdownView.parse_blocks([[
+| Plugin | Description |
+| --- | --- |
+| [`ppm`](plugins/ppm.lua?raw=1) | Plugin manager. |
+| [`linter`](plugins/linter.lua?raw=1) | Reports diagnostics in the editor. |
+]])
+
+    test.equal(#blocks, 1)
+    test.equal(blocks[1].type, "table")
+    test.equal(#blocks[1].headers, 2)
+    test.equal(#blocks[1].rows, 2)
+    test.equal(blocks[1].headers[1].text, "Plugin")
+    test.equal(blocks[1].rows[1][1].text, "[`ppm`](plugins/ppm.lua?raw=1)")
+  end)
+
+  test.test("renders markdown tables with cell links", function()
+    local view = MarkdownView([[
+| Plugin | Description |
+| --- | --- |
+| [`ppm`](plugins/ppm.lua?raw=1) | Plugin manager with [docs](https://example.com/docs). |
+| [`linter`](plugins/linter.lua?raw=1) | Reports diagnostics in the editor. |
+]])
+    view.size.x = 640
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local urls = {}
+    for _, command in ipairs(layout.commands) do
+      if command.links then
+        for _, link in ipairs(command.links) do
+          urls[#urls + 1] = link.url
+        end
+      end
+    end
+
+    test.same(urls, {
+      "plugins/ppm.lua?raw=1",
+      "https://example.com/docs",
+      "plugins/linter.lua?raw=1"
+    })
+    test.ok(layout.content_width > 0)
+    test.ok(view:get_scrollable_size() > 0)
+  end)
+
+  test.test("renders task list markers as checkboxes", function()
+    local view = MarkdownView([[
+- [ ] Open task
+- [x] Done task
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local markers = {}
+    for _, command in ipairs(layout.commands) do
+      if command.type == "checkbox" then
+        markers[#markers + 1] = {
+          checked = command.checked,
+          width = command.width,
+          height = command.height
+        }
+      end
+    end
+
+    test.equal(#markers, 2)
+    test.equal(markers[1].checked, false)
+    test.equal(markers[2].checked, true)
+    test.equal(markers[1].width, markers[2].width)
+    test.equal(markers[1].height, markers[2].height)
+  end)
+
+  test.test("renders nested list items with increasing indent", function()
+    local view = MarkdownView([[
+- [ ] Parent
+  - [x] Child
+    - [ ] Grandchild
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local xs = {}
+    for _, command in ipairs(layout.commands) do
+      if command.type == "checkbox" then
+        xs[#xs + 1] = command.x
+      end
+    end
+
+    table.sort(xs)
+    test.equal(#xs, 3)
+    test.ok(xs[2] > xs[1])
+    test.ok(xs[3] > xs[2])
+  end)
+
+  test.test("renders nested bullets instead of indented code for marker-aligned children", function()
+    local view = MarkdownView([[
+*   Parent
+
+    *   Linux path
+    *   Windows path
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local bullets = {}
+    local code_lines = 0
+    for _, command in ipairs(view:ensure_layout().commands) do
+      if command.type == "text" and command.fragments[1] then
+        if command.fragments[1].text == "\226\128\162" then
+          bullets[#bullets + 1] = command.x
+        end
+        if command.tabbed then
+          code_lines = code_lines + 1
+        end
+      end
+    end
+
+    table.sort(bullets)
+    test.equal(#bullets, 3)
+    test.ok(bullets[2] > bullets[1])
+    test.equal(code_lines, 0)
+  end)
+
+  test.test("renders hard line breaks as separate lines", function()
+    local view = MarkdownView([[
+First line  
+Second line
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local text_commands = {}
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        text_commands[#text_commands + 1] = command
+      end
+    end
+
+    test.ok(#text_commands >= 2)
+    test.ok(text_commands[2].y > text_commands[1].y)
+  end)
+
+  test.test("renders inline images inside paragraphs", function(context)
+    local image_path = context.project_temp_root .. PATHSEP .. "icon.png"
+    local source_path = context.project_temp_root .. PATHSEP .. "inline-image.md"
+    write_file(image_path, "not-a-real-png")
+    write_file(source_path, "Start ![Icon](icon.png) end\n")
+
+    local original_load_image = canvas.load_image
+    local loaded_path
+    canvas.load_image = function(path)
+      loaded_path = path
+      return {
+        get_size = function()
+          return 64, 32
+        end,
+        scaled = function(_, width, height)
+          return {
+            get_size = function()
+              return width, height
+            end
+          }
+        end
+      }
+    end
+
+    local view = MarkdownView(source_path)
+    view.size.x = 420
+    view.size.y = 240
+    local layout = view:ensure_layout()
+    canvas.load_image = original_load_image
+
+    local inline_image
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.type == "image" then
+            inline_image = fragment
+          end
+        end
+      end
+    end
+
+    test.equal(loaded_path, image_path)
+    test.not_nil(inline_image)
+    test.ok(inline_image.width > 0)
+    test.ok(inline_image.height > 0)
+  end)
+
+  test.test("supports multi-backtick code spans and link titles", function()
+    local view = MarkdownView("``code ` span`` and [link](https://example.com/a_(b) \"Title\")")
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local code_texts = {}
+    local link_fragment
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.font == view:get_font_cache().body.code then
+            code_texts[#code_texts + 1] = fragment.text
+          elseif fragment.url == "https://example.com/a_(b)" then
+            link_fragment = fragment
+          end
+        end
+      end
+    end
+
+    test.same(code_texts, { "code ` span" })
+    test.not_nil(link_fragment)
+  end)
+
+  test.test("keeps inline code spans as a single wrapped fragment", function()
+    local view = MarkdownView('* 32 bit: `cmake -G "Visual Studio 12 2013" -DCMAKE_BUILD_TYPE=Release ..`')
+    view.size.x = 420
+    view.size.y = 240
+
+    local code_fragments = {}
+    for _, command in ipairs(view:ensure_layout().commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.font == view:get_font_cache().body.code then
+            code_fragments[#code_fragments + 1] = fragment.text
+          end
+        end
+      end
+    end
+
+    test.same(code_fragments, {
+      'cmake -G "Visual Studio 12 2013" -DCMAKE_BUILD_TYPE=Release ..'
+    })
+  end)
+
+  test.test("resolves inline links split across soft line breaks", function()
+    local view = MarkdownView([[
+- the [Mbed TLS mailing-list
+  archives](https://lists.trustedfirmware.org/archives/list/mbed-tls@lists.trustedfirmware.org/).
+]])
+    view.size.x = 640
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local found
+    for _, command in ipairs(layout.commands) do
+      if command.links then
+        for _, link in ipairs(command.links) do
+          if link.url == "https://lists.trustedfirmware.org/archives/list/mbed-tls@lists.trustedfirmware.org/" then
+            found = true
+          end
+        end
+      end
+    end
+
+    test.ok(found)
+  end)
+
+  test.test("resolves bare URLs after intraword underscores", function()
+    local view = MarkdownView("The API can be found in SDL_net.h and online at https://wiki.libsdl.org/SDL3_net")
+    view.size.x = 640
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local found
+    local saw_filename
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.text:find("SDL_net%.h") then
+            saw_filename = true
+          end
+        end
+      end
+      if command.links then
+        for _, link in ipairs(command.links) do
+          if link.url == "https://wiki.libsdl.org/SDL3_net" then
+            found = true
+          end
+        end
+      end
+    end
+
+    test.ok(saw_filename)
+    test.ok(found)
+  end)
+
+  test.test("renders table alignment markers", function()
+    local view = MarkdownView([[
+| Left | Right |
+| :--- | ---: |
+| a | b |
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local positions = {}
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        local text = command.fragments[1] and command.fragments[1].text
+        if text == "a" or text == "b" then
+          positions[text] = command.x
+        end
+      end
+    end
+
+    test.not_nil(positions["a"])
+    test.not_nil(positions["b"])
+    test.ok(positions["b"] > positions["a"])
+  end)
+
+  test.test("renders footnote references and anchors", function()
+    local view = MarkdownView([[
+Text with a footnote.[^note]
+
+[^note]: Footnote body
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local found_ref
+    for _, command in ipairs(layout.commands) do
+      if command.links then
+        for _, link in ipairs(command.links) do
+          if link.url == "#footnote-note" then
+            found_ref = link
+          end
+        end
+      end
+    end
+
+    test.not_nil(found_ref)
+    test.not_nil(layout.anchors["footnote-note"])
+    view:open_link("#footnote-note")
+    test.equal(view.scroll.to.y, layout.anchors["footnote-note"])
+  end)
+
+  test.test("renders images inside markdown tables", function(context)
+    local preview_dir = context.project_temp_root .. PATHSEP .. "previews"
+    local source_path = context.project_temp_root .. PATHSEP .. "colors.md"
+    local preview_path = preview_dir .. PATHSEP .. "abyss.svg"
+    local ok, err = common.mkdirp(preview_dir)
+    test.ok(ok, err)
+    write_file(preview_path, "<svg></svg>")
+    write_file(source_path, [[
+| Theme | Preview |
+| --- | --- |
+| [abyss](colors/abyss.lua?raw=1) | ![abyss_preview](previews/abyss.svg) |
+]])
+
+    local original_load_image = canvas.load_image
+    local loaded_path
+    canvas.load_image = function(path)
+      loaded_path = path
+      return {
+        get_size = function()
+          return 96, 48
+        end,
+        scaled = function(_, width, height)
+          return {
+            get_size = function()
+              return width, height
+            end
+          }
+        end
+      }
+    end
+
+    local view = MarkdownView(source_path)
+    view.size.x = 640
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    canvas.load_image = original_load_image
+
+    local image_command
+    for _, command in ipairs(layout.commands) do
+      if command.type == "image" then
+        image_command = command
+        break
+      end
+    end
+
+    test.equal(loaded_path, preview_path)
+    test.not_nil(image_command)
+    test.equal(image_command.width, 96)
+    test.equal(image_command.height, 48)
+  end)
+
+  test.test("renders project-local markdown images", function(context)
+    local image_path = context.project_temp_root .. PATHSEP .. "diagram.png"
+    local source_path = context.project_temp_root .. PATHSEP .. "source.md"
+    write_file(image_path, "not-a-real-png")
+    write_file(source_path, "![Diagram](diagram.png)\n")
+
+    local original_load_image = canvas.load_image
+    local loaded_path
+    canvas.load_image = function(path)
+      loaded_path = path
+      return {
+        get_size = function()
+          return 800, 400
+        end,
+        scaled = function(_, width, height)
+          return {
+            get_size = function()
+              return width, height
+            end
+          }
+        end
+      }
+    end
+
+    local view = MarkdownView(source_path)
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    canvas.load_image = original_load_image
+
+    test.equal(loaded_path, image_path)
+    test.equal(layout.commands[1].type, "image")
+    test.equal(layout.commands[1].x, 0)
+    test.equal(layout.commands[1].width, layout.width)
+    test.equal(layout.commands[1].height, math.floor(400 * (layout.width / 800)))
+  end)
+
+  test.test("downloads remote markdown images to the cache", function()
+    local original_download = http.download
+    local original_load_image = canvas.load_image
+    local download_opts
+    local loaded_path
+
+    http.download = function(url, options)
+      download_opts = {
+        url = url,
+        directory = options.directory,
+        filename = options.filename
+      }
+      if not system.get_file_info(options.directory) then
+        local ok, err = common.mkdirp(options.directory)
+        test.ok(ok, err)
+      end
+      local path = options.directory .. PATHSEP .. options.filename
+      write_file(path, "downloaded-image")
+      options.on_done(true, nil, path, {
+        status = 200,
+        headers = {},
+        url = url
+      })
+    end
+
+    canvas.load_image = function(path)
+      loaded_path = path
+      return {
+        get_size = function()
+          return 320, 160
+        end,
+        scaled = function(_, width, height)
+          return {
+            get_size = function()
+              return width, height
+            end
+          }
+        end
+      }
+    end
+
+    local view = MarkdownView("![Remote](https://example.com/assets/diagram.png)")
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+
+    http.download = original_download
+    canvas.load_image = original_load_image
+
+    test.not_nil(download_opts)
+    test.equal(download_opts.url, "https://example.com/assets/diagram.png")
+    test.equal(download_opts.directory, USERDIR .. PATHSEP .. "cache")
+    test.equal(loaded_path, download_opts.directory .. PATHSEP .. download_opts.filename)
+    test.equal(layout.commands[1].type, "image")
+
+    if loaded_path and system.get_file_info(loaded_path) then
+      local ok, err = common.rm(loaded_path)
+      test.ok(ok, err)
+    end
+  end)
+
+  test.test("renders linked image reference rows and opens their target link", function()
+    local original_download = http.download
+    local original_load_image = canvas.load_image
+    local download_opts = {}
+    local opened
+
+    http.download = function(url, options)
+      download_opts[#download_opts + 1] = {
+        url = url,
+        directory = options.directory,
+        filename = options.filename
+      }
+      if not system.get_file_info(options.directory) then
+        local ok, err = common.mkdirp(options.directory)
+        test.ok(ok, err)
+      end
+      local path = options.directory .. PATHSEP .. options.filename
+      write_file(path, "downloaded-image")
+      options.on_done(true, nil, path, {
+        status = 200,
+        headers = {},
+        url = url
+      })
+    end
+
+    canvas.load_image = function()
+      return {
+        get_size = function()
+          return 140, 40
+        end,
+        scaled = function(_, width, height)
+          return {
+            get_size = function()
+              return width, height
+            end
+          }
+        end
+      }
+    end
+
+    local view = MarkdownView([=[
+[![Build Rolling]](https://github.com/pragtical/pragtical/actions/workflows/rolling.yml)
+[![Discord]](https://discord.gg/8V2yJtn3Fc)
+
+[Build Rolling]: https://github.com/pragtical/pragtical/actions/workflows/rolling.yml/badge.svg
+[Discord]: https://discord.com/api/guilds/1285023036071743542/widget.png?style=shield
+]=])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local first_image = layout.commands[1]
+    local second_image = layout.commands[2]
+    test.equal(first_image.type, "image")
+    test.equal(second_image.type, "image")
+    test.equal(first_image.x, 0)
+    test.ok(first_image.y > 0)
+    test.ok(second_image.x > first_image.x)
+    test.equal(second_image.y, first_image.y)
+    test.equal(first_image.link_url, "https://github.com/pragtical/pragtical/actions/workflows/rolling.yml")
+    test.equal(second_image.link_url, "https://discord.gg/8V2yJtn3Fc")
+    test.equal(#download_opts, 2)
+    test.equal(download_opts[1].url, "https://github.com/pragtical/pragtical/actions/workflows/rolling.yml/badge.svg")
+    test.equal(download_opts[2].url, "https://discord.com/api/guilds/1285023036071743542/widget.png?style=shield")
+
+    local original_open_in_system = common.open_in_system
+    common.open_in_system = function(url)
+      opened = url
+      return true
+    end
+
+    local x = view.position.x + style.padding.x + second_image.x + 1
+    local y = view.position.y + style.padding.y + second_image.y + 1
+    view:on_mouse_moved(x, y, 0, 0)
+    test.equal(view.cursor, "hand")
+    view:on_mouse_pressed("left", x, y, 1)
+
+    common.open_in_system = original_open_in_system
+    http.download = original_download
+    canvas.load_image = original_load_image
+
+    test.equal(opened, "https://discord.gg/8V2yJtn3Fc")
+
+    for _, item in ipairs(download_opts) do
+      local cache_path = item.directory .. PATHSEP .. item.filename
+      if system.get_file_info(cache_path) then
+        local ok, err = common.rm(cache_path)
+        test.ok(ok, err)
+      end
+    end
+  end)
+
+  test.test("resolves inline and reference links", function()
+    local view = MarkdownView([[
+[inline](https://example.com) and [docs][ref]
+For more detailed instructions visit: https://pragtical.dev/docs/setup/building
+
+[ref]: https://example.org
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local urls = {}
+    for _, command in ipairs(layout.commands) do
+      if command.links then
+        for _, link in ipairs(command.links) do
+          urls[#urls + 1] = link.url
+        end
+      end
+    end
+
+    test.same(urls, {
+      "https://example.com",
+      "https://example.org",
+      "https://pragtical.dev/docs/setup/building"
+    })
+
+    local first_link_fragment
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.url == "https://example.com" then
+            first_link_fragment = fragment
+            break
+          end
+        end
+      end
+    end
+
+    test.not_nil(first_link_fragment)
+    test.equal(MarkdownView.resolve_color(first_link_fragment.color), style.syntax["function"])
+  end)
+
+  test.test("resolves bold reference links", function()
+    local view = MarkdownView([[
+**[Get Pragtical]**
+
+[Get Pragtical]: https://github.com/pragtical/pragtical/releases
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local target
+    for _, command in ipairs(layout.commands) do
+      if command.links and command.links[1] then
+        target = command.links[1]
+        break
+      end
+    end
+
+    test.not_nil(target)
+    test.equal(target.url, "https://github.com/pragtical/pragtical/releases")
+
+    local link_fragment
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.url == target.url then
+            link_fragment = fragment
+            break
+          end
+        end
+      end
+    end
+
+    test.not_nil(link_fragment)
+    test.equal(link_fragment.font, view:get_font_cache().body.bold)
+  end)
+
+  test.test("opens clicked links in the system browser", function()
+    local view = MarkdownView("[inline](https://example.com)")
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local target
+    for _, command in ipairs(layout.commands) do
+      if command.links and command.links[1] then
+        target = command.links[1]
+        break
+      end
+    end
+
+    test.not_nil(target)
+
+    local opened
+    local original = common.open_in_system
+    local original_show_tooltip = core.status_view.show_tooltip
+    local original_remove_tooltip = core.status_view.remove_tooltip
+    local tooltip
+    local tooltip_removed = 0
+    common.open_in_system = function(url)
+      opened = url
+      return true
+    end
+    core.status_view.show_tooltip = function(_, text)
+      tooltip = text
+    end
+    core.status_view.remove_tooltip = function()
+      tooltip_removed = tooltip_removed + 1
+      tooltip = nil
+    end
+
+    local x = view.position.x + style.padding.x + target.x + 1
+    local y = view.position.y + style.padding.y + target.y + 1
+    view:on_mouse_moved(x, y, 0, 0)
+    test.equal(view.cursor, "hand")
+    test.equal(tooltip, "Open https://example.com")
+    view:on_mouse_pressed("left", x, y, 1)
+    test.equal(opened, "https://example.com")
+    view:on_mouse_left()
+    test.equal(tooltip_removed, 1)
+
+    common.open_in_system = original
+    core.status_view.show_tooltip = original_show_tooltip
+    core.status_view.remove_tooltip = original_remove_tooltip
+  end)
+
+  test.test("opens project markdown links in a new preview", function(context)
+    local target_path = context.project_temp_root .. PATHSEP .. "target.md"
+    local source_path = context.project_temp_root .. PATHSEP .. "source.md"
+    write_file(target_path, "# Target\n")
+    write_file(source_path, "[Preview][doc]\n\n[doc]: target.md\n")
+
+    local view = MarkdownView(source_path)
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local target = layout.commands[1].links[1]
+    test.not_nil(target)
+
+    local opened_markdown
+    local opened_file
+    local opened_external
+    local original_open_markdown = core.open_markdown
+    local original_open_file = core.open_file
+    local original_open_in_system = common.open_in_system
+
+    core.open_markdown = function(path)
+      opened_markdown = path
+    end
+    core.open_file = function(path)
+      opened_file = path
+    end
+    common.open_in_system = function(url)
+      opened_external = url
+    end
+
+    local x = view.position.x + style.padding.x + target.x + 1
+    local y = view.position.y + style.padding.y + target.y + 1
+    view:on_mouse_pressed("left", x, y, 1)
+
+    core.open_markdown = original_open_markdown
+    core.open_file = original_open_file
+    common.open_in_system = original_open_in_system
+
+    test.equal(opened_markdown, target_path)
+    test.is_nil(opened_file)
+    test.is_nil(opened_external)
+  end)
+
+  test.test("opens project file links in the editor", function(context)
+    local target_path = context.project_temp_root .. PATHSEP .. "notes.txt"
+    local source_path = context.project_temp_root .. PATHSEP .. "source.md"
+    write_file(target_path, "notes\n")
+    write_file(source_path, "[Notes](notes.txt)\n")
+
+    local view = MarkdownView(source_path)
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local target = layout.commands[1].links[1]
+    test.not_nil(target)
+
+    local opened_markdown
+    local opened_file
+    local opened_external
+    local original_open_markdown = core.open_markdown
+    local original_open_file = core.open_file
+    local original_open_in_system = common.open_in_system
+
+    core.open_markdown = function(path)
+      opened_markdown = path
+    end
+    core.open_file = function(path)
+      opened_file = path
+    end
+    common.open_in_system = function(url)
+      opened_external = url
+    end
+
+    local x = view.position.x + style.padding.x + target.x + 1
+    local y = view.position.y + style.padding.y + target.y + 1
+    view:on_mouse_pressed("left", x, y, 1)
+
+    core.open_markdown = original_open_markdown
+    core.open_file = original_open_file
+    common.open_in_system = original_open_in_system
+
+    test.equal(opened_file, target_path)
+    test.is_nil(opened_markdown)
+    test.is_nil(opened_external)
+  end)
+
+  test.test("opens markdown files as text docs", function(context)
+    local path = context.temp_root .. PATHSEP .. "opened.md"
+    write_file(path, "# Opened\n\nFrom core.open_file.\n")
+
+    local node = core.root_view:get_active_node_default()
+    local view = core.open_file(path)
+    test.ok(view:extends(DocView))
+    node:close_view(core.root_view.root_node, view)
+  end)
+
+  test.test("previews the active markdown doc", function(context)
+    local path = context.temp_root .. PATHSEP .. "preview.md"
+    write_file(path, "# Preview\n\nInitial text.\n")
+
+    local doc_view = core.open_file(path)
+    test.ok(doc_view:extends(DocView))
+    test.ok(command.is_valid("markdown-view:preview"))
+
+    doc_view.doc:insert(3, 1, "Unsaved change.\n")
+    command.perform("markdown-view:preview")
+
+    local preview
+    for _, view in ipairs(core.root_view.root_node:get_children()) do
+      if view:extends(MarkdownView) and view.linked_doc == doc_view.doc then
+        preview = view
+        break
+      end
+    end
+
+    test.not_nil(preview)
+    test.equal(preview:get_name(), "preview.md Preview")
+    preview:update()
+    test.match(preview.text, "Unsaved change")
+
+    local preview_node = core.root_view.root_node:get_node_for_view(preview)
+    local doc_node = core.root_view.root_node:get_node_for_view(doc_view)
+    preview_node:close_view(core.root_view.root_node, preview)
+    doc_node:close_view(core.root_view.root_node, doc_view)
+  end)
+
+  test.test("places markdown previews according to config.markdown_preview_mode", function(context)
+    local path = context.temp_root .. PATHSEP .. "preview-placement.md"
+    write_file(path, "# Preview\n")
+
+    local original_mode = config.markdown_preview_mode
+    local modes = {
+      right = "right",
+      left = "left",
+      top = "up",
+      bottom = "down",
+      newtab = "newtab"
+    }
+
+    for mode, direction in pairs(modes) do
+      config.markdown_preview_mode = mode
+      local doc_view = core.open_file(path)
+      local doc_node = core.root_view.root_node:get_node_for_view(doc_view)
+
+      command.perform("markdown-view:preview")
+
+      local preview
+      for _, view in ipairs(core.root_view.root_node:get_children()) do
+        if view:extends(MarkdownView) and view.linked_doc == doc_view.doc then
+          preview = view
+          break
+        end
+      end
+
+      test.not_nil(preview, mode)
+      local preview_node = core.root_view.root_node:get_node_for_view(preview)
+      if direction == "newtab" then
+        test.equal(preview_node, doc_node)
+      else
+        local parent = preview_node:get_parent_node(core.root_view.root_node)
+        test.not_nil(parent, mode)
+        local split_type = (direction == "left" or direction == "right") and "hsplit" or "vsplit"
+        local split_child = (direction == "left" or direction == "up") and parent.a or parent.b
+        test.equal(parent.type, split_type)
+        test.equal(split_child, preview_node)
+      end
+
+      preview_node:close_view(core.root_view.root_node, preview)
+      doc_node = core.root_view.root_node:get_node_for_view(doc_view)
+      doc_node:close_view(core.root_view.root_node, doc_view)
+    end
+
+    config.markdown_preview_mode = original_mode
+  end)
+
+  test.test("view raw opens the markdown doc and links standalone previews", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-link.md"
+    write_file(path, "# Preview\n\nInitial text.\n")
+
+    local preview = core.open_markdown(path)
+    test.not_nil(preview)
+    test.is_nil(preview.linked_doc)
+
+    local preview_node = core.root_view.root_node:get_node_for_view(preview)
+    preview_node:set_active_view(preview)
+
+    test.ok(command.is_valid("markdown-view:view-raw"))
+    command.perform("markdown-view:view-raw")
+
+    local raw_view = core.root_view.root_node:get_node_for_view(core.active_view).active_view
+    test.ok(raw_view:extends(DocView))
+    test.equal(common.normalize_path(raw_view.doc.abs_filename), common.normalize_path(path))
+    test.equal(common.normalize_path(preview.linked_doc.abs_filename), common.normalize_path(path))
+
+    raw_view.doc:insert(3, 1, "Linked text.\n")
+    preview:update()
+    test.match(preview.text, "Linked text")
+  end)
+
+  test.test("view raw focuses an already open markdown doc", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-existing.md"
+    write_file(path, "# Preview\n\nInitial text.\n")
+
+    local raw_view = core.open_file(path)
+    test.ok(raw_view:extends(DocView))
+    local doc_node = core.root_view.root_node:get_node_for_view(raw_view)
+    local preview = doc_node:split("right", MarkdownView(path)).active_view
+    test.ok(preview:extends(MarkdownView))
+    test.is_nil(preview.linked_doc)
+
+    local preview_node = core.root_view.root_node:get_node_for_view(preview)
+    preview_node:set_active_view(preview)
+    command.perform("markdown-view:view-raw")
+
+    test.ok(core.active_view:extends(DocView))
+    test.equal(core.active_view.doc, raw_view.doc)
+    test.equal(preview.linked_doc, core.active_view.doc)
+  end)
+
+  test.test("view raw re-establishes the preview doc link", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-relink.md"
+    write_file(path, "# Preview\n\nInitial text.\n")
+
+    local raw_view = core.open_file(path)
+    local original_doc = raw_view.doc
+    local doc_node = core.root_view.root_node:get_node_for_view(raw_view)
+    local preview = doc_node:split("right", MarkdownView({
+      linked_doc = raw_view.doc,
+      path = path,
+      title = raw_view.doc:get_name()
+    })).active_view
+    local preview_node = core.root_view.root_node:get_node_for_view(preview)
+
+    preview_node:set_active_view(preview)
+    core.root_view.root_node:get_node_for_view(raw_view):close_view(core.root_view.root_node, raw_view)
+
+    command.perform("markdown-view:view-raw")
+
+    test.ok(core.active_view:extends(DocView))
+    test.equal(common.normalize_path(preview.linked_doc.abs_filename), common.normalize_path(path))
+    test.equal(common.normalize_path(core.active_view.doc.abs_filename), common.normalize_path(path))
+  end)
+
+  test.test("view raw is invalid for markdown previews without a path", function()
+    local preview = MarkdownView("# Preview\n\nText only.\n")
+    local node = core.root_view:get_active_node_default()
+    node:add_view(preview)
+
+    test.equal(core.active_view, preview)
+    test.not_ok(command.is_valid("markdown-view:view-raw"))
+
+    core.root_view.root_node:get_node_for_view(preview):close_view(core.root_view.root_node, preview)
+  end)
+
+  test.test("view raw places doc views according to config.markdown_preview_mode", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-placement.md"
+    write_file(path, "# Preview\n")
+
+    local original_mode = config.markdown_preview_mode
+    local modes = {
+      right = "left",
+      left = "right",
+      top = "down",
+      bottom = "up",
+      newtab = "newtab"
+    }
+
+    for mode, direction in pairs(modes) do
+      config.markdown_preview_mode = mode
+      local node = core.root_view:get_active_node_default()
+      local preview = MarkdownView(path)
+      node:add_view(preview)
+      node = core.root_view.root_node:get_node_for_view(preview)
+      node:set_active_view(preview)
+
+      command.perform("markdown-view:view-raw")
+
+      local raw_view = core.active_view
+      test.ok(raw_view:extends(DocView), mode)
+      local raw_node = core.root_view.root_node:get_node_for_view(raw_view)
+      if direction == "newtab" then
+        test.equal(raw_node, node)
+      else
+        local parent = raw_node:get_parent_node(core.root_view.root_node)
+        test.not_nil(parent, mode)
+        local split_type = (direction == "left" or direction == "right") and "hsplit" or "vsplit"
+        local split_child = (direction == "left" or direction == "up") and parent.a or parent.b
+        test.equal(parent.type, split_type)
+        test.equal(split_child, raw_node)
+      end
+
+      raw_node:close_view(core.root_view.root_node, raw_view)
+      node = core.root_view.root_node:get_node_for_view(preview)
+      node:close_view(core.root_view.root_node, preview)
+    end
+
+    config.markdown_preview_mode = original_mode
+  end)
+end)

@@ -80,6 +80,6 @@ See the [licenses] directory for details on licenses used by the required depend
 [Get Plugins]:        https://github.com/pragtical/plugins
 [Get Color Themes]:   https://github.com/pragtical/colors
 [plugins repository]: https://github.com/pragtical/plugins
-[changelog]:          https://github.com/pragtical/pragtical/blob/master/changelog.md
+[changelog]:          changelog.md
 [LICENSE]:            LICENSE
 [licenses]:           licenses/licenses.md
