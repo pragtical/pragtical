@@ -768,6 +768,25 @@ settings.add("Image Viewer",
   }
 )
 
+settings.add("Markdown Preview",
+  {
+    {
+      label = "Preview Mode",
+      description = "How markdown previews opened from a document should be placed.",
+      path = "markdown_preview_mode",
+      type = settings.type.SELECTION,
+      default = "right",
+      values = {
+        {"Right", "right"},
+        {"New Tab", "newtab"},
+        {"Bottom", "bottom"},
+        {"Top", "top"},
+        {"Left", "left"}
+      }
+    }
+  }
+)
+
 settings.add("Development",
   {
     {

@@ -4,12 +4,21 @@ local common = require "core.common"
 local command = require "core.command"
 local config = require "core.config"
 local keymap = require "core.keymap"
+local DocView = require "core.docview"
+local MarkdownView = require "core.markdownview"
 local LogView = require "core.logview"
 
 
 local previous_win_mode = "normal"
 local previous_win_pos = core.window_size
 local restore_title_view = false
+
+local markdown_preview_split_directions = {
+  bottom = "down",
+  top = "up",
+  left = "left",
+  right = "right"
+}
 
 local function suggest_directory(text)
   text = common.home_expand(text)
@@ -357,4 +366,45 @@ command.add(nil, {
   ["core:view-website"] = function()
     common.open_in_system("https://pragtical.dev")
   end,
+})
+
+command.add(function()
+  if not core.active_view:extends(DocView) then
+    return false
+  end
+  local dv = core.active_view
+  return MarkdownView.is_supported(dv.doc.filename or ""), dv
+end, {
+  ["core:preview-markdown"] = function(dv)
+    local doc = dv.doc
+
+    for _, view in ipairs(core.root_view.root_node:get_children()) do
+      if view:extends(MarkdownView) and view.doc == doc then
+        local node = core.root_view.root_node:get_node_for_view(view)
+        if node then
+          node:set_active_view(view)
+        end
+        return
+      end
+    end
+
+    local node = core.root_view.root_node:get_node_for_view(dv)
+      or core.root_view:get_active_node_default()
+    local view = MarkdownView({
+      doc = doc,
+      path = doc.abs_filename,
+      title = doc:get_name()
+    })
+    local mode = config.markdown_preview_mode
+    local split_direction = markdown_preview_split_directions[mode]
+    if mode == "newtab" then
+      node:add_view(view)
+    else
+      (split_direction and node or core.root_view:get_active_node_default()):split(
+        split_direction or "right",
+        view
+      )
+    end
+    core.root_view.root_node:update_layout()
+  end
 })

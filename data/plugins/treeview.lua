@@ -11,6 +11,7 @@ local RootView = require "core.rootview"
 local CommandView = require "core.commandview"
 local DocView = require "core.docview"
 local ImageView = require "core.imageview"
+local MarkdownView = require "core.markdownview"
 local DirWatch = require "core.dirwatch"
 
 ---Configuration options for `treeview` plugin.
@@ -664,6 +665,16 @@ menu:register(function() return core.active_view:is(TreeView) and treeitem() end
   ContextMenu.DIVIDER
 })
 
+menu:register(function()
+  local item = treeitem()
+  return core.active_view:is(TreeView)
+    and item
+    and item.type == "file"
+    and MarkdownView.is_supported(item.abs_filename)
+end, {
+  { text = "Preview Markdown", command = "treeview:preview-markdown" }
+})
+
 menu:register(
   function()
     local item = treeitem()
@@ -994,6 +1005,19 @@ command.add(
   end, {
   ["treeview:open-in-editor"] = function(item)
     core.root_view:open_doc(core.open_doc(item.abs_filename))
+  end
+})
+
+command.add(
+  function()
+    local item = treeitem()
+    if item and item.type == "file" and MarkdownView.is_supported(item.abs_filename) then
+      return (core.active_view == view or menu.show_context_menu), item
+    end
+    return false
+  end, {
+  ["treeview:preview-markdown"] = function(item)
+    core.open_markdown(item.abs_filename)
   end
 })
 

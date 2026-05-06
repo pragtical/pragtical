@@ -2,6 +2,7 @@ local common = require "core.common"
 local test = require "core.test"
 
 local temp_root
+local original_cwd
 
 local function assert_callable(value, name)
   local value_type = type(value)
@@ -11,16 +12,25 @@ end
 
 test.describe("system", function()
   test.before_each(function(context)
+    original_cwd = system.getcwd()
+    if not original_cwd then
+      original_cwd = USERDIR
+      system.chdir(original_cwd)
+    end
     temp_root = USERDIR
       .. PATHSEP .. "system-tests-"
       .. system.get_process_id() .. "-"
       .. math.floor(system.get_time() * 1000000)
     local ok, err = common.mkdirp(temp_root)
     test.ok(ok, err)
+    context.original_cwd = original_cwd
     context.temp_root = temp_root
   end)
 
   test.after_each(function(context)
+    if context.original_cwd then
+      system.chdir(context.original_cwd)
+    end
     if context.temp_root and system.get_file_info(context.temp_root) then
       local ok, err = common.rm(context.temp_root, true)
       test.ok(ok, err)
@@ -47,7 +57,6 @@ test.describe("system", function()
   end)
 
   test.test("handles filesystem utilities", function(context)
-    local cwd = system.getcwd()
     local absolute = system.absolute_path(context.temp_root)
     test.not_nil(absolute)
 
@@ -73,8 +82,9 @@ test.describe("system", function()
 
     system.chdir(nested)
     test.equal(system.getcwd():gsub("[/\\]+$", ""), nested:gsub("[/\\]+$", ""))
-    system.chdir(cwd)
-    test.equal(system.getcwd():gsub("[/\\]+$", ""), cwd:gsub("[/\\]+$", ""))
+    system.chdir(context.original_cwd)
+    test.equal(system.getcwd():gsub("[/\\]+$", ""),
+      context.original_cwd:gsub("[/\\]+$", ""))
 
     if PLATFORM == "Linux" then
       test.type(system.get_fs_type(nested), "string")
