@@ -126,6 +126,7 @@ end
 ---@field scroll { x:number, y:number }
 
 ---@class core.markdownview.source
+---@field linked_doc core.doc?
 ---@field doc core.doc?
 ---@field path string?
 ---@field text string?
@@ -135,7 +136,7 @@ end
 ---@class core.markdownview : core.view
 ---@overload fun(source?: string|table, title?: string):core.markdownview
 ---@field super core.view
----@field doc core.doc?
+---@field linked_doc core.doc?
 ---@field image_cache table<string,table>
 ---@field path string?
 ---@field title string?
@@ -2714,7 +2715,7 @@ end
 function MarkdownView:new(source, title)
   MarkdownView.super.new(self)
   self.scrollable = true
-  self.doc = nil
+  self.linked_doc = nil
   self.image_cache = {}
   self.path = nil
   self.title = title
@@ -2731,10 +2732,10 @@ function MarkdownView:new(source, title)
   self.last_doc_change_id = nil
 
   if type(source) == "table" then
-    self.doc = source.doc
+    self.linked_doc = source.linked_doc or source.doc
     self.path = source.path
     self.title = source.title or source.name or title
-    if self.doc then
+    if self.linked_doc then
       self:refresh_from_doc()
     elseif source.path then
       self:load(source.path)
@@ -2751,7 +2752,7 @@ end
 ---Returns the persisted view state for file-backed previews.
 ---@return core.markdownview.state?
 function MarkdownView:get_state()
-  if self.doc or not self.path then
+  if self.linked_doc or not self.path then
     return nil
   end
   return {
@@ -2803,14 +2804,14 @@ end
 
 ---Refreshes preview contents from the bound document.
 function MarkdownView:refresh_from_doc()
-  if not self.doc then
+  if not self.linked_doc then
     return
   end
 
-  self.path = self.doc.abs_filename
-  self.title = common.basename(self.doc:get_name())
-  self.last_doc_change_id = self.doc:get_change_id()
-  self:set_text(self.doc:get_text(1, 1, math.huge, math.huge))
+  self.path = self.linked_doc.abs_filename
+  self.title = common.basename(self.linked_doc:get_name())
+  self.last_doc_change_id = self.linked_doc:get_change_id()
+  self:set_text(self.linked_doc:get_text(1, 1, math.huge, math.huge))
 end
 
 ---Loads markdown contents from disk into the view.
@@ -3184,7 +3185,7 @@ end
 
 ---Refreshes the preview when the bound document changes.
 function MarkdownView:update()
-  if self.doc and self.doc:get_change_id() ~= self.last_doc_change_id then
+  if self.linked_doc and self.linked_doc:get_change_id() ~= self.last_doc_change_id then
     self:refresh_from_doc()
   end
   MarkdownView.super.update(self)

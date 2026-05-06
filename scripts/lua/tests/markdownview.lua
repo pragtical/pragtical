@@ -18,10 +18,19 @@ local function write_file(path, content)
   file:close()
 end
 
+local function path_belongs_to_root(path, root)
+  if not (path and root) then
+    return false
+  end
+  path = common.normalize_path(path)
+  root = common.normalize_path(root)
+  return path == root or common.path_belongs_to(path, root)
+end
+
 local function path_is_in_test_roots(context, path)
   return path and (
-    (context.temp_root and common.path_belongs_to(path, context.temp_root))
-    or (context.project_temp_root and common.path_belongs_to(path, context.project_temp_root))
+    path_belongs_to_root(path, context.temp_root)
+    or path_belongs_to_root(path, context.project_temp_root)
   )
 end
 
@@ -1274,14 +1283,14 @@ For more detailed instructions visit: https://pragtical.dev/docs/setup/building
 
     local doc_view = core.open_file(path)
     test.ok(doc_view:extends(DocView))
-    test.ok(command.is_valid("core:preview-markdown"))
+    test.ok(command.is_valid("markdown-view:preview"))
 
     doc_view.doc:insert(3, 1, "Unsaved change.\n")
-    command.perform("core:preview-markdown")
+    command.perform("markdown-view:preview")
 
     local preview
     for _, view in ipairs(core.root_view.root_node:get_children()) do
-      if view:extends(MarkdownView) and view.doc == doc_view.doc then
+      if view:extends(MarkdownView) and view.linked_doc == doc_view.doc then
         preview = view
         break
       end
@@ -1316,11 +1325,11 @@ For more detailed instructions visit: https://pragtical.dev/docs/setup/building
       local doc_view = core.open_file(path)
       local doc_node = core.root_view.root_node:get_node_for_view(doc_view)
 
-      command.perform("core:preview-markdown")
+      command.perform("markdown-view:preview")
 
       local preview
       for _, view in ipairs(core.root_view.root_node:get_children()) do
-        if view:extends(MarkdownView) and view.doc == doc_view.doc then
+        if view:extends(MarkdownView) and view.linked_doc == doc_view.doc then
           preview = view
           break
         end
@@ -1342,6 +1351,130 @@ For more detailed instructions visit: https://pragtical.dev/docs/setup/building
       preview_node:close_view(core.root_view.root_node, preview)
       doc_node = core.root_view.root_node:get_node_for_view(doc_view)
       doc_node:close_view(core.root_view.root_node, doc_view)
+    end
+
+    config.markdown_preview_mode = original_mode
+  end)
+
+  test.test("view raw opens the markdown doc and links standalone previews", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-link.md"
+    write_file(path, "# Preview\n\nInitial text.\n")
+
+    local preview = core.open_markdown(path)
+    test.not_nil(preview)
+    test.is_nil(preview.linked_doc)
+
+    local preview_node = core.root_view.root_node:get_node_for_view(preview)
+    preview_node:set_active_view(preview)
+
+    test.ok(command.is_valid("markdown-view:view-raw"))
+    command.perform("markdown-view:view-raw")
+
+    local raw_view = core.root_view.root_node:get_node_for_view(core.active_view).active_view
+    test.ok(raw_view:extends(DocView))
+    test.equal(common.normalize_path(raw_view.doc.abs_filename), common.normalize_path(path))
+    test.equal(common.normalize_path(preview.linked_doc.abs_filename), common.normalize_path(path))
+
+    raw_view.doc:insert(3, 1, "Linked text.\n")
+    preview:update()
+    test.match(preview.text, "Linked text")
+  end)
+
+  test.test("view raw focuses an already open markdown doc", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-existing.md"
+    write_file(path, "# Preview\n\nInitial text.\n")
+
+    local raw_view = core.open_file(path)
+    test.ok(raw_view:extends(DocView))
+    local doc_node = core.root_view.root_node:get_node_for_view(raw_view)
+    local preview = doc_node:split("right", MarkdownView(path)).active_view
+    test.ok(preview:extends(MarkdownView))
+    test.is_nil(preview.linked_doc)
+
+    local preview_node = core.root_view.root_node:get_node_for_view(preview)
+    preview_node:set_active_view(preview)
+    command.perform("markdown-view:view-raw")
+
+    test.ok(core.active_view:extends(DocView))
+    test.equal(core.active_view.doc, raw_view.doc)
+    test.equal(preview.linked_doc, core.active_view.doc)
+  end)
+
+  test.test("view raw re-establishes the preview doc link", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-relink.md"
+    write_file(path, "# Preview\n\nInitial text.\n")
+
+    local raw_view = core.open_file(path)
+    local original_doc = raw_view.doc
+    local doc_node = core.root_view.root_node:get_node_for_view(raw_view)
+    local preview = doc_node:split("right", MarkdownView({
+      linked_doc = raw_view.doc,
+      path = path,
+      title = raw_view.doc:get_name()
+    })).active_view
+    local preview_node = core.root_view.root_node:get_node_for_view(preview)
+
+    preview_node:set_active_view(preview)
+    core.root_view.root_node:get_node_for_view(raw_view):close_view(core.root_view.root_node, raw_view)
+
+    command.perform("markdown-view:view-raw")
+
+    test.ok(core.active_view:extends(DocView))
+    test.equal(common.normalize_path(preview.linked_doc.abs_filename), common.normalize_path(path))
+    test.equal(common.normalize_path(core.active_view.doc.abs_filename), common.normalize_path(path))
+  end)
+
+  test.test("view raw is invalid for markdown previews without a path", function()
+    local preview = MarkdownView("# Preview\n\nText only.\n")
+    local node = core.root_view:get_active_node_default()
+    node:add_view(preview)
+
+    test.equal(core.active_view, preview)
+    test.not_ok(command.is_valid("markdown-view:view-raw"))
+
+    core.root_view.root_node:get_node_for_view(preview):close_view(core.root_view.root_node, preview)
+  end)
+
+  test.test("view raw places doc views according to config.markdown_preview_mode", function(context)
+    local path = context.temp_root .. PATHSEP .. "raw-placement.md"
+    write_file(path, "# Preview\n")
+
+    local original_mode = config.markdown_preview_mode
+    local modes = {
+      right = "left",
+      left = "right",
+      top = "down",
+      bottom = "up",
+      newtab = "newtab"
+    }
+
+    for mode, direction in pairs(modes) do
+      config.markdown_preview_mode = mode
+      local node = core.root_view:get_active_node_default()
+      local preview = MarkdownView(path)
+      node:add_view(preview)
+      node = core.root_view.root_node:get_node_for_view(preview)
+      node:set_active_view(preview)
+
+      command.perform("markdown-view:view-raw")
+
+      local raw_view = core.active_view
+      test.ok(raw_view:extends(DocView), mode)
+      local raw_node = core.root_view.root_node:get_node_for_view(raw_view)
+      if direction == "newtab" then
+        test.equal(raw_node, node)
+      else
+        local parent = raw_node:get_parent_node(core.root_view.root_node)
+        test.not_nil(parent, mode)
+        local split_type = (direction == "left" or direction == "right") and "hsplit" or "vsplit"
+        local split_child = (direction == "left" or direction == "up") and parent.a or parent.b
+        test.equal(parent.type, split_type)
+        test.equal(split_child, raw_node)
+      end
+
+      raw_node:close_view(core.root_view.root_node, raw_view)
+      node = core.root_view.root_node:get_node_for_view(preview)
+      node:close_view(core.root_view.root_node, preview)
     end
 
     config.markdown_preview_mode = original_mode

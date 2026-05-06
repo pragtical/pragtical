@@ -296,7 +296,7 @@ keymap.add_direct {
   ["ctrl+,"] = "core:open-user-module",
   ["ctrl+shift+c"] = "core:change-project-folder",
   ["ctrl+shift+o"] = "core:open-project-folder",
-  ["ctrl+alt+m"] = "core:preview-markdown",
+  ["ctrl+alt+m"] = "markdown-view:preview",
   ["ctrl+alt+r"] = "core:restart",
   ["alt+return"] = "core:toggle-fullscreen",
   ["f11"] = "core:toggle-fullscreen",

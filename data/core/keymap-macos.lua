@@ -6,7 +6,7 @@ local function keymap_macos(keymap)
     ["cmd+,"] = "core:open-user-module",
     ["cmd+shift+c"] = "core:change-project-folder",
     ["cmd+shift+o"] = "core:open-project-folder",
-    ["cmd+option+m"] = "core:preview-markdown",
+    ["cmd+option+m"] = "markdown-view:preview",
     ["cmd+option+r"] = "core:restart",
     ["cmd+ctrl+return"] = "core:toggle-fullscreen",
 

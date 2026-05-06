@@ -40,7 +40,7 @@ config.images_background_mode = "grid"
 ---| "top"
 ---| "left"
 
----How markdown previews opened by `core:preview-markdown` should be placed
+---How markdown previews opened by `markdown-view:preview` should be placed
 ---relative to the current document.
 ---
 ---Defaults to "right".
