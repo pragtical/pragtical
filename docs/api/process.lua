@@ -7,33 +7,24 @@
 process = {}
 
 ---Error triggered when the stdout, stderr or stdin fails while reading
----or writing, its value is platform dependent, so the value declared on this
----interface does not represents the real one.
+---or writing.
 ---@type integer
 process.ERROR_PIPE = -1
 
----Error triggered when a read or write action is blocking,
----its value is platform dependent, so the value declared on this
----interface does not represents the real one.
+---Error triggered when a read or write action is blocking.
 ---@type integer
 process.ERROR_WOULDBLOCK = -2
 
 ---Error triggered when a process takes more time than that specified
----by the deadline parameter given on process:start(),
----its value is platform dependent, so the value declared on this
----interface does not represents the real one.
+---by the timeout parameter given on process:start().
 ---@type integer
 process.ERROR_TIMEDOUT = -3
 
----Error triggered when trying to terminate or kill a non running process,
----its value is platform dependent, so the value declared on this
----interface does not represents the real one.
+---Error triggered when trying to terminate or kill a non running process.
 ---@type integer
 process.ERROR_INVAL = -4
 
----Error triggered when no memory is available to allocate the process,
----its value is platform dependent, so the value declared on this
----interface does not represents the real one.
+---Error triggered when no memory is available to allocate the process.
 ---@type integer
 process.ERROR_NOMEM = -5
 
@@ -53,7 +44,7 @@ process.STREAM_STDERR = 2
 ---@type integer
 process.WAIT_INFINITE = -1
 
----Instruct process:wait() to wait until the deadline given on process:start()
+---Instruct process:wait() to wait until the timeout given on process:start().
 ---@type integer
 process.WAIT_DEADLINE = -2
 
@@ -106,23 +97,27 @@ process.REDIRECT_STDOUT = 4
 ---
 --- Options that can be passed to process.start()
 ---@class process.options
----@field public timeout number
----@field public cwd string
----@field public stdin process.redirecttype
----@field public stdout process.redirecttype
----@field public stderr process.redirecttype
----@field public env table<string, string>
+---@field public timeout? number Timeout in milliseconds used by `process.WAIT_DEADLINE`; defaults to 10.
+---@field public cwd? string Working directory for the process.
+---@field public stdin? process.redirecttype
+---@field public stdout? process.redirecttype
+---@field public stderr? process.redirecttype
+---@field public env? table<string, string> | fun(system_env: table<string, string>): string Environment overrides, or a callback returning a NUL-separated environment block.
+---@field public detach? boolean Run the process detached in the background.
+---Run the process in the background. Background processes do not inherit
+---the terminal and their exit code will always return 0.
+---@field public background? boolean
 
 ---
 ---Create and start a new process
 ---
----@param command_and_params table First index is the command to execute
----and subsequente elements are parameters for the command.
----@param options process.options
+---@param command_and_params string | table First index is the command to execute
+---and subsequent elements are parameters for the command.
+---@param options? process.options
 ---
 ---@return process | nil
----@return string errmsg
----@return process.errortype | integer errcode
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process.start(command_and_params, options) end
 
 ---
@@ -140,48 +135,44 @@ function process.strerror(code) end
 function process:pid() end
 
 ---
----Read from the given stream type, if the process fails with a ERROR_PIPE it is
----automatically destroyed returning nil along error message and code.
+---Read from the given stream type.
 ---
 ---@param stream process.streamtype
 ---@param len? integer Amount of bytes to read, defaults to 2048.
 ---
 ---@return string | nil
----@return string errmsg
----@return process.errortype | integer errcode
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:read(stream, len) end
 
 ---
----Read from stdout, if the process fails with a ERROR_PIPE it is
----automatically destroyed returning nil along error message and code.
+---Read from stdout.
 ---
 ---@param len? integer Amount of bytes to read, defaults to 2048.
 ---
 ---@return string | nil
----@return string errmsg
----@return process.errortype | integer errcode
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:read_stdout(len) end
 
 ---
----Read from stderr, if the process fails with a ERROR_PIPE it is
----automatically destroyed returning nil along error message and code.
+---Read from stderr.
 ---
 ---@param len? integer Amount of bytes to read, defaults to 2048.
 ---
 ---@return string | nil
----@return string errmsg
----@return process.errortype | integer errcode
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:read_stderr(len) end
 
 ---
----Write to the stdin, if the process fails with a ERROR_PIPE it is
----automatically destroyed returning nil along error message and code.
+---Write to stdin.
 ---
 ---@param data string
 ---
----@return integer | nil bytes The amount of bytes written or nil if error
----@return string errmsg
----@return process.errortype | integer errcode
+---@return integer | nil bytes The amount of bytes written or nil if error.
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:write(data) end
 
 ---
@@ -189,9 +180,9 @@ function process:write(data) end
 ---
 ---@param stream process.streamtype
 ---
----@return integer | nil
----@return string errmsg
----@return process.errortype | integer errcode
+---@return boolean | nil
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:close_stream(stream) end
 
 ---
@@ -200,29 +191,39 @@ function process:close_stream(stream) end
 ---@param timeout integer | process.waittype Time to wait in milliseconds,
 ---if 0, the function will only check if process is running without waiting.
 ---
----@return integer | nil exit_status The process exit status or nil on error
----@return string errmsg
----@return process.errortype | integer errcode
+---@return integer | nil exit_status The process exit status or nil on error.
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:wait(timeout) end
 
 ---
 ---Sends SIGTERM to the process
 ---
 ---@return boolean | nil
----@return string errmsg
----@return process.errortype | integer errcode
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:terminate() end
 
 ---
 ---Sends SIGKILL to the process
 ---
 ---@return boolean | nil
----@return string errmsg
----@return process.errortype | integer errcode
+---@return string? errmsg
+---@return process.errortype | integer? errcode
 function process:kill() end
 
 ---
+---Sends an interrupt signal to the process
+---
+---@return boolean | nil
+---@return string? errmsg
+---@return process.errortype | integer? errcode
+function process:interrupt() end
+
+---
 ---Get the exit code of the process or nil if still running.
+---Processes started with `background = true` do not provide their real exit
+---code; once they finish, this returns 0.
 ---
 ---@return number | nil
 function process:returncode() end

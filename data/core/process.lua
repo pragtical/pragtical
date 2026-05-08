@@ -31,12 +31,14 @@ end
 ---Reads data from the stream.
 ---
 ---When called inside a coroutine such as `core.add_thread()`,
----the function yields to the main thread occassionally to avoid blocking the editor. <br>
+---the function yields to the main thread occasionally to avoid blocking the editor.
 ---If the function is not called inside the coroutine, the function returns immediately
 ---without waiting for more data.
 ---@param bytes process.stream.readtype|integer The format or number of bytes to read.
 ---@param options? process.stream.readoption Options for reading from the stream.
----@return string|nil data The string read from the stream, or nil if no data could be read.
+---@return string|nil data The string read from the stream, nil if no data could be read or an error occurred.
+---@return string? errmsg The error message when reading fails.
+---@return process.errortype|integer? errcode The error code when reading fails.
 function process.stream:read(bytes, options)
   if type(bytes) == 'string' then bytes = bytes:gsub("^%*", "") end
   options = options or {}
@@ -67,8 +69,11 @@ function process.stream:read(bytes, options)
   end
 
   while self.len < target do
-    local chunk = self.process.process:read(self.fd, math.max(target - self.len, 0))
-    if not chunk then break end
+    local chunk, err, errcode = self.process.process:read(self.fd, math.max(target - self.len, 0))
+    if not chunk then
+      if err then return nil, err, errcode end
+      break
+    end
     if #chunk > 0 then
       table.insert(self.buf, chunk)
       self.len = self.len + #chunk
@@ -100,18 +105,20 @@ end
 ---Writes data into the stream.
 ---
 ---When called inside a coroutine such as `core.add_thread()`,
----the function yields to the main thread occassionally to avoid blocking the editor. <br>
+---the function yields to the main thread occasionally to avoid blocking the editor.
 ---If the function is not called inside the coroutine,
 ---the function writes as much data as possible before returning.
 ---@param bytes string The bytes to write into the stream.
 ---@param options? process.stream.writeoption Options for writing to the stream.
----@return integer num_bytes The number of bytes written to the stream.
+---@return integer|nil num_bytes The number of bytes written to the stream, or nil on error.
+---@return string? errmsg The error message when writing fails.
+---@return process.errortype|integer? errcode The error code when writing fails.
 function process.stream:write(bytes, options)
   options = options or {}
   local buf = bytes
   while #buf > 0 do
-    local len = self.process.process:write(buf)
-    if not len then break end
+    local len, err, errcode = self.process.process:write(buf)
+    if not len then return nil, err, errcode end
     if not coroutine.isyieldable() then return len end
     buf = buf:sub(len + 1)
     coroutine.yield(options.scan or (1 / config.fps))
@@ -121,6 +128,9 @@ end
 
 
 ---Closes the stream and its underlying resources.
+---@return boolean|nil success True when closed, or nil on error.
+---@return string? errmsg The error message when closing fails.
+---@return process.errortype|integer? errcode The error code when closing fails.
 function process.stream:close()
   return self.process.process:close_stream(self.fd)
 end
@@ -128,20 +138,24 @@ end
 
 ---Waits for the process to exit.
 ---When called inside a coroutine such as `core.add_thread()`,
----the function yields to the main thread occassionally to avoid blocking the editor. <br>
+---the function yields to the main thread occasionally to avoid blocking the editor.
 ---Otherwise, the function blocks the editor until the process exited or the timeout has expired.
----@param timeout? number The amount of seconds to wait. If omitted, the function will wait indefinitely.
----@param scan? number The amount of seconds to yield while scanning. If omittted, the scan rate will be the FPS.
----@return integer|nil exit_code The exit code for this process, or nil if the wait timed out.
+---@param timeout? number The amount of milliseconds to wait. If omitted, the function will wait indefinitely.
+---@param scan? number The amount of seconds to yield while scanning. If omitted, the scan rate will be the FPS.
+---@return integer|nil exit_code The exit code for this process, or nil if the wait timed out or an error occurred.
+---@return string? errmsg The error message when the native wait fails.
+---@return process.errortype|integer? errcode The error code when the native wait fails.
 function process:wait(timeout, scan)
-  if not coroutine.isyieldable() then return self.process:wait(timeout) end
+  if not coroutine.isyieldable() then
+    return self.process:wait(timeout)
+  end
   if timeout == nil or timeout == process.WAIT_INFINITE then
     timeout = math.huge
   elseif timeout == process.WAIT_DEADLINE then
     return self.process:wait(timeout)
   end
   local start = system.get_time()
-  while self.process:running() and system.get_time() - start < timeout do
+  while self.process:running() and (system.get_time() - start) * 1000 < timeout do
     coroutine.yield(scan or (1 / config.fps))
   end
   return self.process:returncode()
@@ -165,34 +179,34 @@ local function compare_env(a, b)
 end
 
 local old_start = process.start
+
+---Create and start a new process, wrapping the native process with stream helpers.
+---
+---When `options.env` is a table, values are merged over the system environment.
+---On Windows, environment keys are compared case-insensitively and sorted for
+---the environment block passed to the native process API.
+---@param command string|table First index is the command to execute and subsequent elements are parameters.
+---@param options? process.options
+---@return process|nil proc The wrapped process, or nil on error.
+---@return string? errmsg The error message when process creation fails.
+---@return process.errortype|integer? errcode The error code when process creation fails.
 function process.start(command, options)
   -- delay config load since some values depend on system scale
   if not config then config = require "core.config" end
   assert(type(command) == "table" or type(command) == "string", "invalid argument #1 to process.start(), expected string or table, got "..type(command))
   assert(type(options) == "table" or type(options) == "nil", "invalid argument #2 to process.start(), expected table or nil, got "..type(options))
-  if PLATFORM == "Windows" then
-    if type(command) == "table" then
-      -- escape the arguments into a command line string
-      -- https://github.com/python/cpython/blob/48f9d3e3faec5faaa4f7c9849fecd27eae4da213/Lib/subprocess.py#L531
-      local arglist = {}
-      for _, v in ipairs(command) do
-        local backslash, arg = 0, {}
-        for c in v:gmatch(".") do
-          if     c == "\\" then backslash = backslash + 1
-          elseif c == '"'  then arg[#arg+1] = string.rep("\\", backslash * 2 + 1)..'"'; backslash = 0
-          else                  arg[#arg+1] = string.rep("\\", backslash) .. c;         backslash = 0 end
-        end
-        arg[#arg+1] = string.rep("\\", backslash) -- add remaining backslashes
-        if #v == 0 or v:find("[\t\v\r\n ]") then arglist[#arglist+1] = '"'..table.concat(arg, "")..'"'
-        else                                     arglist[#arglist+1] = table.concat(arg, "") end
-      end
-      command = table.concat(arglist, " ")
-    end
-  else
+  if PLATFORM ~= "Windows" then
     command = type(command) == "table" and command or { command }
   end
-  if type(options) == "table" and options.env then
-    local user_env = options.env --[[@as table]]
+  if options then
+    local copied_options = {}
+    for k, v in pairs(options) do
+      copied_options[k] = v
+    end
+    options = copied_options
+  end
+  if type(options) == "table" and type(options.env) == "table" then
+    local user_env = options.env
     options.env = function(system_env)
       local final_env, envlist = {}, {}
       for k, v in pairs(system_env) do final_env[env_key(k)] = k.."="..v end
@@ -202,7 +216,9 @@ function process.start(command, options)
       return table.concat(envlist, "\0").."\0\0"
     end
   end
-  local self = setmetatable({ process = old_start(command, options) }, process)
+  local native, err, errcode = old_start(command, options)
+  if not native then return nil, err, errcode end
+  local self = setmetatable({ process = native }, process)
   self.stdout = process.stream.new(self, process.STREAM_STDOUT)
   self.stderr = process.stream.new(self, process.STREAM_STDERR)
   self.stdin  = process.stream.new(self, process.STREAM_STDIN)
