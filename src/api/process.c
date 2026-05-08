@@ -1116,6 +1116,12 @@ static int process_start(lua_State *L) {
       background = lua_toboolean(L, -1);
       SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, background);
     }
+#ifdef _WIN32
+    else {
+      /* default to true on windows, annoying cmd window for everything... */
+      SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
+    }
+#endif
     lua_pop(L, 2);
   }
 
