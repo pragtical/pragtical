@@ -105,7 +105,8 @@ process.REDIRECT_STDOUT = 4
 ---@field public env? table<string, string> | fun(system_env: table<string, string>): string Environment overrides, or a callback returning a NUL-separated environment block.
 ---@field public detach? boolean Run the process detached in the background.
 ---Run the process in the background. Background processes do not inherit
----the terminal and their exit code will always return 0.
+---the terminal and their exit code will always return 0. Defaults to true
+---on windows since a lot of console applications cause cmd window to open.
 ---@field public background? boolean
 
 ---

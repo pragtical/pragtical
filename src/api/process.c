@@ -1060,7 +1060,11 @@ static int process_start(lua_State *L) {
   const char *commandline = NULL;
   const char *cwd = NULL;
   bool detach = false;
+#ifdef _WIN32
+  bool background = true;
+#else
   bool background = false;
+#endif
   int deadline = 10;
   int redirects[3] = { REDIRECT_DEFAULT, REDIRECT_DEFAULT, REDIRECT_DEFAULT };
 #ifndef _WIN32
@@ -1114,10 +1118,11 @@ static int process_start(lua_State *L) {
     }
     if (lua_getfield(L, 2, "background") == LUA_TBOOLEAN) {
       background = lua_toboolean(L, -1);
-      SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, background);
     }
     lua_pop(L, 2);
   }
+
+  SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, background);
 
   if (!set_property_or_fail(props, SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *) args)) ||
       (cwd && !SDL_SetStringProperty(props, SDL_PROP_PROCESS_CREATE_WORKING_DIRECTORY_STRING, cwd)) ||
