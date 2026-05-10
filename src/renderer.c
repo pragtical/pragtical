@@ -9,6 +9,7 @@
 #include FT_FREETYPE_H
 #include FT_LCD_FILTER_H
 #include FT_OUTLINE_H
+#include FT_COLOR_H
 #include FT_TRUETYPE_IDS_H
 #include FT_SFNT_NAMES_H
 #include FT_SYSTEM_H
@@ -20,6 +21,10 @@
 
 // uncomment the line below for more debugging information through printf
 // #define RENDERER_DEBUG
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 static RenWindow **window_list = NULL;
 static RenWindow *target_window = NULL;
@@ -95,6 +100,7 @@ typedef struct {
 typedef enum {
   EGlyphFormatGrayscale, // 8bit graysclae
   EGlyphFormatSubpixel,  // 24bit subpixel
+  EGlyphFormatColor,     // 32bit BGRA color
   EGlyphFormatSize
 } ERenGlyphFormat;
 
@@ -150,12 +156,14 @@ typedef struct {
 typedef struct RenFont {
   FT_Face face;
   hb_font_t *hb_font;
+  FT_Color *palette;
+  FT_UShort palette_count;
   CharMap charmap;
   GlyphMap glyphs;
 #if PRAGTICAL_USE_SDL_RENDERER
   float scale;
 #endif
-  float size, space_advance;
+  float size, space_advance, color_scale;
   unsigned short baseline, height, tab_size;
   unsigned short underline_thickness;
   ERenFontAntialiasing antialiasing;
@@ -203,10 +211,13 @@ static int font_set_load_options(RenFont* font) {
   int load_target = font->antialiasing == FONT_ANTIALIASING_NONE ? FT_LOAD_TARGET_MONO
     : (font->hinting == FONT_HINTING_SLIGHT ? FT_LOAD_TARGET_LIGHT : FT_LOAD_TARGET_NORMAL);
   int hinting = font->hinting == FONT_HINTING_NONE ? FT_LOAD_NO_HINTING : FT_LOAD_FORCE_AUTOHINT;
-  return load_target | hinting;
+  int color = FT_HAS_COLOR(font->face) ? FT_LOAD_COLOR : 0;
+  return load_target | hinting | color;
 }
 
 static int font_set_render_options(RenFont* font) {
+  if (FT_HAS_COLOR(font->face))
+    return FT_RENDER_MODE_NORMAL;
   if (font->antialiasing == FONT_ANTIALIASING_NONE)
     return FT_RENDER_MODE_MONO;
   if (font->antialiasing == FONT_ANTIALIASING_SUBPIXEL) {
@@ -255,10 +266,54 @@ static unsigned int font_get_glyph_id(RenFont *font, unsigned int codepoint) {
 
 #define FONT_IS_SUBPIXEL(F) ((F)->antialiasing == FONT_ANTIALIASING_SUBPIXEL)
 #define FONT_BITMAP_COUNT(F) ((F)->antialiasing == FONT_ANTIALIASING_SUBPIXEL ? SUBPIXEL_BITMAPS_CACHED : 1)
-#define SLOT_BITMAP_TYPE(B) ((B).pixel_mode == FT_PIXEL_MODE_LCD ? EGlyphFormatSubpixel : EGlyphFormatGrayscale)
+
+static inline ERenGlyphFormat bitmap_to_glyph_format(FT_Bitmap bitmap) {
+  if (bitmap.pixel_mode == FT_PIXEL_MODE_BGRA)
+    return EGlyphFormatColor;
+  if (bitmap.pixel_mode == FT_PIXEL_MODE_LCD)
+    return EGlyphFormatSubpixel;
+  return EGlyphFormatGrayscale;
+}
+
+static inline int glyphformat_bytes_per_pixel(ERenGlyphFormat format) {
+  switch (format) {
+    case EGlyphFormatColor:     return 4;
+    case EGlyphFormatSubpixel:  return 3;
+    case EGlyphFormatGrayscale: return 1;
+    default: return 0;
+  }
+}
+
+static inline unsigned int scale_bitmap_dimension(unsigned int value, float scale) {
+  if (scale == 1.0f)
+    return value;
+  int scaled = lroundf(value * scale);
+  return scaled > 0 ? scaled : 1;
+}
+
+static inline int scale_bitmap_offset(int value, float scale) {
+  if (scale == 1.0f)
+    return value;
+  return lroundf(value * scale);
+}
+
+typedef struct {
+  SDL_Surface *surface;
+  int x_min, y_max;
+  FT_Matrix matrix;
+  FT_Vector delta;
+} ColrRenderContext;
+
+typedef struct {
+  double offset;
+  RenColor color;
+} ColrStop;
+
+#define COLR_MAX_STOPS 32
 
 static inline SDL_PixelFormat glyphformat_to_pixelformat(ERenGlyphFormat format, int *depth) {
   switch (format) {
+    case EGlyphFormatColor:     *depth = 32; return SDL_PIXELFORMAT_BGRA32;
     case EGlyphFormatSubpixel:  *depth = 24; return SDL_PIXELFORMAT_RGB24;
     case EGlyphFormatGrayscale: *depth = 8;  return SDL_PIXELFORMAT_INDEX8;
     default: return SDL_PIXELFORMAT_UNKNOWN;
@@ -267,7 +322,7 @@ static inline SDL_PixelFormat glyphformat_to_pixelformat(ERenGlyphFormat format,
 
 static SDL_Surface *font_allocate_glyph_surface(RenFont *font, FT_GlyphSlot slot, int bitmap_idx, GlyphMetric *metric) {
   // get an atlas with the correct width
-  ERenGlyphFormat glyph_format = SLOT_BITMAP_TYPE(slot->bitmap);
+  ERenGlyphFormat glyph_format = metric->format;
   int atlas_idx = -1;
   for (int i = 0; i < font->glyphs.natlas[glyph_format]; i++) {
     if (font->glyphs.atlas[glyph_format][i].width >= metric->x1) {
@@ -314,7 +369,7 @@ static SDL_Surface *font_allocate_glyph_surface(RenFont *font, FT_GlyphSlot slot
     userdata = SDL_GetSurfaceProperties(atlas->surfaces[atlas->nsurface]);
     SDL_SetPointerProperty(userdata, "metric", NULL);
     surface_idx = atlas->nsurface++;
-    font->glyphs.bytesize += (sizeof(SDL_Surface *) + sizeof(SDL_Surface) + atlas->width * GLYPHS_PER_ATLAS * h * glyph_format);
+    font->glyphs.bytesize += (sizeof(SDL_Surface *) + sizeof(SDL_Surface) + atlas->width * GLYPHS_PER_ATLAS * h * glyphformat_bytes_per_pixel(glyph_format));
   }
   metric->surface_idx = surface_idx;
   userdata = SDL_GetSurfaceProperties(atlas->surfaces[surface_idx]);
@@ -324,6 +379,565 @@ static SDL_Surface *font_allocate_glyph_surface(RenFont *font, FT_GlyphSlot slot
   }
   SDL_SetPointerProperty(userdata, "metric", (void *) metric);
   return atlas->surfaces[surface_idx];
+}
+
+static inline double colr_fixed_to_pixels(RenFont *font, FT_Fixed value, bool y_axis) {
+  FT_Size_Metrics *metrics = &font->face->size->metrics;
+  double scale = (y_axis ? metrics->y_ppem : metrics->x_ppem) / (double) font->face->units_per_EM;
+  return (value / 65536.0) * scale;
+}
+
+static inline FT_Pos colr_fixed_to_26_6(RenFont *font, FT_Fixed value, bool y_axis) {
+  return lround(colr_fixed_to_pixels(font, value, y_axis) * 64.0);
+}
+
+static ColrRenderContext colr_context_transform(ColrRenderContext *ctx, FT_Matrix matrix, FT_Vector delta) {
+  ColrRenderContext next = *ctx;
+  next.matrix.xx = FT_MulFix(ctx->matrix.xx, matrix.xx) + FT_MulFix(ctx->matrix.xy, matrix.yx);
+  next.matrix.xy = FT_MulFix(ctx->matrix.xx, matrix.xy) + FT_MulFix(ctx->matrix.xy, matrix.yy);
+  next.matrix.yx = FT_MulFix(ctx->matrix.yx, matrix.xx) + FT_MulFix(ctx->matrix.yy, matrix.yx);
+  next.matrix.yy = FT_MulFix(ctx->matrix.yx, matrix.xy) + FT_MulFix(ctx->matrix.yy, matrix.yy);
+  next.delta.x = FT_MulFix(ctx->matrix.xx, delta.x) + FT_MulFix(ctx->matrix.xy, delta.y) + ctx->delta.x;
+  next.delta.y = FT_MulFix(ctx->matrix.yx, delta.x) + FT_MulFix(ctx->matrix.yy, delta.y) + ctx->delta.y;
+  return next;
+}
+
+static ColrRenderContext colr_context_affine_transform(RenFont *font, ColrRenderContext *ctx, FT_Affine23 affine) {
+  FT_Matrix matrix = {
+    .xx = affine.xx,
+    .xy = affine.xy,
+    .yx = affine.yx,
+    .yy = affine.yy
+  };
+  FT_Vector delta = {
+    .x = colr_fixed_to_26_6(font, affine.dx, false),
+    .y = colr_fixed_to_26_6(font, affine.dy, true)
+  };
+  return colr_context_transform(ctx, matrix, delta);
+}
+
+static ColrRenderContext colr_context_translate(RenFont *font, ColrRenderContext *ctx, FT_Fixed dx, FT_Fixed dy) {
+  FT_Matrix identity = { 0x10000L, 0, 0, 0x10000L };
+  FT_Vector delta = {
+    .x = colr_fixed_to_26_6(font, dx, false),
+    .y = colr_fixed_to_26_6(font, dy, true)
+  };
+  return colr_context_transform(ctx, identity, delta);
+}
+
+static ColrRenderContext colr_context_scale(RenFont *font, ColrRenderContext *ctx, FT_Fixed scale_x, FT_Fixed scale_y, FT_Fixed center_x, FT_Fixed center_y) {
+  FT_Matrix matrix = { scale_x, 0, 0, scale_y };
+  FT_Vector center = {
+    .x = colr_fixed_to_26_6(font, center_x, false),
+    .y = colr_fixed_to_26_6(font, center_y, true)
+  };
+  FT_Vector delta = {
+    .x = center.x - FT_MulFix(scale_x, center.x),
+    .y = center.y - FT_MulFix(scale_y, center.y)
+  };
+  return colr_context_transform(ctx, matrix, delta);
+}
+
+static ColrRenderContext colr_context_rotate(RenFont *font, ColrRenderContext *ctx, FT_Fixed angle, FT_Fixed center_x, FT_Fixed center_y) {
+  double radians = (angle / 65536.0) * M_PI;
+  FT_Fixed cos_value = lround(cos(radians) * 65536.0);
+  FT_Fixed sin_value = lround(sin(radians) * 65536.0);
+  FT_Matrix matrix = { cos_value, -sin_value, sin_value, cos_value };
+  FT_Vector center = {
+    .x = colr_fixed_to_26_6(font, center_x, false),
+    .y = colr_fixed_to_26_6(font, center_y, true)
+  };
+  FT_Vector delta = {
+    .x = center.x - FT_MulFix(matrix.xx, center.x) - FT_MulFix(matrix.xy, center.y),
+    .y = center.y - FT_MulFix(matrix.yx, center.x) - FT_MulFix(matrix.yy, center.y)
+  };
+  return colr_context_transform(ctx, matrix, delta);
+}
+
+static ColrRenderContext colr_context_skew(RenFont *font, ColrRenderContext *ctx, FT_Fixed x_angle, FT_Fixed y_angle, FT_Fixed center_x, FT_Fixed center_y) {
+  double x_radians = (x_angle / 65536.0) * M_PI;
+  double y_radians = (y_angle / 65536.0) * M_PI;
+  FT_Matrix matrix = {
+    .xx = 0x10000L,
+    .xy = lround(tan(x_radians) * 65536.0),
+    .yx = lround(tan(y_radians) * 65536.0),
+    .yy = 0x10000L
+  };
+  FT_Vector center = {
+    .x = colr_fixed_to_26_6(font, center_x, false),
+    .y = colr_fixed_to_26_6(font, center_y, true)
+  };
+  FT_Vector delta = {
+    .x = center.x - FT_MulFix(matrix.xx, center.x) - FT_MulFix(matrix.xy, center.y),
+    .y = center.y - FT_MulFix(matrix.yx, center.x) - FT_MulFix(matrix.yy, center.y)
+  };
+  return colr_context_transform(ctx, matrix, delta);
+}
+
+static RenColor colr_palette_color(RenFont *font, FT_ColorIndex color_index) {
+  RenColor color = { 0xff, 0xff, 0xff, 0xff };
+  if (color_index.palette_index != 0xffff && color_index.palette_index < font->palette_count && font->palette) {
+    FT_Color palette_color = font->palette[color_index.palette_index];
+    color = (RenColor) { palette_color.blue, palette_color.green, palette_color.red, palette_color.alpha };
+  }
+  color.a = (color.a * color_index.alpha + (1 << 13)) >> 14;
+  return color;
+}
+
+static void colr_blend_pixel(uint8_t *destination, RenColor color, unsigned int coverage) {
+  unsigned int src_a = (color.a * coverage + 127) / 255;
+  unsigned int inv_a = 255 - src_a;
+  unsigned int src_b = (color.b * src_a + 127) / 255;
+  unsigned int src_g = (color.g * src_a + 127) / 255;
+  unsigned int src_r = (color.r * src_a + 127) / 255;
+
+  destination[0] = src_b + (destination[0] * inv_a + 127) / 255;
+  destination[1] = src_g + (destination[1] * inv_a + 127) / 255;
+  destination[2] = src_r + (destination[2] * inv_a + 127) / 255;
+  destination[3] = src_a + (destination[3] * inv_a + 127) / 255;
+}
+
+static void colr_src_over_premul_pixel(uint8_t *destination, const uint8_t *source) {
+  unsigned int src_a = source[3];
+  unsigned int inv_a = 255 - src_a;
+  destination[0] = source[0] + (destination[0] * inv_a + 127) / 255;
+  destination[1] = source[1] + (destination[1] * inv_a + 127) / 255;
+  destination[2] = source[2] + (destination[2] * inv_a + 127) / 255;
+  destination[3] = src_a + (destination[3] * inv_a + 127) / 255;
+}
+
+static inline double colr_unpremul_channel(uint8_t channel, uint8_t alpha) {
+  return alpha ? fmin(1.0, (double)channel / alpha) : 0.0;
+}
+
+static inline double colr_soft_light_channel(double backdrop, double source) {
+  if (source <= 0.5)
+    return backdrop - (1.0 - 2.0 * source) * backdrop * (1.0 - backdrop);
+  double d = backdrop <= 0.25 ? ((16.0 * backdrop - 12.0) * backdrop + 4.0) * backdrop : sqrt(backdrop);
+  return backdrop + (2.0 * source - 1.0) * (d - backdrop);
+}
+
+static void colr_compose_pixel(uint8_t *destination, const uint8_t *backdrop, const uint8_t *source, FT_Composite_Mode mode) {
+  uint8_t result[4] = { 0, 0, 0, 0 };
+  unsigned int backdrop_a = backdrop[3];
+  unsigned int source_a = source[3];
+
+  switch (mode) {
+    case FT_COLR_COMPOSITE_SRC_IN:
+      result[0] = (source[0] * backdrop_a + 127) / 255;
+      result[1] = (source[1] * backdrop_a + 127) / 255;
+      result[2] = (source[2] * backdrop_a + 127) / 255;
+      result[3] = (source_a * backdrop_a + 127) / 255;
+      break;
+    case FT_COLR_COMPOSITE_SOFT_LIGHT:
+    {
+      double ab = backdrop_a / 255.0;
+      double as = source_a / 255.0;
+      double alpha = as + ab - as * ab;
+      for (int channel = 0; channel < 3; channel++) {
+        double cb = colr_unpremul_channel(backdrop[channel], backdrop_a);
+        double cs = colr_unpremul_channel(source[channel], source_a);
+        double blended = colr_soft_light_channel(cb, cs);
+        double premul = (1.0 - as) * backdrop[channel] / 255.0
+          + (1.0 - ab) * source[channel] / 255.0
+          + as * ab * blended;
+        int value = lround(premul * 255.0);
+        result[channel] = value < 0 ? 0 : (value > 255 ? 255 : value);
+      }
+      int value = lround(alpha * 255.0);
+      result[3] = value < 0 ? 0 : (value > 255 ? 255 : value);
+      break;
+    }
+    case FT_COLR_COMPOSITE_SRC:
+      memcpy(result, source, sizeof(result));
+      break;
+    case FT_COLR_COMPOSITE_DEST:
+      memcpy(result, backdrop, sizeof(result));
+      break;
+    case FT_COLR_COMPOSITE_SRC_OVER:
+    default:
+      memcpy(result, backdrop, sizeof(result));
+      colr_src_over_premul_pixel(result, source);
+      break;
+  }
+
+  colr_src_over_premul_pixel(destination, result);
+}
+
+static RenColor colr_lerp_color(RenColor a, RenColor b, double t) {
+  if (t < 0.0) t = 0.0;
+  if (t > 1.0) t = 1.0;
+  return (RenColor) {
+    a.b + (b.b - a.b) * t,
+    a.g + (b.g - a.g) * t,
+    a.r + (b.r - a.r) * t,
+    a.a + (b.a - a.a) * t
+  };
+}
+
+static int colr_load_stops(RenFont *font, FT_ColorLine *colorline, ColrStop stops[COLR_MAX_STOPS]) {
+  int count = 0;
+  FT_ColorStop stop;
+  FT_ColorStopIterator iterator = colorline->color_stop_iterator;
+  while (count < COLR_MAX_STOPS && FT_Get_Colorline_Stops(font->face, &stop, &iterator)) {
+    stops[count++] = (ColrStop) {
+      .offset = stop.stop_offset / 65536.0,
+      .color = colr_palette_color(font, stop.color)
+    };
+  }
+  return count;
+}
+
+static double colr_extend_gradient_t(double t, ColrStop *stops, int count, FT_PaintExtend extend) {
+  switch (extend) {
+    case FT_COLR_PAINT_EXTEND_REPEAT:
+      return t - floor(t);
+    case FT_COLR_PAINT_EXTEND_REFLECT:
+      t = fabs(fmod(t, 2.0));
+      return t > 1.0 ? 2.0 - t : t;
+    case FT_COLR_PAINT_EXTEND_PAD:
+    default:
+      if (t < stops[0].offset) return stops[0].offset;
+      if (t > stops[count - 1].offset) return stops[count - 1].offset;
+      return t;
+  }
+}
+
+static RenColor colr_stops_color_at(ColrStop *stops, int count, double t) {
+  if (count == 0)
+    return (RenColor) { 0, 0, 0, 0 };
+  if (count == 1)
+    return stops[0].color;
+
+  for (int i = 1; i < count; i++) {
+    if (t <= stops[i].offset) {
+      double span = stops[i].offset - stops[i - 1].offset;
+      return colr_lerp_color(stops[i - 1].color, stops[i].color, span <= 0.0 ? 0.0 : (t - stops[i - 1].offset) / span);
+    }
+  }
+  return stops[count - 1].color;
+}
+
+static void colr_device_to_local_pixels(ColrRenderContext *ctx, int x, int y, double *local_x, double *local_y) {
+  double device_x = ctx->x_min + x + 0.5;
+  double device_y = ctx->y_max - y - 0.5;
+  double dx = device_x - ctx->delta.x / 64.0;
+  double dy = device_y - ctx->delta.y / 64.0;
+  double xx = ctx->matrix.xx / 65536.0;
+  double xy = ctx->matrix.xy / 65536.0;
+  double yx = ctx->matrix.yx / 65536.0;
+  double yy = ctx->matrix.yy / 65536.0;
+  double det = xx * yy - xy * yx;
+  if (fabs(det) < 0.000001) {
+    *local_x = dx;
+    *local_y = dy;
+    return;
+  }
+  *local_x = (dx * yy - dy * xy) / det;
+  *local_y = (dy * xx - dx * yx) / det;
+}
+
+static RenColor colr_solid_pixel(RenFont *font, FT_COLR_Paint *paint, int x, int y, ColrRenderContext *ctx) {
+  (void) x; (void) y; (void) ctx;
+  return colr_palette_color(font, paint->u.solid.color);
+}
+
+static RenColor colr_linear_gradient_pixel(RenFont *font, FT_COLR_Paint *paint, int x, int y, ColrRenderContext *ctx) {
+  ColrStop stops[COLR_MAX_STOPS];
+  int count = colr_load_stops(font, &paint->u.linear_gradient.colorline, stops);
+  if (count < 2)
+    return colr_stops_color_at(stops, count, 0.0);
+
+  double local_x, local_y;
+  colr_device_to_local_pixels(ctx, x, y, &local_x, &local_y);
+  double x0 = colr_fixed_to_pixels(font, paint->u.linear_gradient.p0.x, false);
+  double y0 = colr_fixed_to_pixels(font, paint->u.linear_gradient.p0.y, true);
+  double x1 = colr_fixed_to_pixels(font, paint->u.linear_gradient.p1.x, false);
+  double y1 = colr_fixed_to_pixels(font, paint->u.linear_gradient.p1.y, true);
+  double dx = x1 - x0, dy = y1 - y0;
+  double denom = dx * dx + dy * dy;
+  double t = denom <= 0.0 ? 0.0 : ((local_x - x0) * dx + (local_y - y0) * dy) / denom;
+  return colr_stops_color_at(stops, count, colr_extend_gradient_t(t, stops, count, paint->u.linear_gradient.colorline.extend));
+}
+
+static RenColor colr_radial_gradient_pixel(RenFont *font, FT_COLR_Paint *paint, int x, int y, ColrRenderContext *ctx) {
+  ColrStop stops[COLR_MAX_STOPS];
+  int count = colr_load_stops(font, &paint->u.radial_gradient.colorline, stops);
+  if (count < 2)
+    return colr_stops_color_at(stops, count, 0.0);
+
+  double local_x, local_y;
+  colr_device_to_local_pixels(ctx, x, y, &local_x, &local_y);
+  double cx = colr_fixed_to_pixels(font, paint->u.radial_gradient.c1.x, false);
+  double cy = colr_fixed_to_pixels(font, paint->u.radial_gradient.c1.y, true);
+  double r0 = colr_fixed_to_pixels(font, paint->u.radial_gradient.r0, false);
+  double r1 = colr_fixed_to_pixels(font, paint->u.radial_gradient.r1, false);
+  double radius = r1 - r0;
+  double dx = local_x - cx;
+  double dy = local_y - cy;
+  double t = radius <= 0.0 ? 0.0 : (sqrt(dx * dx + dy * dy) - r0) / radius;
+  return colr_stops_color_at(stops, count, colr_extend_gradient_t(t, stops, count, paint->u.radial_gradient.colorline.extend));
+}
+
+static RenColor colr_sweep_gradient_pixel(RenFont *font, FT_COLR_Paint *paint, int x, int y, ColrRenderContext *ctx) {
+  ColrStop stops[COLR_MAX_STOPS];
+  int count = colr_load_stops(font, &paint->u.sweep_gradient.colorline, stops);
+  if (count < 2)
+    return colr_stops_color_at(stops, count, 0.0);
+
+  double local_x, local_y;
+  colr_device_to_local_pixels(ctx, x, y, &local_x, &local_y);
+  double cx = colr_fixed_to_pixels(font, paint->u.sweep_gradient.center.x, false);
+  double cy = colr_fixed_to_pixels(font, paint->u.sweep_gradient.center.y, true);
+  double angle = atan2(-(local_x - cx), local_y - cy) / M_PI;
+  if (angle < 0.0)
+    angle += 2.0;
+  double start = paint->u.sweep_gradient.start_angle / 65536.0;
+  double end = paint->u.sweep_gradient.end_angle / 65536.0;
+  double span = end - start;
+  while (span <= 0.0) span += 2.0;
+  double t = (angle - start) / span;
+  return colr_stops_color_at(stops, count, colr_extend_gradient_t(t, stops, count, paint->u.sweep_gradient.colorline.extend));
+}
+
+static bool colr_paint_to_surface(RenFont *font, FT_OpaquePaint opaque, ColrRenderContext *ctx);
+
+static SDL_Surface *colr_create_temp_surface(ColrRenderContext *ctx) {
+  SDL_Surface *surface = SDL_CreateSurface(ctx->surface->w, ctx->surface->h, SDL_PIXELFORMAT_BGRA32);
+  if (surface)
+    SDL_FillSurfaceRect(surface, NULL, 0);
+  return surface;
+}
+
+static bool colr_render_opaque_to_temp(RenFont *font, FT_OpaquePaint opaque, ColrRenderContext *ctx, SDL_Surface **surface) {
+  *surface = colr_create_temp_surface(ctx);
+  if (!*surface)
+    return false;
+  ColrRenderContext temp_ctx = *ctx;
+  temp_ctx.surface = *surface;
+  bool ok = colr_paint_to_surface(font, opaque, &temp_ctx);
+  if (!ok) {
+    SDL_DestroySurface(*surface);
+    *surface = NULL;
+  }
+  return ok;
+}
+
+static RenColor colr_paint_pixel(RenFont *font, FT_COLR_Paint *paint, int x, int y, ColrRenderContext *ctx);
+
+static RenColor colr_opaque_paint_pixel(RenFont *font, FT_OpaquePaint opaque, int x, int y, ColrRenderContext *ctx) {
+  FT_COLR_Paint paint;
+  if (!FT_Get_Paint(font->face, opaque, &paint))
+    return (RenColor) { 0, 0, 0, 0 };
+  return colr_paint_pixel(font, &paint, x, y, ctx);
+}
+
+static RenColor colr_paint_pixel(RenFont *font, FT_COLR_Paint *paint, int x, int y, ColrRenderContext *ctx) {
+  switch (paint->format) {
+    case FT_COLR_PAINTFORMAT_SOLID:
+      return colr_solid_pixel(font, paint, x, y, ctx);
+    case FT_COLR_PAINTFORMAT_LINEAR_GRADIENT:
+      return colr_linear_gradient_pixel(font, paint, x, y, ctx);
+    case FT_COLR_PAINTFORMAT_RADIAL_GRADIENT:
+      return colr_radial_gradient_pixel(font, paint, x, y, ctx);
+    case FT_COLR_PAINTFORMAT_SWEEP_GRADIENT:
+      return colr_sweep_gradient_pixel(font, paint, x, y, ctx);
+    case FT_COLR_PAINTFORMAT_TRANSFORM:
+    {
+      ColrRenderContext transformed = colr_context_affine_transform(font, ctx, paint->u.transform.affine);
+      return colr_opaque_paint_pixel(font, paint->u.transform.paint, x, y, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_TRANSLATE:
+    {
+      ColrRenderContext transformed = colr_context_translate(font, ctx, paint->u.translate.dx, paint->u.translate.dy);
+      return colr_opaque_paint_pixel(font, paint->u.translate.paint, x, y, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_SCALE:
+    {
+      ColrRenderContext transformed = colr_context_scale(font, ctx, paint->u.scale.scale_x, paint->u.scale.scale_y, paint->u.scale.center_x, paint->u.scale.center_y);
+      return colr_opaque_paint_pixel(font, paint->u.scale.paint, x, y, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_ROTATE:
+    {
+      ColrRenderContext transformed = colr_context_rotate(font, ctx, paint->u.rotate.angle, paint->u.rotate.center_x, paint->u.rotate.center_y);
+      return colr_opaque_paint_pixel(font, paint->u.rotate.paint, x, y, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_SKEW:
+    {
+      ColrRenderContext transformed = colr_context_skew(font, ctx, paint->u.skew.x_skew_angle, paint->u.skew.y_skew_angle, paint->u.skew.center_x, paint->u.skew.center_y);
+      return colr_opaque_paint_pixel(font, paint->u.skew.paint, x, y, &transformed);
+    }
+    default:
+      return (RenColor) { 0, 0, 0, 0 };
+  }
+}
+
+static bool colr_paint_glyph_to_surface(RenFont *font, FT_PaintGlyph *glyph_paint, ColrRenderContext *ctx) {
+  FT_COLR_Paint fill_paint;
+  if (!FT_Get_Paint(font->face, glyph_paint->paint, &fill_paint))
+    return false;
+
+  int load_options = (font_set_load_options(font) & ~FT_LOAD_COLOR) | FT_LOAD_NO_BITMAP;
+  FT_Set_Transform(font->face, &ctx->matrix, &ctx->delta);
+  if (FT_Load_Glyph(font->face, glyph_paint->glyphID, load_options) != 0 || FT_Render_Glyph(font->face->glyph, FT_RENDER_MODE_NORMAL) != 0)
+    goto failure;
+  FT_Set_Transform(font->face, NULL, NULL);
+
+  FT_GlyphSlot slot = font->face->glyph;
+  if (!slot->bitmap.width || !slot->bitmap.rows || !slot->bitmap.buffer || slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
+    return false;
+
+  for (unsigned int row = 0; row < slot->bitmap.rows; row++) {
+    int target_y = ctx->y_max - slot->bitmap_top + row;
+    if (target_y < 0 || target_y >= ctx->surface->h)
+      continue;
+    for (unsigned int col = 0; col < slot->bitmap.width; col++) {
+      int target_x = slot->bitmap_left - ctx->x_min + col;
+      if (target_x < 0 || target_x >= ctx->surface->w)
+        continue;
+      unsigned int coverage = slot->bitmap.buffer[row * slot->bitmap.pitch + col];
+      if (!coverage)
+        continue;
+
+      RenColor color = colr_paint_pixel(font, &fill_paint, target_x, target_y, ctx);
+      if (color.a)
+        colr_blend_pixel(&((uint8_t *)ctx->surface->pixels)[target_y * ctx->surface->pitch + target_x * glyphformat_bytes_per_pixel(EGlyphFormatColor)], color, coverage);
+    }
+  }
+  return true;
+
+failure:
+  FT_Set_Transform(font->face, NULL, NULL);
+  return false;
+}
+
+static bool colr_paint_to_surface(RenFont *font, FT_OpaquePaint opaque, ColrRenderContext *ctx) {
+  FT_COLR_Paint paint;
+  if (!FT_Get_Paint(font->face, opaque, &paint))
+    return false;
+
+  switch (paint.format) {
+    case FT_COLR_PAINTFORMAT_COLR_LAYERS: {
+      bool ok = true;
+      FT_OpaquePaint layer = { 0 };
+      FT_LayerIterator iterator = paint.u.colr_layers.layer_iterator;
+      while (FT_Get_Paint_Layers(font->face, &iterator, &layer)) {
+        ok = colr_paint_to_surface(font, layer, ctx) && ok;
+      }
+      return ok;
+    }
+    case FT_COLR_PAINTFORMAT_GLYPH:
+      return colr_paint_glyph_to_surface(font, &paint.u.glyph, ctx);
+    case FT_COLR_PAINTFORMAT_COMPOSITE:
+    {
+      SDL_Surface *backdrop = NULL;
+      SDL_Surface *source = NULL;
+      bool ok = colr_render_opaque_to_temp(font, paint.u.composite.backdrop_paint, ctx, &backdrop)
+        && colr_render_opaque_to_temp(font, paint.u.composite.source_paint, ctx, &source);
+      if (ok) {
+        for (int y = 0; y < ctx->surface->h; y++) {
+          for (int x = 0; x < ctx->surface->w; x++) {
+            uint8_t *destination_pixel = &((uint8_t *)ctx->surface->pixels)[y * ctx->surface->pitch + x * glyphformat_bytes_per_pixel(EGlyphFormatColor)];
+            uint8_t *backdrop_pixel = &((uint8_t *)backdrop->pixels)[y * backdrop->pitch + x * glyphformat_bytes_per_pixel(EGlyphFormatColor)];
+            uint8_t *source_pixel = &((uint8_t *)source->pixels)[y * source->pitch + x * glyphformat_bytes_per_pixel(EGlyphFormatColor)];
+            colr_compose_pixel(destination_pixel, backdrop_pixel, source_pixel, paint.u.composite.composite_mode);
+          }
+        }
+      }
+      SDL_DestroySurface(backdrop);
+      SDL_DestroySurface(source);
+      return ok;
+    }
+    case FT_COLR_PAINTFORMAT_COLR_GLYPH: {
+      FT_OpaquePaint glyph = { 0 };
+      if (!FT_Get_Color_Glyph_Paint(font->face, paint.u.colr_glyph.glyphID, FT_COLOR_NO_ROOT_TRANSFORM, &glyph))
+        return false;
+      return colr_paint_to_surface(font, glyph, ctx);
+    }
+    case FT_COLR_PAINTFORMAT_TRANSFORM:
+    {
+      ColrRenderContext transformed = colr_context_affine_transform(font, ctx, paint.u.transform.affine);
+      return colr_paint_to_surface(font, paint.u.transform.paint, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_TRANSLATE:
+    {
+      ColrRenderContext transformed = colr_context_translate(font, ctx, paint.u.translate.dx, paint.u.translate.dy);
+      return colr_paint_to_surface(font, paint.u.translate.paint, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_SCALE:
+    {
+      ColrRenderContext transformed = colr_context_scale(font, ctx, paint.u.scale.scale_x, paint.u.scale.scale_y, paint.u.scale.center_x, paint.u.scale.center_y);
+      return colr_paint_to_surface(font, paint.u.scale.paint, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_ROTATE:
+    {
+      ColrRenderContext transformed = colr_context_rotate(font, ctx, paint.u.rotate.angle, paint.u.rotate.center_x, paint.u.rotate.center_y);
+      return colr_paint_to_surface(font, paint.u.rotate.paint, &transformed);
+    }
+    case FT_COLR_PAINTFORMAT_SKEW:
+    {
+      ColrRenderContext transformed = colr_context_skew(font, ctx, paint.u.skew.x_skew_angle, paint.u.skew.y_skew_angle, paint.u.skew.center_x, paint.u.skew.center_y);
+      return colr_paint_to_surface(font, paint.u.skew.paint, &transformed);
+    }
+    default:
+      return false;
+  }
+}
+
+static SDL_Surface *font_load_colr_bitmap(RenFont *font, unsigned int glyph_id, unsigned int bitmap_idx, GlyphMetric *metric, FT_OpaquePaint root_paint) {
+  FT_ClipBox clip_box;
+  if (!FT_Get_Color_Glyph_ClipBox(font->face, glyph_id, &clip_box))
+    return NULL;
+
+  FT_Pos x_min_26_6 = clip_box.bottom_left.x;
+  FT_Pos x_max_26_6 = clip_box.top_right.x;
+  FT_Pos y_min_26_6 = clip_box.bottom_left.y;
+  FT_Pos y_max_26_6 = clip_box.top_right.y;
+  int x_min = floor(x_min_26_6 / 64.0);
+  int x_max = ceil(x_max_26_6 / 64.0);
+  int y_min = floor(y_min_26_6 / 64.0);
+  int y_max = ceil(y_max_26_6 / 64.0);
+  if (x_max <= x_min || y_max <= y_min)
+    return NULL;
+
+  unsigned int width = x_max - x_min;
+  unsigned int height = y_max - y_min;
+  SDL_Surface *temp_surface = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_BGRA32);
+  if (!temp_surface)
+    return NULL;
+  SDL_FillSurfaceRect(temp_surface, NULL, 0);
+
+  ColrRenderContext ctx = {
+    .surface = temp_surface,
+    .x_min = x_min,
+    .y_max = y_max,
+    .matrix = { 0x10000L, 0, 0, 0x10000L },
+    .delta = { 0, 0 }
+  };
+  if (!colr_paint_to_surface(font, root_paint, &ctx)) {
+    SDL_DestroySurface(temp_surface);
+    return NULL;
+  }
+
+  metric->x1 = width;
+  metric->y1 = height;
+  metric->bitmap_left = x_min;
+  metric->bitmap_top = y_max;
+  metric->flags |= EGlyphBitmap;
+  metric->format = EGlyphFormatColor;
+
+  FT_GlyphSlot slot = font->face->glyph;
+  SDL_Surface *surface = font_allocate_glyph_surface(font, slot, bitmap_idx, metric);
+  int pixel_size = glyphformat_bytes_per_pixel(EGlyphFormatColor);
+  for (unsigned int row = 0; row < height; row++) {
+    memcpy(
+      &((uint8_t *)surface->pixels)[surface->pitch * (metric->y0 + row)],
+      &((uint8_t *)temp_surface->pixels)[temp_surface->pitch * row],
+      width * pixel_size
+    );
+  }
+  SDL_DestroySurface(temp_surface);
+  return surface;
 }
 
 static GlyphMetric *font_load_glyph_metric(RenFont *font, unsigned int glyph_id, unsigned int bitmap_idx) {
@@ -347,6 +961,8 @@ static GlyphMetric *font_load_glyph_metric(RenFont *font, unsigned int glyph_id,
       GlyphMetric *metric = &font->glyphs.metrics[i][row][col];
       metric->flags |= EGlyphXAdvance;
       metric->xadvance = font->face->glyph->advance.x / 64.0f;
+      if (FT_HAS_COLOR(font->face))
+        metric->xadvance *= font->color_scale;
     }
   }
   return &font->glyphs.metrics[bitmap_idx][row][col];
@@ -358,8 +974,15 @@ static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id,
   // render the glyph for a bitmap_idx
   unsigned int load_option = font_set_load_options(font), render_option = font_set_render_options(font);
   FT_GlyphSlot slot = font->face->glyph;
-  if (FT_Load_Glyph(font->face, glyph_id, load_option | FT_LOAD_BITMAP_METRICS_ONLY) != 0
-      || font_set_style(&slot->outline, bitmap_idx * (64 / SUBPIXEL_BITMAPS_CACHED), font->style) != 0
+  FT_OpaquePaint colr_paint = { 0 };
+  if (FT_HAS_COLOR(font->face) && FT_Get_Color_Glyph_Paint(font->face, glyph_id, FT_COLOR_NO_ROOT_TRANSFORM, &colr_paint)) {
+    SDL_Surface *colr_surface = font_load_colr_bitmap(font, glyph_id, bitmap_idx, metric, colr_paint);
+    if (colr_surface)
+      return colr_surface;
+  }
+
+  if (FT_Load_Glyph(font->face, glyph_id, load_option) != 0
+      || (slot->format == FT_GLYPH_FORMAT_OUTLINE && font_set_style(&slot->outline, bitmap_idx * (64 / SUBPIXEL_BITMAPS_CACHED), font->style) != 0)
       || FT_Render_Glyph(slot, render_option) != 0)
     return NULL;
 
@@ -367,34 +990,80 @@ static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id,
   if (!slot->bitmap.width || !slot->bitmap.rows || !slot->bitmap.buffer ||
       (slot->bitmap.pixel_mode != FT_PIXEL_MODE_MONO
         && slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY
-        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_LCD))
+        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_LCD
+        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_BGRA))
     return NULL;
 
-  unsigned int glyph_width = slot->bitmap.width / FONT_BITMAP_COUNT(font);
+  float bitmap_scale = slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA ? font->color_scale : 1.0f;
+  unsigned int glyph_width = slot->bitmap.width;
+  if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_LCD)
+    glyph_width /= FONT_BITMAP_COUNT(font);
   // FT_PIXEL_MODE_MONO uses 1 bit per pixel packed bitmap
   if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) glyph_width *= 8;
 
-  metric->x1 = glyph_width;
-  metric->y1 = slot->bitmap.rows;
-  metric->bitmap_left = slot->bitmap_left;
-  metric->bitmap_top = slot->bitmap_top;
+  metric->x1 = scale_bitmap_dimension(glyph_width, bitmap_scale);
+  metric->y1 = scale_bitmap_dimension(slot->bitmap.rows, bitmap_scale);
+  metric->bitmap_left = scale_bitmap_offset(slot->bitmap_left, bitmap_scale);
+  metric->bitmap_top = scale_bitmap_offset(slot->bitmap_top, bitmap_scale);
   metric->flags |= EGlyphBitmap;
-  metric->format = SLOT_BITMAP_TYPE(slot->bitmap);
+  metric->format = bitmap_to_glyph_format(slot->bitmap);
+
+  if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA && bitmap_scale != 1.0f) {
+    unsigned int target_rows = metric->y1;
+    SDL_Surface *source_surface = SDL_CreateSurfaceFrom(
+      glyph_width, slot->bitmap.rows, SDL_PIXELFORMAT_BGRA32, slot->bitmap.buffer, slot->bitmap.pitch
+    );
+    if (!source_surface) {
+      metric->flags &= ~EGlyphBitmap;
+      return NULL;
+    }
+    SDL_Surface *scaled_surface = SDL_CreateSurface(metric->x1, metric->y1, SDL_PIXELFORMAT_BGRA32);
+    if (!scaled_surface) {
+      SDL_DestroySurface(source_surface);
+      metric->flags &= ~EGlyphBitmap;
+      return NULL;
+    }
+    SDL_SetSurfaceBlendMode(source_surface, SDL_BLENDMODE_NONE);
+    bool scaled = SDL_BlitSurfaceScaled(source_surface, NULL, scaled_surface, NULL, SDL_SCALEMODE_LINEAR);
+    SDL_DestroySurface(source_surface);
+    if (!scaled) {
+      SDL_DestroySurface(scaled_surface);
+      metric->flags &= ~EGlyphBitmap;
+      return NULL;
+    }
+
+    SDL_Surface *surface = font_allocate_glyph_surface(font, slot, bitmap_idx, metric);
+    int pixel_size = glyphformat_bytes_per_pixel(EGlyphFormatColor);
+    for (unsigned int row = 0; row < target_rows; row++) {
+      memcpy(
+        &((uint8_t *)surface->pixels)[surface->pitch * (metric->y0 + row)],
+        &((uint8_t *)scaled_surface->pixels)[scaled_surface->pitch * row],
+        metric->x1 * pixel_size
+      );
+    }
+    SDL_DestroySurface(scaled_surface);
+    return surface;
+  }
 
   // find the best surface to copy the glyph over, and copy it
   SDL_Surface *surface = font_allocate_glyph_surface(font, slot, bitmap_idx, metric);
   uint8_t* pixels = surface->pixels;
-  for (unsigned int line = 0; line < slot->bitmap.rows; ++line) {
+  unsigned int target_rows = metric->y1 - metric->y0;
+  for (unsigned int line = 0; line < target_rows; ++line) {
     int target_offset = surface->pitch * (line + metric->y0); // x0 is always assumed to be 0
-    int source_offset = line * slot->bitmap.pitch;
-    if (font->antialiasing == FONT_ANTIALIASING_NONE) {
+    if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_MONO) {
       for (unsigned int column = 0; column < slot->bitmap.width; ++column) {
+        int source_offset = line * slot->bitmap.pitch;
         int current_source_offset = source_offset + (column / 8);
         int source_pixel = slot->bitmap.buffer[current_source_offset];
         pixels[++target_offset] = ((source_pixel >> (7 - (column % 8))) & 0x1) * 0xFF;
       }
     } else {
-      memcpy(&pixels[target_offset], &slot->bitmap.buffer[source_offset], slot->bitmap.width);
+      int source_offset = line * slot->bitmap.pitch;
+      size_t source_bytes = slot->bitmap.width;
+      if (slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA)
+        source_bytes *= glyphformat_bytes_per_pixel(EGlyphFormatColor);
+      memcpy(&pixels[target_offset], &slot->bitmap.buffer[source_offset], source_bytes);
     }
   }
   return surface;
@@ -556,10 +1225,54 @@ static int font_set_face_metrics(RenFont *font, FT_Face face) {
   #ifdef PRAGTICAL_USE_SDL_RENDERER
   pixel_size *= font->scale;
   #endif
-  if ((err = FT_Set_Pixel_Sizes(face, 0, (int) pixel_size)) != 0)
+  font->color_scale = 1.0f;
+  if (FT_HAS_COLOR(face) && FT_HAS_FIXED_SIZES(face) && face->num_fixed_sizes > 0) {
+    FT_Pos target = (FT_Pos)(pixel_size * 64.0f);
+    int best_match = 0;
+    FT_Pos best_delta = labs(face->available_sizes[0].y_ppem - target);
+    for (int i = 1; i < face->num_fixed_sizes; i++) {
+      FT_Pos delta = labs(face->available_sizes[i].y_ppem - target);
+      if (delta < best_delta) {
+        best_match = i;
+        best_delta = delta;
+      }
+    }
+    err = FT_Select_Size(face, best_match);
+    float selected_size = face->available_sizes[best_match].y_ppem / 64.0f;
+    if (selected_size > 0.0f)
+      font->color_scale = pixel_size / selected_size;
+  } else {
+    err = FT_Set_Pixel_Sizes(face, 0, (int) pixel_size);
+    if (err != 0 && FT_HAS_FIXED_SIZES(face) && face->num_fixed_sizes > 0) {
+      FT_Pos target = (FT_Pos)(pixel_size * 64.0f);
+      int best_match = 0;
+      FT_Pos best_delta = labs(face->available_sizes[0].y_ppem - target);
+      for (int i = 1; i < face->num_fixed_sizes; i++) {
+        FT_Pos delta = labs(face->available_sizes[i].y_ppem - target);
+        if (delta < best_delta) {
+          best_match = i;
+          best_delta = delta;
+        }
+      }
+      err = FT_Select_Size(face, best_match);
+    }
+  }
+  if (err != 0)
     return err;
 
   font->face = face;
+  font->palette = NULL;
+  font->palette_count = 0;
+  if (FT_HAS_COLOR(face)) {
+    FT_Palette_Data palette_data;
+    if (FT_Palette_Data_Get(face, &palette_data) == 0 && palette_data.num_palettes > 0) {
+      FT_Color *palette = NULL;
+      if (FT_Palette_Select(face, 0, &palette) == 0) {
+        font->palette = palette;
+        font->palette_count = palette_data.num_palette_entries;
+      }
+    }
+  }
   if(FT_IS_SCALABLE(face)) {
     font->height = (short)((face->height / (float)face->units_per_EM) * font->size);
     font->baseline = (short)((face->ascender / (float)face->units_per_EM) * font->size);
@@ -910,6 +1623,13 @@ static double hb_position_to_pixels(hb_position_t value) {
   return value / 64.0;
 }
 
+static double hb_position_to_font_pixels(RenFont *font, hb_position_t value) {
+  double pixels = hb_position_to_pixels(value);
+  if (FT_HAS_COLOR(font->face))
+    pixels *= font->color_scale;
+  return pixels;
+}
+
 static bool text_needs_shaping(const char *text, const char *end) {
   while (text < end) {
     unsigned char c = *(const unsigned char *) text++;
@@ -985,7 +1705,7 @@ static double shaped_run_get_width(hb_buffer_t *buffer, RenFont *font, const cha
       GlyphMetric *metric = NULL;
       font_get_glyph_by_id(font, infos[i].codepoint, 0, NULL, &metric);
       if (metric) {
-        cached_x_offset = metric->bitmap_left + hb_position_to_pixels(positions[i].x_offset);
+        cached_x_offset = metric->bitmap_left + hb_position_to_font_pixels(font, positions[i].x_offset);
         cached_has_x_offset = true;
         if (!*set_x_offset && x_offset) {
           *x_offset = cached_x_offset;
@@ -993,7 +1713,7 @@ static double shaped_run_get_width(hb_buffer_t *buffer, RenFont *font, const cha
         }
       }
     }
-    width += hb_position_to_pixels(positions[i].x_advance);
+    width += hb_position_to_font_pixels(font, positions[i].x_advance);
   }
 
   if (cacheable)
@@ -1104,6 +1824,23 @@ static void draw_glyph_bitmap(DrawGlyphContext *ctx, RenFont **fonts, RenFont *f
         (destination_color & surface_format->Amask) >> surface_format->Ashift};
       SDL_Color src;
 
+      if (metric->format == EGlyphFormatColor) {
+        unsigned int src_a = (source_pixel[3] * ctx->color.a + 127) / 255;
+        unsigned int inv_a = 255 - src_a;
+        r = (source_pixel[2] * ctx->color.a + 127) / 255 + (dst.r * inv_a + 127) / 255;
+        g = (source_pixel[1] * ctx->color.a + 127) / 255 + (dst.g * inv_a + 127) / 255;
+        b = (source_pixel[0] * ctx->color.a + 127) / 255 + (dst.b * inv_a + 127) / 255;
+        unsigned int a = src_a + (dst.a * inv_a + 127) / 255;
+        source_pixel += 4;
+        uint32_t packed = ((r << surface_format->Rshift) & surface_format->Rmask)
+          | ((g << surface_format->Gshift) & surface_format->Gmask)
+          | ((b << surface_format->Bshift) & surface_format->Bmask);
+        if (surface_format->Amask)
+          packed |= (a << surface_format->Ashift) & surface_format->Amask;
+        *destination_pixel++ = packed;
+        continue;
+      }
+
       if (metric->format == EGlyphFormatSubpixel) {
         src.r = *(source_pixel++);
         src.g = *(source_pixel++);
@@ -1135,15 +1872,15 @@ static double draw_shaped_run(hb_buffer_t *buffer, DrawGlyphContext *ctx, RenFon
   hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(buffer, NULL);
 
   for (unsigned int i = 0; i < glyph_count; i++) {
-    double x_offset = hb_position_to_pixels(positions[i].x_offset);
-    double y_offset = hb_position_to_pixels(positions[i].y_offset);
+    double x_offset = hb_position_to_font_pixels(font, positions[i].x_offset);
+    double y_offset = hb_position_to_font_pixels(font, positions[i].y_offset);
     double glyph_x = pen_x + x_offset;
     SDL_Surface *font_surface = NULL;
     GlyphMetric *metric = NULL;
     font_get_glyph_by_id(font, infos[i].codepoint, (int)(fmod(glyph_x, 1.0) * SUBPIXEL_BITMAPS_CACHED), &font_surface, &metric);
     if (metric)
       draw_glyph_bitmap(ctx, fonts, font, font_surface, metric, glyph_x, y, y_offset, infos[i].codepoint == 0);
-    pen_x += hb_position_to_pixels(positions[i].x_advance);
+    pen_x += hb_position_to_font_pixels(font, positions[i].x_advance);
   }
 
   return pen_x;

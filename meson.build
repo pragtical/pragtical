@@ -124,6 +124,7 @@ pragtical_cargs += '-DPRAGTICAL_ARCH_TUPLE="@0@"'.format(arch_tuple)
 # Linker Settings
 #===============================================================================
 pragtical_link_args = []
+pragtical_link_whole = []
 if host_machine.system() == 'darwin'
     pragtical_link_args += ['-framework', 'CoreServices', '-framework', 'Foundation']
 endif
@@ -185,38 +186,67 @@ if not get_option('source-only')
         default_options: default_fallback_options + ['default_library=static', 'grep=false', 'test=false']
     )
 
+    if get_option('wrap_mode') == 'forcefallback'
+        # FreeType's PNG support pulls libpng as a nested fallback. Pre-resolve
+        # libpng and zlib as static subprojects so --forcefallback does not
+        # leave pragtical linked against libpng/zlib dylibs on macOS.
+        dependency('zlib', fallback: ['zlib', 'zlib_dep'],
+            default_options: default_fallback_options + ['default_library=static']
+        )
+        dependency('libpng', fallback: ['libpng', 'libpng_dep'],
+            default_options: default_fallback_options + ['default_library=static']
+        )
+    endif
+
     freetype_dep = dependency('freetype2', fallback: ['freetype2', 'freetype_dep'],
-        default_options: default_fallback_options + ['default_library=static', 'zlib=disabled', 'bzip2=disabled', 'png=disabled', 'harfbuzz=disabled', 'brotli=disabled']
+        default_options: default_fallback_options + ['default_library=static', 'zlib=enabled', 'bzip2=disabled', 'png=enabled', 'harfbuzz=disabled', 'brotli=disabled']
     )
 
-    harfbuzz_dep = dependency('harfbuzz', fallback: ['harfbuzz', 'libharfbuzz_dep'],
-        default_options: default_fallback_options + [
-            'default_library=static',
-            'glib=disabled',
-            'gobject=disabled',
-            'cairo=disabled',
-            'chafa=disabled',
-            'icu=disabled',
-            'graphite=disabled',
-            'graphite2=disabled',
-            'freetype=enabled',
-            'fontations=disabled',
-            'gdi=disabled',
-            'directwrite=disabled',
-            'coretext=disabled',
-            'harfrust=disabled',
-            'kbts=disabled',
-            'wasm=disabled',
-            'raster=disabled',
-            'vector=disabled',
-            'subset=disabled',
-            'tests=disabled',
-            'introspection=disabled',
-            'docs=disabled',
-            'utilities=disabled',
-            'benchmark=disabled'
-        ]
-    )
+    harfbuzz_options = default_fallback_options + [
+        'default_library=static',
+        'glib=disabled',
+        'gobject=disabled',
+        'cairo=disabled',
+        'chafa=disabled',
+        'icu=disabled',
+        'graphite=disabled',
+        'graphite2=disabled',
+        'freetype=enabled',
+        'fontations=disabled',
+        'gdi=disabled',
+        'directwrite=disabled',
+        'coretext=disabled',
+        'harfrust=disabled',
+        'kbts=disabled',
+        'wasm=disabled',
+        'raster=disabled',
+        'vector=disabled',
+        'subset=disabled',
+        'tests=disabled',
+        'introspection=disabled',
+        'docs=disabled',
+        'utilities=disabled',
+        'benchmark=disabled'
+    ]
+
+    if host_machine.system() == 'windows' and get_option('wrap_mode') == 'forcefallback'
+        harfbuzz_subproject = subproject('harfbuzz', default_options: harfbuzz_options)
+        harfbuzz_dep = harfbuzz_subproject.get_variable('libharfbuzz_dep')
+
+        # MinGW LTO/PGO static links have failed to extract HarfBuzz API objects
+        # from the archive even though libharfbuzz.a is present on the link line.
+        pragtical_link_whole += harfbuzz_subproject.get_variable('libharfbuzz')
+        harfbuzz_pragtical_dep = harfbuzz_dep.partial_dependency(
+            compile_args: true,
+            includes: true,
+            sources: true
+        )
+    else
+        harfbuzz_dep = dependency('harfbuzz', fallback: ['harfbuzz', 'libharfbuzz_dep'],
+            default_options: harfbuzz_options
+        )
+        harfbuzz_pragtical_dep = harfbuzz_dep
+    endif
 
     uchardet_dep = dependency('uchardet', fallback: ['uchardet', 'uchardet_dep'],
         default_options: default_fallback_options + ['default_library=static', 'test=false']
@@ -287,7 +317,7 @@ if not get_option('source-only')
         default_options: default_fallback_options + ['default_library=static']
     )
 
-    pragtical_deps = [lua_dep, sdl_dep, sdl_image, freetype_dep, harfbuzz_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdl_image, freetype_dep, harfbuzz_pragtical_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 lua_compat_needed = lua_dep.version() < '5.3.0'
