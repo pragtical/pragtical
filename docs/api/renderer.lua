@@ -40,6 +40,7 @@ renderer = {}
 ---@field public underline boolean
 ---@field public smoothing boolean
 ---@field public strikethrough boolean
+---@field public ligatures boolean
 
 ---
 ---@class renderer.font

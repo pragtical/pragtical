@@ -17,7 +17,8 @@ static int font_get_options(
   lua_State *L,
   ERenFontAntialiasing *antialiasing,
   ERenFontHinting *hinting,
-  int *style
+  int *style,
+  int *ligatures
 ) {
   if (lua_gettop(L) > 2 && lua_istable(L, 3)) {
     lua_getfield(L, 3, "antialiasing");
@@ -74,8 +75,11 @@ static int font_get_options(
     lua_getfield(L, 3, "strikethrough");
     if (lua_toboolean(L, -1))
       style_local |= FONT_STYLE_STRIKETHROUGH;
+    lua_getfield(L, 3, "ligatures");
+    if (lua_isboolean(L, -1))
+      *ligatures = lua_toboolean(L, -1);
 
-    lua_pop(L, 5);
+    lua_pop(L, 8);
 
     if (style_local != 0)
       *style = style_local;
@@ -88,15 +92,16 @@ static int f_font_load(lua_State *L) {
   const char *filename  = luaL_checkstring(L, 1);
   float size = luaL_checknumber(L, 2);
   int style = 0;
+  int ligatures = false;
   ERenFontHinting hinting = FONT_HINTING_SLIGHT;
   ERenFontAntialiasing antialiasing = FONT_ANTIALIASING_SUBPIXEL;
 
-  int ret_code = font_get_options(L, &antialiasing, &hinting, &style);
+  int ret_code = font_get_options(L, &antialiasing, &hinting, &style, &ligatures);
   if (ret_code > 0)
     return ret_code;
 
   RenFont** font = lua_newuserdata(L, sizeof(RenFont*));
-  *font = ren_font_load(filename, size, antialiasing, hinting, style);
+  *font = ren_font_load(filename, size, antialiasing, hinting, style, ligatures);
   if (!*font)
     return luaL_error(L, "failed to load font: %s", SDL_GetError());
   luaL_setmetatable(L, API_TYPE_FONT);
@@ -108,10 +113,11 @@ static int f_font_copy(lua_State *L) {
   bool table = font_retrieve(L, fonts, 1);
   float size = lua_gettop(L) >= 2 ? luaL_checknumber(L, 2) : ren_font_group_get_height(fonts);
   int style = -1;
+  int ligatures = -1;
   ERenFontHinting hinting = -1;
   ERenFontAntialiasing antialiasing = -1;
 
-  int ret_code = font_get_options(L, &antialiasing, &hinting, &style);
+  int ret_code = font_get_options(L, &antialiasing, &hinting, &style, &ligatures);
   if (ret_code > 0)
     return ret_code;
 
@@ -121,7 +127,7 @@ static int f_font_copy(lua_State *L) {
   }
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
     RenFont** font = lua_newuserdata(L, sizeof(RenFont*));
-    *font = ren_font_copy(fonts[i], size, antialiasing, hinting, style);
+    *font = ren_font_copy(fonts[i], size, antialiasing, hinting, style, ligatures);
     if (!*font)
       return luaL_error(L, "failed to copy font: %s", SDL_GetError());
     luaL_setmetatable(L, API_TYPE_FONT);
