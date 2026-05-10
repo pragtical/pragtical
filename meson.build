@@ -189,6 +189,35 @@ if not get_option('source-only')
         default_options: default_fallback_options + ['default_library=static', 'zlib=disabled', 'bzip2=disabled', 'png=disabled', 'harfbuzz=disabled', 'brotli=disabled']
     )
 
+    harfbuzz_dep = dependency('harfbuzz', fallback: ['harfbuzz', 'libharfbuzz_dep'],
+        default_options: default_fallback_options + [
+            'default_library=static',
+            'glib=disabled',
+            'gobject=disabled',
+            'cairo=disabled',
+            'chafa=disabled',
+            'icu=disabled',
+            'graphite=disabled',
+            'graphite2=disabled',
+            'freetype=enabled',
+            'fontations=disabled',
+            'gdi=disabled',
+            'directwrite=disabled',
+            'coretext=disabled',
+            'harfrust=disabled',
+            'kbts=disabled',
+            'wasm=disabled',
+            'raster=disabled',
+            'vector=disabled',
+            'subset=disabled',
+            'tests=disabled',
+            'introspection=disabled',
+            'docs=disabled',
+            'utilities=disabled',
+            'benchmark=disabled'
+        ]
+    )
+
     uchardet_dep = dependency('uchardet', fallback: ['uchardet', 'uchardet_dep'],
         default_options: default_fallback_options + ['default_library=static', 'test=false']
     )
@@ -258,7 +287,7 @@ if not get_option('source-only')
         default_options: default_fallback_options + ['default_library=static']
     )
 
-    pragtical_deps = [lua_dep, sdl_dep, sdl_image, freetype_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdl_image, freetype_dep, harfbuzz_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 lua_compat_needed = lua_dep.version() < '5.3.0'

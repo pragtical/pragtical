@@ -74,6 +74,32 @@ test.describe("graphics apis", function()
     test.type(group_meta, "table")
   end)
 
+  test.test("supports toggling font ligatures", function()
+    local font_path = DATADIR .. PATHSEP .. "fonts" .. PATHSEP .. "JetBrainsMono-Regular.ttf"
+    local font_plain = renderer.font.load(font_path, 24 * SCALE, { ligatures = false, antialiasing = "grayscale" })
+    local font_liga = renderer.font.load(font_path, 24 * SCALE, { ligatures = true, antialiasing = "grayscale" })
+    local font_liga_copy = font_liga:copy(24 * SCALE)
+    local font_plain_copy = font_liga:copy(24 * SCALE, { ligatures = false, antialiasing = "grayscale" })
+    local text = "-> === ffi"
+
+    test.equal(font_plain:get_width(text), font_plain_copy:get_width(text))
+    test.equal(font_liga:get_width(text), font_liga_copy:get_width(text))
+
+    local c_plain = canvas.new(180 * SCALE, 48 * SCALE, {0, 0, 0, 255}, true)
+    local c_liga = canvas.new(180 * SCALE, 48 * SCALE, {0, 0, 0, 255}, true)
+    local plain_x = c_plain:draw_text(font_plain, text, 0, 0, {255, 255, 255, 255})
+    local liga_x = c_liga:draw_text(font_liga, text, 0, 0, {255, 255, 255, 255})
+
+    test.equal(plain_x, font_plain:get_width(text))
+    test.equal(liga_x, font_liga:get_width(text))
+
+    c_plain:render()
+    c_liga:render()
+    local pixels_plain = c_plain:get_pixels(0, 0, 180 * SCALE, 48 * SCALE)
+    local pixels_liga = c_liga:get_pixels(0, 0, 180 * SCALE, 48 * SCALE)
+    test.ok(pixels_plain ~= pixels_liga, "ligature-enabled rendering should differ from plain glyph rendering")
+  end)
+
   test.test("supports canvas pixel, copy and image loading operations", function(context)
     local c = canvas.new(2, 2, {0, 0, 0, 255}, true)
     local width, height = c:get_size()

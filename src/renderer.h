@@ -35,8 +35,8 @@ typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
 struct RenWindow;
 typedef struct RenWindow RenWindow;
 
-RenFont* ren_font_load(const char *filename, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style);
-RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style);
+RenFont* ren_font_load(const char *filename, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style, bool ligatures);
+RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style, int ligatures);
 const char* ren_font_get_path(RenFont *font);
 void ren_font_free(RenFont *font);
 int ren_font_get_metadata(const char *path, FontMetaData **data, int *count, bool *monospaced);
