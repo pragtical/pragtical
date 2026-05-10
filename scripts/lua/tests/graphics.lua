@@ -1,7 +1,10 @@
 local common = require "core.common"
+local core = require "core"
+local ImageView = require "core.imageview"
 local test = require "core.test"
 
 local temp_root
+local project_temp_root
 
 test.describe("graphics apis", function()
   test.before_each(function(context)
@@ -12,11 +15,36 @@ test.describe("graphics apis", function()
     local ok, err = common.mkdirp(temp_root)
     test.ok(ok, err)
     context.temp_root = temp_root
+
+    project_temp_root = core.root_project().path
+      .. PATHSEP .. "graphics-project-tests-"
+      .. system.get_process_id() .. "-"
+      .. math.floor(system.get_time() * 1000000)
+    ok, err = common.mkdirp(project_temp_root)
+    test.ok(ok, err)
+    context.project_temp_root = project_temp_root
   end)
 
   test.after_each(function(context)
+    local views = core.root_view.root_node:get_children()
+    for i = #views, 1, -1 do
+      local view = views[i]
+      if view:extends(ImageView)
+          and view.path
+          and common.path_belongs_to(view.path, context.project_temp_root) then
+        local node = core.root_view.root_node:get_node_for_view(view)
+        if node then
+          node:remove_view(core.root_view.root_node, view)
+        end
+      end
+    end
+
     if context.temp_root and system.get_file_info(context.temp_root) then
       local ok, err = common.rm(context.temp_root, true)
+      test.ok(ok, err)
+    end
+    if context.project_temp_root and system.get_file_info(context.project_temp_root) then
+      local ok, err = common.rm(context.project_temp_root, true)
       test.ok(ok, err)
     end
   end)
@@ -159,6 +187,23 @@ test.describe("graphics apis", function()
     local svg_width, svg_height = svg_canvas:get_size()
     test.equal(svg_width, 32)
     test.equal(svg_height, 32)
+  end)
+
+  test.test("opens project-relative images through core.open_file", function(context)
+    local c = canvas.new(2, 2, {255, 0, 0, 255}, true)
+    local image_path = context.project_temp_root .. PATHSEP .. "treeview-image.png"
+    local saved, save_err = c:save_image(image_path)
+    test.ok(saved, save_err)
+
+    local relative_path = common.relative_path(core.root_project().path, image_path)
+    local cwd = system.getcwd()
+    system.chdir(context.temp_root)
+    local view = core.open_file(relative_path)
+    system.chdir(cwd)
+
+    test.not_nil(view)
+    test.ok(view:extends(ImageView))
+    test.equal(view.path, image_path)
   end)
 
   test.test("renders to a temporary window", function()

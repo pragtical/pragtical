@@ -1203,18 +1203,19 @@ end
 function core.open_image(filename)
   ---@cast ImageView core.imageview
   if ImageView.is_supported(filename) then
-    local file = io.open(filename)
+    local abs_filename = core.root_project():absolute_path(filename)
+    local file = io.open(abs_filename)
     if not file then return false end
     file:close()
 
     local node = core.root_view:get_active_node_default()
     for i, view in ipairs(node.views) do
-      if view.path == filename then
+      if view.path == abs_filename then
         node:set_active_view(node.views[i])
         return view
       end
     end
-    local view = ImageView(filename)
+    local view = ImageView(abs_filename)
     if view.image then
       node:add_view(view)
       core.root_view.root_node:update_layout()
