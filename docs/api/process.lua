@@ -103,11 +103,12 @@ process.REDIRECT_STDOUT = 4
 ---@field public stdout? process.redirecttype
 ---@field public stderr? process.redirecttype
 ---@field public env? table<string, string> | fun(system_env: table<string, string>): string Environment overrides, or a callback returning a NUL-separated environment block.
----@field public detach? boolean Run the process detached in the background.
----Run the process in the background. Background processes do not inherit
----the terminal and their exit code will always return 0. Defaults to true
----on windows since a lot of console applications cause cmd window to open.
----@field public background? boolean
+---Run the process detached from Pragtical lifecycle management. Detached
+---processes are not terminated by Pragtical on shutdown and their exit code
+---will always return 0. On Windows, processes are launched without inheriting
+---the terminal by default to avoid opening cmd windows; this does not detach
+---them from Pragtical lifecycle management.
+---@field public detach? boolean
 
 ---
 ---Create and start a new process
@@ -223,7 +224,7 @@ function process:interrupt() end
 
 ---
 ---Get the exit code of the process or nil if still running.
----Processes started with `background = true` do not provide their real exit
+---Processes started with `detach = true` do not provide their real exit
 ---code; once they finish, this returns 0.
 ---
 ---@return number | nil

@@ -1061,9 +1061,9 @@ static int process_start(lua_State *L) {
   const char *cwd = NULL;
   bool detach = false;
 #ifdef _WIN32
-  bool background = true;
+  bool launch_background = true;
 #else
-  bool background = false;
+  bool launch_background = false;
 #endif
   int deadline = 10;
   int redirects[3] = { REDIRECT_DEFAULT, REDIRECT_DEFAULT, REDIRECT_DEFAULT };
@@ -1078,7 +1078,8 @@ static int process_start(lua_State *L) {
     return push_error(L, "invalid command", ERROR_INVAL);
 
   if (lua_istable(L, 2)) {
-    lua_getfield(L, 2, "detach");  detach = lua_toboolean(L, -1);
+    if (lua_getfield(L, 2, "detach") == LUA_TBOOLEAN)
+      detach = lua_toboolean(L, -1);
     lua_getfield(L, 2, "timeout"); deadline = (int) luaL_optnumber(L, -1, deadline);
     lua_getfield(L, 2, "stdin");   redirects[STDIN_FD] = (int) luaL_optnumber(L, -1, REDIRECT_DEFAULT);
     lua_getfield(L, 2, "stdout");  redirects[STDOUT_FD] = (int) luaL_optnumber(L, -1, REDIRECT_DEFAULT);
@@ -1116,18 +1117,14 @@ static int process_start(lua_State *L) {
       SDL_DestroyProperties(props);
       return push_error(L, "cannot build process environment", ERROR_INVAL);
     }
-    if (lua_getfield(L, 2, "background") == LUA_TBOOLEAN) {
-      background = lua_toboolean(L, -1);
-    }
-    lua_pop(L, 2);
+    lua_pop(L, 1);
   }
 
-  SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, background);
+  SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, launch_background || detach);
 
   if (!set_property_or_fail(props, SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *) args)) ||
       (cwd && !SDL_SetStringProperty(props, SDL_PROP_PROCESS_CREATE_WORKING_DIRECTORY_STRING, cwd)) ||
-      (env && !SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, env)) ||
-      (detach && !SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true))) {
+      (env && !SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, env))) {
     if (env) SDL_DestroyEnvironment(env);
     SDL_DestroyProperties(props);
     return push_error(L, "cannot configure process", ERROR_INVAL);
@@ -1192,7 +1189,6 @@ static int process_start(lua_State *L) {
 #else
   /* Use our POSIX path instead of SDL3 here because we need process groups for
      non-blocking cleanup of shell-launched child processes. */
-  (void) background;
   if (!process_start_posix(args, env, cwd, detach, redirects, &native_pid, native_streams)) {
     if (env) SDL_DestroyEnvironment(env);
     SDL_DestroyProperties(props);
