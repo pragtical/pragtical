@@ -2,6 +2,7 @@
 #define RENCACHE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "renderer.h"
 
 /* These values represent the maximum size that can be tracked by rencache
@@ -14,7 +15,21 @@
 /* 72 Y cells with additional 1 cell padding to prevent hash crash */
 #define RENCACHE_CELLS_Y ((4320 + RENCACHE_CELL_SIZE) / RENCACHE_CELL_SIZE)
 
+typedef struct RenCache RenCache;
+typedef struct RenBackend RenBackend;
+typedef RenSurface (*RenCacheGetSurfaceFn)(RenCache *rc);
+typedef void (*RenCachePresentFn)(RenCache *rc, RenRect *rects, int count);
+
 typedef struct {
+  void (*set_clip_rect)(RenCache *rc, RenSurface *surface, RenRect rect);
+  void (*draw_rect)(RenCache *rc, RenSurface *surface, RenRect rect, RenColor color, bool replace);
+  double (*draw_text)(RenCache *rc, RenSurface *surface, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab);
+  void (*draw_poly)(RenCache *rc, RenSurface *surface, RenPoint *points, unsigned short npoints, RenColor color);
+  void (*draw_canvas)(RenCache *rc, RenSurface *surface, RenCache *canvas, int x, int y);
+  void (*draw_pixels)(RenCache *rc, RenSurface *surface, RenRect rect, const char *bytes, size_t len);
+} RenCacheDrawOps;
+
+struct RenCache {
   uint8_t *command_buf;
   size_t command_buf_idx;
   size_t command_buf_size;
@@ -26,13 +41,15 @@ typedef struct {
   bool resize_issue;
   RenRect screen_rect;
   RenRect last_clip_rect;
-  SDL_Window *window;   /* The cache can be used for both a window or surface */
+  void *target;
+  void *backend_data;
+  bool window_target;
+  uint64_t revision;
+  RenCacheGetSurfaceFn get_surface;
+  RenCachePresentFn present_rects;
+  const RenBackend *backend;
   RenSurface rensurface;
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-  SDL_Renderer *renderer;
-  SDL_Texture *texture;
-#endif
-} RenCache;
+};
 
 void rencache_init(RenCache *rc);
 void rencache_uninit(RenCache *rc);

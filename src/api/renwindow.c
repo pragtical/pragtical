@@ -99,7 +99,7 @@ static int f_renwin_restore(lua_State *L) {
 static int f_get_refresh_rate(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
 
-  SDL_DisplayID display = SDL_GetDisplayForWindow(window_renderer->cache.window);
+  SDL_DisplayID display = SDL_GetDisplayForWindow(renwin_get_sdl_window(window_renderer));
   if (!display) return 0;
 
   const SDL_DisplayMode *mode;

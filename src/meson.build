@@ -21,10 +21,15 @@ pragtical_sources = [
     'arena_allocator.c',
     'custom_events.c',
     'system_events.c',
+    'renatlas.c',
+    'renatlas_surface.c',
+    'renbackend.c',
+    'renbackend_surface.c',
     'renderer.c',
     'renwindow.c',
     'rencache.c',
     'main.c',
+    'renbackend_sdlgpu.c',
 ]
 
 if lua_jit_found

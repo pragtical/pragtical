@@ -110,9 +110,11 @@ pragtical_cargs = [
     '-DPCRE2_STATIC',
     '-DPRAGTICAL_PROJECT_VERSION_STR="@0@"'.format(version)
 ]
-if get_option('renderer')
-    pragtical_cargs += '-DPRAGTICAL_USE_SDL_RENDERER'
-endif
+
+renderer_backend = get_option('renderer_backend')
+pragtical_cargs += '-DPRAGTICAL_DEFAULT_RENDERER_BACKEND="@0@"'.format(renderer_backend)
+pragtical_cargs += '-DPRAGTICAL_HAVE_SDL_RENDERER'
+pragtical_cargs += '-DPRAGTICAL_HAVE_SDL_GPU'
 if get_option('arch_tuple') != ''
     arch_tuple = get_option('arch_tuple')
 else
@@ -297,16 +299,25 @@ if not get_option('source-only')
 
         sdl_options = cmake.subproject_options()
 
+        sdl_gpu = 'ON'
+        sdl_vulkan = 'OFF'
+        sdl_metal = 'OFF'
+        if host_machine.system() == 'darwin'
+            sdl_metal = 'ON'
+        else
+            sdl_vulkan = 'ON'
+        endif
+
         sdl_options.add_cmake_defines({
             'CMAKE_BUILD_TYPE': sdl_build_type,
             'CMAKE_POSITION_INDEPENDENT_CODE': 'ON',
             'CMAKE_OSX_DEPLOYMENT_TARGET': sdl_osx_deploy_target,
             'SDL_DEPS_SHARED': 'ON', 'SDL_SHARED': 'OFF', 'SDL_STATIC': 'ON',
             'SDL_DBUS': 'ON', 'SDL_IBUS': 'ON', 'SDL_AUDIO': 'OFF',
-            'SDL_GPU': 'OFF', 'SDL_RPATH': 'OFF', 'SDL_PIPEWIRE': 'OFF',
+            'SDL_GPU': sdl_gpu, 'SDL_RPATH': 'OFF', 'SDL_PIPEWIRE': 'OFF',
             'SDL_CAMERA': 'OFF', 'SDL_JOYSTICK': 'OFF', 'SDL_HAPTIC': 'OFF',
             'SDL_HIDAPI': 'OFF', 'SDL_DIALOG': 'ON', 'SDL_POWER': 'OFF',
-            'SDL_SENSOR': 'OFF', 'SDL_VULKAN': 'OFF', 'SDL_LIBUDEV': 'ON',
+            'SDL_SENSOR': 'OFF', 'SDL_VULKAN': sdl_vulkan, 'SDL_METAL': sdl_metal, 'SDL_LIBUDEV': 'ON',
             'SDL_X11': sdl_x11, 'SDL_WAYLAND': sdl_wayland,
             'SDL_TESTS': 'OFF', 'SDL_X11_XTEST': 'OFF',
             'SDL_OPENGL': sdl_opengl, 'SDL_OPENGLES': sdl_opengles,
