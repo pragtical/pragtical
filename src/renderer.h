@@ -11,15 +11,13 @@
 #define UNUSED
 #endif
 
-#ifdef PRAGTICAL_USE_SDL_RENDERER
 #define RECT_TYPE double
-#else
-#define RECT_TYPE int
-#endif
 
 #define FONT_FALLBACK_MAX 10
 #define MAX_POLY_POINTS 0xFFFF
 typedef struct RenFont RenFont;
+typedef struct RenAtlas RenAtlas;
+typedef struct GlyphMetric GlyphMetric;
 typedef enum { FONT_HINTING_NONE, FONT_HINTING_SLIGHT, FONT_HINTING_FULL } ERenFontHinting;
 typedef enum { FONT_ANTIALIASING_NONE, FONT_ANTIALIASING_GRAYSCALE, FONT_ANTIALIASING_SUBPIXEL } ERenFontAntialiasing;
 typedef enum { FONT_STYLE_BOLD = 1, FONT_STYLE_ITALIC = 2, FONT_STYLE_UNDERLINE = 4, FONT_STYLE_SMOOTH = 8, FONT_STYLE_STRIKETHROUGH = 16 } ERenFontStyle;
@@ -31,6 +29,17 @@ typedef struct { RECT_TYPE x, y, width, height; } RenRect;
 typedef struct { double offset; } RenTab;
 typedef struct { SDL_Surface *surface; float scale_x, scale_y; } RenSurface;
 typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
+typedef struct {
+  RenAtlas *atlas;
+  SDL_Surface *surface;
+  GlyphMetric *metric;
+  RenColor color;
+  int dst_x, dst_y;
+  int src_x, src_y;
+  int width, height;
+  unsigned char format;
+} RenGlyphDraw;
+typedef bool (*RenGlyphDrawFn)(void *userdata, const RenGlyphDraw *glyph);
 
 struct RenWindow;
 typedef struct RenWindow RenWindow;
@@ -42,14 +51,16 @@ void ren_font_free(RenFont *font);
 int ren_font_get_metadata(const char *path, FontMetaData **data, int *count, bool *monospaced);
 int ren_font_group_get_tab_size(RenFont **font);
 int ren_font_group_get_height(RenFont **font);
+int ren_font_group_get_style(RenFont **font);
+int ren_font_group_get_underline_thickness(RenFont **font);
 float ren_font_group_get_size(RenFont **font);
 void ren_font_group_set_size(RenFont **font, float size, float surface_scale);
-#ifdef PRAGTICAL_USE_SDL_RENDERER
 void update_font_scale(RenWindow *window_renderer, RenFont **fonts);
-#endif
 void ren_font_group_set_tab_size(RenFont **font, int n);
 double ren_font_group_get_width(RenFont **font, const char *text, size_t len, RenTab tab, int *x_offset);
 double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab);
+double ren_draw_text_cb(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab, RenGlyphDrawFn glyph_fn, void *userdata);
+double ren_draw_text_cb_ex(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab, RenGlyphDrawFn glyph_fn, void *userdata, bool draw_decorations);
 
 void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color, bool replace);
 

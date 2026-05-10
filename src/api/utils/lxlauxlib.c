@@ -93,9 +93,7 @@ bool font_retrieve(lua_State *L, RenFont **fonts, int idx) {
       lua_pop(L, 1);
     }
   }
-#ifdef PRAGTICAL_USE_SDL_RENDERER
   update_font_scale(ren_get_target_window(), fonts);
-#endif
   return is_table;
 }
 

@@ -7,11 +7,29 @@
 
 #include "api.h"
 #include "utils/lxlauxlib.h"
+#include "../renbackend.h"
 #include "../renderer.h"
 #include "../rencache.h"
 
 extern int RENDERER_FONT_REF;
 extern int RENDERER_CANVAS_REF;
+
+static RenCache *push_canvas(lua_State *L, SDL_Surface *surface) {
+  RenCache *canvas = lua_newuserdata(L, sizeof(RenCache));
+  luaL_setmetatable(L, API_TYPE_CANVAS);
+  rencache_init(canvas);
+  canvas->backend->init_canvas(canvas, surface);
+  rencache_begin_frame(canvas);
+  return canvas;
+}
+
+static SDL_Surface *canvas_surface(RenCache *canvas) {
+  return canvas->backend->get_canvas_surface(canvas);
+}
+
+static void canvas_size(RenCache *canvas, int *width, int *height) {
+  canvas->backend->get_canvas_size(canvas, width, height);
+}
 
 static int f_new(lua_State *L) {
   lua_Number w = luaL_checknumber(L, 1);
@@ -28,13 +46,7 @@ static int f_new(lua_State *L) {
     SDL_MapSurfaceRGBA(surface, color.r, color.g, color.b, color.a)
   );
 
-  RenCache *canvas = lua_newuserdata(L, sizeof(RenCache));
-  luaL_setmetatable(L, API_TYPE_CANVAS);
-  rencache_init(canvas);
-  canvas->rensurface.surface = surface;
-  canvas->rensurface.scale_x = 1;
-  canvas->rensurface.scale_y = 1;
-  rencache_begin_frame(canvas);
+  push_canvas(L, surface);
 
   return 1;
 }
@@ -54,13 +66,7 @@ static int f_load_image(lua_State *L) {
     surface = new;
   }
 
-  RenCache *canvas = lua_newuserdata(L, sizeof(RenCache));
-  luaL_setmetatable(L, API_TYPE_CANVAS);
-  rencache_init(canvas);
-  canvas->rensurface.surface = surface;
-  canvas->rensurface.scale_x = 1;
-  canvas->rensurface.scale_y = 1;
-  rencache_begin_frame(canvas);
+  push_canvas(L, surface);
   return 1;
 
 error:
@@ -87,13 +93,7 @@ static int f_load_svg_image(lua_State *L) {
     surface = new;
   }
 
-  RenCache *canvas = lua_newuserdata(L, sizeof(RenCache));
-  luaL_setmetatable(L, API_TYPE_CANVAS);
-  rencache_init(canvas);
-  canvas->rensurface.surface = surface;
-  canvas->rensurface.scale_x = 1;
-  canvas->rensurface.scale_y = 1;
-  rencache_begin_frame(canvas);
+  push_canvas(L, surface);
   return 1;
 
 error:
@@ -105,8 +105,10 @@ error:
 
 static int f_get_size(lua_State *L) {
   RenCache *canvas = luaL_checkudata(L, 1, API_TYPE_CANVAS);
-  lua_pushinteger(L, canvas->rensurface.surface->w);
-  lua_pushinteger(L, canvas->rensurface.surface->h);
+  int w, h;
+  canvas_size(canvas, &w, &h);
+  lua_pushinteger(L, w);
+  lua_pushinteger(L, h);
   return 2;
 }
 
@@ -116,12 +118,14 @@ static int f_get_pixels(lua_State *L) {
 
   lua_Integer x = luaL_optinteger(L, 2, 0);
   lua_Integer y = luaL_optinteger(L, 3, 0);
-  lua_Integer w = luaL_optinteger(L, 4, canvas->rensurface.surface->w);
-  lua_Integer h = luaL_optinteger(L, 5, canvas->rensurface.surface->h);
+  int canvas_w, canvas_h;
+  canvas_size(canvas, &canvas_w, &canvas_h);
+  lua_Integer w = luaL_optinteger(L, 4, canvas_w);
+  lua_Integer h = luaL_optinteger(L, 5, canvas_h);
 
   SDL_Surface *dst = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
   SDL_Rect rect = { .x = x, .y = y, .w = w, .h = h };
-  SDL_BlitSurface(canvas->rensurface.surface, &rect, dst, NULL);
+  SDL_BlitSurface(canvas_surface(canvas), &rect, dst, NULL);
 
   const SDL_PixelFormatDetails *details = SDL_GetPixelFormatDetails(SDL_PIXELFORMAT_RGBA32);
   lua_pushlstring(L, dst->pixels, details->bytes_per_pixel * w * h);
@@ -155,8 +159,10 @@ static int f_copy(lua_State *L) {
   RenCache *canvas = luaL_checkudata(L, 1, API_TYPE_CANVAS);
   lua_Number x = luaL_optnumber(L, 2, 0);
   lua_Number y = luaL_optnumber(L, 3, 0);
-  lua_Number w = luaL_optnumber(L, 4, canvas->rensurface.surface->w);
-  lua_Number h = luaL_optnumber(L, 5, canvas->rensurface.surface->h);
+  int canvas_w, canvas_h;
+  canvas_size(canvas, &canvas_w, &canvas_h);
+  lua_Number w = luaL_optnumber(L, 4, canvas_w);
+  lua_Number h = luaL_optnumber(L, 5, canvas_h);
   lua_Number new_w = luaL_optnumber(L, 6, w);
   lua_Number new_h = luaL_optnumber(L, 7, h);
   const char *mode_str = luaL_optstring(L, 8, "linear");
@@ -172,29 +178,26 @@ static int f_copy(lua_State *L) {
   }
   #endif
 
-  RenCache *new_canvas = lua_newuserdata(L, sizeof(RenCache));
-  luaL_setmetatable(L, API_TYPE_CANVAS);
-  rencache_init(new_canvas);
-
   bool full_surface = (
     x == 0 && y == 0
     &&
-    w == canvas->rensurface.surface->w
+    w == canvas_w
     &&
-    h == canvas->rensurface.surface->h
+    h == canvas_h
   );
   bool scaled = (new_w != w || new_h != h);
   SDL_Surface *surface_copy;
+  SDL_Surface *surface = canvas_surface(canvas);
   if (full_surface && !scaled) {
-    surface_copy = SDL_DuplicateSurface(canvas->rensurface.surface);
+    surface_copy = SDL_DuplicateSurface(surface);
     // DuplicateSurface copies the clip rect, so we reset it
     SDL_SetSurfaceClipRect(surface_copy, NULL);
   } else if (full_surface) {
-    surface_copy = SDL_ScaleSurface(canvas->rensurface.surface, new_w, new_h, mode);
+    surface_copy = SDL_ScaleSurface(surface, new_w, new_h, mode);
   } else {
-    surface_copy = SDL_CreateSurface(new_w, new_h, canvas->rensurface.surface->format);
+    surface_copy = SDL_CreateSurface(new_w, new_h, surface->format);
     SDL_Rect src_rect = {.x = x, .y = y, .w = w, .h = h};
-    SDL_BlitSurfaceScaled(canvas->rensurface.surface, &src_rect, surface_copy, NULL, mode);
+    SDL_BlitSurfaceScaled(surface, &src_rect, surface_copy, NULL, mode);
   }
 
   if(!surface_copy) {
@@ -203,10 +206,7 @@ static int f_copy(lua_State *L) {
     return 2;
   }
 
-  new_canvas->rensurface.surface = surface_copy;
-  new_canvas->rensurface.scale_x = 1;
-  new_canvas->rensurface.scale_y = 1;
-  rencache_begin_frame(new_canvas);
+  push_canvas(L, surface_copy);
 
   return 1;
 }
@@ -217,13 +217,15 @@ static int f_scaled(lua_State *L) {
   lua_Number new_w = luaL_checknumber(L, 2);
   lua_Number new_h = luaL_checknumber(L, 3);
   const char *mode = luaL_optstring(L, 4, "linear");
+  int w, h;
+  canvas_size(canvas, &w, &h);
 
   lua_settop(L, 1); // keep only the canvas
 
   lua_pushnumber(L, 0); // x
   lua_pushnumber(L, 0); // y
-  lua_pushnumber(L, canvas->rensurface.surface->w); // w
-  lua_pushnumber(L, canvas->rensurface.surface->h); // h
+  lua_pushnumber(L, w);
+  lua_pushnumber(L, h);
   lua_pushnumber(L, new_w);
   lua_pushnumber(L, new_h);
   lua_pushstring(L, mode);
@@ -241,9 +243,9 @@ static int f_clear(lua_State *L) {
   else
     color = luaXL_checkcolor(L, 6, 255);
 
-  RECT_TYPE w, h;
-  ren_get_size(&canvas->rensurface, &w, &h);
-  RenRect rect = { .x = 0, .y = 0, .width = w, .height = h };
+  int w, h;
+  canvas_size(canvas, &w, &h);
+  RenRect rect = { .x = 0, .y = 0, .width = (RECT_TYPE) w, .height = (RECT_TYPE) h };
 
   rencache_draw_rect(canvas, rect, color, true);
 
@@ -361,14 +363,7 @@ static int f_draw_canvas(lua_State *L) {
   lua_Number y = luaL_checknumber(L, 4);
   bool blend = luaXL_optboolean(L, 5, true);
 
-  SDL_Rect rect = { .x = x, .y = y, .w = canvas_src->rensurface.surface->w, .h = canvas_src->rensurface.surface->h };
-  SDL_BlendMode src_mode;
-  SDL_GetSurfaceBlendMode(canvas_src->rensurface.surface, &src_mode);
-  SDL_SetSurfaceBlendMode(canvas_src->rensurface.surface, blend ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
-
-  SDL_BlitSurface(canvas_src->rensurface.surface, NULL, canvas_dst->rensurface.surface, &rect);
-
-  SDL_SetSurfaceBlendMode(canvas_src->rensurface.surface, src_mode);
+  canvas_dst->backend->copy_canvas(canvas_dst, canvas_src, x, y, blend);
 
   return 0;
 }
@@ -388,12 +383,13 @@ static int f_save_image(lua_State *L) {
   int quality = luaL_optinteger(L, 3, 100);
 
   bool saved = false;
+  SDL_Surface *surface = canvas_surface(canvas);
   if (strcmp(type, "png") == 0) {
-    saved = IMG_SavePNG(canvas->rensurface.surface, file);
+    saved = IMG_SavePNG(surface, file);
   } else if (strcmp(type, "jpg") == 0) {
-    saved = IMG_SaveJPG(canvas->rensurface.surface, file, quality);
+    saved = IMG_SaveJPG(surface, file, quality);
   } else if (strcmp(type, "avif") == 0) {
-    saved = IMG_SaveAVIF(canvas->rensurface.surface, file, quality);
+    saved = IMG_SaveAVIF(surface, file, quality);
   }
 
   if (saved) {
@@ -409,8 +405,7 @@ static int f_save_image(lua_State *L) {
 
 static int f_gc(lua_State *L) {
   RenCache* canvas = luaL_checkudata(L, 1, API_TYPE_CANVAS);
-  if (canvas->rensurface.surface)
-    SDL_DestroySurface(canvas->rensurface.surface);
+  canvas->backend->destroy_canvas(canvas);
   rencache_uninit(canvas);
   return 0;
 }
