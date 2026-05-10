@@ -230,7 +230,14 @@ if not get_option('source-only')
     ]
 
     if host_machine.system() == 'windows' and get_option('wrap_mode') == 'forcefallback'
-        harfbuzz_subproject = subproject('harfbuzz', default_options: harfbuzz_options)
+        harfbuzz_windows_options = harfbuzz_options + [
+            # The app links this archive whole on MinGW. Keep HarfBuzz as
+            # regular objects so LTO/PGO builds do not depend on ld's LTO
+            # plugin handling inside a whole-archive static library.
+            'b_lto=false',
+            'b_pgo=off'
+        ]
+        harfbuzz_subproject = subproject('harfbuzz', default_options: harfbuzz_windows_options)
         harfbuzz_dep = harfbuzz_subproject.get_variable('libharfbuzz_dep')
 
         # MinGW LTO/PGO static links have failed to extract HarfBuzz API objects

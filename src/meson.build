@@ -130,6 +130,11 @@ if host_machine.system() == 'windows'
         pragtical_deps += cc.find_library('version', required: true)
         pragtical_deps += cc.find_library('iconv', required: false)
     endif
+
+    if cc.get_id() == 'gcc' and get_option('b_pgo') == 'generate'
+        # MinGW GCC does not always inject libgcov for static PGO links.
+        pragtical_deps += cc.find_library('gcov', required: true)
+    endif
 elif host_machine.system() == 'darwin'
     pragtical_sources += 'bundle_open.m'
 
