@@ -117,7 +117,11 @@ end
 ---@return boolean loaded
 ---@return string? errmsg
 function ImageView:load(path)
-  if not path or not io.open(path, "r") then return false, "invalid path" end
+  if not path then return false, "invalid path" end
+  local file = io.open(path, "r")
+  if not file then return false, "invalid path" end
+  file:close()
+
   local _
   _, self.type = ImageView.is_supported(path)
   self.path = path
