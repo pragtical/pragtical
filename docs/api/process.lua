@@ -104,10 +104,10 @@ process.REDIRECT_STDOUT = 4
 ---@field public stderr? process.redirecttype
 ---@field public env? table<string, string> | fun(system_env: table<string, string>): string Environment overrides, or a callback returning a NUL-separated environment block.
 ---Run the process detached from Pragtical lifecycle management. Detached
----processes are not terminated by Pragtical on shutdown and their exit code
----will always return 0. On Windows, processes are launched without inheriting
----the terminal by default to avoid opening cmd windows; this does not detach
----them from Pragtical lifecycle management.
+---processes are not terminated by Pragtical on shutdown. On Windows, processes
+---are launched without opening a console window; when built against Pragtical's
+---bundled SDL3 subproject, the real Windows exit code remains available because
+---the SDL3 process backend is patched for this.
 ---@field public detach? boolean
 
 ---
@@ -224,8 +224,11 @@ function process:interrupt() end
 
 ---
 ---Get the exit code of the process or nil if still running.
----Processes started with `detach = true` do not provide their real exit
----code; once they finish, this returns 0.
+---Processes started with `detach = true` are not owned by Pragtical after
+---launch, so their real exit code may not be available. On Windows, processes
+---still provide their real exit code when built against Pragtical's bundled
+---SDL3 subproject, which patches SDL3 to preserve it when the process is
+---launched without a console window.
 ---
 ---@return number | nil
 function process:returncode() end
