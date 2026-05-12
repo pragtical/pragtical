@@ -328,6 +328,51 @@ local lua_var = 1
     test.equal(MarkdownView.resolve_color(colors_by_text["1"]), style.syntax["number"])
   end)
 
+  test.test("uses a fixed font object for all markdown font roles when configured", function()
+    local fixed_font = style.code_font:copy(12 * SCALE)
+    local view = MarkdownView({
+      text = [[
+# Heading
+
+Paragraph with `inline`.
+
+```lua
+local lua_var = 1
+```
+]],
+      font = fixed_font
+    })
+    view.size.x = 420
+    view.size.y = 240
+
+    local fonts = view:get_font_cache()
+
+    test.equal(fonts.body.normal, fixed_font)
+    test.equal(fonts.body.bold, fixed_font)
+    test.equal(fonts.body.italic, fixed_font)
+    test.equal(fonts.body.strikethrough, fixed_font)
+    test.equal(fonts.body.code, fixed_font)
+    test.equal(fonts.code, fixed_font)
+    test.equal(fonts.heading[1].normal, fixed_font)
+    test.equal(fonts.heading[1].bold, fixed_font)
+
+    for _, command in ipairs(view:ensure_layout().commands) do
+      if command.type == "text" then
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.font then
+            test.equal(fragment.font, fixed_font)
+          end
+        end
+      end
+    end
+
+    local default_view = MarkdownView("# Heading\n\nParagraph")
+    test.ok(
+      default_view:get_font_cache().heading[1].normal:get_size()
+      > default_view:get_font_cache().body.normal:get_size()
+    )
+  end)
+
   test.test("uses updated style colors without rebuilding layout", function()
     local view = MarkdownView("plain `code` [link](https://example.com)")
     view.size.x = 420

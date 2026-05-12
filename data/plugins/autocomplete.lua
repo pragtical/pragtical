@@ -7,6 +7,7 @@ local keymap = require "core.keymap"
 local style = require "core.style"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local MarkdownView = require "core.markdownview"
 local RootView = require "core.rootview"
 
 ---@class plugins.autocomplete.symbolinfo
@@ -393,12 +394,23 @@ local suggestions_offset = 1
 local suggestions_idx = 1
 local suggestions = {}
 local last_line, last_col
+local desc_view
+local desc_view_text
+local desc_view_font
+local desc_rect
+local desc_font_size = config.plugins.autocomplete.desc_font_size
+local previous_scale = SCALE
+local desc_font = style.code_font:copy(desc_font_size * SCALE)
 
 
 local function reset_suggestions(skip_close)
   suggestions_offset = 1
   suggestions_idx = 1
   suggestions = {}
+  desc_rect = nil
+  desc_view = nil
+  desc_view_text = nil
+  desc_view_font = nil
 
   triggered_manually = false
 
@@ -587,120 +599,65 @@ local function get_suggestions_rect(av)
     has_icons
 end
 
-local function wrap_line(line, max_chars)
-  if #line > max_chars then
-    local lines = {}
-    local line_len = #line
-    local new_line = ""
-    local prev_char = ""
-    local position = 0
-    local indent = line:match("^%s+")
-    for char in line:gmatch(".") do
-      position = position + 1
-      if #new_line < max_chars then
-        new_line = new_line .. char
-        prev_char = char
-        if position >= line_len then
-          table.insert(lines, new_line)
-        end
-      else
-        if
-          not prev_char:match("%s")
-          and
-          not string.sub(line, position+1, 1):match("%s")
-          and
-          position < line_len
-        then
-          new_line = new_line .. "-"
-        end
-        table.insert(lines, new_line)
-        if indent then
-          new_line = indent .. char
-        else
-          new_line = char
-        end
-      end
-    end
-    return lines
-  end
-  return line
+local function point_over_rect(x, y, rect)
+  return rect
+    and x >= rect.x and y >= rect.y
+    and x <= rect.x + rect.w and y <= rect.y + rect.h
 end
 
-local previous_scale = SCALE
-local desc_font = style.code_font:copy(
-  config.plugins.autocomplete.desc_font_size * SCALE
-)
-local function draw_description_box(text, sx, sy, sw, sh)
-  if previous_scale ~= SCALE then
-    desc_font = style.code_font:copy(
-      config.plugins.autocomplete.desc_font_size * SCALE
-    )
+local function get_description_view(text)
+  local font_size = config.plugins.autocomplete.desc_font_size
+  if previous_scale ~= SCALE or desc_font_size ~= font_size then
+    desc_font = style.code_font:copy(font_size * SCALE)
+    desc_font_size = font_size
     previous_scale = SCALE
   end
 
-  local ww = system.get_window_size(core.window)
+  if
+    not desc_view
+    or desc_view_text ~= text
+    or desc_view_font ~= desc_font
+  then
+    desc_view = MarkdownView({
+      text = text,
+      title = "Completion Documentation",
+      font = desc_font
+    })
+    desc_view_text = text
+    desc_view_font = desc_font
+  end
+  return desc_view
+end
 
-  local font = desc_font
-  local lh = font:get_height()
-  local y = sy + style.padding.y
-  local x = sx + sw + style.padding.x / 4
-  local width = 0
-  local char_width = font:get_width(" ")
-  local draw_left = false;
+local function draw_description_box(text, sx, sy, sw, sh)
+  local ww, wh = system.get_window_size(core.window)
+  local gap = style.padding.x / 4
+  local max_width = math.max(260 * SCALE, ww * 0.35)
+  local x = sx + sw + gap
+  local y = sy
+  local width
 
-  local max_chars = 0
   if sw > (ww - style.padding.x * 2) * 0.5 then
-    sy = sy + sh + style.padding.x / 4
-    y = sy + style.padding.y
     x = sx
-    max_chars = ((ww - x - style.padding.x * 4) / char_width)
+    y = sy + sh + gap
+    width = math.min(sw, ww - x - style.padding.x * 2)
   elseif sx < ww - sx - sw then
-    max_chars = (((ww) - x) / char_width) - 5
+    width = math.min(max_width, ww - x - style.padding.x * 2)
   else
-    draw_left = true;
-    max_chars = (
-      (sx - (style.padding.x / 4) - style.scrollbar_size)
-      / char_width
-    ) - 5
+    width = math.min(max_width, sx - gap - style.padding.x * 2)
+    x = sx - gap - width
   end
 
-  local lines = {}
-  for line in string.gmatch(text.."\n", "(.-)\n") do
-    local wrapper_lines = wrap_line(line, max_chars)
-    if type(wrapper_lines) == "table" then
-      for _, wrapped_line in pairs(wrapper_lines) do
-        width = math.max(width, font:get_width(wrapped_line))
-        table.insert(lines, wrapped_line)
-      end
-    else
-      width = math.max(width, font:get_width(line))
-      table.insert(lines, line)
-    end
-  end
+  width = math.max(width, 160 * SCALE)
 
-  if draw_left then
-    x = sx - (style.padding.x / 4) - width - (style.padding.x * 2)
-  end
+  local view = get_description_view(text)
+  local _, content_height = view:get_rendered_size(width)
+  local max_height = math.max(120 * SCALE, wh * 0.55)
+  local available_height = wh - y - style.padding.y
+  local height = math.min(content_height, max_height, math.max(available_height, 1))
 
-  local height = #lines * font:get_height()
-
-  -- draw background rect
-  renderer.draw_rect(
-    x,
-    sy,
-    width + style.padding.x * 2,
-    height + style.padding.y * 2,
-    style.background3
-  )
-
-  -- draw text
-  for _, line in pairs(lines) do
-    common.draw_text(
-      font, style.text, line, "left",
-      x + style.padding.x, y, width, lh
-    )
-    y = y + lh
-  end
+  view:draw_at(x, y, width, height, style.background3, true)
+  desc_rect = { x = x, y = y, w = width, h = height }
 end
 
 local function draw_suggestions_box(av)
@@ -713,6 +670,7 @@ local function draw_suggestions_box(av)
   -- draw background rect
   local rx, ry, rw, rh, has_icons = get_suggestions_rect(av)
   renderer.draw_rect(rx, ry, rw, rh, style.background3)
+  desc_rect = nil
 
   -- draw text
   local font = av:get_font()
@@ -855,12 +813,68 @@ end
 local on_text_input = RootView.on_text_input
 local on_text_remove = Doc.remove
 local on_doc_close = Doc.on_close
+local on_mouse_pressed = RootView.on_mouse_pressed
+local on_mouse_released = RootView.on_mouse_released
+local on_mouse_moved = RootView.on_mouse_moved
+local on_mouse_wheel = RootView.on_mouse_wheel
 local update = RootView.update
 local draw = RootView.draw
 
 RootView.on_text_input = function(...)
   on_text_input(...)
   show_autocomplete()
+end
+
+RootView.on_mouse_pressed = function(self, button, x, y, clicks)
+  if desc_view and point_over_rect(x, y, desc_rect) then
+    if desc_view:on_mouse_pressed(button, x, y, clicks) then
+      return true
+    end
+  end
+  return on_mouse_pressed(self, button, x, y, clicks)
+end
+
+RootView.on_mouse_released = function(self, button, x, y)
+  if desc_view then
+    desc_view:on_mouse_released(button, x, y)
+  end
+  return on_mouse_released(self, button, x, y)
+end
+
+RootView.on_mouse_moved = function(self, x, y, dx, dy)
+  if desc_view and (point_over_rect(x, y, desc_rect) or desc_view:scrollbar_dragging()) then
+    local handled = desc_view:on_mouse_moved(x, y, dx, dy)
+    if handled then
+      core.request_cursor(desc_view.cursor)
+      core.redraw = true
+      return true
+    end
+    local result = on_mouse_moved(self, x, y, dx, dy)
+    core.request_cursor(desc_view.cursor)
+    core.redraw = true
+    return result
+  elseif desc_view then
+    desc_view:on_mouse_left()
+  end
+  return on_mouse_moved(self, x, y, dx, dy)
+end
+
+RootView.on_mouse_wheel = function(self, y, x)
+  if desc_view and point_over_rect(core.root_view.mouse.x, core.root_view.mouse.y, desc_rect) then
+    if keymap.modkeys["shift"] then
+      x = y
+      y = 0
+    end
+    if y and y ~= 0 then
+      desc_view.scroll.to.y = desc_view.scroll.to.y + y * -config.mouse_wheel_scroll
+    end
+    if x and x ~= 0 then
+      desc_view.scroll.to.x = desc_view.scroll.to.x + x * -config.mouse_wheel_scroll
+    end
+    core.redraw = true
+    return true
+  end
+  return on_mouse_wheel(self, y, x)
 end
 
 Doc.remove = function(self, line1, col1, line2, col2)
@@ -882,6 +896,10 @@ end
 
 RootView.update = function(...)
   update(...)
+
+  if desc_view then
+    desc_view:update()
+  end
 
   local av = get_active_view()
   if av then

@@ -132,6 +132,7 @@ end
 ---@field text string?
 ---@field title string?
 ---@field name string?
+---@field font renderer.font?
 
 ---@class core.markdownview : core.view
 ---@overload fun(source?: string|table, title?: string):core.markdownview
@@ -146,6 +147,7 @@ end
 ---@field footnotes table
 ---@field layout table?
 ---@field font_cache table?
+---@field font renderer.font?
 ---@field last_doc_change_id integer?
 ---@field hovered_link_url string?
 local MarkdownView = View:extend()
@@ -2709,6 +2711,85 @@ local function make_fontset(font)
   }
 end
 
+local function make_shared_fontset(font)
+  return {
+    normal = font,
+    bold = font,
+    italic = font,
+    bold_italic = font,
+    code = font,
+    strikethrough = font,
+    bold_strikethrough = font,
+    italic_strikethrough = font,
+    bold_italic_strikethrough = font,
+    code_strikethrough = font
+  }
+end
+
+local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+  core.push_clip_rect(clip_x, clip_y, clip_w, clip_h)
+
+  for _, command in ipairs(commands) do
+    local x = start_x + command.x
+    local y = start_y + command.y
+    if y + command.height >= clip_y and y <= clip_y + clip_h then
+      if command.type == "rect" then
+        renderer.draw_rect(x, y, command.width, command.height, resolve_color(command.color))
+      elseif command.type == "checkbox" then
+        local box_size = command.width
+        local box_x = x
+        local box_y = y + math.max(math.floor((command.height - box_size) / 2), 0)
+        local checkbox_color = resolve_color(command.color)
+        renderer.draw_rect(box_x, box_y, box_size, 1, checkbox_color)
+        renderer.draw_rect(box_x, box_y + box_size - 1, box_size, 1, checkbox_color)
+        renderer.draw_rect(box_x, box_y, 1, box_size, checkbox_color)
+        renderer.draw_rect(box_x + box_size - 1, box_y, 1, box_size, checkbox_color)
+        if command.checked then
+          local fill = math.max(box_size - 4, 1)
+          renderer.draw_rect(box_x + 2, box_y + 2, fill, fill, checkbox_color)
+        end
+      elseif command.type == "image" then
+        renderer.draw_canvas(command.image, x, y)
+      elseif command.type == "text" then
+        local cursor_x = x
+        local tab_offset = 0
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.type == "image" then
+            local draw_y = y + math.max(math.floor((command.height - fragment.height) / 2), 0)
+            renderer.draw_canvas(fragment.image, cursor_x, draw_y)
+            cursor_x = cursor_x + fragment.width
+          else
+            local font_height = fragment.font:get_height()
+            local draw_y = y + (command.height - font_height) / 2
+            if fragment.background then
+              renderer.draw_rect(
+                cursor_x - INLINE_CODE_PADDING_X,
+                draw_y - INLINE_CODE_PADDING_Y,
+                fragment.width + INLINE_CODE_PADDING_X * 2,
+                font_height + INLINE_CODE_PADDING_Y * 2,
+                resolve_color(fragment.background)
+              )
+            end
+            cursor_x = renderer.draw_text(
+              fragment.font,
+              fragment.text,
+              cursor_x,
+              draw_y,
+              resolve_color(fragment.color),
+              command.tabbed and { tab_offset = tab_offset } or nil
+            )
+          end
+          if command.tabbed then
+            tab_offset = cursor_x - x
+          end
+        end
+      end
+    end
+  end
+
+  core.pop_clip_rect()
+end
+
 ---Constructor.
 ---@param source? string|core.markdownview.source
 ---@param title? string
@@ -2729,12 +2810,14 @@ function MarkdownView:new(source, title)
   }
   self.layout = nil
   self.font_cache = nil
+  self.font = nil
   self.last_doc_change_id = nil
 
   if type(source) == "table" then
     self.linked_doc = source.linked_doc or source.doc
     self.path = source.path
     self.title = source.title or source.name or title
+    self.font = source.font
     if self.linked_doc then
       self:refresh_from_doc()
     elseif source.path then
@@ -2839,10 +2922,35 @@ function MarkdownView:get_name()
   return (self.title or "Markdown") .. " Preview"
 end
 
+---Sets a fixed font object for all rendered markdown fonts.
+---@param font? renderer.font
+function MarkdownView:set_font(font)
+  if self.font == font then
+    return
+  end
+  self.font = font
+  self.font_cache = nil
+  self:invalidate_layout()
+end
+
 ---Builds and caches the fonts used by the markdown renderer.
 ---@return table
 function MarkdownView:get_font_cache()
   if not self.font_cache then
+    if self.font then
+      local fontset = make_shared_fontset(self.font)
+      self.font_cache = {
+        body = fontset,
+        quote = fontset,
+        code = self.font,
+        heading = {}
+      }
+      for i = 1, 6 do
+        self.font_cache.heading[i] = fontset
+      end
+      return self.font_cache
+    end
+
     local sizes = {
       30 * SCALE,
       24 * SCALE,
@@ -3018,6 +3126,54 @@ end
 function MarkdownView:get_h_scrollable_size()
   local layout = self:ensure_layout()
   return layout.content_width + style.padding.x * 2
+end
+
+---Returns the rendered size for the given outer width.
+---@param width number
+---@return number width
+---@return number height
+function MarkdownView:get_rendered_size(width)
+  self.size.x = width
+  local layout = self:ensure_layout()
+  return layout.content_width + style.padding.x * 2,
+    layout.height + style.padding.y * 2
+end
+
+---Draws the markdown contents at an arbitrary rectangle.
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@param background? renderer.color
+---@param show_scrollbars? boolean
+function MarkdownView:draw_at(x, y, width, height, background, show_scrollbars)
+  self.position.x = x
+  self.position.y = y
+  self.size.x = width
+  self.size.y = height
+
+  if background then
+    renderer.draw_rect(x, y, width, height, background)
+  end
+
+  local layout = self:ensure_layout()
+  if show_scrollbars then
+    self:clamp_scroll_position()
+    self:update_scrollbar()
+  end
+  local ox, oy = self:get_content_offset()
+  draw_layout_commands(
+    layout.commands,
+    ox + style.padding.x,
+    oy + style.padding.y,
+    x,
+    y,
+    width,
+    height
+  )
+  if show_scrollbars then
+    self:draw_scrollbar()
+  end
 end
 
 ---Clears cached font and layout data after a scale change.
@@ -3202,67 +3358,7 @@ function MarkdownView:draw()
   local start_x = ox + style.padding.x
   local start_y = oy + style.padding.y
 
-  core.push_clip_rect(clip_x, clip_y, clip_w, clip_h)
-
-  for _, command in ipairs(layout.commands) do
-    local x = start_x + command.x
-    local y = start_y + command.y
-    if y + command.height >= clip_y and y <= clip_y + clip_h then
-      if command.type == "rect" then
-        renderer.draw_rect(x, y, command.width, command.height, resolve_color(command.color))
-      elseif command.type == "checkbox" then
-        local box_size = command.width
-        local box_x = x
-        local box_y = y + math.max(math.floor((command.height - box_size) / 2), 0)
-        local checkbox_color = resolve_color(command.color)
-        renderer.draw_rect(box_x, box_y, box_size, 1, checkbox_color)
-        renderer.draw_rect(box_x, box_y + box_size - 1, box_size, 1, checkbox_color)
-        renderer.draw_rect(box_x, box_y, 1, box_size, checkbox_color)
-        renderer.draw_rect(box_x + box_size - 1, box_y, 1, box_size, checkbox_color)
-        if command.checked then
-          local fill = math.max(box_size - 4, 1)
-          renderer.draw_rect(box_x + 2, box_y + 2, fill, fill, checkbox_color)
-        end
-      elseif command.type == "image" then
-        renderer.draw_canvas(command.image, x, y)
-      elseif command.type == "text" then
-        local cursor_x = x
-        local tab_offset = 0
-        for _, fragment in ipairs(command.fragments) do
-          if fragment.type == "image" then
-            local draw_y = y + math.max(math.floor((command.height - fragment.height) / 2), 0)
-            renderer.draw_canvas(fragment.image, cursor_x, draw_y)
-            cursor_x = cursor_x + fragment.width
-          else
-            local font_height = fragment.font:get_height()
-            local draw_y = y + (command.height - font_height) / 2
-            if fragment.background then
-              renderer.draw_rect(
-                cursor_x - INLINE_CODE_PADDING_X,
-                draw_y - INLINE_CODE_PADDING_Y,
-                fragment.width + INLINE_CODE_PADDING_X * 2,
-                font_height + INLINE_CODE_PADDING_Y * 2,
-                resolve_color(fragment.background)
-              )
-            end
-            cursor_x = renderer.draw_text(
-              fragment.font,
-              fragment.text,
-              cursor_x,
-              draw_y,
-              resolve_color(fragment.color),
-              command.tabbed and { tab_offset = tab_offset } or nil
-            )
-          end
-          if command.tabbed then
-            tab_offset = cursor_x - x
-          end
-        end
-      end
-    end
-  end
-
-  core.pop_clip_rect()
+  draw_layout_commands(layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
   self:draw_scrollbar()
 end
 
