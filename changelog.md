@@ -1,5 +1,65 @@
 # Changes Log
 
+## [3.10.0] - 2026-05-12
+
+### New Features
+
+* New view-documentation-help and view-website commands
+  ([#474](https://github.com/pragtical/pragtical/pull/474))
+
+* Add TCP+SSL and UDP support using SDL3_net+mbedtls
+  ([#398](https://github.com/pragtical/pragtical/pull/398))
+
+* Add MarkdownView preview support
+  ([#475](https://github.com/pragtical/pragtical/pull/475))
+
+* Add optional Ligatures support using Harfbuzz
+  ([#479](https://github.com/pragtical/pragtical/pull/479))
+
+* Add color emoji support
+  ([#480](https://github.com/pragtical/pragtical/pull/480))
+
+### Enhancements
+
+* Port process API to use new sdl3 process API
+  ([#477](https://github.com/pragtical/pragtical/pull/477))
+
+* Use MarkdownView for autocomplete description box
+  ([#482](https://github.com/pragtical/pragtical/pull/482))
+
+### Fixes
+
+* Process API: default background to true on Windows
+  ([#478](https://github.com/pragtical/pragtical/pull/478))
+
+* Restore image opening from treeview
+  ([cee3bbb0](https://github.com/pragtical/pragtical/commit/cee3bbb0))
+
+* process: drop background since detach is almost same
+  ([4285a25b](https://github.com/pragtical/pragtical/commit/4285a25b))
+
+* Fix harfbuzz build issue on msys
+  ([18450100](https://github.com/pragtical/pragtical/commit/18450100))
+
+* Patch sdl3 process api return exitcode on Windows
+  ([f93cc85d](https://github.com/pragtical/pragtical/commit/f93cc85d))
+
+### Widgets
+
+* Update widget for TreeList filter support
+  ([#476](https://github.com/pragtical/pragtical/pull/476))
+
+* Update widget for ligatures in font dialog
+  ([55def203](https://github.com/pragtical/pragtical/commit/55def203))
+
+* widget: textbox password mode, label scrolling
+  ([a110e82b](https://github.com/pragtical/pragtical/commit/a110e82b))
+
+### Build System
+
+* Add linux-mingw32-x86_64.ini meson cross file
+  ([e53400c1](https://github.com/pragtical/pragtical/commit/e53400c1))
+
 ## [3.9.0] - 2026-05-05
 
 ### New Features
@@ -3274,6 +3334,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.10.0]: https://github.com/pragtical/pragtical/releases/tag/v3.10.0
 [3.9.0]: https://github.com/pragtical/pragtical/releases/tag/v3.9.0
 [3.8.7]: https://github.com/pragtical/pragtical/releases/tag/v3.8.7
 [3.8.6]: https://github.com/pragtical/pragtical/releases/tag/v3.8.6
