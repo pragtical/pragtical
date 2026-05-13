@@ -93,6 +93,10 @@ typedef struct {
 } GpuBatchRun;
 
 typedef struct {
+  float x, y;
+} GpuPolyVertex;
+
+typedef struct {
   SDL_Surface *surface;
   SDL_GPUTexture *texture;
   SDL_GPUTransferBuffer *transfer;
@@ -103,6 +107,9 @@ typedef struct {
   SDL_GPUBuffer *quad_vertex_buffer;
   SDL_GPUTransferBuffer *quad_transfer;
   GpuBatchRun *batch_runs;
+  RenPoint *poly_points;
+  GpuPolyVertex *poly_vertices;
+  int *poly_indices;
   Uint32 transfer_size;
   Uint32 poly_vertex_buffer_size;
   Uint32 poly_transfer_size;
@@ -111,6 +118,9 @@ typedef struct {
   Uint32 quad_vertex_buffer_size;
   Uint32 quad_transfer_size;
   int batch_run_capacity;
+  int poly_point_capacity;
+  int poly_vertex_capacity;
+  int poly_index_capacity;
   SDL_PixelFormat texture_pixel_format;
   int texture_w, texture_h;
   bool needs_full_upload;
@@ -141,10 +151,6 @@ typedef struct {
   float u0, v0, u1, v1;
   GpuTextureBatchMode mode;
 } GpuQueuedCanvas;
-
-typedef struct {
-  float x, y;
-} GpuPolyVertex;
 
 typedef struct {
   RenColor color;
@@ -563,6 +569,12 @@ static void gpu_destroy_bridge_resources(SDL_GPUDevice *device, GpuFrameBridge *
   }
   SDL_free(frame->batch_runs);
   frame->batch_runs = NULL;
+  SDL_free(frame->poly_points);
+  frame->poly_points = NULL;
+  SDL_free(frame->poly_vertices);
+  frame->poly_vertices = NULL;
+  SDL_free(frame->poly_indices);
+  frame->poly_indices = NULL;
   frame->transfer_size = 0;
   frame->poly_vertex_buffer_size = 0;
   frame->poly_transfer_size = 0;
@@ -571,6 +583,9 @@ static void gpu_destroy_bridge_resources(SDL_GPUDevice *device, GpuFrameBridge *
   frame->quad_vertex_buffer_size = 0;
   frame->quad_transfer_size = 0;
   frame->batch_run_capacity = 0;
+  frame->poly_point_capacity = 0;
+  frame->poly_vertex_capacity = 0;
+  frame->poly_index_capacity = 0;
   frame->texture_w = 0;
   frame->texture_h = 0;
   frame->needs_full_upload = true;
@@ -891,6 +906,51 @@ static GpuBatchRun *gpu_ensure_batch_runs(GpuFrameBridge *frame, int count) {
   frame->batch_runs = runs;
   frame->batch_run_capacity = capacity;
   return runs;
+}
+
+static bool gpu_ensure_poly_point_scratch(GpuFrameBridge *frame, int count) {
+  if (count <= frame->poly_point_capacity)
+    return true;
+
+  int capacity = frame->poly_point_capacity ? frame->poly_point_capacity * 2 : 32;
+  while (capacity < count)
+    capacity *= 2;
+  RenPoint *points = SDL_realloc(frame->poly_points, (size_t) capacity * sizeof(RenPoint));
+  if (!points)
+    return false;
+  frame->poly_points = points;
+  frame->poly_point_capacity = capacity;
+  return true;
+}
+
+static bool gpu_ensure_poly_vertex_scratch(GpuFrameBridge *frame, int count) {
+  if (count <= frame->poly_vertex_capacity)
+    return true;
+
+  int capacity = frame->poly_vertex_capacity ? frame->poly_vertex_capacity * 2 : 32;
+  while (capacity < count)
+    capacity *= 2;
+  GpuPolyVertex *vertices = SDL_realloc(frame->poly_vertices, (size_t) capacity * sizeof(GpuPolyVertex));
+  if (!vertices)
+    return false;
+  frame->poly_vertices = vertices;
+  frame->poly_vertex_capacity = capacity;
+  return true;
+}
+
+static bool gpu_ensure_poly_index_scratch(GpuFrameBridge *frame, int count) {
+  if (count <= frame->poly_index_capacity)
+    return true;
+
+  int capacity = frame->poly_index_capacity ? frame->poly_index_capacity * 2 : 32;
+  while (capacity < count)
+    capacity *= 2;
+  int *indices = SDL_realloc(frame->poly_indices, (size_t) capacity * sizeof(int));
+  if (!indices)
+    return false;
+  frame->poly_indices = indices;
+  frame->poly_index_capacity = capacity;
+  return true;
 }
 
 static SDL_GPURenderPass *gpu_begin_configured_render_pass(
@@ -2053,23 +2113,17 @@ static bool gpu_poly_point_in_triangle(RenPoint *p, RenPoint *a, RenPoint *b, Re
   return !(has_neg && has_pos);
 }
 
-static bool gpu_append_flat_poly_point(RenPoint **points, int *count, int *capacity, float x, float y) {
+static bool gpu_append_flat_poly_point(GpuFrameBridge *frame, int *count, float x, float y) {
   if (*count > 0) {
-    RenPoint *last = &(*points)[*count - 1];
+    RenPoint *last = &frame->poly_points[*count - 1];
     if (last->x == (int) lroundf(x) && last->y == (int) lroundf(y))
       return true;
   }
 
-  if (*count == *capacity) {
-    int next_capacity = *capacity ? *capacity * 2 : 32;
-    RenPoint *next = SDL_realloc(*points, next_capacity * sizeof(RenPoint));
-    if (!next)
-      return false;
-    *points = next;
-    *capacity = next_capacity;
-  }
+  if (!gpu_ensure_poly_point_scratch(frame, *count + 1))
+    return false;
 
-  (*points)[*count] = (RenPoint) {
+  frame->poly_points[*count] = (RenPoint) {
     .x = (int) lroundf(x),
     .y = (int) lroundf(y),
     .tag = POLY_NORMAL,
@@ -2078,24 +2132,24 @@ static bool gpu_append_flat_poly_point(RenPoint **points, int *count, int *capac
   return true;
 }
 
-static bool gpu_flatten_poly(RenPoint *points, unsigned short npoints, RenPoint **flat, unsigned short *flat_count) {
-  *flat = NULL;
+static bool gpu_flatten_poly(
+  GpuFrameBridge *frame, RenPoint *points, unsigned short npoints, unsigned short *flat_count
+) {
   *flat_count = 0;
-  if (npoints < 3 || points[0].tag != POLY_NORMAL)
+  if (!frame || npoints < 3 || points[0].tag != POLY_NORMAL)
     return false;
 
   int count = 0;
-  int capacity = 0;
-  if (!gpu_append_flat_poly_point(flat, &count, &capacity, points[0].x, points[0].y))
+  if (!gpu_append_flat_poly_point(frame, &count, points[0].x, points[0].y))
     return false;
 
   const int segments = 12;
   for (unsigned short i = 1; i < npoints; i++) {
-    RenPoint p0 = (*flat)[count - 1];
+    RenPoint p0 = frame->poly_points[count - 1];
     RenPoint p1 = points[i];
 
     if (p1.tag == POLY_NORMAL) {
-      if (!gpu_append_flat_poly_point(flat, &count, &capacity, p1.x, p1.y))
+      if (!gpu_append_flat_poly_point(frame, &count, p1.x, p1.y))
         goto error;
       continue;
     }
@@ -2109,7 +2163,7 @@ static bool gpu_flatten_poly(RenPoint *points, unsigned short npoints, RenPoint 
         float mt = 1.0f - t;
         float x = mt * mt * p0.x + 2.0f * mt * t * p1.x + t * t * p2.x;
         float y = mt * mt * p0.y + 2.0f * mt * t * p1.y + t * t * p2.y;
-        if (!gpu_append_flat_poly_point(flat, &count, &capacity, x, y))
+        if (!gpu_append_flat_poly_point(frame, &count, x, y))
           goto error;
       }
       continue;
@@ -2132,7 +2186,7 @@ static bool gpu_flatten_poly(RenPoint *points, unsigned short npoints, RenPoint 
           + 3.0f * mt * mt * t * p1.y
           + 3.0f * mt * t * t * p2.y
           + t * t * t * p3.y;
-        if (!gpu_append_flat_poly_point(flat, &count, &capacity, x, y))
+        if (!gpu_append_flat_poly_point(frame, &count, x, y))
           goto error;
       }
       continue;
@@ -2141,7 +2195,9 @@ static bool gpu_flatten_poly(RenPoint *points, unsigned short npoints, RenPoint 
     goto error;
   }
 
-  if (count > 1 && (*flat)[0].x == (*flat)[count - 1].x && (*flat)[0].y == (*flat)[count - 1].y)
+  if (count > 1 &&
+      frame->poly_points[0].x == frame->poly_points[count - 1].x &&
+      frame->poly_points[0].y == frame->poly_points[count - 1].y)
     count--;
   if (count < 3 || count > MAX_POLY_POINTS)
     goto error;
@@ -2150,19 +2206,20 @@ static bool gpu_flatten_poly(RenPoint *points, unsigned short npoints, RenPoint 
   return true;
 
 error:
-  SDL_free(*flat);
-  *flat = NULL;
   *flat_count = 0;
   return false;
 }
 
-static int gpu_triangulate_line_poly(RenPoint *points, unsigned short npoints, GpuPolyVertex *vertices, float scale_x, float scale_y) {
+static int gpu_triangulate_line_poly(
+  GpuFrameBridge *frame, RenPoint *points, unsigned short npoints,
+  GpuPolyVertex *vertices, float scale_x, float scale_y
+) {
   if (npoints < 3)
     return 0;
-
-  int *indices = SDL_malloc(npoints * sizeof(int));
-  if (!indices)
+  if (!gpu_ensure_poly_index_scratch(frame, npoints))
     gpu_abort("Error allocating polygon triangulation indices");
+
+  int *indices = frame->poly_indices;
   for (unsigned short i = 0; i < npoints; i++)
     indices[i] = i;
 
@@ -2204,7 +2261,6 @@ static int gpu_triangulate_line_poly(RenPoint *points, unsigned short npoints, G
       break;
     }
     if (!clipped) {
-      SDL_free(indices);
       return 0;
     }
   }
@@ -2218,7 +2274,6 @@ static int gpu_triangulate_line_poly(RenPoint *points, unsigned short npoints, G
     vertices[vertex_count++] = (GpuPolyVertex) { c->x * scale_x, c->y * scale_y };
   }
 
-  SDL_free(indices);
   return vertex_count;
 }
 
@@ -2399,24 +2454,20 @@ static bool gpu_draw_poly_native(
   if (!gpu_flush_pending_canvas_barrier(data))
     gpu_abort("SDLGPU native canvas flush before poly failed");
 
-  RenPoint *flat_points = NULL;
   unsigned short flat_count = 0;
-  if (!gpu_flatten_poly(points, npoints, &flat_points, &flat_count))
+  if (!gpu_flatten_poly(&data->frame, points, npoints, &flat_count))
     return false;
 
-  GpuPolyVertex *vertices = SDL_malloc((flat_count - 2) * 3 * sizeof(GpuPolyVertex));
-  if (!vertices)
+  int max_vertices = (flat_count - 2) * 3;
+  if (!gpu_ensure_poly_vertex_scratch(&data->frame, max_vertices))
     gpu_abort("Error allocating polygon vertices");
   int vertex_count = gpu_triangulate_line_poly(
-    flat_points, flat_count, vertices,
+    &data->frame, data->frame.poly_points, flat_count, data->frame.poly_vertices,
     surface->scale_x > 0 ? surface->scale_x : 1.0f,
     surface->scale_y > 0 ? surface->scale_y : 1.0f
   );
-  if (vertex_count == 0) {
-    SDL_free(flat_points);
-    SDL_free(vertices);
+  if (vertex_count == 0)
     return false;
-  }
 
   if (!gpu_flush_window_batches(
         data,
@@ -2426,9 +2477,7 @@ static bool gpu_draw_poly_native(
       ))
     gpu_abort("SDLGPU native batch flush before poly failed");
 
-  bool drawn = gpu_queue_window_native_poly(data, dst, vertices, vertex_count, color);
-  SDL_free(flat_points);
-  SDL_free(vertices);
+  bool drawn = gpu_queue_window_native_poly(data, dst, data->frame.poly_vertices, vertex_count, color);
   if (!drawn)
     return false;
 
@@ -5195,34 +5244,28 @@ static bool gpu_draw_canvas_poly_native(
   if (!data->device)
     data->device = gpu_retain_device();
 
-  RenPoint *flat_points = NULL;
   unsigned short flat_count = 0;
-  if (!gpu_flatten_poly(points, npoints, &flat_points, &flat_count))
+  if (!gpu_flatten_poly(&data->frame, points, npoints, &flat_count))
     return false;
 
-  GpuPolyVertex *vertices = SDL_malloc((flat_count - 2) * 3 * sizeof(GpuPolyVertex));
-  if (!vertices)
+  int max_vertices = (flat_count - 2) * 3;
+  if (!gpu_ensure_poly_vertex_scratch(&data->frame, max_vertices))
     gpu_abort("Error allocating polygon vertices");
   int vertex_count = gpu_triangulate_line_poly(
-    flat_points, flat_count, vertices,
+    &data->frame, data->frame.poly_points, flat_count, data->frame.poly_vertices,
     surface->scale_x > 0 ? surface->scale_x : 1.0f,
     surface->scale_y > 0 ? surface->scale_y : 1.0f
   );
-  if (vertex_count == 0) {
-    SDL_free(flat_points);
-    SDL_free(vertices);
+  if (vertex_count == 0)
     return false;
-  }
 
   bool owned = false;
   SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
   bool drawn = gpu_draw_poly_vertices_to_bridge(
-    data->device, cmd, &data->frame, surface->surface, vertices, vertex_count, bounds, color
+    data->device, cmd, &data->frame, surface->surface, data->frame.poly_vertices, vertex_count, bounds, color
   );
-  SDL_free(flat_points);
-  SDL_free(vertices);
   if (!drawn) {
     gpu_cancel_canvas_draw(cmd, owned);
     return false;
@@ -5333,10 +5376,8 @@ static bool gpu_can_native_poly(
     return false;
   if (!gpu_ensure_poly_pipeline(data->device))
     return false;
-  RenPoint *flat_points = NULL;
   unsigned short flat_count = 0;
-  bool can_flatten = gpu_flatten_poly(points, npoints, &flat_points, &flat_count);
-  SDL_free(flat_points);
+  bool can_flatten = gpu_flatten_poly(&data->frame, points, npoints, &flat_count);
   if (!can_flatten)
     return false;
 
