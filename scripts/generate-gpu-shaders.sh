@@ -70,6 +70,8 @@ for dest in SPIRV DXBC MSL; do
   emit_header resources/glsl/gpu_text.frag.glsl fragment "$dest" gpu_text_frag_"$suffix" src/shaders/gpu_text.frag."$suffix".h
   emit_header resources/glsl/gpu_canvas.vert.glsl vertex "$dest" gpu_canvas_vert_"$suffix" src/shaders/gpu_canvas.vert."$suffix".h
   emit_header resources/glsl/gpu_canvas.frag.glsl fragment "$dest" gpu_canvas_frag_"$suffix" src/shaders/gpu_canvas.frag."$suffix".h
+  emit_header resources/glsl/gpu_rect.vert.glsl vertex "$dest" gpu_rect_vert_"$suffix" src/shaders/gpu_rect.vert."$suffix".h
+  emit_header resources/glsl/gpu_rect.frag.glsl fragment "$dest" gpu_rect_frag_"$suffix" src/shaders/gpu_rect.frag."$suffix".h
   emit_header resources/glsl/gpu_poly.vert.glsl vertex "$dest" gpu_poly_vert_"$suffix" src/shaders/gpu_poly.vert."$suffix".h
   emit_header resources/glsl/gpu_poly.frag.glsl fragment "$dest" gpu_poly_frag_"$suffix" src/shaders/gpu_poly.frag."$suffix".h
 done
