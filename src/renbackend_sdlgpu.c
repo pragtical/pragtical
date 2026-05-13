@@ -146,9 +146,14 @@ typedef struct {
 
 typedef struct {
   SDL_GPUDevice *device;
+  SDL_GPUCommandBuffer *command_buffer;
   GpuFrameBridge frame;
+  SDL_GPUDevice *prev_active_frame_device;
+  SDL_GPUCommandBuffer *prev_active_frame_command_buffer;
+  GpuWindowData *prev_active_frame_window_data;
   bool surface_valid;
   bool texture_valid;
+  bool region_modified;
 } GpuCanvasData;
 
 typedef struct {
@@ -4014,9 +4019,54 @@ static void gpu_begin_frame(RenCache *cache, UNUSED RenRect *rects, UNUSED int c
 static void gpu_end_frame(UNUSED RenCache *cache, UNUSED RenRect *rects, UNUSED int count) {
 }
 
-static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, bool native_only) {
-  if (!cache->window_target)
+static void gpu_submit_canvas_region_command(GpuCanvasData *data) {
+  if (!data || !data->command_buffer)
     return;
+
+  SDL_GPUCommandBuffer *cmd = data->command_buffer;
+  data->command_buffer = NULL;
+  if (gpu_active_frame_command_buffer == cmd) {
+    gpu_active_frame_device = data->prev_active_frame_device;
+    gpu_active_frame_command_buffer = data->prev_active_frame_command_buffer;
+    gpu_active_frame_window_data = data->prev_active_frame_window_data;
+  }
+  data->prev_active_frame_device = NULL;
+  data->prev_active_frame_command_buffer = NULL;
+  data->prev_active_frame_window_data = NULL;
+
+  if (!gpu_submit_and_wait(data->device, cmd))
+    gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
+
+  if (data->region_modified) {
+    data->texture_valid = true;
+    data->surface_valid = false;
+    data->frame.needs_full_upload = false;
+    data->frame.dirty_count = 0;
+    data->region_modified = false;
+  }
+}
+
+static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, bool native_only) {
+  if (!cache->window_target) {
+    GpuCanvasData *data = cache->backend_data;
+    if (!data || data->command_buffer)
+      return;
+    if (!data->device)
+      data->device = gpu_retain_device();
+
+    data->command_buffer = SDL_AcquireGPUCommandBuffer(data->device);
+    if (!data->command_buffer)
+      gpu_abort("SDL_AcquireGPUCommandBuffer failed");
+    data->region_modified = false;
+    data->prev_active_frame_device = gpu_active_frame_device;
+    data->prev_active_frame_command_buffer = gpu_active_frame_command_buffer;
+    data->prev_active_frame_window_data = gpu_active_frame_window_data;
+    gpu_active_frame_device = data->device;
+    gpu_active_frame_command_buffer = data->command_buffer;
+    gpu_active_frame_window_data = NULL;
+    gpu_sync_canvas_texture(data, data->command_buffer);
+    return;
+  }
 
   RenWindow *ren = cache->target;
   GpuWindowData *data = ren->backend_data;
@@ -4025,8 +4075,11 @@ static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, bool native_o
 }
 
 static void gpu_end_region(RenCache *cache, UNUSED RenRect rect, UNUSED bool native_only) {
-  if (!cache->window_target)
+  if (!cache->window_target) {
+    GpuCanvasData *data = cache->backend_data;
+    gpu_submit_canvas_region_command(data);
     return;
+  }
 
   RenWindow *ren = cache->target;
   GpuWindowData *data = ren->backend_data;
@@ -4150,6 +4203,15 @@ static void gpu_init_canvas(RenCache *canvas, SDL_Surface *surface) {
 static void gpu_destroy_canvas(RenCache *canvas) {
   GpuCanvasData *data = canvas->backend_data;
   if (data) {
+    if (data->command_buffer) {
+      if (gpu_active_frame_command_buffer == data->command_buffer) {
+        gpu_active_frame_device = data->prev_active_frame_device;
+        gpu_active_frame_command_buffer = data->prev_active_frame_command_buffer;
+        gpu_active_frame_window_data = data->prev_active_frame_window_data;
+      }
+      SDL_CancelGPUCommandBuffer(data->command_buffer);
+      data->command_buffer = NULL;
+    }
     gpu_destroy_bridge_resources(data->device, &data->frame);
     if (data->device) {
       gpu_release_device();
@@ -4166,6 +4228,9 @@ static SDL_Surface *gpu_get_canvas_surface(RenCache *canvas) {
   GpuCanvasData *data = canvas->backend_data;
   if (!data)
     return canvas->rensurface.surface;
+
+  if (data->command_buffer && data->region_modified)
+    gpu_submit_canvas_region_command(data);
 
   if (!data->surface_valid) {
     if (!data->texture_valid || !data->frame.texture)
@@ -4365,6 +4430,90 @@ static void gpu_copy_canvas(RenCache *dst, RenCache *src, int x, int y, bool ble
   dst->revision++;
 }
 
+static SDL_GPUCommandBuffer *gpu_canvas_command_buffer(GpuCanvasData *data, bool *owned) {
+  if (data->command_buffer) {
+    *owned = false;
+    return data->command_buffer;
+  }
+
+  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(data->device);
+  if (!cmd)
+    gpu_abort("SDL_AcquireGPUCommandBuffer failed");
+  *owned = true;
+  return cmd;
+}
+
+static void gpu_finish_canvas_draw(
+  RenCache *rc, GpuCanvasData *data, SDL_GPUCommandBuffer *cmd, bool owned, bool modified
+) {
+  if (owned) {
+    if (!gpu_submit_and_wait(data->device, cmd))
+      gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
+  }
+
+  if (modified) {
+    data->texture_valid = true;
+    data->surface_valid = false;
+    data->frame.needs_full_upload = false;
+    data->frame.dirty_count = 0;
+    if (owned)
+      rc->revision++;
+    else
+      data->region_modified = true;
+  }
+}
+
+static void gpu_cancel_canvas_draw(SDL_GPUCommandBuffer *cmd, bool owned) {
+  if (owned)
+    SDL_CancelGPUCommandBuffer(cmd);
+}
+
+static bool gpu_draw_canvas_to_canvas_native(
+  RenCache *dst, RenSurface *surface, RenCache *src, int x, int y
+) {
+  if (dst->window_target || !surface || !surface->surface || dst == src)
+    return false;
+
+  GpuCanvasData *dst_data = dst->backend_data;
+  GpuCanvasData *src_data = src->backend_data;
+  if (!dst_data || !src_data || src_data->command_buffer)
+    return false;
+  if (!dst_data->device)
+    dst_data->device = gpu_retain_device();
+  if (!src_data->device)
+    src_data->device = gpu_retain_device();
+  if (dst_data->device != src_data->device)
+    return false;
+
+  SDL_BlendMode blend_mode = SDL_BLENDMODE_INVALID;
+  if (!src_data->frame.surface ||
+      !SDL_GetSurfaceBlendMode(src_data->frame.surface, &blend_mode) ||
+      (blend_mode != SDL_BLENDMODE_NONE && blend_mode != SDL_BLENDMODE_BLEND))
+    return false;
+
+  bool owned = false;
+  SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(dst_data, &owned);
+  gpu_sync_canvas_texture(src_data, cmd);
+  gpu_sync_canvas_texture(dst_data, cmd);
+  bool drawn = gpu_blit_texture_to_bridge(
+    dst_data->device,
+    cmd,
+    &dst_data->frame,
+    &src_data->frame,
+    x,
+    y,
+    blend_mode,
+    false
+  );
+  if (!drawn) {
+    gpu_cancel_canvas_draw(cmd, owned);
+    return false;
+  }
+
+  gpu_finish_canvas_draw(dst, dst_data, cmd, owned, true);
+  return true;
+}
+
 static bool gpu_draw_canvas_rect_native(
   RenCache *rc, RenSurface *surface, RenRect rect, RenColor color, bool replace
 ) {
@@ -4377,26 +4526,19 @@ static bool gpu_draw_canvas_rect_native(
   if (!data->device)
     data->device = gpu_retain_device();
 
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(data->device);
-  if (!cmd)
-    gpu_abort("SDL_AcquireGPUCommandBuffer failed");
+  bool owned = false;
+  SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
   bool drawn = gpu_draw_solid_rect_to_bridge(
     data->device, cmd, &data->frame, surface->surface, rect, color, replace
   );
   if (!drawn) {
-    SDL_CancelGPUCommandBuffer(cmd);
+    gpu_cancel_canvas_draw(cmd, owned);
     return false;
   }
-  if (!gpu_submit_and_wait(data->device, cmd))
-    gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
 
-  data->texture_valid = true;
-  data->surface_valid = false;
-  data->frame.needs_full_upload = false;
-  data->frame.dirty_count = 0;
-  rc->revision++;
+  gpu_finish_canvas_draw(rc, data, cmd, owned, true);
   return true;
 }
 
@@ -4412,26 +4554,19 @@ static bool gpu_draw_canvas_pixels_native(
   if (!data->device)
     data->device = gpu_retain_device();
 
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(data->device);
-  if (!cmd)
-    gpu_abort("SDL_AcquireGPUCommandBuffer failed");
+  bool owned = false;
+  SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
   bool uploaded = gpu_upload_pixels_to_bridge(
     data->device, cmd, &data->frame, surface->surface, rect, bytes, len
   );
   if (!uploaded) {
-    SDL_CancelGPUCommandBuffer(cmd);
+    gpu_cancel_canvas_draw(cmd, owned);
     return false;
   }
-  if (!gpu_submit_and_wait(data->device, cmd))
-    gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
 
-  data->texture_valid = true;
-  data->surface_valid = false;
-  data->frame.needs_full_upload = false;
-  data->frame.dirty_count = 0;
-  rc->revision++;
+  gpu_finish_canvas_draw(rc, data, cmd, owned, true);
   return true;
 }
 
@@ -4450,14 +4585,13 @@ static bool gpu_draw_canvas_text_native(
   if (!gpu_native_text_supported(data->device))
     return false;
 
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(data->device);
-  if (!cmd)
-    gpu_abort("SDL_AcquireGPUCommandBuffer failed");
+  bool owned = false;
+  SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
   gpu_ensure_bridge_texture(data->device, &data->frame, surface->surface->w, surface->surface->h);
   if (!data->frame.texture || !gpu_ensure_text_pipeline(data->device)) {
-    SDL_CancelGPUCommandBuffer(cmd);
+    gpu_cancel_canvas_draw(cmd, owned);
     return false;
   }
 
@@ -4514,19 +4648,11 @@ static bool gpu_draw_canvas_text_native(
   int glyph_count = text_context.glyph_count;
   SDL_free(text_context.glyphs);
   if (!drawn) {
-    SDL_CancelGPUCommandBuffer(cmd);
+    gpu_cancel_canvas_draw(cmd, owned);
     return false;
   }
 
-  if (!gpu_submit_and_wait(data->device, cmd))
-    gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
-
-  data->texture_valid = true;
-  data->surface_valid = false;
-  data->frame.needs_full_upload = false;
-  data->frame.dirty_count = 0;
-  if (glyph_count > 0)
-    rc->revision++;
+  gpu_finish_canvas_draw(rc, data, cmd, owned, glyph_count > 0);
   return true;
 }
 
@@ -4565,9 +4691,8 @@ static bool gpu_draw_canvas_poly_native(
     return false;
   }
 
-  SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(data->device);
-  if (!cmd)
-    gpu_abort("SDL_AcquireGPUCommandBuffer failed");
+  bool owned = false;
+  SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
   bool drawn = gpu_draw_poly_vertices_to_bridge(
@@ -4576,17 +4701,11 @@ static bool gpu_draw_canvas_poly_native(
   SDL_free(flat_points);
   SDL_free(vertices);
   if (!drawn) {
-    SDL_CancelGPUCommandBuffer(cmd);
+    gpu_cancel_canvas_draw(cmd, owned);
     return false;
   }
-  if (!gpu_submit_and_wait(data->device, cmd))
-    gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
 
-  data->texture_valid = true;
-  data->surface_valid = false;
-  data->frame.needs_full_upload = false;
-  data->frame.dirty_count = 0;
-  rc->revision++;
+  gpu_finish_canvas_draw(rc, data, cmd, owned, true);
   return true;
 }
 
@@ -4810,6 +4929,8 @@ static void gpu_draw_poly(RenCache *rc, RenSurface *surface, RenPoint *points, u
 
 static void gpu_draw_canvas(RenCache *rc, RenSurface *surface, RenCache *canvas, int x, int y) {
   if (!rc->window_target) {
+    if (gpu_draw_canvas_to_canvas_native(rc, surface, canvas, x, y))
+      return;
     gpu_ensure_canvas_cpu_surface_for_draw(rc, surface);
     ren_draw_canvas(surface, canvas->backend->get_canvas_surface(canvas), x, y);
     return;
