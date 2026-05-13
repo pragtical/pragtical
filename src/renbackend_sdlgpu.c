@@ -65,6 +65,19 @@ typedef enum {
   GPU_BATCH_PIPELINE_RECT_REPLACE,
 } GpuBatchPipeline;
 
+typedef enum {
+  GPU_BATCH_QUEUE_RECTS = 1 << 0,
+  GPU_BATCH_QUEUE_TEXT = 1 << 1,
+  GPU_BATCH_QUEUE_CANVASES = 1 << 2,
+  GPU_BATCH_QUEUE_POLYS = 1 << 3,
+  GPU_BATCH_QUEUE_PIXELS = 1 << 4,
+  GPU_BATCH_QUEUE_ALL = GPU_BATCH_QUEUE_RECTS
+      | GPU_BATCH_QUEUE_TEXT
+      | GPU_BATCH_QUEUE_CANVASES
+      | GPU_BATCH_QUEUE_POLYS
+      | GPU_BATCH_QUEUE_PIXELS,
+} GpuBatchQueueMask;
+
 typedef struct {
   GpuBatchPipeline pipeline;
   SDL_GPUTexture *texture;
@@ -292,34 +305,32 @@ static bool gpu_upload_pixels_to_bridge(
   SDL_Surface *surface, RenRect rect, const char *bytes, size_t len
 );
 
-static bool gpu_flush_window_batches(
-  GpuWindowData *data, bool flush_rects, bool flush_text, bool flush_canvases, bool flush_polys, bool flush_pixels
-) {
+static bool gpu_flush_window_batches(GpuWindowData *data, GpuBatchQueueMask queues) {
   if (!data || !data->command_buffer)
     return true;
-  if (flush_rects && !gpu_flush_window_native_rects(data, data->command_buffer))
+  if ((queues & GPU_BATCH_QUEUE_RECTS) && !gpu_flush_window_native_rects(data, data->command_buffer))
     return false;
-  if (flush_text && data->pending_text_glyph_count > 0 &&
+  if ((queues & GPU_BATCH_QUEUE_TEXT) && data->pending_text_glyph_count > 0 &&
       !gpu_flush_queued_text(data, data->command_buffer, NULL, 0, false))
     return false;
-  if (flush_canvases && data->pending_canvas_count > 0 &&
+  if ((queues & GPU_BATCH_QUEUE_CANVASES) && data->pending_canvas_count > 0 &&
       !gpu_flush_queued_canvases(data, data->command_buffer))
     return false;
-  if (flush_polys && data->pending_poly_count > 0 &&
+  if ((queues & GPU_BATCH_QUEUE_POLYS) && data->pending_poly_count > 0 &&
       !gpu_flush_queued_polys(data, data->command_buffer))
     return false;
-  if (flush_pixels && data->pending_pixel_count > 0 &&
+  if ((queues & GPU_BATCH_QUEUE_PIXELS) && data->pending_pixel_count > 0 &&
       !gpu_flush_queued_pixels(data, data->command_buffer))
     return false;
   return true;
 }
 
 static bool gpu_flush_pending_text_barrier(GpuWindowData *data) {
-  return gpu_flush_window_batches(data, false, true, false, false, false);
+  return gpu_flush_window_batches(data, GPU_BATCH_QUEUE_TEXT);
 }
 
 static bool gpu_flush_pending_canvas_barrier(GpuWindowData *data) {
-  return gpu_flush_window_batches(data, false, false, true, false, false);
+  return gpu_flush_window_batches(data, GPU_BATCH_QUEUE_CANVASES);
 }
 
 static bool gpu_env_flag(const char *name, bool fallback) {
@@ -1770,7 +1781,7 @@ static bool gpu_draw_pixels_native(
   if ((Uint64) len < required)
     return false;
 
-  if (!gpu_flush_window_batches(data, true, true, true, true, false))
+  if (!gpu_flush_window_batches(data, GPU_BATCH_QUEUE_ALL & ~GPU_BATCH_QUEUE_PIXELS))
     gpu_abort("SDLGPU native batch flush before pixels failed");
 
   if (!gpu_queue_window_pixels(data, dst, rect, bytes))
@@ -2234,7 +2245,12 @@ static bool gpu_draw_poly_native(
     return false;
   }
 
-  if (!gpu_flush_window_batches(data, true, true, false, false, true))
+  if (!gpu_flush_window_batches(
+        data,
+        GPU_BATCH_QUEUE_RECTS
+          | GPU_BATCH_QUEUE_TEXT
+          | GPU_BATCH_QUEUE_PIXELS
+      ))
     gpu_abort("SDLGPU native batch flush before poly failed");
 
   bool drawn = gpu_queue_window_native_poly(data, dst, vertices, vertex_count, color);
@@ -5436,7 +5452,7 @@ static void gpu_draw_rect(RenCache *rc, RenSurface *surface, RenRect rect, RenCo
 
   RenWindow *ren = rc->target;
   GpuWindowData *data = ren->backend_data;
-  if (!gpu_flush_window_batches(data, false, true, true, true, true))
+  if (!gpu_flush_window_batches(data, GPU_BATCH_QUEUE_ALL & ~GPU_BATCH_QUEUE_RECTS))
     gpu_abort("SDLGPU native batch flush before rect failed");
   bool native_queued = native_region && gpu_native_rect_enabled() &&
     gpu_queue_window_native_rect(rc, surface, rect, color, replace);
@@ -5468,7 +5484,7 @@ static double gpu_draw_text(RenCache *rc, RenSurface *surface, RenFont **fonts, 
   text_context.window_data = ren->backend_data;
   if (!text_context.window_data || !text_context.window_data->command_buffer)
     gpu_abort("SDLGPU native text command buffer unavailable");
-  if (!gpu_flush_window_batches(text_context.window_data, true, false, true, true, true))
+  if (!gpu_flush_window_batches(text_context.window_data, GPU_BATCH_QUEUE_ALL & ~GPU_BATCH_QUEUE_TEXT))
     gpu_abort("SDLGPU native batch flush before text failed");
   text_context.collect_overlay = gpu_native_text_supported(text_context.window_data->device)
       && text_context.window_data->frame.texture;
@@ -5549,7 +5565,7 @@ static void gpu_draw_canvas(RenCache *rc, RenSurface *surface, RenCache *canvas,
         SDL_GetSurfaceBlendMode(canvas_data->frame.surface, &blend_mode) &&
         (blend_mode == SDL_BLENDMODE_NONE || blend_mode == SDL_BLENDMODE_BLEND);
       if (native_candidate) {
-        if (!gpu_flush_window_batches(window_data, true, true, false, true, true))
+        if (!gpu_flush_window_batches(window_data, GPU_BATCH_QUEUE_ALL & ~GPU_BATCH_QUEUE_CANVASES))
           gpu_abort("SDLGPU native batch flush before canvas failed");
       }
     }
