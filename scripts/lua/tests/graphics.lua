@@ -211,6 +211,29 @@ test.describe("graphics apis", function()
     end
     test.ok(text_visible > 8, "offscreen canvas text should render visible glyph pixels")
 
+    local subpixel_font = renderer.font.load(
+      DATADIR .. PATHSEP .. "fonts" .. PATHSEP .. "FiraSans-Regular.ttf",
+      24 * SCALE,
+      { antialiasing = "subpixel" }
+    )
+    local subpixel_canvas = canvas.new(180, 48, {0, 0, 0, 255}, false)
+    subpixel_canvas:draw_text(subpixel_font, "Subpixel", 2, 4, {255, 255, 255, 255})
+    subpixel_canvas:render()
+    local subpixel_pixels = subpixel_canvas:get_pixels(0, 0, 180, 48)
+    local subpixel_visible = 0
+    local subpixel_colored = 0
+    for i = 1, #subpixel_pixels - 3, 4 do
+      local sr, sg, sb = subpixel_pixels:byte(i, i + 2)
+      if sr > 16 or sg > 16 or sb > 16 then
+        subpixel_visible = subpixel_visible + 1
+        if math.abs(sr - sg) > 8 or math.abs(sg - sb) > 8 or math.abs(sr - sb) > 8 then
+          subpixel_colored = subpixel_colored + 1
+        end
+      end
+    end
+    test.ok(subpixel_visible > 16, "subpixel canvas text should render visible glyph pixels")
+    test.ok(subpixel_colored > 0, "subpixel canvas text should preserve RGB coverage masks")
+
     local poly_canvas = canvas.new(24, 24, {0, 0, 0, 255}, false)
     poly_canvas:draw_poly({{2, 2}, {20, 2}, {2, 20}}, {255, 255, 255, 255})
     poly_canvas:render()

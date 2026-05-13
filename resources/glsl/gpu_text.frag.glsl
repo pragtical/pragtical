@@ -17,7 +17,8 @@ void main() {
   } else if (u.format == 1u) {
     vec3 mask = sample_color.rgb;
     float coverage = sample_color.a;
-    out_color = vec4(u.color.rgb * mask, coverage * u.color.a);
+    vec3 color = coverage > 0.0 ? u.color.rgb * mask / coverage : vec3(0.0);
+    out_color = vec4(color, coverage * u.color.a);
   } else {
     float coverage = sample_color.a;
     out_color = vec4(u.color.rgb, coverage * u.color.a);
