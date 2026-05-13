@@ -61,6 +61,8 @@ typedef enum {
   GPU_BATCH_PIPELINE_TEXT,
   GPU_BATCH_PIPELINE_CANVAS_BLEND,
   GPU_BATCH_PIPELINE_CANVAS_REPLACE,
+  GPU_BATCH_PIPELINE_RECT_BLEND,
+  GPU_BATCH_PIPELINE_RECT_REPLACE,
 } GpuBatchPipeline;
 
 typedef struct {
@@ -96,6 +98,7 @@ typedef struct {
 typedef struct {
   SDL_Rect rect;
   RenColor color;
+  bool replace;
 } GpuNativeRect;
 
 typedef struct {
@@ -214,6 +217,7 @@ static SDL_GPUGraphicsPipeline *gpu_canvas_batch_replace_pipeline = NULL;
 static SDL_GPUSampler *gpu_canvas_sampler = NULL;
 static bool gpu_canvas_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_rect_pipeline = NULL;
+static SDL_GPUGraphicsPipeline *gpu_rect_replace_pipeline = NULL;
 static bool gpu_rect_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_poly_pipeline = NULL;
 static bool gpu_poly_pipeline_failed = false;
@@ -809,6 +813,14 @@ static GpuBatchMaterial gpu_canvas_batch_material(SDL_GPUTexture *texture, GpuTe
       ? GPU_BATCH_PIPELINE_CANVAS_REPLACE
       : GPU_BATCH_PIPELINE_CANVAS_BLEND,
     .texture = texture,
+    .glyph_format = 0,
+  };
+}
+
+static GpuBatchMaterial gpu_rect_batch_material(bool replace) {
+  return (GpuBatchMaterial) {
+    .pipeline = replace ? GPU_BATCH_PIPELINE_RECT_REPLACE : GPU_BATCH_PIPELINE_RECT_BLEND,
+    .texture = NULL,
     .glyph_format = 0,
   };
 }
@@ -1463,7 +1475,7 @@ static bool gpu_window_region_is_native(RenCache *rc) {
   return data && data->native_region;
 }
 
-static bool gpu_queue_window_native_rect(RenCache *rc, RenSurface *surface, RenRect rect, RenColor color) {
+static bool gpu_queue_window_native_rect(RenCache *rc, RenSurface *surface, RenRect rect, RenColor color, bool replace) {
   if (!rc->window_target || !surface->surface)
     return false;
 
@@ -1491,6 +1503,7 @@ static bool gpu_queue_window_native_rect(RenCache *rc, RenSurface *surface, RenR
   data->pending_native_rects[data->pending_native_rect_count++] = (GpuNativeRect) {
     .rect = dst,
     .color = color,
+    .replace = replace,
   };
   data->stats_native_rects++;
   return true;
@@ -2162,19 +2175,13 @@ static SDL_GPUShader *gpu_create_rect_shader(SDL_GPUDevice *device, bool vertex)
   return SDL_CreateGPUShader(device, &createinfo);
 }
 
-static bool gpu_ensure_rect_pipeline(SDL_GPUDevice *device) {
-  if (gpu_rect_pipeline)
-    return true;
-  if (gpu_rect_pipeline_failed)
-    return false;
-
+static SDL_GPUGraphicsPipeline *gpu_create_rect_graphics_pipeline(SDL_GPUDevice *device, bool blend) {
   SDL_GPUShader *vertex_shader = gpu_create_rect_shader(device, true);
   SDL_GPUShader *fragment_shader = gpu_create_rect_shader(device, false);
   if (!vertex_shader || !fragment_shader) {
     if (vertex_shader) SDL_ReleaseGPUShader(device, vertex_shader);
     if (fragment_shader) SDL_ReleaseGPUShader(device, fragment_shader);
-    gpu_rect_pipeline_failed = true;
-    return false;
+    return NULL;
   }
 
   SDL_GPUVertexBufferDescription vertex_buffer;
@@ -2197,17 +2204,17 @@ static bool gpu_ensure_rect_pipeline(SDL_GPUDevice *device) {
   SDL_GPUColorTargetDescription color_target;
   SDL_zero(color_target);
   color_target.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_BGRA32);
-  color_target.blend_state.enable_blend = true;
+  color_target.blend_state.enable_blend = blend;
   color_target.blend_state.enable_color_write_mask = true;
   color_target.blend_state.color_write_mask =
     SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G |
     SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
   color_target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
   color_target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
-  color_target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
-  color_target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+  color_target.blend_state.src_color_blendfactor = blend ? SDL_GPU_BLENDFACTOR_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ONE;
+  color_target.blend_state.dst_color_blendfactor = blend ? SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ZERO;
   color_target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
-  color_target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+  color_target.blend_state.dst_alpha_blendfactor = blend ? SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ZERO;
 
   SDL_GPUGraphicsPipelineCreateInfo pipeline_info;
   SDL_zero(pipeline_info);
@@ -2222,10 +2229,37 @@ static bool gpu_ensure_rect_pipeline(SDL_GPUDevice *device) {
   pipeline_info.target_info.num_color_targets = 1;
   pipeline_info.target_info.color_target_descriptions = &color_target;
 
-  gpu_rect_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+  SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
   SDL_ReleaseGPUShader(device, vertex_shader);
   SDL_ReleaseGPUShader(device, fragment_shader);
+  return pipeline;
+}
+
+static bool gpu_ensure_rect_pipeline(SDL_GPUDevice *device) {
+  if (gpu_rect_pipeline)
+    return true;
+  if (gpu_rect_pipeline_failed)
+    return false;
+
+  gpu_rect_pipeline = gpu_create_rect_graphics_pipeline(device, true);
   if (!gpu_rect_pipeline) {
+    gpu_rect_pipeline_failed = true;
+    return false;
+  }
+
+  return true;
+}
+
+static bool gpu_ensure_rect_replace_pipeline(SDL_GPUDevice *device) {
+  if (gpu_rect_replace_pipeline)
+    return true;
+  if (gpu_rect_pipeline_failed)
+    return false;
+  if (!gpu_ensure_rect_pipeline(device))
+    return false;
+
+  gpu_rect_replace_pipeline = gpu_create_rect_graphics_pipeline(device, false);
+  if (!gpu_rect_replace_pipeline) {
     gpu_rect_pipeline_failed = true;
     return false;
   }
@@ -2237,6 +2271,10 @@ static void gpu_destroy_rect_pipeline(SDL_GPUDevice *device) {
   if (gpu_rect_pipeline) {
     SDL_ReleaseGPUGraphicsPipeline(device, gpu_rect_pipeline);
     gpu_rect_pipeline = NULL;
+  }
+  if (gpu_rect_replace_pipeline) {
+    SDL_ReleaseGPUGraphicsPipeline(device, gpu_rect_replace_pipeline);
+    gpu_rect_replace_pipeline = NULL;
   }
   gpu_rect_pipeline_failed = false;
 }
@@ -2785,12 +2823,27 @@ static bool gpu_ensure_solid_white_texture(SDL_GPUDevice *device, SDL_GPUCommand
   return true;
 }
 
+typedef struct {
+  GpuBatchMaterial material;
+  Uint32 first_vertex;
+  Uint32 vertex_count;
+} GpuRectBatchRun;
+
 static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuffer *cmd) {
   if (!data || data->pending_native_rect_count == 0)
     return true;
   if (!cmd || !data->frame.texture)
     return false;
   if (!gpu_ensure_rect_pipeline(data->device))
+    return false;
+  bool needs_replace_pipeline = false;
+  for (int i = 0; i < data->pending_native_rect_count; i++) {
+    if (data->pending_native_rects[i].replace) {
+      needs_replace_pipeline = true;
+      break;
+    }
+  }
+  if (needs_replace_pipeline && !gpu_ensure_rect_replace_pipeline(data->device))
     return false;
 
   int rect_count = 0;
@@ -2804,19 +2857,38 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     return true;
   }
 
+  GpuRectBatchRun *runs = SDL_malloc((size_t) rect_count * sizeof(GpuRectBatchRun));
+  if (!runs) {
+    fprintf(stderr, "Error allocating SDL GPU rect batch runs\n");
+    exit(1);
+  }
+
   Uint32 vertex_count = (Uint32) rect_count * 6;
   Uint32 upload_size = vertex_count * sizeof(GpuRectVertex);
   gpu_ensure_window_rect_buffers(data, upload_size);
 
   GpuRectVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->rect_transfer, true);
-  if (!vertices)
+  if (!vertices) {
+    SDL_free(runs);
     return false;
+  }
 
   GpuRectVertex *out = vertices;
+  int run_count = 0;
+  Uint32 emitted_vertices = 0;
   for (int i = 0; i < data->pending_native_rect_count; i++) {
     GpuNativeRect *native = &data->pending_native_rects[i];
     if (native->rect.w <= 0 || native->rect.h <= 0)
       continue;
+
+    GpuBatchMaterial material = gpu_rect_batch_material(native->replace);
+    if (run_count == 0 || !gpu_batch_material_equal(runs[run_count - 1].material, material)) {
+      runs[run_count++] = (GpuRectBatchRun) {
+        .material = material,
+        .first_vertex = emitted_vertices,
+        .vertex_count = 0,
+      };
+    }
 
     float x0 = native->rect.x;
     float y0 = native->rect.y;
@@ -2838,6 +2910,8 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     };
     SDL_memcpy(out, quad, sizeof(quad));
     out += SDL_arraysize(quad);
+    emitted_vertices += SDL_arraysize(quad);
+    runs[run_count - 1].vertex_count += SDL_arraysize(quad);
   }
   SDL_UnmapGPUTransferBuffer(data->device, data->rect_transfer);
 
@@ -2865,7 +2939,6 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
   viewport.h = data->frame.texture_h;
   viewport.max_depth = 1;
   SDL_SetGPUViewport(pass, &viewport);
-  SDL_BindGPUGraphicsPipeline(pass, gpu_rect_pipeline);
 
   SDL_GPUBufferBinding binding;
   SDL_zero(binding);
@@ -2876,9 +2949,25 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     .target = { data->frame.texture_w, data->frame.texture_h, 0, 0 },
   };
   SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
-  SDL_DrawGPUPrimitives(pass, vertex_count, 1, 0, 0);
+
+  SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
+  for (int i = 0; i < run_count; i++) {
+    GpuRectBatchRun *run = &runs[i];
+    if (run->vertex_count == 0)
+      continue;
+
+    SDL_GPUGraphicsPipeline *pipeline = run->material.pipeline == GPU_BATCH_PIPELINE_RECT_REPLACE
+      ? gpu_rect_replace_pipeline
+      : gpu_rect_pipeline;
+    if (bound_pipeline != pipeline) {
+      SDL_BindGPUGraphicsPipeline(pass, pipeline);
+      bound_pipeline = pipeline;
+    }
+    SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
+  }
 
   SDL_EndGPURenderPass(pass);
+  SDL_free(runs);
   data->pending_native_rect_count = 0;
   data->stats_native_rect_batches++;
   return true;
@@ -4938,7 +5027,7 @@ static void gpu_set_clip_rect(UNUSED RenCache *rc, RenSurface *surface, RenRect 
 }
 
 static bool gpu_can_native_rect(
-  RenCache *rc, RenSurface *surface, RenRect rect, RenColor color, UNUSED bool replace
+  RenCache *rc, RenSurface *surface, RenRect rect, RenColor color, bool replace
 ) {
   if (!rc->window_target || !surface->surface || !gpu_direct_replay_enabled() ||
       !gpu_native_rect_enabled() || (replace && color.a != 255))
@@ -4948,8 +5037,9 @@ static bool gpu_can_native_rect(
   GpuWindowData *data = ren->backend_data;
   if (!data || !data->command_buffer || !data->frame.texture)
     return false;
-  if (!gpu_ensure_text_pipeline(data->device) ||
-      !gpu_ensure_solid_white_texture(data->device, data->command_buffer))
+  if (!gpu_ensure_rect_pipeline(data->device))
+    return false;
+  if (replace && !gpu_ensure_rect_replace_pipeline(data->device))
     return false;
 
   SDL_Rect dst = gpu_pixel_rect_from_ren_rect(surface->surface, rect);
@@ -5065,7 +5155,8 @@ static void gpu_draw_rect(RenCache *rc, RenSurface *surface, RenRect rect, RenCo
   GpuWindowData *data = ren->backend_data;
   if (!gpu_flush_window_batches(data, false, true, true))
     gpu_abort("SDLGPU native batch flush before rect failed");
-  bool native_queued = native_region && gpu_native_rect_enabled() && gpu_queue_window_native_rect(rc, surface, rect, color);
+  bool native_queued = native_region && gpu_native_rect_enabled() &&
+    gpu_queue_window_native_rect(rc, surface, rect, color, replace);
   if (!native_queued)
     gpu_abort("SDLGPU native rect draw failed");
 }
@@ -5122,11 +5213,11 @@ static double gpu_draw_text(RenCache *rc, RenSurface *surface, RenFont **fonts, 
     };
     if (style & FONT_STYLE_UNDERLINE) {
       decoration.y = y + height - 1;
-      gpu_queue_window_native_rect(rc, surface, decoration, color);
+      gpu_queue_window_native_rect(rc, surface, decoration, color, false);
     }
     if (style & FONT_STYLE_STRIKETHROUGH) {
       decoration.y = y + (float) height / 2;
-      gpu_queue_window_native_rect(rc, surface, decoration, color);
+      gpu_queue_window_native_rect(rc, surface, decoration, color, false);
     }
   }
   return end_x;
