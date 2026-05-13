@@ -137,10 +137,12 @@ typedef struct {
 typedef struct {
   RenAtlas *atlas;
   GlyphMetric metric;
+  SDL_GPUTexture *texture;
   RenColor color;
   int dst_x, dst_y;
   int src_x, src_y;
   int width, height;
+  int texture_w, texture_h;
   SDL_Rect clip;
   unsigned char format;
 } GpuQueuedGlyph;
@@ -3638,6 +3640,7 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   *queued = (GpuQueuedGlyph) {
     .atlas = glyph->atlas,
     .metric = *glyph->metric,
+    .texture = texture->texture,
     .color = glyph->color,
     .dst_x = glyph->dst_x,
     .dst_y = glyph->dst_y,
@@ -3645,6 +3648,8 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     .src_y = glyph->src_y,
     .width = glyph->width,
     .height = glyph->height,
+    .texture_w = texture->texture_w,
+    .texture_h = texture->texture_h,
     .clip = clip,
     .format = glyph->format,
   };
@@ -3736,8 +3741,7 @@ static bool gpu_draw_text_batches_to_bridge(
 
   for (int i = 0; i < glyph_count; i++) {
     GpuQueuedGlyph *glyph = &glyphs[i];
-    GpuAtlasTexture *texture = gpu_atlas_lookup_texture(glyph->atlas, &glyph->metric);
-    if (!texture || !texture->texture || texture->texture_w <= 0 || texture->texture_h <= 0)
+    if (!glyph->texture || glyph->texture_w <= 0 || glyph->texture_h <= 0)
       continue;
 
     SDL_Rect dst = {
@@ -3763,15 +3767,15 @@ static bool gpu_draw_text_batches_to_bridge(
     if (src_y < 0)
       src_y = 0;
 
-    float u0 = (float) (glyph->src_x + clipped.x - dst.x) / (float) texture->texture_w;
-    float v0 = (float) (src_y + clipped.y - dst.y) / (float) texture->texture_h;
-    float u1 = (float) (glyph->src_x + clipped.x - dst.x + clipped.w) / (float) texture->texture_w;
-    float v1 = (float) (src_y + clipped.y - dst.y + clipped.h) / (float) texture->texture_h;
+    float u0 = (float) (glyph->src_x + clipped.x - dst.x) / (float) glyph->texture_w;
+    float v0 = (float) (src_y + clipped.y - dst.y) / (float) glyph->texture_h;
+    float u1 = (float) (glyph->src_x + clipped.x - dst.x + clipped.w) / (float) glyph->texture_w;
+    float v1 = (float) (src_y + clipped.y - dst.y + clipped.h) / (float) glyph->texture_h;
     float color[4];
     gpu_color_to_float(glyph->color, color);
 
     GpuBatchRun *run = gpu_batch_append_run(
-      runs, &run_count, gpu_text_batch_material(texture->texture, glyph->format), vertex_count
+      runs, &run_count, gpu_text_batch_material(glyph->texture, glyph->format), vertex_count
     );
 
     Uint32 quad_vertices = gpu_emit_text_quad(vertices + vertex_count, clipped, u0, v0, u1, v1, color);
