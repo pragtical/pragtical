@@ -443,12 +443,15 @@ typedef struct {
   SDL_GPUCommandBuffer *command_buffer;
   GpuFrameBridge *target_frame;
   GpuQueuedGlyph *glyphs;
+  SDL_Rect clip;
   RenRect dirty_rect;
   int glyph_count;
   int glyph_capacity;
   bool attempted_native;
   bool have_dirty_rect;
   bool collect_overlay;
+  bool have_clip;
+  bool batch_pipeline_ready;
 } GpuTextDrawContext;
 
 typedef struct {
@@ -3611,15 +3614,18 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   }
   if (!device || !cmd || !frame || !frame->texture)
     gpu_abort("SDLGPU native text target unavailable");
-  if (!gpu_ensure_text_batch_pipeline(device))
+  if (!ctx->batch_pipeline_ready && !gpu_ensure_text_batch_pipeline(device))
     gpu_abort("SDLGPU native text pipeline unavailable");
+  ctx->batch_pipeline_ready = true;
 
   GpuAtlasTexture *texture = gpu_atlas_lookup_texture(glyph->atlas, glyph->metric);
   if (!texture || !texture->texture || texture->texture_w <= 0 || texture->texture_h <= 0)
     gpu_abort("SDLGPU native glyph texture unavailable");
-  SDL_Rect clip;
-  if (!frame->surface || !SDL_GetSurfaceClipRect(frame->surface, &clip))
-    gpu_abort("SDLGPU native text clip unavailable");
+  if (!ctx->have_clip) {
+    if (!frame->surface || !SDL_GetSurfaceClipRect(frame->surface, &ctx->clip))
+      gpu_abort("SDLGPU native text clip unavailable");
+    ctx->have_clip = true;
+  }
 
   GpuQueuedGlyph *queued = NULL;
   if (data) {
@@ -3650,7 +3656,7 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     .height = glyph->height,
     .texture_w = texture->texture_w,
     .texture_h = texture->texture_h,
-    .clip = clip,
+    .clip = ctx->clip,
     .format = glyph->format,
   };
   ctx->glyph_count++;
