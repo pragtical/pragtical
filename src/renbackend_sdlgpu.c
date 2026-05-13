@@ -143,6 +143,7 @@ typedef struct {
   int src_x, src_y;
   int width, height;
   int texture_w, texture_h;
+  int texture_y0;
   SDL_Rect clip;
   unsigned char format;
 } GpuQueuedGlyph;
@@ -884,6 +885,17 @@ static GpuBatchRun *gpu_batch_append_run(
   return &runs[*run_count - 1];
 }
 
+static GpuBatchRun *gpu_batch_append_new_run(
+  GpuBatchRun *runs, int *run_count, GpuBatchMaterial material, Uint32 first_vertex
+) {
+  runs[(*run_count)++] = (GpuBatchRun) {
+    .material = material,
+    .first_vertex = first_vertex,
+    .vertex_count = 0,
+  };
+  return &runs[*run_count - 1];
+}
+
 static GpuBatchRun *gpu_ensure_batch_runs(GpuFrameBridge *frame, int count) {
   if (count <= 0)
     return NULL;
@@ -1346,12 +1358,20 @@ static Uint32 gpu_atlas_upload_size(SDL_Surface *surface, GlyphMetric *metric, U
   return *row_stride * (metric->y1 - metric->y0);
 }
 
+static bool gpu_atlas_use_tight_texture(GlyphMetric *metric) {
+  return metric->x1 >= 64 || metric->y1 - metric->y0 >= 64;
+}
+
 static GpuAtlasTexture *gpu_atlas_find_texture(GpuAtlasData *data, SDL_Surface *surface, GlyphMetric *metric) {
+  bool tight_texture = gpu_atlas_use_tight_texture(metric);
   for (size_t i = 0; i < data->texture_count; i++) {
     GpuAtlasTexture *texture = &data->textures[i];
-    if (texture->format == metric->format
-        && texture->atlas_idx == metric->atlas_idx
-        && texture->surface_idx == metric->surface_idx)
+    if (texture->format == metric->format &&
+        texture->atlas_idx == metric->atlas_idx &&
+        texture->surface_idx == metric->surface_idx &&
+        texture->x1 == (tight_texture ? metric->x1 : (unsigned int) surface->w) &&
+        texture->y0 == (tight_texture ? metric->y0 : 0) &&
+        texture->y1 == (tight_texture ? metric->y1 : (unsigned int) surface->h))
       return texture;
   }
 
@@ -1371,9 +1391,9 @@ static GpuAtlasTexture *gpu_atlas_find_texture(GpuAtlasData *data, SDL_Surface *
   texture->format = metric->format;
   texture->atlas_idx = metric->atlas_idx;
   texture->surface_idx = metric->surface_idx;
-  texture->x1 = surface->w;
-  texture->y0 = 0;
-  texture->y1 = surface->h;
+  texture->x1 = tight_texture ? metric->x1 : (unsigned int) surface->w;
+  texture->y0 = tight_texture ? metric->y0 : 0;
+  texture->y1 = tight_texture ? metric->y1 : (unsigned int) surface->h;
   return texture;
 }
 
@@ -1381,19 +1401,30 @@ static GpuAtlasTexture *gpu_atlas_lookup_texture(RenAtlas *atlas, GlyphMetric *m
   GpuAtlasData *data = atlas->data;
   if (!data)
     return NULL;
+  bool tight_texture = gpu_atlas_use_tight_texture(metric);
   for (size_t i = 0; i < data->texture_count; i++) {
     GpuAtlasTexture *texture = &data->textures[i];
-    if (texture->format == metric->format
-        && texture->atlas_idx == metric->atlas_idx
-        && texture->surface_idx == metric->surface_idx)
+    if (texture->format != metric->format ||
+        texture->atlas_idx != metric->atlas_idx ||
+        texture->surface_idx != metric->surface_idx)
+      continue;
+    if (tight_texture &&
+        texture->x1 == metric->x1 &&
+        texture->y0 == metric->y0 &&
+        texture->y1 == metric->y1)
+      return texture;
+    if (!tight_texture &&
+        texture->x1 >= metric->x1 &&
+        texture->y0 == 0 &&
+        texture->y1 > metric->y1)
       return texture;
   }
   return NULL;
 }
 
-static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *texture, SDL_Surface *surface) {
-  int width = surface->w;
-  int height = surface->h;
+static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *texture) {
+  int width = texture->x1;
+  int height = texture->y1 - texture->y0;
   if (texture->texture && texture->texture_w == width && texture->texture_h == height)
     return;
 
@@ -1476,6 +1507,7 @@ static bool gpu_validate_atlas_upload(
   SDL_GPUTexture *texture,
   SDL_Surface *surface,
   GlyphMetric *metric,
+  int texture_y0,
   SDL_GPUCommandBuffer *cmd,
   Uint32 row_stride
 ) {
@@ -1501,7 +1533,7 @@ static bool gpu_validate_atlas_upload(
   SDL_zero(source);
   source.texture = texture;
   source.x = 0;
-  source.y = metric->y0;
+  source.y = metric->y0 - texture_y0;
   source.w = metric->x1;
   source.h = height;
   source.d = 1;
@@ -1613,26 +1645,14 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
     data->device = gpu_retain_device();
 
   GpuAtlasTexture *texture = gpu_atlas_find_texture(data, surface, metric);
-  gpu_atlas_ensure_texture(data->device, texture, surface);
+  gpu_atlas_ensure_texture(data->device, texture);
 
   Uint32 row_stride = 0;
   Uint32 upload_size = gpu_atlas_upload_size(surface, metric, &row_stride);
   if (upload_size == 0)
     return;
   gpu_atlas_ensure_transfer(data->device, texture, upload_size);
-
-  if (!SDL_LockSurface(surface))
-    gpu_abort("SDL_LockSurface failed");
-
-  void *map = SDL_MapGPUTransferBuffer(data->device, texture->transfer, true);
-  if (!map) {
-    SDL_UnlockSurface(surface);
-    gpu_abort("SDL_MapGPUTransferBuffer failed");
-  }
-
-  gpu_atlas_copy_glyph_to_transfer(surface, metric, map, row_stride);
-  SDL_UnmapGPUTransferBuffer(data->device, texture->transfer);
-  SDL_UnlockSurface(surface);
+  SDL_GPUTransferBuffer *transfer = texture->transfer;
 
   SDL_GPUCommandBuffer *cmd = NULL;
   bool submit_upload = false;
@@ -1645,10 +1665,23 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
     submit_upload = true;
   }
 
+  if (!SDL_LockSurface(surface))
+    gpu_abort("SDL_LockSurface failed");
+
+  void *map = SDL_MapGPUTransferBuffer(data->device, transfer, true);
+  if (!map) {
+    SDL_UnlockSurface(surface);
+    gpu_abort("SDL_MapGPUTransferBuffer failed");
+  }
+
+  gpu_atlas_copy_glyph_to_transfer(surface, metric, map, row_stride);
+  SDL_UnmapGPUTransferBuffer(data->device, transfer);
+  SDL_UnlockSurface(surface);
+
   SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
   SDL_GPUTextureTransferInfo source;
   SDL_zero(source);
-  source.transfer_buffer = texture->transfer;
+  source.transfer_buffer = transfer;
   source.pixels_per_row = row_stride / ren_glyphformat_bytes_per_pixel(EGlyphFormatColor);
   source.rows_per_layer = metric->y1 - metric->y0;
 
@@ -1656,7 +1689,7 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
   SDL_zero(destination);
   destination.texture = texture->texture;
   destination.x = 0;
-  destination.y = metric->y0;
+  destination.y = metric->y0 - texture->y0;
   destination.w = metric->x1;
   destination.h = metric->y1 - metric->y0;
   destination.d = 1;
@@ -1666,7 +1699,7 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
 
   if (submit_upload) {
     bool submitted = gpu_validate_atlas_upload(
-      data->device, texture->texture, surface, metric, cmd, row_stride
+      data->device, texture->texture, surface, metric, texture->y0, cmd, row_stride
     );
     if (!submitted) {
       if (!SDL_SubmitGPUCommandBuffer(cmd)) {
@@ -3607,6 +3640,7 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     .height = glyph->height,
     .texture_w = texture->texture_w,
     .texture_h = texture->texture_h,
+    .texture_y0 = texture->y0,
     .clip = ctx->clip,
     .format = glyph->format,
   };
@@ -3694,6 +3728,9 @@ static bool gpu_draw_text_batches_to_bridge(
 
   Uint32 instance_count = 0;
   int run_count = 0;
+  SDL_Rect last_glyph_rect = {0};
+  GpuBatchMaterial last_material = {0};
+  bool have_last_glyph = false;
 
   for (int i = 0; i < glyph_count; i++) {
     GpuQueuedGlyph *glyph = &glyphs[i];
@@ -3720,21 +3757,28 @@ static bool gpu_draw_text_batches_to_bridge(
       continue;
 
     float u0 = (float) (glyph->src_x + clipped.x - dst.x) / (float) glyph->texture_w;
-    float v0 = (float) (glyph->src_y + clipped.y - dst.y) / (float) glyph->texture_h;
+    float v0 = (float) (glyph->src_y - glyph->texture_y0 + clipped.y - dst.y) / (float) glyph->texture_h;
     float u1 = (float) (glyph->src_x + clipped.x - dst.x + clipped.w) / (float) glyph->texture_w;
-    float v1 = (float) (glyph->src_y + clipped.y - dst.y + clipped.h) / (float) glyph->texture_h;
+    float v1 = (float) (glyph->src_y - glyph->texture_y0 + clipped.y - dst.y + clipped.h) / (float) glyph->texture_h;
     float color[4];
     gpu_color_to_float(glyph->color, color);
 
-    GpuBatchRun *run = gpu_batch_append_run(
-      runs, &run_count, gpu_text_batch_material(glyph->texture, glyph->format), instance_count
-    );
+    GpuBatchMaterial material = gpu_text_batch_material(glyph->texture, glyph->format);
+    bool overlaps_last = have_last_glyph
+      && gpu_batch_material_equal(last_material, material)
+      && SDL_HasRectIntersection(&last_glyph_rect, &clipped);
+    GpuBatchRun *run = overlaps_last
+      ? gpu_batch_append_new_run(runs, &run_count, material, instance_count)
+      : gpu_batch_append_run(runs, &run_count, material, instance_count);
 
     Uint32 emitted_instances = gpu_emit_text_instance(
       instances + instance_count, clipped, u0, v0, u1, v1, color
     );
     instance_count += emitted_instances;
     run->vertex_count += emitted_instances;
+    last_glyph_rect = clipped;
+    last_material = material;
+    have_last_glyph = true;
   }
 
   SDL_UnmapGPUTransferBuffer(device, frame->text_transfer);
