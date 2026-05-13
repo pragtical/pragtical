@@ -4765,7 +4765,7 @@ static SDL_GPUCommandBuffer *gpu_begin_canvas_region_command(GpuCanvasData *data
   return data->command_buffer;
 }
 
-static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, bool native_only) {
+static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, UNUSED bool native_only) {
   if (!cache->window_target) {
     GpuCanvasData *data = cache->backend_data;
     if (data) {
@@ -4778,7 +4778,7 @@ static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, bool native_o
   RenWindow *ren = cache->target;
   GpuWindowData *data = ren->backend_data;
   if (data)
-    data->native_region = gpu_direct_replay_enabled() && native_only;
+    data->native_region = gpu_direct_replay_enabled();
 }
 
 static void gpu_end_region(RenCache *cache, UNUSED RenRect rect, UNUSED bool native_only) {
