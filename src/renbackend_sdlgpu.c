@@ -894,6 +894,28 @@ static SDL_GPURenderPass *gpu_begin_batch_render_pass(
   return pass;
 }
 
+static void gpu_upload_batch_vertices(
+  SDL_GPUCommandBuffer *cmd, SDL_GPUTransferBuffer *transfer, SDL_GPUBuffer *buffer, Uint32 size
+) {
+  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTransferBufferLocation source;
+  SDL_zero(source);
+  source.transfer_buffer = transfer;
+  SDL_GPUBufferRegion destination;
+  SDL_zero(destination);
+  destination.buffer = buffer;
+  destination.size = size;
+  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
+  SDL_EndGPUCopyPass(copy_pass);
+}
+
+static void gpu_bind_batch_vertex_buffer(SDL_GPURenderPass *pass, SDL_GPUBuffer *buffer) {
+  SDL_GPUBufferBinding binding;
+  SDL_zero(binding);
+  binding.buffer = buffer;
+  SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+}
+
 static bool gpu_color_equal(RenColor a, RenColor b) {
   return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
@@ -3226,25 +3248,13 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
   }
   SDL_UnmapGPUTransferBuffer(data->device, data->rect_transfer);
 
-  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTransferBufferLocation source;
-  SDL_zero(source);
-  source.transfer_buffer = data->rect_transfer;
-  SDL_GPUBufferRegion destination;
-  SDL_zero(destination);
-  destination.buffer = data->rect_vertex_buffer;
-  destination.size = upload_size;
-  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
-  SDL_EndGPUCopyPass(copy_pass);
+  gpu_upload_batch_vertices(cmd, data->rect_transfer, data->rect_vertex_buffer, upload_size);
 
   SDL_GPURenderPass *pass = gpu_begin_batch_render_pass(
     cmd, data->frame.texture, data->frame.texture_w, data->frame.texture_h, NULL
   );
 
-  SDL_GPUBufferBinding binding;
-  SDL_zero(binding);
-  binding.buffer = data->rect_vertex_buffer;
-  SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+  gpu_bind_batch_vertex_buffer(pass, data->rect_vertex_buffer);
 
   SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   for (int i = 0; i < run_count; i++) {
@@ -3691,16 +3701,9 @@ static bool gpu_draw_text_batches_to_bridge(
     return true;
   }
 
-  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTransferBufferLocation source;
-  SDL_zero(source);
-  source.transfer_buffer = frame->text_transfer;
-  SDL_GPUBufferRegion destination;
-  SDL_zero(destination);
-  destination.buffer = frame->text_vertex_buffer;
-  destination.size = vertex_count * sizeof(GpuTextBatchVertex);
-  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
-  SDL_EndGPUCopyPass(copy_pass);
+  gpu_upload_batch_vertices(
+    cmd, frame->text_transfer, frame->text_vertex_buffer, vertex_count * sizeof(GpuTextBatchVertex)
+  );
 
   SDL_Rect target_clip = { .x = 0, .y = 0, .w = surface->w, .h = surface->h };
   SDL_GPURenderPass *pass = gpu_begin_batch_render_pass(
@@ -3708,10 +3711,7 @@ static bool gpu_draw_text_batches_to_bridge(
   );
   SDL_BindGPUGraphicsPipeline(pass, gpu_text_batch_pipeline);
 
-  SDL_GPUBufferBinding vertex_binding;
-  SDL_zero(vertex_binding);
-  vertex_binding.buffer = frame->text_vertex_buffer;
-  SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
+  gpu_bind_batch_vertex_buffer(pass, frame->text_vertex_buffer);
 
   for (int i = 0; i < run_count; i++) {
     GpuBatchRun *run = &runs[i];
@@ -3804,26 +3804,16 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
     return true;
   }
 
-  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTransferBufferLocation source;
-  SDL_zero(source);
-  source.transfer_buffer = data->frame.quad_transfer;
-  SDL_GPUBufferRegion destination;
-  SDL_zero(destination);
-  destination.buffer = data->frame.quad_vertex_buffer;
-  destination.size = vertex_count * sizeof(GpuTextureQuadVertex);
-  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
-  SDL_EndGPUCopyPass(copy_pass);
+  gpu_upload_batch_vertices(
+    cmd, data->frame.quad_transfer, data->frame.quad_vertex_buffer, vertex_count * sizeof(GpuTextureQuadVertex)
+  );
 
   SDL_Rect target_clip = { .x = 0, .y = 0, .w = data->frame.texture_w, .h = data->frame.texture_h };
   SDL_GPURenderPass *pass = gpu_begin_batch_render_pass(
     cmd, data->frame.texture, data->frame.texture_w, data->frame.texture_h, &target_clip
   );
 
-  SDL_GPUBufferBinding vertex_binding;
-  SDL_zero(vertex_binding);
-  vertex_binding.buffer = data->frame.quad_vertex_buffer;
-  SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
+  gpu_bind_batch_vertex_buffer(pass, data->frame.quad_vertex_buffer);
 
   SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   for (int i = 0; i < run_count; i++) {
