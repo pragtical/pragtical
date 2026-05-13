@@ -50,7 +50,7 @@
 #define GPU_NATIVE_TEXT_ENABLED false
 #define GPU_NATIVE_CANVAS_ENABLED false
 #define GPU_NATIVE_RECT_ENABLED false
-#define GPU_NATIVE_RECT_BATCH_SIZE 1024
+#define GPU_NATIVE_RECT_BATCH_SIZE 16384
 
 typedef enum {
   GPU_TEXTURE_BATCH_BLEND,
@@ -198,6 +198,7 @@ typedef struct {
   Uint32 validation_transfer_size;
   SDL_Rect validation_text_rect;
   SDL_Rect validation_probe_rect;
+  SDL_Rect native_clip_rect;
   int pending_native_rect_count;
   int pending_text_glyph_count;
   int pending_text_glyph_capacity;
@@ -228,6 +229,7 @@ typedef struct {
   bool validation_text_pending;
   bool validation_probe_pending;
   bool validation_reported;
+  bool have_native_clip_rect;
   bool sampled_canvas_this_frame;
 } GpuWindowData;
 
@@ -428,9 +430,9 @@ typedef struct {
 } GpuPolyFragmentUniforms;
 
 typedef struct {
-  float x, y;
+  float dst[4];
   float color[4];
-} GpuRectVertex;
+} GpuRectInstance;
 
 typedef struct {
   float dst[4];
@@ -1071,18 +1073,16 @@ static void gpu_color_to_float(RenColor color, float out[4]) {
   out[3] = (float) color.a / 255.0f;
 }
 
-static Uint32 gpu_emit_rect_quad(GpuRectVertex *vertices, SDL_Rect rect, const float color[4]) {
-  float x0 = rect.x;
-  float y0 = rect.y;
-  float x1 = rect.x + rect.w;
-  float y1 = rect.y + rect.h;
-  vertices[0] = (GpuRectVertex) { x0, y0, { color[0], color[1], color[2], color[3] } };
-  vertices[1] = (GpuRectVertex) { x1, y0, { color[0], color[1], color[2], color[3] } };
-  vertices[2] = (GpuRectVertex) { x1, y1, { color[0], color[1], color[2], color[3] } };
-  vertices[3] = (GpuRectVertex) { x0, y0, { color[0], color[1], color[2], color[3] } };
-  vertices[4] = (GpuRectVertex) { x1, y1, { color[0], color[1], color[2], color[3] } };
-  vertices[5] = (GpuRectVertex) { x0, y1, { color[0], color[1], color[2], color[3] } };
-  return 6;
+static Uint32 gpu_emit_rect_instance(GpuRectInstance *instance, SDL_Rect rect, const float color[4]) {
+  instance->dst[0] = rect.x;
+  instance->dst[1] = rect.y;
+  instance->dst[2] = rect.w;
+  instance->dst[3] = rect.h;
+  instance->color[0] = color[0];
+  instance->color[1] = color[1];
+  instance->color[2] = color[2];
+  instance->color[3] = color[3];
+  return 1;
 }
 
 static Uint32 gpu_emit_text_instance(
@@ -1125,6 +1125,46 @@ static bool gpu_color_equal(RenColor a, RenColor b) {
 
 static bool gpu_rect_equal(SDL_Rect a, SDL_Rect b) {
   return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
+}
+
+static bool gpu_rects_overlap(SDL_Rect a, SDL_Rect b) {
+  return a.x < b.x + b.w && b.x < a.x + a.w &&
+    a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+static bool gpu_try_merge_rect(SDL_Rect *dst, SDL_Rect src, RenColor color) {
+  if (!dst || dst->w <= 0 || dst->h <= 0 || src.w <= 0 || src.h <= 0)
+    return false;
+
+  bool overlaps = gpu_rects_overlap(*dst, src);
+  if (overlaps && color.a != 255)
+    return false;
+
+  if (dst->y == src.y && dst->h == src.h) {
+    int dst_x2 = dst->x + dst->w;
+    int src_x2 = src.x + src.w;
+    if (src.x <= dst_x2 && dst->x <= src_x2) {
+      int x1 = SDL_min(dst->x, src.x);
+      int x2 = SDL_max(dst_x2, src_x2);
+      dst->x = x1;
+      dst->w = x2 - x1;
+      return true;
+    }
+  }
+
+  if (dst->x == src.x && dst->w == src.w) {
+    int dst_y2 = dst->y + dst->h;
+    int src_y2 = src.y + src.h;
+    if (src.y <= dst_y2 && dst->y <= src_y2) {
+      int y1 = SDL_min(dst->y, src.y);
+      int y2 = SDL_max(dst_y2, src_y2);
+      dst->y = y1;
+      dst->h = y2 - y1;
+      return true;
+    }
+  }
+
+  return false;
 }
 
 static GpuBatchMaterial gpu_text_batch_material(SDL_GPUTexture *texture, unsigned char format) {
@@ -1173,13 +1213,42 @@ static RenRect gpu_clip_surface_rect(SDL_Surface *surface, RenRect rect) {
   return (RenRect) { x1, y1, x2 - x1, y2 - y1 };
 }
 
+static int gpu_floor_to_int(double value) {
+  int result = (int) value;
+  return value < (double) result ? result - 1 : result;
+}
+
+static int gpu_ceil_to_int(double value) {
+  int result = (int) value;
+  return value > (double) result ? result + 1 : result;
+}
+
 static SDL_Rect gpu_pixel_rect_from_ren_rect(SDL_Surface *surface, RenRect rect) {
   RenRect clipped = gpu_clip_surface_rect(surface, rect);
-  const int x1 = SDL_clamp((int) floor(clipped.x), 0, surface->w);
-  const int y1 = SDL_clamp((int) floor(clipped.y), 0, surface->h);
-  const int x2 = SDL_clamp((int) ceil(clipped.x + clipped.width), x1, surface->w);
-  const int y2 = SDL_clamp((int) ceil(clipped.y + clipped.height), y1, surface->h);
+  const int x1 = SDL_clamp(gpu_floor_to_int(clipped.x), 0, surface->w);
+  const int y1 = SDL_clamp(gpu_floor_to_int(clipped.y), 0, surface->h);
+  const int x2 = SDL_clamp(gpu_ceil_to_int(clipped.x + clipped.width), x1, surface->w);
+  const int y2 = SDL_clamp(gpu_ceil_to_int(clipped.y + clipped.height), y1, surface->h);
   return (SDL_Rect) {.x = x1, .y = y1, .w = x2 - x1, .h = y2 - y1};
+}
+
+static SDL_Rect gpu_pixel_rect_from_ren_rect_unclipped(RenRect rect) {
+  const int x1 = gpu_floor_to_int(rect.x);
+  const int y1 = gpu_floor_to_int(rect.y);
+  const int x2 = gpu_ceil_to_int(rect.x + rect.width);
+  const int y2 = gpu_ceil_to_int(rect.y + rect.height);
+  return (SDL_Rect) {.x = x1, .y = y1, .w = x2 - x1, .h = y2 - y1};
+}
+
+static bool gpu_intersect_sdl_rect(SDL_Rect a, SDL_Rect b, SDL_Rect *out) {
+  int x1 = SDL_max(a.x, b.x);
+  int y1 = SDL_max(a.y, b.y);
+  int x2 = SDL_min(a.x + a.w, b.x + b.w);
+  int y2 = SDL_min(a.y + a.h, b.y + b.h);
+  if (x2 <= x1 || y2 <= y1)
+    return false;
+  *out = (SDL_Rect) { .x = x1, .y = y1, .w = x2 - x1, .h = y2 - y1 };
+  return true;
 }
 
 static int gpu_collect_upload_regions(
@@ -1825,16 +1894,25 @@ static bool gpu_queue_window_native_rect(RenCache *rc, RenSurface *surface, RenR
   if (!data || !data->command_buffer)
     return false;
 
-  SDL_Rect dst = gpu_pixel_rect_from_ren_rect(surface->surface, rect);
+  SDL_Rect dst = gpu_pixel_rect_from_ren_rect_unclipped(rect);
   if (dst.w == 0 || dst.h == 0)
     return true;
 
-  SDL_Rect clip;
-  if (!SDL_GetSurfaceClipRect(surface->surface, &clip))
-    return false;
+  SDL_Rect clip = data->have_native_clip_rect
+    ? data->native_clip_rect
+    : (SDL_Rect) { .x = 0, .y = 0, .w = surface->surface->w, .h = surface->surface->h };
 
-  if (!SDL_GetRectIntersection(&dst, &clip, &dst) || dst.w == 0 || dst.h == 0)
+  if (!gpu_intersect_sdl_rect(dst, clip, &dst))
     return true;
+
+  if (data->pending_native_rect_count > 0) {
+    GpuNativeRect *last = &data->pending_native_rects[data->pending_native_rect_count - 1];
+    if (last->replace == replace && gpu_color_equal(last->color, color) &&
+        gpu_try_merge_rect(&last->rect, dst, color)) {
+      data->stats_native_rects++;
+      return true;
+    }
+  }
 
   if (data->pending_native_rect_count >= GPU_NATIVE_RECT_BATCH_SIZE) {
     if (!gpu_flush_window_native_rects(data, data->command_buffer))
@@ -2690,19 +2768,19 @@ static SDL_GPUGraphicsPipeline *gpu_create_rect_graphics_pipeline(SDL_GPUDevice 
   SDL_GPUVertexBufferDescription vertex_buffer;
   SDL_zero(vertex_buffer);
   vertex_buffer.slot = 0;
-  vertex_buffer.pitch = sizeof(GpuRectVertex);
-  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+  vertex_buffer.pitch = sizeof(GpuRectInstance);
+  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE;
 
   SDL_GPUVertexAttribute vertex_attributes[2];
   SDL_zeroa(vertex_attributes);
   vertex_attributes[0].location = 0;
   vertex_attributes[0].buffer_slot = 0;
-  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
   vertex_attributes[0].offset = 0;
   vertex_attributes[1].location = 1;
   vertex_attributes[1].buffer_slot = 0;
   vertex_attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
-  vertex_attributes[1].offset = offsetof(GpuRectVertex, color);
+  vertex_attributes[1].offset = offsetof(GpuRectInstance, color);
 
   SDL_GPUColorTargetDescription color_target;
   SDL_zero(color_target);
@@ -3356,32 +3434,32 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
 
   GpuBatchRun *runs = gpu_ensure_batch_runs(&data->frame, rect_count);
 
-  Uint32 vertex_count = (Uint32) rect_count * 6;
-  Uint32 upload_size = vertex_count * sizeof(GpuRectVertex);
+  Uint32 instance_count = (Uint32) rect_count;
+  Uint32 upload_size = instance_count * sizeof(GpuRectInstance);
   gpu_ensure_window_rect_buffers(data, upload_size);
 
-  GpuRectVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->rect_transfer, true);
-  if (!vertices)
+  GpuRectInstance *instances = SDL_MapGPUTransferBuffer(data->device, data->rect_transfer, true);
+  if (!instances)
     return false;
 
-  GpuRectVertex *out = vertices;
+  GpuRectInstance *out = instances;
   int run_count = 0;
-  Uint32 emitted_vertices = 0;
+  Uint32 emitted_instances = 0;
   for (int i = 0; i < data->pending_native_rect_count; i++) {
     GpuNativeRect *native = &data->pending_native_rects[i];
     if (native->rect.w <= 0 || native->rect.h <= 0)
       continue;
 
     GpuBatchRun *run = gpu_batch_append_run(
-      runs, &run_count, gpu_rect_batch_material(native->replace), emitted_vertices
+      runs, &run_count, gpu_rect_batch_material(native->replace), emitted_instances
     );
 
     float color[4];
     gpu_color_to_float(native->color, color);
-    Uint32 quad_vertices = gpu_emit_rect_quad(out, native->rect, color);
-    out += quad_vertices;
-    emitted_vertices += quad_vertices;
-    run->vertex_count += quad_vertices;
+    Uint32 emitted = gpu_emit_rect_instance(out, native->rect, color);
+    out += emitted;
+    emitted_instances += emitted;
+    run->vertex_count += emitted;
   }
   SDL_UnmapGPUTransferBuffer(data->device, data->rect_transfer);
 
@@ -3400,7 +3478,7 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
       continue;
 
     gpu_bind_batch_pipeline(pass, run->material, &bound_pipeline);
-    SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
+    SDL_DrawGPUPrimitives(pass, 6, run->vertex_count, 0, run->first_vertex);
   }
 
   SDL_EndGPURenderPass(pass);
@@ -4587,6 +4665,7 @@ static void gpu_begin_frame(RenCache *cache, UNUSED RenRect *rects, UNUSED int c
   data->native_region = false;
   data->frame_synced_during_replay = false;
   data->native_text_used = false;
+  data->have_native_clip_rect = false;
   data->sampled_canvas_this_frame = false;
 
   if (data->command_buffer) {
@@ -5303,8 +5382,16 @@ static bool gpu_draw_canvas_poly_native(
   return true;
 }
 
-static void gpu_set_clip_rect(UNUSED RenCache *rc, RenSurface *surface, RenRect rect) {
+static void gpu_set_clip_rect(RenCache *rc, RenSurface *surface, RenRect rect) {
   ren_set_clip_rect(surface, rect);
+  if (rc && rc->window_target && surface && surface->surface) {
+    RenWindow *ren = rc->target;
+    GpuWindowData *data = ren ? ren->backend_data : NULL;
+    if (data) {
+      data->native_clip_rect = gpu_pixel_rect_from_ren_rect(surface->surface, rect);
+      data->have_native_clip_rect = true;
+    }
+  }
 }
 
 static bool gpu_can_native_rect(
@@ -5318,13 +5405,20 @@ static bool gpu_can_native_rect(
   GpuWindowData *data = ren->backend_data;
   if (!data || !data->command_buffer || !data->frame.texture)
     return false;
-  if (!gpu_ensure_rect_pipeline(data->device))
-    return false;
-  if (replace && !gpu_ensure_rect_replace_pipeline(data->device))
+  return rect.width > 0 && rect.height > 0;
+}
+
+static bool gpu_can_native_region(RenCache *rc, UNUSED RenSurface *surface, UNUSED RenRect region) {
+  if (!rc->window_target || !gpu_direct_replay_enabled())
     return false;
 
-  SDL_Rect dst = gpu_pixel_rect_from_ren_rect(surface->surface, rect);
-  return dst.w > 0 && dst.h > 0;
+  RenWindow *ren = rc->target;
+  GpuWindowData *data = ren ? ren->backend_data : NULL;
+  return data && data->command_buffer && data->frame.texture;
+}
+
+static bool gpu_use_full_frame_regions(RenCache *rc) {
+  return rc && rc->window_target && gpu_direct_replay_enabled();
 }
 
 static bool gpu_can_native_text(
@@ -5601,10 +5695,12 @@ static const RenCacheDrawOps gpu_draw_ops = {
 static const RenBackend sdlgpu_backend = {
   .name = "sdlgpu",
   .draw_ops = &gpu_draw_ops,
+  .use_full_frame_regions = gpu_use_full_frame_regions,
   .begin_frame = gpu_begin_frame,
   .end_frame = gpu_end_frame,
   .begin_region = gpu_begin_region,
   .end_region = gpu_end_region,
+  .can_native_region = gpu_can_native_region,
   .can_native_rect = gpu_can_native_rect,
   .can_native_text = gpu_can_native_text,
   .can_native_canvas = gpu_can_native_canvas,
