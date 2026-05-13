@@ -8,10 +8,12 @@
 struct RenBackend {
   const char *name;
   const RenCacheDrawOps *draw_ops;
+  bool (*use_full_frame_regions)(RenCache *cache);
   void (*begin_frame)(RenCache *cache, RenRect *rects, int count);
   void (*end_frame)(RenCache *cache, RenRect *rects, int count);
   void (*begin_region)(RenCache *cache, RenRect rect, bool native_only);
   void (*end_region)(RenCache *cache, RenRect rect, bool native_only);
+  bool (*can_native_region)(RenCache *cache, RenSurface *surface, RenRect region);
   bool (*can_native_rect)(RenCache *cache, RenSurface *surface, RenRect rect, RenColor color, bool replace);
   bool (*can_native_text)(RenCache *cache, RenSurface *surface, RenFont **fonts, const char *text, size_t len, float x, float y, RenColor color, RenTab tab);
   bool (*can_native_canvas)(RenCache *cache, RenSurface *surface, RenCache *canvas, int x, int y);
