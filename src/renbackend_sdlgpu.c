@@ -869,14 +869,17 @@ static GpuBatchRun *gpu_batch_append_run(
   return &runs[*run_count - 1];
 }
 
-static SDL_GPURenderPass *gpu_begin_target_render_pass(
-  SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *texture, int width, int height, const SDL_Rect *scissor
+static SDL_GPURenderPass *gpu_begin_configured_render_pass(
+  SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *texture, int width, int height, const SDL_Rect *scissor,
+  SDL_GPULoadOp load_op, SDL_FColor clear_color, bool cycle
 ) {
   SDL_GPUColorTargetInfo color_target;
   SDL_zero(color_target);
   color_target.texture = texture;
-  color_target.load_op = SDL_GPU_LOADOP_LOAD;
+  color_target.clear_color = clear_color;
+  color_target.load_op = load_op;
   color_target.store_op = SDL_GPU_STOREOP_STORE;
+  color_target.cycle = cycle;
 
   SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
 
@@ -889,6 +892,14 @@ static SDL_GPURenderPass *gpu_begin_target_render_pass(
   if (scissor)
     SDL_SetGPUScissor(pass, scissor);
   return pass;
+}
+
+static SDL_GPURenderPass *gpu_begin_target_render_pass(
+  SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *texture, int width, int height, const SDL_Rect *scissor
+) {
+  return gpu_begin_configured_render_pass(
+    cmd, texture, width, height, scissor, SDL_GPU_LOADOP_LOAD, (SDL_FColor) { 0 }, false
+  );
 }
 
 static SDL_GPURenderPass *gpu_begin_batch_render_pass(
@@ -3930,24 +3941,11 @@ static bool gpu_blit_texture_to_bridge(
     pipeline = replace_pipeline;
   }
 
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = dst->texture;
-  color_target.load_op = SDL_GPU_LOADOP_LOAD;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-  color_target.cycle = cycle_destination;
-
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
-
-  SDL_GPUViewport viewport;
-  SDL_zero(viewport);
-  viewport.w = dst->texture_w;
-  viewport.h = dst->texture_h;
-  viewport.max_depth = 1;
-  SDL_SetGPUViewport(pass, &viewport);
-
   SDL_Rect scissor = { .x = x1, .y = y1, .w = x2 - x1, .h = y2 - y1 };
-  SDL_SetGPUScissor(pass, &scissor);
+  SDL_GPURenderPass *pass = gpu_begin_configured_render_pass(
+    cmd, dst->texture, dst->texture_w, dst->texture_h, &scissor,
+    SDL_GPU_LOADOP_LOAD, (SDL_FColor) { 0 }, cycle_destination
+  );
 
   GpuTextVertexUniforms vertex_uniforms = {
     .dst = { x1, y1, x2 - x1, y2 - y1 },
@@ -4494,13 +4492,10 @@ static void gpu_clear_frame_texture(GpuWindowData *data) {
   if (!data || !data->command_buffer || !data->frame.texture)
     return;
 
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = data->frame.texture;
-  color_target.clear_color = (SDL_FColor) { 0, 0, 0, 1 };
-  color_target.load_op = SDL_GPU_LOADOP_CLEAR;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(data->command_buffer, &color_target, 1, NULL);
+  SDL_GPURenderPass *pass = gpu_begin_configured_render_pass(
+    data->command_buffer, data->frame.texture, data->frame.texture_w, data->frame.texture_h, NULL,
+    SDL_GPU_LOADOP_CLEAR, (SDL_FColor) { 0, 0, 0, 1 }, false
+  );
   SDL_EndGPURenderPass(pass);
   data->frame.needs_full_upload = false;
   data->frame.dirty_count = 0;
@@ -4852,14 +4847,10 @@ static bool gpu_surface_is_fully_transparent(SDL_Surface *surface) {
 static void gpu_clear_canvas_texture(GpuCanvasData *data, SDL_GPUCommandBuffer *cmd, SDL_FColor color) {
   gpu_ensure_bridge_texture(data->device, &data->frame, data->frame.surface->w, data->frame.surface->h);
 
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = data->frame.texture;
-  color_target.clear_color = color;
-  color_target.load_op = SDL_GPU_LOADOP_CLEAR;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-  color_target.cycle = true;
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
+  SDL_GPURenderPass *pass = gpu_begin_configured_render_pass(
+    cmd, data->frame.texture, data->frame.texture_w, data->frame.texture_h, NULL,
+    SDL_GPU_LOADOP_CLEAR, color, true
+  );
   SDL_EndGPURenderPass(pass);
 
   data->texture_valid = true;
