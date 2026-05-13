@@ -121,6 +121,17 @@ typedef struct {
 
 typedef struct {
   float x, y;
+} GpuPolyVertex;
+
+typedef struct {
+  RenColor color;
+  SDL_Rect clip;
+  Uint32 first_vertex;
+  Uint32 vertex_count;
+} GpuQueuedPoly;
+
+typedef struct {
+  float x, y;
   float u, v;
 } GpuTextureQuadVertex;
 
@@ -140,6 +151,8 @@ typedef struct {
   GpuNativeRect pending_native_rects[GPU_NATIVE_RECT_BATCH_SIZE];
   GpuQueuedGlyph *pending_text_glyphs;
   GpuQueuedCanvas *pending_canvases;
+  GpuQueuedPoly *pending_polys;
+  GpuPolyVertex *pending_poly_vertices;
   SDL_GPUTransferBuffer *validation_transfer;
   Uint32 validation_transfer_size;
   SDL_Rect validation_text_rect;
@@ -149,6 +162,10 @@ typedef struct {
   int pending_text_glyph_capacity;
   int pending_canvas_count;
   int pending_canvas_capacity;
+  int pending_poly_count;
+  int pending_poly_capacity;
+  int pending_poly_vertex_count;
+  int pending_poly_vertex_capacity;
   Uint64 stats_frames;
   Uint64 stats_native_rects;
   Uint64 stats_native_rect_batches;
@@ -249,6 +266,7 @@ static bool gpu_flush_queued_text(
   UNUSED bool uploaded_cpu_full
 );
 static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
+static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
 static bool gpu_draw_solid_rect_to_bridge(
   SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd, GpuFrameBridge *frame,
   SDL_Surface *surface, RenRect rect, RenColor color, bool replace
@@ -259,7 +277,7 @@ static bool gpu_upload_pixels_to_bridge(
 );
 
 static bool gpu_flush_window_batches(
-  GpuWindowData *data, bool flush_rects, bool flush_text, bool flush_canvases
+  GpuWindowData *data, bool flush_rects, bool flush_text, bool flush_canvases, bool flush_polys
 ) {
   if (!data || !data->command_buffer)
     return true;
@@ -271,15 +289,18 @@ static bool gpu_flush_window_batches(
   if (flush_canvases && data->pending_canvas_count > 0 &&
       !gpu_flush_queued_canvases(data, data->command_buffer))
     return false;
+  if (flush_polys && data->pending_poly_count > 0 &&
+      !gpu_flush_queued_polys(data, data->command_buffer))
+    return false;
   return true;
 }
 
 static bool gpu_flush_pending_text_barrier(GpuWindowData *data) {
-  return gpu_flush_window_batches(data, false, true, false);
+  return gpu_flush_window_batches(data, false, true, false, false);
 }
 
 static bool gpu_flush_pending_canvas_barrier(GpuWindowData *data) {
-  return gpu_flush_window_batches(data, false, false, true);
+  return gpu_flush_window_batches(data, false, false, true, false);
 }
 
 static bool gpu_env_flag(const char *name, bool fallback) {
@@ -354,10 +375,6 @@ typedef struct {
 typedef struct {
   float color[4];
 } GpuPolyFragmentUniforms;
-
-typedef struct {
-  float x, y;
-} GpuPolyVertex;
 
 typedef struct {
   float x, y;
@@ -797,6 +814,14 @@ static bool gpu_batch_material_equal(GpuBatchMaterial a, GpuBatchMaterial b) {
   return a.pipeline == b.pipeline &&
     a.texture == b.texture &&
     a.glyph_format == b.glyph_format;
+}
+
+static bool gpu_color_equal(RenColor a, RenColor b) {
+  return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
+}
+
+static bool gpu_rect_equal(SDL_Rect a, SDL_Rect b) {
+  return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
 }
 
 static GpuBatchMaterial gpu_text_batch_material(SDL_GPUTexture *texture, unsigned char format) {
@@ -1635,7 +1660,7 @@ static bool gpu_draw_pixels_native(
   SDL_UploadToGPUTexture(copy_pass, &source_info, &destination, false);
   SDL_EndGPUCopyPass(copy_pass);
 
-  if (!gpu_flush_window_batches(data, true, true, false))
+  if (!gpu_flush_window_batches(data, true, true, false, true))
     gpu_abort("SDLGPU native batch flush before pixels failed");
 
   SDL_GPUBlitInfo blit_info;
@@ -1929,6 +1954,142 @@ static bool gpu_draw_poly_vertices_to_bridge(
   return true;
 }
 
+static bool gpu_queue_window_native_poly(
+  GpuWindowData *data, SDL_Rect clip, GpuPolyVertex *vertices, int vertex_count, RenColor color
+) {
+  if (!data || !vertices || vertex_count <= 0 || clip.w <= 0 || clip.h <= 0)
+    return false;
+
+  if (data->pending_poly_vertex_count + vertex_count > data->pending_poly_vertex_capacity) {
+    int capacity = data->pending_poly_vertex_capacity ? data->pending_poly_vertex_capacity * 2 : 256;
+    while (capacity < data->pending_poly_vertex_count + vertex_count)
+      capacity *= 2;
+    GpuPolyVertex *pending_vertices = SDL_realloc(data->pending_poly_vertices, capacity * sizeof(GpuPolyVertex));
+    if (!pending_vertices) {
+      fprintf(stderr, "Error allocating SDL GPU pending polygon vertices\n");
+      exit(1);
+    }
+    data->pending_poly_vertices = pending_vertices;
+    data->pending_poly_vertex_capacity = capacity;
+  }
+
+  Uint32 first_vertex = (Uint32) data->pending_poly_vertex_count;
+  SDL_memcpy(
+    data->pending_poly_vertices + data->pending_poly_vertex_count,
+    vertices,
+    (size_t) vertex_count * sizeof(GpuPolyVertex)
+  );
+  data->pending_poly_vertex_count += vertex_count;
+
+  if (data->pending_poly_count > 0) {
+    GpuQueuedPoly *last = &data->pending_polys[data->pending_poly_count - 1];
+    if (gpu_color_equal(last->color, color) &&
+        gpu_rect_equal(last->clip, clip) &&
+        last->first_vertex + last->vertex_count == first_vertex) {
+      last->vertex_count += (Uint32) vertex_count;
+      return true;
+    }
+  }
+
+  if (data->pending_poly_count >= data->pending_poly_capacity) {
+    int capacity = data->pending_poly_capacity ? data->pending_poly_capacity * 2 : 64;
+    GpuQueuedPoly *polys = SDL_realloc(data->pending_polys, capacity * sizeof(GpuQueuedPoly));
+    if (!polys) {
+      fprintf(stderr, "Error allocating SDL GPU pending polygons\n");
+      exit(1);
+    }
+    data->pending_polys = polys;
+    data->pending_poly_capacity = capacity;
+  }
+
+  data->pending_polys[data->pending_poly_count++] = (GpuQueuedPoly) {
+    .color = color,
+    .clip = clip,
+    .first_vertex = first_vertex,
+    .vertex_count = (Uint32) vertex_count,
+  };
+  return true;
+}
+
+static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cmd) {
+  if (!data || data->pending_poly_count == 0)
+    return true;
+  if (!cmd || !data->frame.texture || data->pending_poly_vertex_count <= 0)
+    return false;
+  if (!gpu_ensure_poly_pipeline(data->device))
+    return false;
+
+  Uint32 upload_size = (Uint32) data->pending_poly_vertex_count * sizeof(GpuPolyVertex);
+  gpu_ensure_bridge_poly_buffers(data->device, &data->frame, upload_size);
+
+  GpuPolyVertex *map = SDL_MapGPUTransferBuffer(data->device, data->frame.poly_transfer, true);
+  if (!map)
+    return false;
+  SDL_memcpy(map, data->pending_poly_vertices, upload_size);
+  SDL_UnmapGPUTransferBuffer(data->device, data->frame.poly_transfer);
+
+  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTransferBufferLocation source;
+  SDL_zero(source);
+  source.transfer_buffer = data->frame.poly_transfer;
+  SDL_GPUBufferRegion destination;
+  SDL_zero(destination);
+  destination.buffer = data->frame.poly_vertex_buffer;
+  destination.size = upload_size;
+  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
+  SDL_EndGPUCopyPass(copy_pass);
+
+  SDL_GPUColorTargetInfo color_target;
+  SDL_zero(color_target);
+  color_target.texture = data->frame.texture;
+  color_target.load_op = SDL_GPU_LOADOP_LOAD;
+  color_target.store_op = SDL_GPU_STOREOP_STORE;
+
+  SDL_GPUViewport viewport;
+  SDL_zero(viewport);
+  viewport.w = data->frame.texture_w;
+  viewport.h = data->frame.texture_h;
+  viewport.max_depth = 1;
+
+  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
+  SDL_SetGPUViewport(pass, &viewport);
+  SDL_BindGPUGraphicsPipeline(pass, gpu_poly_pipeline);
+
+  SDL_GPUBufferBinding binding;
+  SDL_zero(binding);
+  binding.buffer = data->frame.poly_vertex_buffer;
+  SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+
+  GpuPolyVertexUniforms vertex_uniforms = {
+    .target = { data->frame.texture_w, data->frame.texture_h, 0, 0 },
+  };
+  SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
+
+  for (int i = 0; i < data->pending_poly_count; i++) {
+    GpuQueuedPoly *poly = &data->pending_polys[i];
+    if (poly->vertex_count == 0 || poly->clip.w <= 0 || poly->clip.h <= 0)
+      continue;
+
+    GpuPolyFragmentUniforms fragment_uniforms = {
+      .color = {
+        (float) poly->color.r / 255.0f,
+        (float) poly->color.g / 255.0f,
+        (float) poly->color.b / 255.0f,
+        (float) poly->color.a / 255.0f,
+      },
+    };
+    SDL_SetGPUScissor(pass, &poly->clip);
+    SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
+    SDL_DrawGPUPrimitives(pass, poly->vertex_count, 1, poly->first_vertex, 0);
+  }
+
+  SDL_EndGPURenderPass(pass);
+  data->pending_poly_count = 0;
+  data->pending_poly_vertex_count = 0;
+  data->frame_synced_during_replay = true;
+  return true;
+}
+
 static bool gpu_draw_poly_native(
   RenCache *rc, RenSurface *surface, RenPoint *points, unsigned short npoints, RenColor color
 ) {
@@ -1975,19 +2136,15 @@ static bool gpu_draw_poly_native(
     return false;
   }
 
-  if (!gpu_flush_window_batches(data, true, true, false))
+  if (!gpu_flush_window_batches(data, true, true, false, false))
     gpu_abort("SDLGPU native batch flush before poly failed");
 
-  bool drawn = gpu_draw_poly_vertices_to_bridge(
-    data->device, data->command_buffer, &data->frame, surface->surface,
-    vertices, vertex_count, bounds, color
-  );
+  bool drawn = gpu_queue_window_native_poly(data, dst, vertices, vertex_count, color);
   SDL_free(flat_points);
   SDL_free(vertices);
   if (!drawn)
     return false;
 
-  data->frame_synced_during_replay = true;
   data->stats_native_polys++;
   return true;
 }
@@ -4250,6 +4407,14 @@ static void gpu_destroy_window(RenWindow *ren) {
     data->pending_canvases = NULL;
     data->pending_canvas_count = 0;
     data->pending_canvas_capacity = 0;
+    SDL_free(data->pending_polys);
+    data->pending_polys = NULL;
+    data->pending_poly_count = 0;
+    data->pending_poly_capacity = 0;
+    SDL_free(data->pending_poly_vertices);
+    data->pending_poly_vertices = NULL;
+    data->pending_poly_vertex_count = 0;
+    data->pending_poly_vertex_capacity = 0;
     gpu_destroy_bridge_resources(data->device, &data->frame);
     if (data->device) {
       SDL_ReleaseWindowFromGPUDevice(data->device, ren->window);
@@ -4297,6 +4462,8 @@ static void gpu_begin_frame(RenCache *cache, UNUSED RenRect *rects, UNUSED int c
   data->pending_native_rect_count = 0;
   data->pending_text_glyph_count = 0;
   data->pending_canvas_count = 0;
+  data->pending_poly_count = 0;
+  data->pending_poly_vertex_count = 0;
   data->native_region = false;
   data->frame_synced_during_replay = false;
   data->native_text_used = false;
@@ -4457,6 +4624,8 @@ static void gpu_present_window_rects(RenCache *cache, UNUSED RenRect *rects, UNU
     gpu_abort("SDLGPU native text flush failed");
   if (!gpu_flush_queued_canvases(data, cmd))
     gpu_abort("SDLGPU native canvas flush failed");
+  if (!gpu_flush_queued_polys(data, cmd))
+    gpu_abort("SDLGPU native polygon flush failed");
 
   if (swapchain_texture)
     gpu_blit_frame_to_swapchain(data, cmd, swapchain_texture, swapchain_width, swapchain_height);
@@ -5153,7 +5322,7 @@ static void gpu_draw_rect(RenCache *rc, RenSurface *surface, RenRect rect, RenCo
 
   RenWindow *ren = rc->target;
   GpuWindowData *data = ren->backend_data;
-  if (!gpu_flush_window_batches(data, false, true, true))
+  if (!gpu_flush_window_batches(data, false, true, true, true))
     gpu_abort("SDLGPU native batch flush before rect failed");
   bool native_queued = native_region && gpu_native_rect_enabled() &&
     gpu_queue_window_native_rect(rc, surface, rect, color, replace);
@@ -5185,7 +5354,7 @@ static double gpu_draw_text(RenCache *rc, RenSurface *surface, RenFont **fonts, 
   text_context.window_data = ren->backend_data;
   if (!text_context.window_data || !text_context.window_data->command_buffer)
     gpu_abort("SDLGPU native text command buffer unavailable");
-  if (!gpu_flush_window_batches(text_context.window_data, true, false, true))
+  if (!gpu_flush_window_batches(text_context.window_data, true, false, true, true))
     gpu_abort("SDLGPU native batch flush before text failed");
   text_context.collect_overlay = gpu_native_text_supported(text_context.window_data->device)
       && text_context.window_data->frame.texture;
@@ -5266,7 +5435,7 @@ static void gpu_draw_canvas(RenCache *rc, RenSurface *surface, RenCache *canvas,
         SDL_GetSurfaceBlendMode(canvas_data->frame.surface, &blend_mode) &&
         (blend_mode == SDL_BLENDMODE_NONE || blend_mode == SDL_BLENDMODE_BLEND);
       if (native_candidate) {
-        if (!gpu_flush_window_batches(window_data, true, true, false))
+        if (!gpu_flush_window_batches(window_data, true, true, false, true))
           gpu_abort("SDLGPU native batch flush before canvas failed");
       }
     }
