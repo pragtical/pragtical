@@ -92,7 +92,7 @@ test.describe("graphics apis", function()
     for _, name in ipairs({
       "show_debug", "get_size", "begin_frame", "end_frame",
       "set_clip_rect", "draw_rect", "draw_text", "draw_canvas",
-      "to_canvas", "draw_poly"
+      "to_canvas", "draw_poly", "draw_pixels"
     }) do
       test.type(renderer[name], "function", "missing renderer." .. name)
     end
@@ -419,6 +419,201 @@ test.describe("graphics apis", function()
 
     local br4, bg4, bb4 = average_region(captures[4], width, 12, 140, 120, 20)
     test.ok(br4 < 30 and bg4 < 35 and bb4 < 45, "cleared background should not contain stale text")
+  end)
+
+  test.test("captures moving Pacman rendered with window polygons", function(context)
+    local width, height = 180, 96
+    local window = renwindow.create("graphics-pacman-polygons", width, height)
+    test.not_nil(window)
+
+    local background = {8, 10, 14, 255}
+    local yellow = {246, 220, 48, 255}
+    local captures = {}
+    local keep_output = os.getenv("PRAGTICAL_KEEP_VISUAL_TEST_OUTPUT") == "1"
+    local frame_count = keep_output and 90 or 18
+
+    local function pacman_points(cx, cy, radius)
+      local points = {{cx, cy}}
+      for degrees = 38, 322, 12 do
+        local angle = math.rad(degrees)
+        table.insert(points, {
+          cx + math.cos(angle) * radius,
+          cy + math.sin(angle) * radius
+        })
+      end
+      return points
+    end
+
+    local function average_region(pixels, x, y, w, h)
+      local r, g, b, a, n = 0, 0, 0, 0, 0
+      for yy = y, y + h - 1 do
+        for xx = x, x + w - 1 do
+          local idx = ((yy * width + xx) * 4) + 1
+          local pr, pg, pb, pa = pixels:byte(idx, idx + 3)
+          r, g, b, a, n = r + pr, g + pg, b + pb, a + pa, n + 1
+        end
+      end
+      return r / n, g / n, b / n, a / n
+    end
+
+    local function wait_visual_frame()
+      if not keep_output then
+        return
+      end
+      if coroutine.isyieldable() then
+        coroutine.yield(1 / 30)
+      else
+        system.sleep(1 / 30)
+      end
+    end
+
+    local positions = {}
+    for frame = 1, frame_count do
+      local t = frame_count == 1 and 0 or (frame - 1) / (frame_count - 1)
+      positions[frame] = math.floor(26 + t * 119 + 0.5)
+    end
+
+    for frame, x in ipairs(positions) do
+      renderer.begin_frame(window)
+      renderer.set_clip_rect(0, 0, width, height)
+      renderer.draw_rect(0, 0, width, height, background, true)
+      renderer.draw_poly(pacman_points(x, 48, 19), yellow)
+      renderer.end_frame()
+
+      local capture = renderer.to_canvas(window, 0, 0, width, height)
+      test.not_nil(capture)
+      local path = context.temp_root .. PATHSEP .. string.format("pacman-poly-%02d.png", frame)
+      local saved, save_err = capture:save_image(path)
+      test.ok(saved, save_err)
+      captures[frame] = capture:get_pixels(0, 0, width, height)
+      wait_visual_frame()
+    end
+
+    local r1, g1, b1 = average_region(captures[1], 14, 43, 10, 10)
+    test.ok(r1 > 190 and g1 > 160 and b1 < 90, "polygon Pacman should start on the left")
+
+    local middle_frame = math.ceil(#positions / 2)
+    local middle_sample_x = positions[middle_frame] - 12
+    local r2, g2, b2 = average_region(captures[middle_frame], middle_sample_x, 43, 10, 10)
+    test.ok(r2 > 190 and g2 > 160 and b2 < 90, "polygon Pacman should move to the middle")
+
+    local last_frame = #positions
+    local last_sample_x = positions[last_frame] - 12
+    local r3, g3, b3 = average_region(captures[last_frame], last_sample_x, 43, 10, 10)
+    test.ok(r3 > 190 and g3 > 160 and b3 < 90, "polygon Pacman should move to the right")
+
+    local old_r, old_g, old_b = average_region(captures[last_frame], 14, 43, 10, 10)
+    test.ok(old_r < 35 and old_g < 35 and old_b < 45,
+      "polygon Pacman should not leave stale pixels at its first position")
+  end)
+
+  test.test("captures moving Pacman rendered with window pixels", function(context)
+    local width, height = 180, 96
+    local window = renwindow.create("graphics-pacman-pixels", width, height)
+    test.not_nil(window)
+
+    local background = {8, 10, 14, 255}
+    local captures = {}
+    local keep_output = os.getenv("PRAGTICAL_KEEP_VISUAL_TEST_OUTPUT") == "1"
+    local frame_count = keep_output and 90 or 18
+
+    local function pacman_pixels(size)
+      local radius = (size - 2) / 2
+      local center = (size - 1) / 2
+      local bytes = {}
+      local function atan2(y, x)
+        if x > 0 then
+          return math.atan(y / x)
+        elseif x < 0 and y >= 0 then
+          return math.atan(y / x) + math.pi
+        elseif x < 0 then
+          return math.atan(y / x) - math.pi
+        elseif y > 0 then
+          return math.pi / 2
+        elseif y < 0 then
+          return -math.pi / 2
+        end
+        return 0
+      end
+      for y = 0, size - 1 do
+        for x = 0, size - 1 do
+          local dx = x - center
+          local dy = y - center
+          local distance = math.sqrt(dx * dx + dy * dy)
+          local angle = math.deg(atan2(dy, dx))
+          local in_mouth = math.abs(angle) < 34
+          if distance <= radius and not in_mouth then
+            table.insert(bytes, string.char(246, 220, 48, 255))
+          else
+            table.insert(bytes, string.char(background[1], background[2], background[3], background[4]))
+          end
+        end
+      end
+      return table.concat(bytes)
+    end
+
+    local function average_region(pixels, x, y, w, h)
+      local r, g, b, a, n = 0, 0, 0, 0, 0
+      for yy = y, y + h - 1 do
+        for xx = x, x + w - 1 do
+          local idx = ((yy * width + xx) * 4) + 1
+          local pr, pg, pb, pa = pixels:byte(idx, idx + 3)
+          r, g, b, a, n = r + pr, g + pg, b + pb, a + pa, n + 1
+        end
+      end
+      return r / n, g / n, b / n, a / n
+    end
+
+    local function wait_visual_frame()
+      if not keep_output then
+        return
+      end
+      if coroutine.isyieldable() then
+        coroutine.yield(1 / 30)
+      else
+        system.sleep(1 / 30)
+      end
+    end
+
+    local pixels = pacman_pixels(30)
+    local positions = {}
+    for frame = 1, frame_count do
+      local t = frame_count == 1 and 0 or (frame - 1) / (frame_count - 1)
+      positions[frame] = math.floor(12 + t * 119 + 0.5)
+    end
+
+    for frame, x in ipairs(positions) do
+      renderer.begin_frame(window)
+      renderer.set_clip_rect(0, 0, width, height)
+      renderer.draw_rect(0, 0, width, height, background, true)
+      renderer.draw_pixels(pixels, x, 33, 30, 30)
+      renderer.end_frame()
+
+      local capture = renderer.to_canvas(window, 0, 0, width, height)
+      test.not_nil(capture)
+      local path = context.temp_root .. PATHSEP .. string.format("pacman-pixels-%02d.png", frame)
+      local saved, save_err = capture:save_image(path)
+      test.ok(saved, save_err)
+      captures[frame] = capture:get_pixels(0, 0, width, height)
+      wait_visual_frame()
+    end
+
+    local r1, g1, b1 = average_region(captures[1], 19, 43, 10, 10)
+    test.ok(r1 > 190 and g1 > 160 and b1 < 90, "pixel Pacman should start on the left")
+
+    local middle_frame = math.ceil(#positions / 2)
+    local middle_sample_x = positions[middle_frame] + 7
+    local r2, g2, b2 = average_region(captures[middle_frame], middle_sample_x, 43, 10, 10)
+    test.ok(r2 > 190 and g2 > 160 and b2 < 90, "pixel Pacman should move to the middle")
+
+    local last_frame = #positions
+    local last_sample_x = positions[last_frame] + 7
+    local r3, g3, b3 = average_region(captures[last_frame], last_sample_x, 43, 10, 10)
+    test.ok(r3 > 190 and g3 > 160 and b3 < 90, "pixel Pacman should move to the right")
+
+    local old_r, old_g, old_b = average_region(captures[last_frame], 19, 43, 10, 10)
+    test.ok(old_r < 35 and old_g < 35 and old_b < 45,
+      "pixel Pacman should not leave stale pixels at its first position")
   end)
 
   test.test("renders native canvas blend, replace and clipping semantics", function(context)
