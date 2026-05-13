@@ -24,6 +24,7 @@ pragtical_sources = [
     'renatlas.c',
     'renatlas_surface.c',
     'renbackend.c',
+    'renbackend_sdlrenderer.c',
     'renbackend_surface.c',
     'renderer.c',
     'renwindow.c',

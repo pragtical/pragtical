@@ -1,5 +1,6 @@
 #include "renbackend.h"
 #include "renbackend_sdlgpu.h"
+#include "renbackend_sdlrenderer.h"
 #include "renbackend_surface.h"
 #include <stdio.h>
 #include <stdlib.h>
