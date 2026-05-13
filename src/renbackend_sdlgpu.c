@@ -292,6 +292,7 @@ static SDL_GPUDevice *gpu_retain_device(void);
 static void gpu_release_device(void);
 static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
 static bool gpu_ensure_canvas_pipeline(SDL_GPUDevice *device);
+static bool gpu_ensure_canvas_batch_replace_pipeline(SDL_GPUDevice *device);
 static bool gpu_ensure_poly_pipeline(SDL_GPUDevice *device);
 static bool gpu_submit_and_wait(SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd);
 static bool gpu_flush_queued_text(
@@ -1807,6 +1808,8 @@ static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *c
     return true;
   if (!cmd || !data->frame.texture || data->pending_pixel_bytes_size == 0)
     return false;
+  if (!gpu_ensure_canvas_batch_replace_pipeline(data->device))
+    return false;
   if (!gpu_ensure_pixels_texture(data, data->pending_pixels_texture_w, data->pending_pixels_texture_h))
     return false;
   if (!gpu_ensure_pixels_transfer(data, data->pending_pixel_bytes_size))
@@ -1839,22 +1842,60 @@ static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *c
   }
   SDL_EndGPUCopyPass(copy_pass);
 
+  Uint32 max_vertices = (Uint32) data->pending_pixel_count * 6;
+  Uint32 vertex_upload_size = max_vertices * sizeof(GpuTextureQuadVertex);
+  gpu_ensure_bridge_quad_buffers(data->device, &data->frame, vertex_upload_size);
+
+  GpuTextureQuadVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->frame.quad_transfer, true);
+  if (!vertices)
+    return false;
+
+  Uint32 vertex_count = 0;
   for (int i = 0; i < data->pending_pixel_count; i++) {
     GpuQueuedPixels *pixels = &data->pending_pixels[i];
-    SDL_GPUBlitInfo blit_info;
-    SDL_zero(blit_info);
-    blit_info.source.texture = data->pixels_texture;
-    blit_info.source.y = pixels->atlas_y;
-    blit_info.source.w = pixels->dst.w;
-    blit_info.source.h = pixels->dst.h;
-    blit_info.destination.texture = data->frame.texture;
-    blit_info.destination.x = pixels->dst.x;
-    blit_info.destination.y = pixels->dst.y;
-    blit_info.destination.w = pixels->dst.w;
-    blit_info.destination.h = pixels->dst.h;
-    blit_info.load_op = SDL_GPU_LOADOP_LOAD;
-    blit_info.filter = SDL_GPU_FILTER_NEAREST;
-    SDL_BlitGPUTexture(cmd, &blit_info);
+    float x0 = pixels->dst.x;
+    float y0 = pixels->dst.y;
+    float x1 = pixels->dst.x + pixels->dst.w;
+    float y1 = pixels->dst.y + pixels->dst.h;
+    float u0 = 0.0f;
+    float v0 = (float) pixels->atlas_y / (float) data->pixels_texture_h;
+    float u1 = (float) pixels->dst.w / (float) data->pixels_texture_w;
+    float v1 = (float) (pixels->atlas_y + pixels->dst.h) / (float) data->pixels_texture_h;
+    GpuTextureQuadVertex quad[6] = {
+      { x0, y0, u0, v0 },
+      { x1, y0, u1, v0 },
+      { x1, y1, u1, v1 },
+      { x0, y0, u0, v0 },
+      { x1, y1, u1, v1 },
+      { x0, y1, u0, v1 },
+    };
+    SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
+    vertex_count += SDL_arraysize(quad);
+  }
+  SDL_UnmapGPUTransferBuffer(data->device, data->frame.quad_transfer);
+
+  if (vertex_count > 0) {
+    gpu_upload_batch_vertices(
+      cmd, data->frame.quad_transfer, data->frame.quad_vertex_buffer, vertex_count * sizeof(GpuTextureQuadVertex)
+    );
+
+    SDL_Rect target_clip = { .x = 0, .y = 0, .w = data->frame.texture_w, .h = data->frame.texture_h };
+    SDL_GPURenderPass *pass = gpu_begin_batch_render_pass(
+      cmd, data->frame.texture, data->frame.texture_w, data->frame.texture_h, &target_clip
+    );
+    SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
+    gpu_bind_batch_pipeline(
+      pass, gpu_canvas_batch_material(data->pixels_texture, GPU_TEXTURE_BATCH_REPLACE), &bound_pipeline
+    );
+    gpu_bind_batch_vertex_buffer(pass, data->frame.quad_vertex_buffer);
+
+    SDL_GPUTextureSamplerBinding sampler_binding;
+    SDL_zero(sampler_binding);
+    sampler_binding.texture = data->pixels_texture;
+    sampler_binding.sampler = gpu_canvas_sampler;
+    SDL_BindGPUFragmentSamplers(pass, 0, &sampler_binding, 1);
+    SDL_DrawGPUPrimitives(pass, vertex_count, 1, 0, 0);
+    SDL_EndGPURenderPass(pass);
   }
 
   data->pending_pixel_count = 0;
