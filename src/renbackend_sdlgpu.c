@@ -102,6 +102,7 @@ typedef struct {
   SDL_GPUTransferBuffer *text_transfer;
   SDL_GPUBuffer *quad_vertex_buffer;
   SDL_GPUTransferBuffer *quad_transfer;
+  GpuBatchRun *batch_runs;
   Uint32 transfer_size;
   Uint32 poly_vertex_buffer_size;
   Uint32 poly_transfer_size;
@@ -109,6 +110,7 @@ typedef struct {
   Uint32 text_transfer_size;
   Uint32 quad_vertex_buffer_size;
   Uint32 quad_transfer_size;
+  int batch_run_capacity;
   SDL_PixelFormat texture_pixel_format;
   int texture_w, texture_h;
   bool needs_full_upload;
@@ -559,6 +561,8 @@ static void gpu_destroy_bridge_resources(SDL_GPUDevice *device, GpuFrameBridge *
       SDL_ReleaseGPUTransferBuffer(device, frame->quad_transfer);
     frame->quad_transfer = NULL;
   }
+  SDL_free(frame->batch_runs);
+  frame->batch_runs = NULL;
   frame->transfer_size = 0;
   frame->poly_vertex_buffer_size = 0;
   frame->poly_transfer_size = 0;
@@ -566,6 +570,7 @@ static void gpu_destroy_bridge_resources(SDL_GPUDevice *device, GpuFrameBridge *
   frame->text_transfer_size = 0;
   frame->quad_vertex_buffer_size = 0;
   frame->quad_transfer_size = 0;
+  frame->batch_run_capacity = 0;
   frame->texture_w = 0;
   frame->texture_h = 0;
   frame->needs_full_upload = true;
@@ -869,6 +874,25 @@ static GpuBatchRun *gpu_batch_append_run(
   return &runs[*run_count - 1];
 }
 
+static GpuBatchRun *gpu_ensure_batch_runs(GpuFrameBridge *frame, int count) {
+  if (count <= 0)
+    return NULL;
+  if (frame->batch_runs && frame->batch_run_capacity >= count)
+    return frame->batch_runs;
+
+  int capacity = frame->batch_run_capacity ? frame->batch_run_capacity * 2 : 64;
+  while (capacity < count)
+    capacity *= 2;
+  GpuBatchRun *runs = SDL_realloc(frame->batch_runs, (size_t) capacity * sizeof(GpuBatchRun));
+  if (!runs) {
+    fprintf(stderr, "Error allocating SDL GPU batch runs\n");
+    exit(1);
+  }
+  frame->batch_runs = runs;
+  frame->batch_run_capacity = capacity;
+  return runs;
+}
+
 static SDL_GPURenderPass *gpu_begin_configured_render_pass(
   SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *texture, int width, int height, const SDL_Rect *scissor,
   SDL_GPULoadOp load_op, SDL_FColor clear_color, bool cycle
@@ -980,6 +1004,36 @@ static void gpu_color_to_float(RenColor color, float out[4]) {
   out[3] = (float) color.a / 255.0f;
 }
 
+static Uint32 gpu_emit_rect_quad(GpuRectVertex *vertices, SDL_Rect rect, const float color[4]) {
+  float x0 = rect.x;
+  float y0 = rect.y;
+  float x1 = rect.x + rect.w;
+  float y1 = rect.y + rect.h;
+  vertices[0] = (GpuRectVertex) { x0, y0, { color[0], color[1], color[2], color[3] } };
+  vertices[1] = (GpuRectVertex) { x1, y0, { color[0], color[1], color[2], color[3] } };
+  vertices[2] = (GpuRectVertex) { x1, y1, { color[0], color[1], color[2], color[3] } };
+  vertices[3] = (GpuRectVertex) { x0, y0, { color[0], color[1], color[2], color[3] } };
+  vertices[4] = (GpuRectVertex) { x1, y1, { color[0], color[1], color[2], color[3] } };
+  vertices[5] = (GpuRectVertex) { x0, y1, { color[0], color[1], color[2], color[3] } };
+  return 6;
+}
+
+static Uint32 gpu_emit_text_quad(
+  GpuTextBatchVertex *vertices, SDL_Rect dst, float u0, float v0, float u1, float v1, const float color[4]
+) {
+  float x0 = dst.x;
+  float y0 = dst.y;
+  float x1 = dst.x + dst.w;
+  float y1 = dst.y + dst.h;
+  vertices[0] = (GpuTextBatchVertex) { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } };
+  vertices[1] = (GpuTextBatchVertex) { x1, y0, u1, v0, { color[0], color[1], color[2], color[3] } };
+  vertices[2] = (GpuTextBatchVertex) { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } };
+  vertices[3] = (GpuTextBatchVertex) { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } };
+  vertices[4] = (GpuTextBatchVertex) { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } };
+  vertices[5] = (GpuTextBatchVertex) { x0, y1, u0, v1, { color[0], color[1], color[2], color[3] } };
+  return 6;
+}
+
 static Uint32 gpu_emit_texture_quad(
   GpuTextureQuadVertex *vertices, SDL_Rect dst, float u0, float v0, float u1, float v1
 ) {
@@ -987,16 +1041,13 @@ static Uint32 gpu_emit_texture_quad(
   float y0 = dst.y;
   float x1 = dst.x + dst.w;
   float y1 = dst.y + dst.h;
-  GpuTextureQuadVertex quad[6] = {
-    { x0, y0, u0, v0 },
-    { x1, y0, u1, v0 },
-    { x1, y1, u1, v1 },
-    { x0, y0, u0, v0 },
-    { x1, y1, u1, v1 },
-    { x0, y1, u0, v1 },
-  };
-  SDL_memcpy(vertices, quad, sizeof(quad));
-  return SDL_arraysize(quad);
+  vertices[0] = (GpuTextureQuadVertex) { x0, y0, u0, v0 };
+  vertices[1] = (GpuTextureQuadVertex) { x1, y0, u1, v0 };
+  vertices[2] = (GpuTextureQuadVertex) { x1, y1, u1, v1 };
+  vertices[3] = (GpuTextureQuadVertex) { x0, y0, u0, v0 };
+  vertices[4] = (GpuTextureQuadVertex) { x1, y1, u1, v1 };
+  vertices[5] = (GpuTextureQuadVertex) { x0, y1, u0, v1 };
+  return 6;
 }
 
 static bool gpu_color_equal(RenColor a, RenColor b) {
@@ -3244,21 +3295,15 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     return true;
   }
 
-  GpuBatchRun *runs = SDL_malloc((size_t) rect_count * sizeof(GpuBatchRun));
-  if (!runs) {
-    fprintf(stderr, "Error allocating SDL GPU rect batch runs\n");
-    exit(1);
-  }
+  GpuBatchRun *runs = gpu_ensure_batch_runs(&data->frame, rect_count);
 
   Uint32 vertex_count = (Uint32) rect_count * 6;
   Uint32 upload_size = vertex_count * sizeof(GpuRectVertex);
   gpu_ensure_window_rect_buffers(data, upload_size);
 
   GpuRectVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->rect_transfer, true);
-  if (!vertices) {
-    SDL_free(runs);
+  if (!vertices)
     return false;
-  }
 
   GpuRectVertex *out = vertices;
   int run_count = 0;
@@ -3272,24 +3317,12 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
       runs, &run_count, gpu_rect_batch_material(native->replace), emitted_vertices
     );
 
-    float x0 = native->rect.x;
-    float y0 = native->rect.y;
-    float x1 = native->rect.x + native->rect.w;
-    float y1 = native->rect.y + native->rect.h;
     float color[4];
     gpu_color_to_float(native->color, color);
-    const GpuRectVertex quad[6] = {
-      { x0, y0, { color[0], color[1], color[2], color[3] } },
-      { x1, y0, { color[0], color[1], color[2], color[3] } },
-      { x1, y1, { color[0], color[1], color[2], color[3] } },
-      { x0, y0, { color[0], color[1], color[2], color[3] } },
-      { x1, y1, { color[0], color[1], color[2], color[3] } },
-      { x0, y1, { color[0], color[1], color[2], color[3] } },
-    };
-    SDL_memcpy(out, quad, sizeof(quad));
-    out += SDL_arraysize(quad);
-    emitted_vertices += SDL_arraysize(quad);
-    run->vertex_count += SDL_arraysize(quad);
+    Uint32 quad_vertices = gpu_emit_rect_quad(out, native->rect, color);
+    out += quad_vertices;
+    emitted_vertices += quad_vertices;
+    run->vertex_count += quad_vertices;
   }
   SDL_UnmapGPUTransferBuffer(data->device, data->rect_transfer);
 
@@ -3312,7 +3345,6 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
   }
 
   SDL_EndGPURenderPass(pass);
-  SDL_free(runs);
   data->pending_native_rect_count = 0;
   data->stats_native_rect_batches++;
   return true;
@@ -3614,21 +3646,15 @@ static bool gpu_draw_text_batches_to_bridge(
   if (!gpu_ensure_text_batch_pipeline(device))
     return false;
 
-  GpuBatchRun *runs = SDL_malloc((size_t) glyph_count * sizeof(GpuBatchRun));
-  if (!runs) {
-    fprintf(stderr, "Error allocating SDL GPU text batch runs\n");
-    exit(1);
-  }
+  GpuBatchRun *runs = gpu_ensure_batch_runs(frame, glyph_count);
 
   Uint32 max_vertices = (Uint32) glyph_count * 6;
   Uint32 upload_size = max_vertices * sizeof(GpuTextBatchVertex);
   gpu_ensure_bridge_text_buffers(device, frame, upload_size);
 
   GpuTextBatchVertex *vertices = SDL_MapGPUTransferBuffer(device, frame->text_transfer, true);
-  if (!vertices) {
-    SDL_free(runs);
+  if (!vertices)
     return false;
-  }
 
   Uint32 vertex_count = 0;
   int run_count = 0;
@@ -3662,10 +3688,6 @@ static bool gpu_draw_text_batches_to_bridge(
     if (src_y < 0)
       src_y = 0;
 
-    float x0 = clipped.x;
-    float y0 = clipped.y;
-    float x1 = clipped.x + clipped.w;
-    float y1 = clipped.y + clipped.h;
     float u0 = (float) (glyph->src_x + clipped.x - dst.x) / (float) texture->texture_w;
     float v0 = (float) (src_y + clipped.y - dst.y) / (float) texture->texture_h;
     float u1 = (float) (glyph->src_x + clipped.x - dst.x + clipped.w) / (float) texture->texture_w;
@@ -3677,23 +3699,14 @@ static bool gpu_draw_text_batches_to_bridge(
       runs, &run_count, gpu_text_batch_material(texture->texture, glyph->format), vertex_count
     );
 
-    GpuTextBatchVertex quad[6] = {
-      { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } },
-      { x1, y0, u1, v0, { color[0], color[1], color[2], color[3] } },
-      { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } },
-      { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } },
-      { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } },
-      { x0, y1, u0, v1, { color[0], color[1], color[2], color[3] } },
-    };
-    SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
-    vertex_count += SDL_arraysize(quad);
-    run->vertex_count += SDL_arraysize(quad);
+    Uint32 quad_vertices = gpu_emit_text_quad(vertices + vertex_count, clipped, u0, v0, u1, v1, color);
+    vertex_count += quad_vertices;
+    run->vertex_count += quad_vertices;
   }
 
   SDL_UnmapGPUTransferBuffer(device, frame->text_transfer);
 
   if (vertex_count == 0) {
-    SDL_free(runs);
     return true;
   }
 
@@ -3725,7 +3738,6 @@ static bool gpu_draw_text_batches_to_bridge(
   }
 
   SDL_EndGPURenderPass(pass);
-  SDL_free(runs);
   return true;
 }
 
@@ -3745,21 +3757,15 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
   if (needs_replace_pipeline && !gpu_ensure_canvas_batch_replace_pipeline(data->device))
     return false;
 
-  GpuBatchRun *runs = SDL_malloc((size_t) data->pending_canvas_count * sizeof(GpuBatchRun));
-  if (!runs) {
-    fprintf(stderr, "Error allocating SDL GPU canvas batch runs\n");
-    exit(1);
-  }
+  GpuBatchRun *runs = gpu_ensure_batch_runs(&data->frame, data->pending_canvas_count);
 
   Uint32 max_vertices = (Uint32) data->pending_canvas_count * 6;
   Uint32 upload_size = max_vertices * sizeof(GpuTextureQuadVertex);
   gpu_ensure_bridge_quad_buffers(data->device, &data->frame, upload_size);
 
   GpuTextureQuadVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->frame.quad_transfer, true);
-  if (!vertices) {
-    SDL_free(runs);
+  if (!vertices)
     return false;
-  }
 
   Uint32 vertex_count = 0;
   int run_count = 0;
@@ -3783,7 +3789,6 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
 
   if (vertex_count == 0) {
     data->pending_canvas_count = 0;
-    SDL_free(runs);
     return true;
   }
 
@@ -3812,7 +3817,6 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
 
   SDL_EndGPURenderPass(pass);
   int submitted_runs = run_count;
-  SDL_free(runs);
   data->pending_canvas_count = 0;
   data->frame_synced_during_replay = true;
   data->sampled_canvas_this_frame = true;
