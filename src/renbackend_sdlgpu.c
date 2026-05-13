@@ -916,6 +916,32 @@ static void gpu_bind_batch_vertex_buffer(SDL_GPURenderPass *pass, SDL_GPUBuffer 
   SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
 }
 
+static SDL_GPUGraphicsPipeline *gpu_batch_pipeline_for_material(GpuBatchMaterial material) {
+  switch (material.pipeline) {
+    case GPU_BATCH_PIPELINE_TEXT:
+      return gpu_text_batch_pipeline;
+    case GPU_BATCH_PIPELINE_CANVAS_BLEND:
+      return gpu_canvas_batch_pipeline;
+    case GPU_BATCH_PIPELINE_CANVAS_REPLACE:
+      return gpu_canvas_batch_replace_pipeline;
+    case GPU_BATCH_PIPELINE_RECT_BLEND:
+      return gpu_rect_pipeline;
+    case GPU_BATCH_PIPELINE_RECT_REPLACE:
+      return gpu_rect_replace_pipeline;
+  }
+  return NULL;
+}
+
+static void gpu_bind_batch_pipeline(
+  SDL_GPURenderPass *pass, GpuBatchMaterial material, SDL_GPUGraphicsPipeline **bound_pipeline
+) {
+  SDL_GPUGraphicsPipeline *pipeline = gpu_batch_pipeline_for_material(material);
+  if (*bound_pipeline != pipeline) {
+    SDL_BindGPUGraphicsPipeline(pass, pipeline);
+    *bound_pipeline = pipeline;
+  }
+}
+
 static bool gpu_color_equal(RenColor a, RenColor b) {
   return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
@@ -3262,13 +3288,7 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     if (run->vertex_count == 0)
       continue;
 
-    SDL_GPUGraphicsPipeline *pipeline = run->material.pipeline == GPU_BATCH_PIPELINE_RECT_REPLACE
-      ? gpu_rect_replace_pipeline
-      : gpu_rect_pipeline;
-    if (bound_pipeline != pipeline) {
-      SDL_BindGPUGraphicsPipeline(pass, pipeline);
-      bound_pipeline = pipeline;
-    }
+    gpu_bind_batch_pipeline(pass, run->material, &bound_pipeline);
     SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
   }
 
@@ -3821,13 +3841,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
     if (run->vertex_count == 0)
       continue;
 
-    SDL_GPUGraphicsPipeline *pipeline = run->material.pipeline == GPU_BATCH_PIPELINE_CANVAS_REPLACE
-      ? gpu_canvas_batch_replace_pipeline
-      : gpu_canvas_batch_pipeline;
-    if (bound_pipeline != pipeline) {
-      SDL_BindGPUGraphicsPipeline(pass, pipeline);
-      bound_pipeline = pipeline;
-    }
+    gpu_bind_batch_pipeline(pass, run->material, &bound_pipeline);
 
     SDL_GPUTextureSamplerBinding sampler_binding;
     SDL_zero(sampler_binding);
