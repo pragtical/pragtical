@@ -869,7 +869,7 @@ static GpuBatchRun *gpu_batch_append_run(
   return &runs[*run_count - 1];
 }
 
-static SDL_GPURenderPass *gpu_begin_batch_render_pass(
+static SDL_GPURenderPass *gpu_begin_target_render_pass(
   SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *texture, int width, int height, const SDL_Rect *scissor
 ) {
   SDL_GPUColorTargetInfo color_target;
@@ -888,7 +888,13 @@ static SDL_GPURenderPass *gpu_begin_batch_render_pass(
   SDL_SetGPUViewport(pass, &viewport);
   if (scissor)
     SDL_SetGPUScissor(pass, scissor);
+  return pass;
+}
 
+static SDL_GPURenderPass *gpu_begin_batch_render_pass(
+  SDL_GPUCommandBuffer *cmd, SDL_GPUTexture *texture, int width, int height, const SDL_Rect *scissor
+) {
+  SDL_GPURenderPass *pass = gpu_begin_target_render_pass(cmd, texture, width, height, scissor);
   GpuPolyVertexUniforms vertex_uniforms = {
     .target = { width, height, 0, 0 },
   };
@@ -3337,21 +3343,9 @@ static bool gpu_draw_solid_rect_to_bridge(
   if (!SDL_GetRectIntersection(&dst, &clip, &dst) || dst.w <= 0 || dst.h <= 0)
     return true;
 
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = frame->texture;
-  color_target.load_op = SDL_GPU_LOADOP_LOAD;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
-
-  SDL_GPUViewport viewport;
-  SDL_zero(viewport);
-  viewport.w = frame->texture_w;
-  viewport.h = frame->texture_h;
-  viewport.max_depth = 1;
-  SDL_SetGPUViewport(pass, &viewport);
-  SDL_SetGPUScissor(pass, &dst);
+  SDL_GPURenderPass *pass = gpu_begin_target_render_pass(
+    cmd, frame->texture, frame->texture_w, frame->texture_h, &dst
+  );
 
   GpuTextVertexUniforms vertex_uniforms = {
     .dst = { dst.x, dst.y, dst.w, dst.h },
@@ -3478,21 +3472,9 @@ static bool gpu_draw_validation_probe(GpuWindowData *data, SDL_GPUCommandBuffer 
   if (!SDL_GetRectIntersection(&rect, &bounds, &rect) || rect.w <= 0 || rect.h <= 0)
     return false;
 
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = data->frame.texture;
-  color_target.load_op = SDL_GPU_LOADOP_LOAD;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
-
-  SDL_GPUViewport viewport;
-  SDL_zero(viewport);
-  viewport.w = data->frame.texture_w;
-  viewport.h = data->frame.texture_h;
-  viewport.max_depth = 1;
-  SDL_SetGPUViewport(pass, &viewport);
-  SDL_SetGPUScissor(pass, &rect);
+  SDL_GPURenderPass *pass = gpu_begin_target_render_pass(
+    cmd, data->frame.texture, data->frame.texture_w, data->frame.texture_h, &rect
+  );
 
   GpuTextVertexUniforms vertex_uniforms = {
     .dst = { rect.x, rect.y, rect.w, rect.h },
