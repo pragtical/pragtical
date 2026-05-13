@@ -1491,6 +1491,10 @@ static GpuAtlasTexture *gpu_atlas_lookup_texture(RenAtlas *atlas, GlyphMetric *m
   return NULL;
 }
 
+static bool gpu_atlas_texture_ready(GpuAtlasTexture *texture) {
+  return texture && texture->texture && texture->texture_w > 0 && texture->texture_h > 0;
+}
+
 static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *texture) {
   int width = texture->x1;
   int height = texture->y1 - texture->y0;
@@ -1778,6 +1782,24 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
   }
 
   gpu_atlas_update_bytesize(atlas);
+}
+
+static GpuAtlasTexture *gpu_ensure_native_glyph_texture(
+  GpuWindowData *data, RenAtlas *atlas, GlyphMetric *metric
+) {
+  if (!atlas || !metric)
+    return NULL;
+
+  GpuAtlasTexture *texture = gpu_atlas_lookup_texture(atlas, metric);
+  if (gpu_atlas_texture_ready(texture))
+    return texture;
+
+  if (data && data->pending_text_glyph_count > 0 && !gpu_flush_pending_text_barrier(data))
+    return NULL;
+
+  gpu_atlas_glyph_updated(atlas, metric);
+  texture = gpu_atlas_lookup_texture(atlas, metric);
+  return gpu_atlas_texture_ready(texture) ? texture : NULL;
 }
 
 static void gpu_atlas_clear(RenAtlas *atlas) {
@@ -3680,8 +3702,8 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     gpu_abort("SDLGPU native text pipeline unavailable");
   ctx->batch_pipeline_ready = true;
 
-  GpuAtlasTexture *texture = gpu_atlas_lookup_texture(glyph->atlas, glyph->metric);
-  if (!texture || !texture->texture || texture->texture_w <= 0 || texture->texture_h <= 0)
+  GpuAtlasTexture *texture = gpu_ensure_native_glyph_texture(data, glyph->atlas, glyph->metric);
+  if (!texture)
     gpu_abort("SDLGPU native glyph texture unavailable");
   if (!ctx->have_clip) {
     if (!frame->surface || !SDL_GetSurfaceClipRect(frame->surface, &ctx->clip))
@@ -3728,7 +3750,8 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
 
 static bool gpu_check_native_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   GpuTextNativeCheck *check = userdata;
-  if (glyph->format >= EGlyphFormatSize)
+  if (glyph->format >= EGlyphFormatSize ||
+      !gpu_ensure_native_glyph_texture(NULL, glyph->atlas, glyph->metric))
     check->native_text = false;
   return true;
 }
