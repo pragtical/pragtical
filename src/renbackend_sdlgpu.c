@@ -30,6 +30,12 @@
 #include "shaders/gpu_text.vert.dxbc.h"
 #include "shaders/gpu_text.vert.msl.h"
 #include "shaders/gpu_text.vert.spv.h"
+#include "shaders/gpu_text_batch.frag.dxbc.h"
+#include "shaders/gpu_text_batch.frag.msl.h"
+#include "shaders/gpu_text_batch.frag.spv.h"
+#include "shaders/gpu_text_batch.vert.dxbc.h"
+#include "shaders/gpu_text_batch.vert.msl.h"
+#include "shaders/gpu_text_batch.vert.spv.h"
 
 #define GPU_SUPPORTED_SHADER_FORMATS (SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXBC | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL)
 #define GPU_DIRTY_UPLOAD_FULL_THRESHOLD 64
@@ -46,9 +52,13 @@ typedef struct {
   SDL_GPUTransferBuffer *transfer;
   SDL_GPUBuffer *poly_vertex_buffer;
   SDL_GPUTransferBuffer *poly_transfer;
+  SDL_GPUBuffer *text_vertex_buffer;
+  SDL_GPUTransferBuffer *text_transfer;
   Uint32 transfer_size;
   Uint32 poly_vertex_buffer_size;
   Uint32 poly_transfer_size;
+  Uint32 text_vertex_buffer_size;
+  Uint32 text_transfer_size;
   SDL_PixelFormat texture_pixel_format;
   int texture_w, texture_h;
   bool needs_full_upload;
@@ -68,6 +78,7 @@ typedef struct {
   int dst_x, dst_y;
   int src_x, src_y;
   int width, height;
+  SDL_Rect clip;
   unsigned char format;
 } GpuQueuedGlyph;
 
@@ -158,6 +169,7 @@ static SDL_GPUGraphicsPipeline *gpu_poly_pipeline = NULL;
 static bool gpu_poly_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_text_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_text_replace_pipeline = NULL;
+static SDL_GPUGraphicsPipeline *gpu_text_batch_pipeline = NULL;
 static SDL_GPUSampler *gpu_text_sampler = NULL;
 static bool gpu_text_pipeline_failed = false;
 static SDL_GPUTexture *gpu_solid_white_texture = NULL;
@@ -257,6 +269,11 @@ typedef struct {
 } GpuTextFragmentUniforms;
 
 typedef struct {
+  Uint32 format;
+  Uint32 padding[3];
+} GpuTextBatchFragmentUniforms;
+
+typedef struct {
   float target[4];
 } GpuPolyVertexUniforms;
 
@@ -272,6 +289,12 @@ typedef struct {
   float x, y;
   float color[4];
 } GpuRectVertex;
+
+typedef struct {
+  float x, y;
+  float u, v;
+  float color[4];
+} GpuTextBatchVertex;
 
 typedef struct {
   GpuWindowData *window_data;
@@ -386,9 +409,21 @@ static void gpu_destroy_bridge_resources(SDL_GPUDevice *device, GpuFrameBridge *
       SDL_ReleaseGPUTransferBuffer(device, frame->poly_transfer);
     frame->poly_transfer = NULL;
   }
+  if (frame->text_vertex_buffer) {
+    if (device)
+      SDL_ReleaseGPUBuffer(device, frame->text_vertex_buffer);
+    frame->text_vertex_buffer = NULL;
+  }
+  if (frame->text_transfer) {
+    if (device)
+      SDL_ReleaseGPUTransferBuffer(device, frame->text_transfer);
+    frame->text_transfer = NULL;
+  }
   frame->transfer_size = 0;
   frame->poly_vertex_buffer_size = 0;
   frame->poly_transfer_size = 0;
+  frame->text_vertex_buffer_size = 0;
+  frame->text_transfer_size = 0;
   frame->texture_w = 0;
   frame->texture_h = 0;
   frame->needs_full_upload = true;
@@ -564,6 +599,40 @@ static void gpu_ensure_bridge_poly_buffers(SDL_GPUDevice *device, GpuFrameBridge
 
   frame->poly_vertex_buffer_size = size;
   frame->poly_transfer_size = size;
+}
+
+static void gpu_ensure_bridge_text_buffers(SDL_GPUDevice *device, GpuFrameBridge *frame, Uint32 size) {
+  if (frame->text_vertex_buffer && frame->text_transfer &&
+      frame->text_vertex_buffer_size >= size && frame->text_transfer_size >= size)
+    return;
+
+  if (frame->text_vertex_buffer)
+    SDL_ReleaseGPUBuffer(device, frame->text_vertex_buffer);
+  if (frame->text_transfer)
+    SDL_ReleaseGPUTransferBuffer(device, frame->text_transfer);
+  frame->text_vertex_buffer = NULL;
+  frame->text_transfer = NULL;
+  frame->text_vertex_buffer_size = 0;
+  frame->text_transfer_size = 0;
+
+  SDL_GPUBufferCreateInfo buffer_info;
+  SDL_zero(buffer_info);
+  buffer_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+  buffer_info.size = size;
+  frame->text_vertex_buffer = SDL_CreateGPUBuffer(device, &buffer_info);
+  if (!frame->text_vertex_buffer)
+    gpu_abort("SDL_CreateGPUBuffer failed for text vertices");
+
+  SDL_GPUTransferBufferCreateInfo transfer_info;
+  SDL_zero(transfer_info);
+  transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+  transfer_info.size = size;
+  frame->text_transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
+  if (!frame->text_transfer)
+    gpu_abort("SDL_CreateGPUTransferBuffer failed for text vertices");
+
+  frame->text_vertex_buffer_size = size;
+  frame->text_transfer_size = size;
 }
 
 static void gpu_ensure_window_rect_buffers(GpuWindowData *data, Uint32 size) {
@@ -2118,6 +2187,33 @@ static SDL_GPUShader *gpu_create_text_shader(SDL_GPUDevice *device, bool vertex)
   return SDL_CreateGPUShader(device, &createinfo);
 }
 
+static SDL_GPUShader *gpu_create_text_batch_shader(SDL_GPUDevice *device, bool vertex) {
+  SDL_GPUShaderCreateInfo createinfo;
+  SDL_zero(createinfo);
+  createinfo.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+  createinfo.num_samplers = vertex ? 0 : 1;
+  createinfo.num_uniform_buffers = 1;
+
+  SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
+  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
+    createinfo.code = vertex ? gpu_text_batch_vert_dxbc : gpu_text_batch_frag_dxbc;
+    createinfo.code_size = vertex ? gpu_text_batch_vert_dxbc_len : gpu_text_batch_frag_dxbc_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_MSL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_MSL;
+    createinfo.code = vertex ? gpu_text_batch_vert_msl : gpu_text_batch_frag_msl;
+    createinfo.code_size = vertex ? gpu_text_batch_vert_msl_len : gpu_text_batch_frag_msl_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_SPIRV) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    createinfo.code = vertex ? gpu_text_batch_vert_spv : gpu_text_batch_frag_spv;
+    createinfo.code_size = vertex ? gpu_text_batch_vert_spv_len : gpu_text_batch_frag_spv_len;
+  } else {
+    return NULL;
+  }
+
+  return SDL_CreateGPUShader(device, &createinfo);
+}
+
 static SDL_GPUGraphicsPipeline *gpu_create_text_graphics_pipeline(SDL_GPUDevice *device, bool blend) {
   SDL_GPUShader *vertex_shader = gpu_create_text_shader(device, true);
   SDL_GPUShader *fragment_shader = gpu_create_text_shader(device, false);
@@ -2157,6 +2253,70 @@ static SDL_GPUGraphicsPipeline *gpu_create_text_graphics_pipeline(SDL_GPUDevice 
   return pipeline;
 }
 
+static SDL_GPUGraphicsPipeline *gpu_create_text_batch_graphics_pipeline(SDL_GPUDevice *device) {
+  SDL_GPUShader *vertex_shader = gpu_create_text_batch_shader(device, true);
+  SDL_GPUShader *fragment_shader = gpu_create_text_batch_shader(device, false);
+  if (!vertex_shader || !fragment_shader) {
+    if (vertex_shader) SDL_ReleaseGPUShader(device, vertex_shader);
+    if (fragment_shader) SDL_ReleaseGPUShader(device, fragment_shader);
+    return NULL;
+  }
+
+  SDL_GPUVertexBufferDescription vertex_buffer;
+  SDL_zero(vertex_buffer);
+  vertex_buffer.slot = 0;
+  vertex_buffer.pitch = sizeof(GpuTextBatchVertex);
+  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+  SDL_GPUVertexAttribute vertex_attributes[3];
+  SDL_zeroa(vertex_attributes);
+  vertex_attributes[0].location = 0;
+  vertex_attributes[0].buffer_slot = 0;
+  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+  vertex_attributes[0].offset = 0;
+  vertex_attributes[1].location = 1;
+  vertex_attributes[1].buffer_slot = 0;
+  vertex_attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+  vertex_attributes[1].offset = offsetof(GpuTextBatchVertex, u);
+  vertex_attributes[2].location = 2;
+  vertex_attributes[2].buffer_slot = 0;
+  vertex_attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+  vertex_attributes[2].offset = offsetof(GpuTextBatchVertex, color);
+
+  SDL_GPUColorTargetDescription color_target;
+  SDL_zero(color_target);
+  color_target.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_BGRA32);
+  color_target.blend_state.enable_blend = true;
+  color_target.blend_state.enable_color_write_mask = true;
+  color_target.blend_state.color_write_mask =
+    SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G |
+    SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
+  color_target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+  color_target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+  color_target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+  color_target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+  SDL_GPUGraphicsPipelineCreateInfo pipeline_info;
+  SDL_zero(pipeline_info);
+  pipeline_info.vertex_shader = vertex_shader;
+  pipeline_info.fragment_shader = fragment_shader;
+  pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+  pipeline_info.rasterizer_state.enable_depth_clip = true;
+  pipeline_info.vertex_input_state.vertex_buffer_descriptions = &vertex_buffer;
+  pipeline_info.vertex_input_state.num_vertex_buffers = 1;
+  pipeline_info.vertex_input_state.vertex_attributes = vertex_attributes;
+  pipeline_info.vertex_input_state.num_vertex_attributes = SDL_arraysize(vertex_attributes);
+  pipeline_info.target_info.num_color_targets = 1;
+  pipeline_info.target_info.color_target_descriptions = &color_target;
+
+  SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+  SDL_ReleaseGPUShader(device, vertex_shader);
+  SDL_ReleaseGPUShader(device, fragment_shader);
+  return pipeline;
+}
+
 static bool gpu_ensure_text_pipeline(SDL_GPUDevice *device) {
   if (gpu_text_pipeline && gpu_text_sampler)
     return true;
@@ -2181,6 +2341,23 @@ static bool gpu_ensure_text_pipeline(SDL_GPUDevice *device) {
   if (!gpu_text_sampler) {
     SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_pipeline);
     gpu_text_pipeline = NULL;
+    gpu_text_pipeline_failed = true;
+    return false;
+  }
+
+  return true;
+}
+
+static bool gpu_ensure_text_batch_pipeline(SDL_GPUDevice *device) {
+  if (gpu_text_batch_pipeline && gpu_text_sampler)
+    return true;
+  if (gpu_text_pipeline_failed)
+    return false;
+  if (!gpu_ensure_text_pipeline(device))
+    return false;
+
+  gpu_text_batch_pipeline = gpu_create_text_batch_graphics_pipeline(device);
+  if (!gpu_text_batch_pipeline) {
     gpu_text_pipeline_failed = true;
     return false;
   }
@@ -2227,6 +2404,10 @@ static void gpu_destroy_text_pipeline(SDL_GPUDevice *device) {
   if (gpu_text_replace_pipeline) {
     SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_replace_pipeline);
     gpu_text_replace_pipeline = NULL;
+  }
+  if (gpu_text_batch_pipeline) {
+    SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_batch_pipeline);
+    gpu_text_batch_pipeline = NULL;
   }
   gpu_text_pipeline_failed = false;
 }
@@ -2670,12 +2851,15 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   }
   if (!device || !cmd || !frame || !frame->texture)
     gpu_abort("SDLGPU native text target unavailable");
-  if (!gpu_ensure_text_pipeline(device))
+  if (!gpu_ensure_text_batch_pipeline(device))
     gpu_abort("SDLGPU native text pipeline unavailable");
 
   GpuAtlasTexture *texture = gpu_atlas_lookup_texture(glyph->atlas, glyph->metric);
   if (!texture || !texture->texture || texture->texture_w <= 0 || texture->texture_h <= 0)
     gpu_abort("SDLGPU native glyph texture unavailable");
+  SDL_Rect clip;
+  if (!frame->surface || !SDL_GetSurfaceClipRect(frame->surface, &clip))
+    gpu_abort("SDLGPU native text clip unavailable");
 
   if (ctx->glyph_count >= ctx->glyph_capacity) {
     int capacity = ctx->glyph_capacity ? ctx->glyph_capacity * 2 : 128;
@@ -2698,6 +2882,7 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     .src_y = glyph->src_y,
     .width = glyph->width,
     .height = glyph->height,
+    .clip = clip,
     .format = glyph->format,
   };
   ctx->attempted_native = true;
@@ -2715,7 +2900,7 @@ static bool gpu_queue_text_batch(GpuTextDrawContext *ctx) {
   GpuWindowData *data = ctx->window_data;
   if (!data || !data->command_buffer || !data->frame.texture || ctx->glyph_count == 0)
     return false;
-  if (!gpu_ensure_text_pipeline(data->device))
+  if (!gpu_ensure_text_batch_pipeline(data->device))
     return false;
 
   if (data->pending_text_glyph_count + ctx->glyph_count > data->pending_text_glyph_capacity) {
@@ -2741,20 +2926,129 @@ static bool gpu_queue_text_batch(GpuTextDrawContext *ctx) {
   return true;
 }
 
-static bool gpu_draw_text_glyphs_to_bridge(
+typedef struct {
+  SDL_GPUTexture *texture;
+  unsigned char format;
+  Uint32 first_vertex;
+  Uint32 vertex_count;
+} GpuTextBatchRun;
+
+static bool gpu_draw_text_batches_to_bridge(
   SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd, GpuFrameBridge *frame,
-  SDL_Surface *surface, GpuQueuedGlyph *glyphs, int glyph_count
+  SDL_Surface *surface, GpuQueuedGlyph *glyphs, int glyph_count,
+  SDL_Rect *validation_rect, bool *have_validation_rect
 ) {
   if (!device || !cmd || !frame || !surface || glyph_count == 0)
     return true;
   if (!frame->texture)
     return false;
-  if (!gpu_ensure_text_pipeline(device))
+  if (!gpu_ensure_text_batch_pipeline(device))
     return false;
 
-  SDL_Rect clip;
-  if (!SDL_GetSurfaceClipRect(surface, &clip))
+  GpuTextBatchRun *runs = SDL_malloc((size_t) glyph_count * sizeof(GpuTextBatchRun));
+  if (!runs) {
+    fprintf(stderr, "Error allocating SDL GPU text batch runs\n");
+    exit(1);
+  }
+
+  Uint32 max_vertices = (Uint32) glyph_count * 6;
+  Uint32 upload_size = max_vertices * sizeof(GpuTextBatchVertex);
+  gpu_ensure_bridge_text_buffers(device, frame, upload_size);
+
+  GpuTextBatchVertex *vertices = SDL_MapGPUTransferBuffer(device, frame->text_transfer, true);
+  if (!vertices) {
+    SDL_free(runs);
     return false;
+  }
+
+  Uint32 vertex_count = 0;
+  int run_count = 0;
+
+  for (int i = 0; i < glyph_count; i++) {
+    GpuQueuedGlyph *glyph = &glyphs[i];
+    GpuAtlasTexture *texture = gpu_atlas_lookup_texture(glyph->atlas, &glyph->metric);
+    if (!texture || !texture->texture || texture->texture_w <= 0 || texture->texture_h <= 0)
+      continue;
+
+    SDL_Rect dst = {
+      .x = glyph->dst_x,
+      .y = glyph->dst_y,
+      .w = glyph->width,
+      .h = glyph->height,
+    };
+    if (validation_rect && have_validation_rect) {
+      if (*have_validation_rect)
+        SDL_GetRectUnion(validation_rect, &dst, validation_rect);
+      else {
+        *validation_rect = dst;
+        *have_validation_rect = true;
+      }
+    }
+
+    SDL_Rect clipped = dst;
+    if (!SDL_GetRectIntersection(&clipped, &glyph->clip, &clipped) || clipped.w <= 0 || clipped.h <= 0)
+      continue;
+
+    int src_y = glyph->src_y - (int) glyph->metric.y0;
+    if (src_y < 0)
+      src_y = 0;
+
+    float x0 = clipped.x;
+    float y0 = clipped.y;
+    float x1 = clipped.x + clipped.w;
+    float y1 = clipped.y + clipped.h;
+    float u0 = (float) (glyph->src_x + clipped.x - dst.x) / (float) texture->texture_w;
+    float v0 = (float) (src_y + clipped.y - dst.y) / (float) texture->texture_h;
+    float u1 = (float) (glyph->src_x + clipped.x - dst.x + clipped.w) / (float) texture->texture_w;
+    float v1 = (float) (src_y + clipped.y - dst.y + clipped.h) / (float) texture->texture_h;
+    float color[4] = {
+      (float) glyph->color.r / 255.0f,
+      (float) glyph->color.g / 255.0f,
+      (float) glyph->color.b / 255.0f,
+      (float) glyph->color.a / 255.0f,
+    };
+
+    if (run_count == 0 ||
+        runs[run_count - 1].texture != texture->texture ||
+        runs[run_count - 1].format != glyph->format) {
+      runs[run_count++] = (GpuTextBatchRun) {
+        .texture = texture->texture,
+        .format = glyph->format,
+        .first_vertex = vertex_count,
+        .vertex_count = 0,
+      };
+    }
+
+    GpuTextBatchVertex quad[6] = {
+      { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } },
+      { x1, y0, u1, v0, { color[0], color[1], color[2], color[3] } },
+      { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } },
+      { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } },
+      { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } },
+      { x0, y1, u0, v1, { color[0], color[1], color[2], color[3] } },
+    };
+    SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
+    vertex_count += SDL_arraysize(quad);
+    runs[run_count - 1].vertex_count += SDL_arraysize(quad);
+  }
+
+  SDL_UnmapGPUTransferBuffer(device, frame->text_transfer);
+
+  if (vertex_count == 0) {
+    SDL_free(runs);
+    return true;
+  }
+
+  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTransferBufferLocation source;
+  SDL_zero(source);
+  source.transfer_buffer = frame->text_transfer;
+  SDL_GPUBufferRegion destination;
+  SDL_zero(destination);
+  destination.buffer = frame->text_vertex_buffer;
+  destination.size = vertex_count * sizeof(GpuTextBatchVertex);
+  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
+  SDL_EndGPUCopyPass(copy_pass);
 
   SDL_GPUColorTargetInfo color_target;
   SDL_zero(color_target);
@@ -2770,61 +3064,48 @@ static bool gpu_draw_text_glyphs_to_bridge(
 
   SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
   SDL_SetGPUViewport(pass, &viewport);
-  SDL_BindGPUGraphicsPipeline(pass, gpu_text_pipeline);
+  SDL_Rect target_clip = { .x = 0, .y = 0, .w = surface->w, .h = surface->h };
+  SDL_SetGPUScissor(pass, &target_clip);
+  SDL_BindGPUGraphicsPipeline(pass, gpu_text_batch_pipeline);
 
-  for (int i = 0; i < glyph_count; i++) {
-    GpuQueuedGlyph *glyph = &glyphs[i];
-    GpuAtlasTexture *texture = gpu_atlas_lookup_texture(glyph->atlas, &glyph->metric);
-    if (!texture || !texture->texture || texture->texture_w <= 0 || texture->texture_h <= 0)
+  SDL_GPUBufferBinding vertex_binding;
+  SDL_zero(vertex_binding);
+  vertex_binding.buffer = frame->text_vertex_buffer;
+  SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
+
+  GpuPolyVertexUniforms vertex_uniforms = {
+    .target = { frame->texture_w, frame->texture_h, 0, 0 },
+  };
+  SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
+
+  for (int i = 0; i < run_count; i++) {
+    GpuTextBatchRun *run = &runs[i];
+    if (run->vertex_count == 0)
       continue;
 
-    SDL_Rect scissor = {
-      .x = glyph->dst_x,
-      .y = glyph->dst_y,
-      .w = glyph->width,
-      .h = glyph->height,
+    SDL_GPUTextureSamplerBinding sampler_binding;
+    SDL_zero(sampler_binding);
+    sampler_binding.texture = run->texture;
+    sampler_binding.sampler = gpu_text_sampler;
+
+    GpuTextBatchFragmentUniforms fragment_uniforms = {
+      .format = run->format,
     };
-    if (!SDL_GetRectIntersection(&scissor, &clip, &scissor) || scissor.w <= 0 || scissor.h <= 0)
-      continue;
-
-    SDL_GPUTextureSamplerBinding binding;
-    SDL_zero(binding);
-    binding.texture = texture->texture;
-    binding.sampler = gpu_text_sampler;
-
-    int src_y = glyph->src_y - (int) glyph->metric.y0;
-    if (src_y < 0)
-      src_y = 0;
-
-    GpuTextVertexUniforms vertex_uniforms = {
-      .dst = { glyph->dst_x, glyph->dst_y, glyph->width, glyph->height },
-      .uv = {
-        (float) glyph->src_x / texture->texture_w,
-        (float) src_y / texture->texture_h,
-        (float) glyph->width / texture->texture_w,
-        (float) glyph->height / texture->texture_h,
-      },
-      .target = { frame->texture_w, frame->texture_h, 0, 0 },
-    };
-    GpuTextFragmentUniforms fragment_uniforms = {
-      .color = {
-        (float) glyph->color.r / 255.0f,
-        (float) glyph->color.g / 255.0f,
-        (float) glyph->color.b / 255.0f,
-        (float) glyph->color.a / 255.0f,
-      },
-      .format = glyph->format,
-    };
-
-    SDL_SetGPUScissor(pass, &scissor);
-    SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
     SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
-    SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-    SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
+    SDL_BindGPUFragmentSamplers(pass, 0, &sampler_binding, 1);
+    SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
   }
 
   SDL_EndGPURenderPass(pass);
+  SDL_free(runs);
   return true;
+}
+
+static bool gpu_draw_text_glyphs_to_bridge(
+  SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd, GpuFrameBridge *frame,
+  SDL_Surface *surface, GpuQueuedGlyph *glyphs, int glyph_count
+) {
+  return gpu_draw_text_batches_to_bridge(device, cmd, frame, surface, glyphs, glyph_count, NULL, NULL);
 }
 
 static bool gpu_flush_queued_text(
@@ -2836,86 +3117,24 @@ static bool gpu_flush_queued_text(
 ) {
   if (!data || !cmd || !data->frame.texture || data->pending_text_glyph_count == 0)
     return true;
-  if (!gpu_ensure_text_pipeline(data->device))
+  if (!gpu_ensure_text_batch_pipeline(data->device))
     return false;
-
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = data->frame.texture;
-  color_target.load_op = SDL_GPU_LOADOP_LOAD;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-
-  SDL_GPUViewport viewport;
-  SDL_zero(viewport);
-  viewport.w = data->frame.texture_w;
-  viewport.h = data->frame.texture_h;
-  viewport.max_depth = 1;
-
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
-  SDL_SetGPUViewport(pass, &viewport);
-  SDL_BindGPUGraphicsPipeline(pass, gpu_text_pipeline);
 
   SDL_Rect validation_rect = {0};
   bool have_validation_rect = false;
-
-  for (int i = 0; i < data->pending_text_glyph_count; i++) {
-    GpuQueuedGlyph *glyph = &data->pending_text_glyphs[i];
-    GpuAtlasTexture *texture = gpu_atlas_lookup_texture(glyph->atlas, &glyph->metric);
-    if (!texture || !texture->texture || texture->texture_w <= 0 || texture->texture_h <= 0)
-      continue;
-
-    SDL_Rect scissor = {
-      .x = glyph->dst_x,
-      .y = glyph->dst_y,
-      .w = glyph->width,
-      .h = glyph->height,
-    };
-    if (gpu_validate_text_enabled()) {
-      if (have_validation_rect)
-        SDL_GetRectUnion(&validation_rect, &scissor, &validation_rect);
-      else {
-        validation_rect = scissor;
-        have_validation_rect = true;
-      }
-    }
-
-    SDL_GPUTextureSamplerBinding binding;
-    SDL_zero(binding);
-    binding.texture = texture->texture;
-    binding.sampler = gpu_text_sampler;
-
-    int src_y = glyph->src_y - (int) glyph->metric.y0;
-    if (src_y < 0)
-      src_y = 0;
-
-    GpuTextVertexUniforms vertex_uniforms = {
-      .dst = { glyph->dst_x, glyph->dst_y, glyph->width, glyph->height },
-      .uv = {
-        (float) glyph->src_x / texture->texture_w,
-        (float) src_y / texture->texture_h,
-        (float) glyph->width / texture->texture_w,
-        (float) glyph->height / texture->texture_h,
-      },
-      .target = { data->frame.texture_w, data->frame.texture_h, 0, 0 },
-    };
-    GpuTextFragmentUniforms fragment_uniforms = {
-      .color = {
-        (float) glyph->color.r / 255.0f,
-        (float) glyph->color.g / 255.0f,
-        (float) glyph->color.b / 255.0f,
-        (float) glyph->color.a / 255.0f,
-      },
-      .format = glyph->format,
-    };
-
-    SDL_SetGPUScissor(pass, &scissor);
-    SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
-    SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
-    SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-    SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
-  }
-
-  SDL_EndGPURenderPass(pass);
+  SDL_Rect *validation_rect_ptr = gpu_validate_text_enabled() ? &validation_rect : NULL;
+  bool *have_validation_rect_ptr = gpu_validate_text_enabled() ? &have_validation_rect : NULL;
+  if (!gpu_draw_text_batches_to_bridge(
+        data->device,
+        cmd,
+        &data->frame,
+        data->frame.surface,
+        data->pending_text_glyphs,
+        data->pending_text_glyph_count,
+        validation_rect_ptr,
+        have_validation_rect_ptr
+      ))
+    return false;
 
   data->frame_synced_during_replay = true;
   data->pending_text_glyph_count = 0;
