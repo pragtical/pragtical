@@ -63,6 +63,7 @@ typedef enum {
   GPU_BATCH_PIPELINE_CANVAS_REPLACE,
   GPU_BATCH_PIPELINE_RECT_BLEND,
   GPU_BATCH_PIPELINE_RECT_REPLACE,
+  GPU_BATCH_PIPELINE_POLY,
 } GpuBatchPipeline;
 
 typedef enum {
@@ -928,6 +929,8 @@ static SDL_GPUGraphicsPipeline *gpu_batch_pipeline_for_material(GpuBatchMaterial
       return gpu_rect_pipeline;
     case GPU_BATCH_PIPELINE_RECT_REPLACE:
       return gpu_rect_replace_pipeline;
+    case GPU_BATCH_PIPELINE_POLY:
+      return gpu_poly_pipeline;
   }
   return NULL;
 }
@@ -973,6 +976,15 @@ static GpuBatchMaterial gpu_canvas_batch_material(SDL_GPUTexture *texture, GpuTe
 static GpuBatchMaterial gpu_rect_batch_material(bool replace) {
   return (GpuBatchMaterial) {
     .pipeline = replace ? GPU_BATCH_PIPELINE_RECT_REPLACE : GPU_BATCH_PIPELINE_RECT_BLEND,
+    .texture = NULL,
+    .sampler = NULL,
+    .glyph_format = 0,
+  };
+}
+
+static GpuBatchMaterial gpu_poly_batch_material(void) {
+  return (GpuBatchMaterial) {
+    .pipeline = GPU_BATCH_PIPELINE_POLY,
     .texture = NULL,
     .sampler = NULL,
     .glyph_format = 0,
@@ -2137,7 +2149,8 @@ static bool gpu_draw_poly_vertices_to_bridge(
   SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
   SDL_SetGPUViewport(pass, &viewport);
   SDL_SetGPUScissor(pass, &scissor);
-  SDL_BindGPUGraphicsPipeline(pass, gpu_poly_pipeline);
+  SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
+  gpu_bind_batch_pipeline(pass, gpu_poly_batch_material(), &bound_pipeline);
 
   SDL_GPUBufferBinding binding;
   SDL_zero(binding);
@@ -2261,7 +2274,8 @@ static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cm
 
   SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
   SDL_SetGPUViewport(pass, &viewport);
-  SDL_BindGPUGraphicsPipeline(pass, gpu_poly_pipeline);
+  SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
+  gpu_bind_batch_pipeline(pass, gpu_poly_batch_material(), &bound_pipeline);
 
   SDL_GPUBufferBinding binding;
   SDL_zero(binding);
