@@ -313,6 +313,7 @@ static bool gpu_flush_queued_text(
 static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
 static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
 static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
+static GpuQueuedGlyph *gpu_append_pending_text_glyph(GpuWindowData *data);
 static bool gpu_draw_solid_rect_to_bridge(
   SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd, GpuFrameBridge *frame,
   SDL_Surface *surface, RenRect rect, RenColor color, bool replace
@@ -3618,7 +3619,10 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   if (!frame->surface || !SDL_GetSurfaceClipRect(frame->surface, &clip))
     gpu_abort("SDLGPU native text clip unavailable");
 
-  if (ctx->glyph_count >= ctx->glyph_capacity) {
+  GpuQueuedGlyph *queued = NULL;
+  if (data) {
+    queued = gpu_append_pending_text_glyph(data);
+  } else if (ctx->glyph_count >= ctx->glyph_capacity) {
     int capacity = ctx->glyph_capacity ? ctx->glyph_capacity * 2 : 128;
     GpuQueuedGlyph *glyphs = SDL_realloc(ctx->glyphs, capacity * sizeof(GpuQueuedGlyph));
     if (!glyphs) {
@@ -3628,8 +3632,10 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     ctx->glyphs = glyphs;
     ctx->glyph_capacity = capacity;
   }
+  if (!queued)
+    queued = &ctx->glyphs[ctx->glyph_count];
 
-  ctx->glyphs[ctx->glyph_count++] = (GpuQueuedGlyph) {
+  *queued = (GpuQueuedGlyph) {
     .atlas = glyph->atlas,
     .metric = *glyph->metric,
     .color = glyph->color,
@@ -3642,6 +3648,7 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     .clip = clip,
     .format = glyph->format,
   };
+  ctx->glyph_count++;
   ctx->attempted_native = true;
   return true;
 }
@@ -3653,12 +3660,31 @@ static bool gpu_check_native_text_glyph(void *userdata, const RenGlyphDraw *glyp
   return true;
 }
 
+static GpuQueuedGlyph *gpu_append_pending_text_glyph(GpuWindowData *data) {
+  if (data->pending_text_glyph_count >= data->pending_text_glyph_capacity) {
+    int capacity = data->pending_text_glyph_capacity ? data->pending_text_glyph_capacity * 2 : 512;
+    GpuQueuedGlyph *glyphs = SDL_realloc(data->pending_text_glyphs, capacity * sizeof(GpuQueuedGlyph));
+    if (!glyphs) {
+      fprintf(stderr, "Error allocating SDL GPU pending text glyphs\n");
+      exit(1);
+    }
+    data->pending_text_glyphs = glyphs;
+    data->pending_text_glyph_capacity = capacity;
+  }
+  return &data->pending_text_glyphs[data->pending_text_glyph_count++];
+}
+
 static bool gpu_queue_text_batch(GpuTextDrawContext *ctx) {
   GpuWindowData *data = ctx->window_data;
   if (!data || !data->command_buffer || !data->frame.texture || ctx->glyph_count == 0)
     return false;
   if (!gpu_ensure_text_batch_pipeline(data->device))
     return false;
+
+  if (!ctx->glyphs) {
+    data->native_text_used = true;
+    return true;
+  }
 
   if (data->pending_text_glyph_count + ctx->glyph_count > data->pending_text_glyph_capacity) {
     int capacity = data->pending_text_glyph_capacity ? data->pending_text_glyph_capacity * 2 : 512;
