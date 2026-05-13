@@ -2116,16 +2116,7 @@ static bool gpu_draw_poly_vertices_to_bridge(
   SDL_memcpy(map, vertices, upload_size);
   SDL_UnmapGPUTransferBuffer(device, frame->poly_transfer);
 
-  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTransferBufferLocation source;
-  SDL_zero(source);
-  source.transfer_buffer = frame->poly_transfer;
-  SDL_GPUBufferRegion destination;
-  SDL_zero(destination);
-  destination.buffer = frame->poly_vertex_buffer;
-  destination.size = upload_size;
-  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
-  SDL_EndGPUCopyPass(copy_pass);
+  gpu_upload_batch_vertices(cmd, frame->poly_transfer, frame->poly_vertex_buffer, upload_size);
 
   SDL_Rect scissor = gpu_pixel_rect_from_ren_rect(surface, bounds);
   SDL_Rect clip;
@@ -2134,32 +2125,14 @@ static bool gpu_draw_poly_vertices_to_bridge(
   if (!SDL_GetRectIntersection(&scissor, &clip, &scissor) || scissor.w <= 0 || scissor.h <= 0)
     return true;
 
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = frame->texture;
-  color_target.load_op = SDL_GPU_LOADOP_LOAD;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-
-  SDL_GPUViewport viewport;
-  SDL_zero(viewport);
-  viewport.w = frame->texture_w;
-  viewport.h = frame->texture_h;
-  viewport.max_depth = 1;
-
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
-  SDL_SetGPUViewport(pass, &viewport);
-  SDL_SetGPUScissor(pass, &scissor);
+  SDL_GPURenderPass *pass = gpu_begin_batch_render_pass(
+    cmd, frame->texture, frame->texture_w, frame->texture_h, &scissor
+  );
   SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   gpu_bind_batch_pipeline(pass, gpu_poly_batch_material(), &bound_pipeline);
 
-  SDL_GPUBufferBinding binding;
-  SDL_zero(binding);
-  binding.buffer = frame->poly_vertex_buffer;
-  SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+  gpu_bind_batch_vertex_buffer(pass, frame->poly_vertex_buffer);
 
-  GpuPolyVertexUniforms vertex_uniforms = {
-    .target = { frame->texture_w, frame->texture_h, 0, 0 },
-  };
   GpuPolyFragmentUniforms fragment_uniforms = {
     .color = {
       (float) color.r / 255.0f,
@@ -2168,7 +2141,6 @@ static bool gpu_draw_poly_vertices_to_bridge(
       (float) color.a / 255.0f,
     },
   };
-  SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
   SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
   SDL_DrawGPUPrimitives(pass, vertex_count, 1, 0, 0);
   SDL_EndGPURenderPass(pass);
@@ -2249,43 +2221,15 @@ static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cm
   SDL_memcpy(map, data->pending_poly_vertices, upload_size);
   SDL_UnmapGPUTransferBuffer(data->device, data->frame.poly_transfer);
 
-  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTransferBufferLocation source;
-  SDL_zero(source);
-  source.transfer_buffer = data->frame.poly_transfer;
-  SDL_GPUBufferRegion destination;
-  SDL_zero(destination);
-  destination.buffer = data->frame.poly_vertex_buffer;
-  destination.size = upload_size;
-  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
-  SDL_EndGPUCopyPass(copy_pass);
+  gpu_upload_batch_vertices(cmd, data->frame.poly_transfer, data->frame.poly_vertex_buffer, upload_size);
 
-  SDL_GPUColorTargetInfo color_target;
-  SDL_zero(color_target);
-  color_target.texture = data->frame.texture;
-  color_target.load_op = SDL_GPU_LOADOP_LOAD;
-  color_target.store_op = SDL_GPU_STOREOP_STORE;
-
-  SDL_GPUViewport viewport;
-  SDL_zero(viewport);
-  viewport.w = data->frame.texture_w;
-  viewport.h = data->frame.texture_h;
-  viewport.max_depth = 1;
-
-  SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
-  SDL_SetGPUViewport(pass, &viewport);
+  SDL_GPURenderPass *pass = gpu_begin_batch_render_pass(
+    cmd, data->frame.texture, data->frame.texture_w, data->frame.texture_h, NULL
+  );
   SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   gpu_bind_batch_pipeline(pass, gpu_poly_batch_material(), &bound_pipeline);
 
-  SDL_GPUBufferBinding binding;
-  SDL_zero(binding);
-  binding.buffer = data->frame.poly_vertex_buffer;
-  SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-
-  GpuPolyVertexUniforms vertex_uniforms = {
-    .target = { data->frame.texture_w, data->frame.texture_h, 0, 0 },
-  };
-  SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
+  gpu_bind_batch_vertex_buffer(pass, data->frame.poly_vertex_buffer);
 
   for (int i = 0; i < data->pending_poly_count; i++) {
     GpuQueuedPoly *poly = &data->pending_polys[i];
