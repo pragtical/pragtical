@@ -12,6 +12,12 @@
 #include "shaders/gpu_canvas.vert.dxbc.h"
 #include "shaders/gpu_canvas.vert.msl.h"
 #include "shaders/gpu_canvas.vert.spv.h"
+#include "shaders/gpu_canvas_batch.frag.dxbc.h"
+#include "shaders/gpu_canvas_batch.frag.msl.h"
+#include "shaders/gpu_canvas_batch.frag.spv.h"
+#include "shaders/gpu_canvas_batch.vert.dxbc.h"
+#include "shaders/gpu_canvas_batch.vert.msl.h"
+#include "shaders/gpu_canvas_batch.vert.spv.h"
 #include "shaders/gpu_rect.frag.dxbc.h"
 #include "shaders/gpu_rect.frag.msl.h"
 #include "shaders/gpu_rect.frag.spv.h"
@@ -59,11 +65,15 @@ typedef struct {
   SDL_GPUTransferBuffer *poly_transfer;
   SDL_GPUBuffer *text_vertex_buffer;
   SDL_GPUTransferBuffer *text_transfer;
+  SDL_GPUBuffer *quad_vertex_buffer;
+  SDL_GPUTransferBuffer *quad_transfer;
   Uint32 transfer_size;
   Uint32 poly_vertex_buffer_size;
   Uint32 poly_transfer_size;
   Uint32 text_vertex_buffer_size;
   Uint32 text_transfer_size;
+  Uint32 quad_vertex_buffer_size;
+  Uint32 quad_transfer_size;
   SDL_PixelFormat texture_pixel_format;
   int texture_w, texture_h;
   bool needs_full_upload;
@@ -93,6 +103,11 @@ typedef struct {
   float u0, v0, u1, v1;
   GpuTextureBatchMode mode;
 } GpuQueuedCanvas;
+
+typedef struct {
+  float x, y;
+  float u, v;
+} GpuTextureQuadVertex;
 
 typedef struct {
   SDL_GPUDevice *device;
@@ -182,6 +197,8 @@ typedef struct {
 static SDL_GPUDevice *gpu_device = NULL;
 static int gpu_device_ref_count = 0;
 static SDL_GPUGraphicsPipeline *gpu_canvas_blend_pipeline = NULL;
+static SDL_GPUGraphicsPipeline *gpu_canvas_batch_pipeline = NULL;
+static SDL_GPUGraphicsPipeline *gpu_canvas_batch_replace_pipeline = NULL;
 static SDL_GPUSampler *gpu_canvas_sampler = NULL;
 static bool gpu_canvas_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_rect_pipeline = NULL;
@@ -191,7 +208,6 @@ static bool gpu_poly_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_text_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_text_replace_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_text_batch_pipeline = NULL;
-static SDL_GPUGraphicsPipeline *gpu_text_batch_replace_pipeline = NULL;
 static SDL_GPUSampler *gpu_text_sampler = NULL;
 static bool gpu_text_pipeline_failed = false;
 static SDL_GPUTexture *gpu_solid_white_texture = NULL;
@@ -448,11 +464,23 @@ static void gpu_destroy_bridge_resources(SDL_GPUDevice *device, GpuFrameBridge *
       SDL_ReleaseGPUTransferBuffer(device, frame->text_transfer);
     frame->text_transfer = NULL;
   }
+  if (frame->quad_vertex_buffer) {
+    if (device)
+      SDL_ReleaseGPUBuffer(device, frame->quad_vertex_buffer);
+    frame->quad_vertex_buffer = NULL;
+  }
+  if (frame->quad_transfer) {
+    if (device)
+      SDL_ReleaseGPUTransferBuffer(device, frame->quad_transfer);
+    frame->quad_transfer = NULL;
+  }
   frame->transfer_size = 0;
   frame->poly_vertex_buffer_size = 0;
   frame->poly_transfer_size = 0;
   frame->text_vertex_buffer_size = 0;
   frame->text_transfer_size = 0;
+  frame->quad_vertex_buffer_size = 0;
+  frame->quad_transfer_size = 0;
   frame->texture_w = 0;
   frame->texture_h = 0;
   frame->needs_full_upload = true;
@@ -662,6 +690,40 @@ static void gpu_ensure_bridge_text_buffers(SDL_GPUDevice *device, GpuFrameBridge
 
   frame->text_vertex_buffer_size = size;
   frame->text_transfer_size = size;
+}
+
+static void gpu_ensure_bridge_quad_buffers(SDL_GPUDevice *device, GpuFrameBridge *frame, Uint32 size) {
+  if (frame->quad_vertex_buffer && frame->quad_transfer &&
+      frame->quad_vertex_buffer_size >= size && frame->quad_transfer_size >= size)
+    return;
+
+  if (frame->quad_vertex_buffer)
+    SDL_ReleaseGPUBuffer(device, frame->quad_vertex_buffer);
+  if (frame->quad_transfer)
+    SDL_ReleaseGPUTransferBuffer(device, frame->quad_transfer);
+  frame->quad_vertex_buffer = NULL;
+  frame->quad_transfer = NULL;
+  frame->quad_vertex_buffer_size = 0;
+  frame->quad_transfer_size = 0;
+
+  SDL_GPUBufferCreateInfo buffer_info;
+  SDL_zero(buffer_info);
+  buffer_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+  buffer_info.size = size;
+  frame->quad_vertex_buffer = SDL_CreateGPUBuffer(device, &buffer_info);
+  if (!frame->quad_vertex_buffer)
+    gpu_abort("SDL_CreateGPUBuffer failed for texture quads");
+
+  SDL_GPUTransferBufferCreateInfo transfer_info;
+  SDL_zero(transfer_info);
+  transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+  transfer_info.size = size;
+  frame->quad_transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
+  if (!frame->quad_transfer)
+    gpu_abort("SDL_CreateGPUTransferBuffer failed for texture quads");
+
+  frame->quad_vertex_buffer_size = size;
+  frame->quad_transfer_size = size;
 }
 
 static void gpu_ensure_window_rect_buffers(GpuWindowData *data, Uint32 size) {
@@ -1898,6 +1960,33 @@ static SDL_GPUShader *gpu_create_canvas_shader(SDL_GPUDevice *device, bool verte
   return SDL_CreateGPUShader(device, &createinfo);
 }
 
+static SDL_GPUShader *gpu_create_canvas_batch_shader(SDL_GPUDevice *device, bool vertex) {
+  SDL_GPUShaderCreateInfo createinfo;
+  SDL_zero(createinfo);
+  createinfo.num_samplers = vertex ? 0 : 1;
+  createinfo.num_uniform_buffers = vertex ? 1 : 0;
+  createinfo.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+
+  SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
+  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
+    createinfo.code = vertex ? gpu_canvas_batch_vert_dxbc : gpu_canvas_batch_frag_dxbc;
+    createinfo.code_size = vertex ? gpu_canvas_batch_vert_dxbc_len : gpu_canvas_batch_frag_dxbc_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_MSL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_MSL;
+    createinfo.code = vertex ? gpu_canvas_batch_vert_msl : gpu_canvas_batch_frag_msl;
+    createinfo.code_size = vertex ? gpu_canvas_batch_vert_msl_len : gpu_canvas_batch_frag_msl_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_SPIRV) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    createinfo.code = vertex ? gpu_canvas_batch_vert_spv : gpu_canvas_batch_frag_spv;
+    createinfo.code_size = vertex ? gpu_canvas_batch_vert_spv_len : gpu_canvas_batch_frag_spv_len;
+  } else {
+    return NULL;
+  }
+
+  return SDL_CreateGPUShader(device, &createinfo);
+}
+
 static SDL_GPUShader *gpu_create_poly_shader(SDL_GPUDevice *device, bool vertex) {
   SDL_GPUShaderCreateInfo createinfo;
   SDL_zero(createinfo);
@@ -2147,6 +2236,68 @@ static SDL_GPUGraphicsPipeline *gpu_create_canvas_graphics_pipeline(
   return pipeline;
 }
 
+static SDL_GPUGraphicsPipeline *gpu_create_canvas_batch_graphics_pipeline(
+  SDL_GPUDevice *device, SDL_GPUTextureFormat target_format, bool blend
+) {
+  SDL_GPUShader *vertex_shader = gpu_create_canvas_batch_shader(device, true);
+  SDL_GPUShader *fragment_shader = gpu_create_canvas_batch_shader(device, false);
+  if (!vertex_shader || !fragment_shader) {
+    if (vertex_shader) SDL_ReleaseGPUShader(device, vertex_shader);
+    if (fragment_shader) SDL_ReleaseGPUShader(device, fragment_shader);
+    return NULL;
+  }
+
+  SDL_GPUVertexBufferDescription vertex_buffer;
+  SDL_zero(vertex_buffer);
+  vertex_buffer.slot = 0;
+  vertex_buffer.pitch = sizeof(GpuTextureQuadVertex);
+  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+  SDL_GPUVertexAttribute vertex_attributes[2];
+  SDL_zeroa(vertex_attributes);
+  vertex_attributes[0].location = 0;
+  vertex_attributes[0].buffer_slot = 0;
+  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+  vertex_attributes[0].offset = 0;
+  vertex_attributes[1].location = 1;
+  vertex_attributes[1].buffer_slot = 0;
+  vertex_attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+  vertex_attributes[1].offset = offsetof(GpuTextureQuadVertex, u);
+
+  SDL_GPUColorTargetDescription color_target;
+  SDL_zero(color_target);
+  color_target.format = target_format;
+  color_target.blend_state.enable_blend = blend;
+  color_target.blend_state.enable_color_write_mask = true;
+  color_target.blend_state.color_write_mask =
+    SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G |
+    SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
+  color_target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.src_color_blendfactor = blend ? SDL_GPU_BLENDFACTOR_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ONE;
+  color_target.blend_state.dst_color_blendfactor = blend ? SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ZERO;
+  color_target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+  color_target.blend_state.dst_alpha_blendfactor = blend ? SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ZERO;
+
+  SDL_GPUGraphicsPipelineCreateInfo pipeline_info;
+  SDL_zero(pipeline_info);
+  pipeline_info.vertex_shader = vertex_shader;
+  pipeline_info.fragment_shader = fragment_shader;
+  pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+  pipeline_info.rasterizer_state.enable_depth_clip = true;
+  pipeline_info.vertex_input_state.vertex_buffer_descriptions = &vertex_buffer;
+  pipeline_info.vertex_input_state.num_vertex_buffers = 1;
+  pipeline_info.vertex_input_state.vertex_attributes = vertex_attributes;
+  pipeline_info.vertex_input_state.num_vertex_attributes = SDL_arraysize(vertex_attributes);
+  pipeline_info.target_info.num_color_targets = 1;
+  pipeline_info.target_info.color_target_descriptions = &color_target;
+
+  SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+  SDL_ReleaseGPUShader(device, vertex_shader);
+  SDL_ReleaseGPUShader(device, fragment_shader);
+  return pipeline;
+}
+
 static bool gpu_ensure_canvas_pipeline(SDL_GPUDevice *device) {
   if (gpu_canvas_blend_pipeline && gpu_canvas_sampler)
     return true;
@@ -2182,6 +2333,48 @@ static bool gpu_ensure_canvas_pipeline(SDL_GPUDevice *device) {
   return true;
 }
 
+static bool gpu_ensure_canvas_batch_pipeline(SDL_GPUDevice *device) {
+  if (gpu_canvas_batch_pipeline && gpu_canvas_sampler)
+    return true;
+  if (gpu_canvas_pipeline_failed)
+    return false;
+  if (!gpu_ensure_canvas_pipeline(device))
+    return false;
+
+  gpu_canvas_batch_pipeline = gpu_create_canvas_batch_graphics_pipeline(
+    device,
+    SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_BGRA32),
+    true
+  );
+  if (!gpu_canvas_batch_pipeline) {
+    gpu_canvas_pipeline_failed = true;
+    return false;
+  }
+
+  return true;
+}
+
+static bool gpu_ensure_canvas_batch_replace_pipeline(SDL_GPUDevice *device) {
+  if (gpu_canvas_batch_replace_pipeline && gpu_canvas_sampler)
+    return true;
+  if (gpu_canvas_pipeline_failed)
+    return false;
+  if (!gpu_ensure_canvas_batch_pipeline(device))
+    return false;
+
+  gpu_canvas_batch_replace_pipeline = gpu_create_canvas_batch_graphics_pipeline(
+    device,
+    SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_BGRA32),
+    false
+  );
+  if (!gpu_canvas_batch_replace_pipeline) {
+    gpu_canvas_pipeline_failed = true;
+    return false;
+  }
+
+  return true;
+}
+
 static void gpu_destroy_canvas_pipeline(SDL_GPUDevice *device) {
   if (gpu_canvas_sampler) {
     SDL_ReleaseGPUSampler(device, gpu_canvas_sampler);
@@ -2190,6 +2383,14 @@ static void gpu_destroy_canvas_pipeline(SDL_GPUDevice *device) {
   if (gpu_canvas_blend_pipeline) {
     SDL_ReleaseGPUGraphicsPipeline(device, gpu_canvas_blend_pipeline);
     gpu_canvas_blend_pipeline = NULL;
+  }
+  if (gpu_canvas_batch_pipeline) {
+    SDL_ReleaseGPUGraphicsPipeline(device, gpu_canvas_batch_pipeline);
+    gpu_canvas_batch_pipeline = NULL;
+  }
+  if (gpu_canvas_batch_replace_pipeline) {
+    SDL_ReleaseGPUGraphicsPipeline(device, gpu_canvas_batch_replace_pipeline);
+    gpu_canvas_batch_replace_pipeline = NULL;
   }
   gpu_canvas_pipeline_failed = false;
 }
@@ -2399,23 +2600,6 @@ static bool gpu_ensure_text_batch_pipeline(SDL_GPUDevice *device) {
   return true;
 }
 
-static bool gpu_ensure_text_batch_replace_pipeline(SDL_GPUDevice *device) {
-  if (gpu_text_batch_replace_pipeline && gpu_text_sampler)
-    return true;
-  if (gpu_text_pipeline_failed)
-    return false;
-  if (!gpu_ensure_text_batch_pipeline(device))
-    return false;
-
-  gpu_text_batch_replace_pipeline = gpu_create_text_batch_graphics_pipeline(device, false);
-  if (!gpu_text_batch_replace_pipeline) {
-    gpu_text_pipeline_failed = true;
-    return false;
-  }
-
-  return true;
-}
-
 static bool gpu_ensure_text_replace_pipeline(SDL_GPUDevice *device) {
   if (gpu_text_replace_pipeline)
     return true;
@@ -2459,10 +2643,6 @@ static void gpu_destroy_text_pipeline(SDL_GPUDevice *device) {
   if (gpu_text_batch_pipeline) {
     SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_batch_pipeline);
     gpu_text_batch_pipeline = NULL;
-  }
-  if (gpu_text_batch_replace_pipeline) {
-    SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_batch_replace_pipeline);
-    gpu_text_batch_replace_pipeline = NULL;
   }
   gpu_text_pipeline_failed = false;
 }
@@ -3166,7 +3346,7 @@ typedef struct {
 static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer *cmd) {
   if (!data || !cmd || !data->frame.texture || data->pending_canvas_count == 0)
     return true;
-  if (!gpu_ensure_text_batch_pipeline(data->device))
+  if (!gpu_ensure_canvas_batch_pipeline(data->device))
     return false;
 
   bool needs_replace_pipeline = false;
@@ -3176,7 +3356,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
       break;
     }
   }
-  if (needs_replace_pipeline && !gpu_ensure_text_batch_replace_pipeline(data->device))
+  if (needs_replace_pipeline && !gpu_ensure_canvas_batch_replace_pipeline(data->device))
     return false;
 
   GpuCanvasBatchRun *runs = SDL_malloc((size_t) data->pending_canvas_count * sizeof(GpuCanvasBatchRun));
@@ -3186,10 +3366,10 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
   }
 
   Uint32 max_vertices = (Uint32) data->pending_canvas_count * 6;
-  Uint32 upload_size = max_vertices * sizeof(GpuTextBatchVertex);
-  gpu_ensure_bridge_text_buffers(data->device, &data->frame, upload_size);
+  Uint32 upload_size = max_vertices * sizeof(GpuTextureQuadVertex);
+  gpu_ensure_bridge_quad_buffers(data->device, &data->frame, upload_size);
 
-  GpuTextBatchVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->frame.text_transfer, true);
+  GpuTextureQuadVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->frame.quad_transfer, true);
   if (!vertices) {
     SDL_free(runs);
     return false;
@@ -3217,20 +3397,20 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
     float y0 = canvas->dst.y;
     float x1 = canvas->dst.x + canvas->dst.w;
     float y1 = canvas->dst.y + canvas->dst.h;
-    GpuTextBatchVertex quad[6] = {
-      { x0, y0, canvas->u0, canvas->v0, { 1, 1, 1, 1 } },
-      { x1, y0, canvas->u1, canvas->v0, { 1, 1, 1, 1 } },
-      { x1, y1, canvas->u1, canvas->v1, { 1, 1, 1, 1 } },
-      { x0, y0, canvas->u0, canvas->v0, { 1, 1, 1, 1 } },
-      { x1, y1, canvas->u1, canvas->v1, { 1, 1, 1, 1 } },
-      { x0, y1, canvas->u0, canvas->v1, { 1, 1, 1, 1 } },
+    GpuTextureQuadVertex quad[6] = {
+      { x0, y0, canvas->u0, canvas->v0 },
+      { x1, y0, canvas->u1, canvas->v0 },
+      { x1, y1, canvas->u1, canvas->v1 },
+      { x0, y0, canvas->u0, canvas->v0 },
+      { x1, y1, canvas->u1, canvas->v1 },
+      { x0, y1, canvas->u0, canvas->v1 },
     };
     SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
     vertex_count += SDL_arraysize(quad);
     runs[run_count - 1].vertex_count += SDL_arraysize(quad);
   }
 
-  SDL_UnmapGPUTransferBuffer(data->device, data->frame.text_transfer);
+  SDL_UnmapGPUTransferBuffer(data->device, data->frame.quad_transfer);
 
   if (vertex_count == 0) {
     data->pending_canvas_count = 0;
@@ -3241,11 +3421,11 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
   SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
   SDL_GPUTransferBufferLocation source;
   SDL_zero(source);
-  source.transfer_buffer = data->frame.text_transfer;
+  source.transfer_buffer = data->frame.quad_transfer;
   SDL_GPUBufferRegion destination;
   SDL_zero(destination);
-  destination.buffer = data->frame.text_vertex_buffer;
-  destination.size = vertex_count * sizeof(GpuTextBatchVertex);
+  destination.buffer = data->frame.quad_vertex_buffer;
+  destination.size = vertex_count * sizeof(GpuTextureQuadVertex);
   SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
   SDL_EndGPUCopyPass(copy_pass);
 
@@ -3268,17 +3448,13 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
 
   SDL_GPUBufferBinding vertex_binding;
   SDL_zero(vertex_binding);
-  vertex_binding.buffer = data->frame.text_vertex_buffer;
+  vertex_binding.buffer = data->frame.quad_vertex_buffer;
   SDL_BindGPUVertexBuffers(pass, 0, &vertex_binding, 1);
 
   GpuPolyVertexUniforms vertex_uniforms = {
     .target = { data->frame.texture_w, data->frame.texture_h, 0, 0 },
   };
-  GpuTextBatchFragmentUniforms fragment_uniforms = {
-    .format = EGlyphFormatColor,
-  };
   SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
-  SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
 
   SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   for (int i = 0; i < run_count; i++) {
@@ -3287,8 +3463,8 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
       continue;
 
     SDL_GPUGraphicsPipeline *pipeline = run->mode == GPU_TEXTURE_BATCH_REPLACE
-      ? gpu_text_batch_replace_pipeline
-      : gpu_text_batch_pipeline;
+      ? gpu_canvas_batch_replace_pipeline
+      : gpu_canvas_batch_pipeline;
     if (bound_pipeline != pipeline) {
       SDL_BindGPUGraphicsPipeline(pass, pipeline);
       bound_pipeline = pipeline;
@@ -3297,7 +3473,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
     SDL_GPUTextureSamplerBinding sampler_binding;
     SDL_zero(sampler_binding);
     sampler_binding.texture = run->texture;
-    sampler_binding.sampler = gpu_text_sampler;
+    sampler_binding.sampler = gpu_canvas_sampler;
     SDL_BindGPUFragmentSamplers(pass, 0, &sampler_binding, 1);
     SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
   }
