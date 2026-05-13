@@ -628,6 +628,21 @@ test.describe("graphics apis", function()
       }
     end
 
+    local function capture_region(label, x, y, w, h)
+      local c = renderer.to_canvas(window, x, y, w, h)
+      test.not_nil(c, "failed to capture " .. label)
+      local path = context.temp_root .. PATHSEP
+        .. string.format("visual-user-flow-%03d-%s.png", frame, label)
+      local saved, save_err = c:save_image(path)
+      test.ok(saved, save_err)
+      captures[label] = {
+        pixels = c:get_pixels(0, 0, w, h),
+        path = path,
+        width = w,
+        height = h
+      }
+    end
+
     local function pump(label, count, force_capture)
       count = count or 1
       for i = 1, count do
@@ -704,7 +719,16 @@ test.describe("graphics apis", function()
     local function assert_not_blank(label)
       local capture_data = captures[label]
       test.not_nil(capture_data, "missing capture " .. label)
-      local r, g, b = average_region(capture_data.pixels, width, 0, 0, width, height)
+      local capture_width = capture_data.width or width
+      local capture_height = capture_data.height or height
+      local r, g, b = average_region(
+        capture_data.pixels,
+        capture_width,
+        0,
+        0,
+        capture_width,
+        capture_height
+      )
       test.ok(r + g + b > 6, label .. " should not be blank")
     end
 
@@ -755,6 +779,7 @@ test.describe("graphics apis", function()
         end
       end
       pump("settings-open", 2, true)
+      capture_region("settings-open-tab-strip", 0, 0, width, math.min(height, 96))
 
       local function scale_label(value)
         return string.format("%.2f", value):gsub("%.", "_")
@@ -909,6 +934,7 @@ test.describe("graphics apis", function()
 
     assert_not_blank("file-open-01")
     assert_not_blank("settings-open-01")
+    assert_not_blank("settings-open-tab-strip")
     for _, label in ipairs(image_viewer_labels) do
       assert_not_blank(label)
     end
