@@ -3,6 +3,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 
 #include "shaders/gpu_canvas.frag.dxbc.h"
@@ -11,6 +12,12 @@
 #include "shaders/gpu_canvas.vert.dxbc.h"
 #include "shaders/gpu_canvas.vert.msl.h"
 #include "shaders/gpu_canvas.vert.spv.h"
+#include "shaders/gpu_rect.frag.dxbc.h"
+#include "shaders/gpu_rect.frag.msl.h"
+#include "shaders/gpu_rect.frag.spv.h"
+#include "shaders/gpu_rect.vert.dxbc.h"
+#include "shaders/gpu_rect.vert.msl.h"
+#include "shaders/gpu_rect.vert.spv.h"
 #include "shaders/gpu_poly.frag.dxbc.h"
 #include "shaders/gpu_poly.frag.msl.h"
 #include "shaders/gpu_poly.frag.spv.h"
@@ -70,7 +77,11 @@ typedef struct {
   GpuFrameBridge frame;
   SDL_GPUTexture *pixels_texture;
   SDL_GPUTransferBuffer *pixels_transfer;
+  SDL_GPUBuffer *rect_vertex_buffer;
+  SDL_GPUTransferBuffer *rect_transfer;
   Uint32 pixels_transfer_size;
+  Uint32 rect_vertex_buffer_size;
+  Uint32 rect_transfer_size;
   int pixels_texture_w;
   int pixels_texture_h;
   GpuNativeRect pending_native_rects[GPU_NATIVE_RECT_BATCH_SIZE];
@@ -141,6 +152,8 @@ static int gpu_device_ref_count = 0;
 static SDL_GPUGraphicsPipeline *gpu_canvas_blend_pipeline = NULL;
 static SDL_GPUSampler *gpu_canvas_sampler = NULL;
 static bool gpu_canvas_pipeline_failed = false;
+static SDL_GPUGraphicsPipeline *gpu_rect_pipeline = NULL;
+static bool gpu_rect_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_poly_pipeline = NULL;
 static bool gpu_poly_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_text_pipeline = NULL;
@@ -254,6 +267,11 @@ typedef struct {
 typedef struct {
   float x, y;
 } GpuPolyVertex;
+
+typedef struct {
+  float x, y;
+  float color[4];
+} GpuRectVertex;
 
 typedef struct {
   GpuWindowData *window_data;
@@ -546,6 +564,40 @@ static void gpu_ensure_bridge_poly_buffers(SDL_GPUDevice *device, GpuFrameBridge
 
   frame->poly_vertex_buffer_size = size;
   frame->poly_transfer_size = size;
+}
+
+static void gpu_ensure_window_rect_buffers(GpuWindowData *data, Uint32 size) {
+  if (data->rect_vertex_buffer && data->rect_transfer &&
+      data->rect_vertex_buffer_size >= size && data->rect_transfer_size >= size)
+    return;
+
+  if (data->rect_vertex_buffer)
+    SDL_ReleaseGPUBuffer(data->device, data->rect_vertex_buffer);
+  if (data->rect_transfer)
+    SDL_ReleaseGPUTransferBuffer(data->device, data->rect_transfer);
+  data->rect_vertex_buffer = NULL;
+  data->rect_transfer = NULL;
+  data->rect_vertex_buffer_size = 0;
+  data->rect_transfer_size = 0;
+
+  SDL_GPUBufferCreateInfo buffer_info;
+  SDL_zero(buffer_info);
+  buffer_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+  buffer_info.size = size;
+  data->rect_vertex_buffer = SDL_CreateGPUBuffer(data->device, &buffer_info);
+  if (!data->rect_vertex_buffer)
+    gpu_abort("SDL_CreateGPUBuffer failed for rect vertices");
+
+  SDL_GPUTransferBufferCreateInfo transfer_info;
+  SDL_zero(transfer_info);
+  transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+  transfer_info.size = size;
+  data->rect_transfer = SDL_CreateGPUTransferBuffer(data->device, &transfer_info);
+  if (!data->rect_transfer)
+    gpu_abort("SDL_CreateGPUTransferBuffer failed for rect vertices");
+
+  data->rect_vertex_buffer_size = size;
+  data->rect_transfer_size = size;
 }
 
 static Uint32 gpu_align_u32(Uint32 value, Uint32 alignment) {
@@ -1844,6 +1896,113 @@ static void gpu_destroy_poly_pipeline(SDL_GPUDevice *device) {
   gpu_poly_pipeline_failed = false;
 }
 
+static SDL_GPUShader *gpu_create_rect_shader(SDL_GPUDevice *device, bool vertex) {
+  SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
+  SDL_GPUShaderCreateInfo createinfo;
+  SDL_zero(createinfo);
+  createinfo.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
+  createinfo.entrypoint = "main";
+  createinfo.num_samplers = 0;
+  createinfo.num_uniform_buffers = vertex ? 1 : 0;
+
+  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
+    createinfo.code = vertex ? gpu_rect_vert_dxbc : gpu_rect_frag_dxbc;
+    createinfo.code_size = vertex ? gpu_rect_vert_dxbc_len : gpu_rect_frag_dxbc_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_MSL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_MSL;
+    createinfo.code = vertex ? gpu_rect_vert_msl : gpu_rect_frag_msl;
+    createinfo.code_size = vertex ? gpu_rect_vert_msl_len : gpu_rect_frag_msl_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_SPIRV) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_SPIRV;
+    createinfo.code = vertex ? gpu_rect_vert_spv : gpu_rect_frag_spv;
+    createinfo.code_size = vertex ? gpu_rect_vert_spv_len : gpu_rect_frag_spv_len;
+  } else {
+    return NULL;
+  }
+
+  return SDL_CreateGPUShader(device, &createinfo);
+}
+
+static bool gpu_ensure_rect_pipeline(SDL_GPUDevice *device) {
+  if (gpu_rect_pipeline)
+    return true;
+  if (gpu_rect_pipeline_failed)
+    return false;
+
+  SDL_GPUShader *vertex_shader = gpu_create_rect_shader(device, true);
+  SDL_GPUShader *fragment_shader = gpu_create_rect_shader(device, false);
+  if (!vertex_shader || !fragment_shader) {
+    if (vertex_shader) SDL_ReleaseGPUShader(device, vertex_shader);
+    if (fragment_shader) SDL_ReleaseGPUShader(device, fragment_shader);
+    gpu_rect_pipeline_failed = true;
+    return false;
+  }
+
+  SDL_GPUVertexBufferDescription vertex_buffer;
+  SDL_zero(vertex_buffer);
+  vertex_buffer.slot = 0;
+  vertex_buffer.pitch = sizeof(GpuRectVertex);
+  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+
+  SDL_GPUVertexAttribute vertex_attributes[2];
+  SDL_zeroa(vertex_attributes);
+  vertex_attributes[0].location = 0;
+  vertex_attributes[0].buffer_slot = 0;
+  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+  vertex_attributes[0].offset = 0;
+  vertex_attributes[1].location = 1;
+  vertex_attributes[1].buffer_slot = 0;
+  vertex_attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+  vertex_attributes[1].offset = offsetof(GpuRectVertex, color);
+
+  SDL_GPUColorTargetDescription color_target;
+  SDL_zero(color_target);
+  color_target.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_BGRA32);
+  color_target.blend_state.enable_blend = true;
+  color_target.blend_state.enable_color_write_mask = true;
+  color_target.blend_state.color_write_mask =
+    SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G |
+    SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
+  color_target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
+  color_target.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+  color_target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+  color_target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+
+  SDL_GPUGraphicsPipelineCreateInfo pipeline_info;
+  SDL_zero(pipeline_info);
+  pipeline_info.vertex_shader = vertex_shader;
+  pipeline_info.fragment_shader = fragment_shader;
+  pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+  pipeline_info.rasterizer_state.enable_depth_clip = true;
+  pipeline_info.vertex_input_state.vertex_buffer_descriptions = &vertex_buffer;
+  pipeline_info.vertex_input_state.num_vertex_buffers = 1;
+  pipeline_info.vertex_input_state.vertex_attributes = vertex_attributes;
+  pipeline_info.vertex_input_state.num_vertex_attributes = SDL_arraysize(vertex_attributes);
+  pipeline_info.target_info.num_color_targets = 1;
+  pipeline_info.target_info.color_target_descriptions = &color_target;
+
+  gpu_rect_pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+  SDL_ReleaseGPUShader(device, vertex_shader);
+  SDL_ReleaseGPUShader(device, fragment_shader);
+  if (!gpu_rect_pipeline) {
+    gpu_rect_pipeline_failed = true;
+    return false;
+  }
+
+  return true;
+}
+
+static void gpu_destroy_rect_pipeline(SDL_GPUDevice *device) {
+  if (gpu_rect_pipeline) {
+    SDL_ReleaseGPUGraphicsPipeline(device, gpu_rect_pipeline);
+    gpu_rect_pipeline = NULL;
+  }
+  gpu_rect_pipeline_failed = false;
+}
+
 static SDL_GPUGraphicsPipeline *gpu_create_canvas_graphics_pipeline(
   SDL_GPUDevice *device, SDL_GPUTextureFormat target_format, bool blend
 ) {
@@ -2169,10 +2328,67 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     return true;
   if (!cmd || !data->frame.texture)
     return false;
-  if (!gpu_ensure_text_pipeline(data->device))
+  if (!gpu_ensure_rect_pipeline(data->device))
     return false;
-  if (!gpu_ensure_solid_white_texture(data->device, cmd))
+
+  int rect_count = 0;
+  for (int i = 0; i < data->pending_native_rect_count; i++) {
+    GpuNativeRect *native = &data->pending_native_rects[i];
+    if (native->rect.w > 0 && native->rect.h > 0)
+      rect_count++;
+  }
+  if (rect_count == 0) {
+    data->pending_native_rect_count = 0;
+    return true;
+  }
+
+  Uint32 vertex_count = (Uint32) rect_count * 6;
+  Uint32 upload_size = vertex_count * sizeof(GpuRectVertex);
+  gpu_ensure_window_rect_buffers(data, upload_size);
+
+  GpuRectVertex *vertices = SDL_MapGPUTransferBuffer(data->device, data->rect_transfer, true);
+  if (!vertices)
     return false;
+
+  GpuRectVertex *out = vertices;
+  for (int i = 0; i < data->pending_native_rect_count; i++) {
+    GpuNativeRect *native = &data->pending_native_rects[i];
+    if (native->rect.w <= 0 || native->rect.h <= 0)
+      continue;
+
+    float x0 = native->rect.x;
+    float y0 = native->rect.y;
+    float x1 = native->rect.x + native->rect.w;
+    float y1 = native->rect.y + native->rect.h;
+    float color[4] = {
+      (float) native->color.r / 255.0f,
+      (float) native->color.g / 255.0f,
+      (float) native->color.b / 255.0f,
+      (float) native->color.a / 255.0f,
+    };
+    const GpuRectVertex quad[6] = {
+      { x0, y0, { color[0], color[1], color[2], color[3] } },
+      { x1, y0, { color[0], color[1], color[2], color[3] } },
+      { x1, y1, { color[0], color[1], color[2], color[3] } },
+      { x0, y0, { color[0], color[1], color[2], color[3] } },
+      { x1, y1, { color[0], color[1], color[2], color[3] } },
+      { x0, y1, { color[0], color[1], color[2], color[3] } },
+    };
+    SDL_memcpy(out, quad, sizeof(quad));
+    out += SDL_arraysize(quad);
+  }
+  SDL_UnmapGPUTransferBuffer(data->device, data->rect_transfer);
+
+  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTransferBufferLocation source;
+  SDL_zero(source);
+  source.transfer_buffer = data->rect_transfer;
+  SDL_GPUBufferRegion destination;
+  SDL_zero(destination);
+  destination.buffer = data->rect_vertex_buffer;
+  destination.size = upload_size;
+  SDL_UploadToGPUBuffer(copy_pass, &source, &destination, true);
+  SDL_EndGPUCopyPass(copy_pass);
 
   SDL_GPUColorTargetInfo color_target;
   SDL_zero(color_target);
@@ -2187,41 +2403,18 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
   viewport.h = data->frame.texture_h;
   viewport.max_depth = 1;
   SDL_SetGPUViewport(pass, &viewport);
+  SDL_BindGPUGraphicsPipeline(pass, gpu_rect_pipeline);
 
-  SDL_GPUTextureSamplerBinding binding;
+  SDL_GPUBufferBinding binding;
   SDL_zero(binding);
-  binding.texture = gpu_solid_white_texture;
-  binding.sampler = gpu_text_sampler;
+  binding.buffer = data->rect_vertex_buffer;
+  SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
 
-  SDL_BindGPUGraphicsPipeline(pass, gpu_text_pipeline);
-  SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
-
-  for (int i = 0; i < data->pending_native_rect_count; i++) {
-    GpuNativeRect *native = &data->pending_native_rects[i];
-    if (native->rect.w <= 0 || native->rect.h <= 0)
-      continue;
-
-    SDL_SetGPUScissor(pass, &native->rect);
-
-    GpuTextVertexUniforms vertex_uniforms = {
-      .dst = { native->rect.x, native->rect.y, native->rect.w, native->rect.h },
-      .uv = { 0, 0, 1, 1 },
-      .target = { data->frame.texture_w, data->frame.texture_h, 0, 0 },
-    };
-    GpuTextFragmentUniforms fragment_uniforms = {
-      .color = {
-        (float) native->color.r / 255.0f,
-        (float) native->color.g / 255.0f,
-        (float) native->color.b / 255.0f,
-        (float) native->color.a / 255.0f,
-      },
-      .format = EGlyphFormatGrayscale,
-    };
-
-    SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
-    SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
-    SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
-  }
+  GpuPolyVertexUniforms vertex_uniforms = {
+    .target = { data->frame.texture_w, data->frame.texture_h, 0, 0 },
+  };
+  SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
+  SDL_DrawGPUPrimitives(pass, vertex_count, 1, 0, 0);
 
   SDL_EndGPURenderPass(pass);
   data->pending_native_rect_count = 0;
@@ -3226,6 +3419,7 @@ static void gpu_release_device(void) {
     gpu_device_ref_count--;
   if (gpu_device_ref_count == 0 && gpu_device) {
     gpu_destroy_canvas_pipeline(gpu_device);
+    gpu_destroy_rect_pipeline(gpu_device);
     gpu_destroy_poly_pipeline(gpu_device);
     gpu_destroy_text_pipeline(gpu_device);
     SDL_DestroyGPUDevice(gpu_device);
@@ -3297,6 +3491,16 @@ static void gpu_destroy_window(RenWindow *ren) {
       SDL_ReleaseGPUTransferBuffer(data->device, data->pixels_transfer);
       data->pixels_transfer = NULL;
       data->pixels_transfer_size = 0;
+    }
+    if (data->rect_vertex_buffer) {
+      SDL_ReleaseGPUBuffer(data->device, data->rect_vertex_buffer);
+      data->rect_vertex_buffer = NULL;
+      data->rect_vertex_buffer_size = 0;
+    }
+    if (data->rect_transfer) {
+      SDL_ReleaseGPUTransferBuffer(data->device, data->rect_transfer);
+      data->rect_transfer = NULL;
+      data->rect_transfer_size = 0;
     }
     SDL_free(data->pending_text_glyphs);
     data->pending_text_glyphs = NULL;
