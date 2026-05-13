@@ -194,6 +194,16 @@ function renderer.set_clip_rect(x, y, width, height) end
 function renderer.draw_rect(x, y, width, height, color) end
 
 ---
+---Draw RGBA pixels.
+---
+---@param pixels string RGBA32 bytes, at least width * height * 4 bytes.
+---@param x integer
+---@param y integer
+---@param width integer
+---@param height integer
+function renderer.draw_pixels(pixels, x, y, width, height) end
+
+---
 ---Draw text and return the x coordinate where the text finished drawing.
 ---
 ---@param font renderer.font

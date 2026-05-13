@@ -411,6 +411,27 @@ static int f_draw_rect(lua_State *L) {
   return 0;
 }
 
+static int f_draw_pixels(lua_State *L) {
+  size_t len;
+  const char *bytes = luaL_checklstring(L, 1, &len);
+
+  lua_Integer x = luaL_checkinteger(L, 2);
+  lua_Integer y = luaL_checkinteger(L, 3);
+  lua_Integer w = luaL_checkinteger(L, 4);
+  lua_Integer h = luaL_checkinteger(L, 5);
+  luaL_argcheck(L, w > 0, 4, "must be a positive non-zero integer");
+  luaL_argcheck(L, h > 0, 5, "must be a positive non-zero integer");
+
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  }
+
+  RenRect rect = { .x = x, .y = y, .width = w, .height = h };
+  rencache_draw_pixels(&window->cache, rect, bytes, len);
+  return 0;
+}
+
 
 static int f_draw_poly(lua_State *L) {
   static const char normal_tag[] = { POLY_NORMAL };
@@ -577,6 +598,7 @@ static const luaL_Reg lib[] = {
   { "end_frame",          f_end_frame          },
   { "set_clip_rect",      f_set_clip_rect      },
   { "draw_rect",          f_draw_rect          },
+  { "draw_pixels",        f_draw_pixels        },
   { "draw_text",          f_draw_text          },
   { "draw_poly",          f_draw_poly          },
   { "draw_canvas",        f_draw_canvas        },

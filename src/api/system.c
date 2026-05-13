@@ -401,6 +401,8 @@ top:
     case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
       {
         RenWindow* window_renderer = ren_find_window_from_id(e.window.windowID);
+        if (!window_renderer)
+          break;
         ren_resize_window(window_renderer);
         lua_pushstring(L, "scalechanged");
         float new_scale = SDL_GetWindowDisplayScale(renwin_get_sdl_window(window_renderer));
