@@ -90,6 +90,7 @@ static SDL_Surface *surface_atlas_allocate_glyph_surface(RenAtlas *ren_atlas, Re
     SDL_PixelFormat format = glyphformat_to_pixelformat(glyph_format, &depth);
     atlas->surfaces = check_alloc(SDL_realloc(atlas->surfaces, sizeof(SDL_Surface *) * (atlas->nsurface + 1)));
     atlas->surfaces[atlas->nsurface] = check_alloc(SDL_CreateSurface(atlas->width, GLYPHS_PER_ATLAS * h, format));
+    SDL_ClearSurface(atlas->surfaces[atlas->nsurface], 0, 0, 0, 0);
     userdata = SDL_GetSurfaceProperties(atlas->surfaces[atlas->nsurface]);
     SDL_SetPointerProperty(userdata, "metric", NULL);
     surface_idx = atlas->nsurface++;
