@@ -444,11 +444,8 @@ typedef struct {
   GpuFrameBridge *target_frame;
   GpuQueuedGlyph *glyphs;
   SDL_Rect clip;
-  RenRect dirty_rect;
   int glyph_count;
   int glyph_capacity;
-  bool attempted_native;
-  bool have_dirty_rect;
   bool collect_overlay;
   bool have_clip;
   bool batch_pipeline_ready;
@@ -457,14 +454,6 @@ typedef struct {
 typedef struct {
   bool native_text;
 } GpuTextNativeCheck;
-
-static RenRect gpu_merge_rects(RenRect a, RenRect b) {
-  int x1 = SDL_min(a.x, b.x);
-  int y1 = SDL_min(a.y, b.y);
-  int x2 = SDL_max(a.x + a.width, b.x + b.width);
-  int y2 = SDL_max(a.y + a.height, b.y + b.height);
-  return (RenRect) { x1, y1, x2 - x1, y2 - y1 };
-}
 
 static void gpu_abort(const char *message) {
   fprintf(stderr, "%s: %s\n", message, SDL_GetError());
@@ -3584,21 +3573,6 @@ static bool gpu_draw_validation_probe(GpuWindowData *data, SDL_GPUCommandBuffer 
 
 static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   GpuTextDrawContext *ctx = userdata;
-  RenRect glyph_rect = {
-    .x = glyph->dst_x,
-    .y = glyph->dst_y,
-    .width = glyph->width,
-    .height = glyph->height,
-  };
-  if (glyph_rect.width > 0 && glyph_rect.height > 0) {
-    if (ctx->have_dirty_rect)
-      ctx->dirty_rect = gpu_merge_rects(ctx->dirty_rect, glyph_rect);
-    else {
-      ctx->dirty_rect = glyph_rect;
-      ctx->have_dirty_rect = true;
-    }
-  }
-
   if (!ctx->collect_overlay) {
     gpu_abort("SDLGPU native text collection unavailable");
   }
@@ -3607,11 +3581,6 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   SDL_GPUDevice *device = ctx->device;
   SDL_GPUCommandBuffer *cmd = ctx->command_buffer;
   GpuFrameBridge *frame = ctx->target_frame;
-  if (data) {
-    device = data->device;
-    cmd = data->command_buffer;
-    frame = &data->frame;
-  }
   if (!device || !cmd || !frame || !frame->texture)
     gpu_abort("SDLGPU native text target unavailable");
   if (!ctx->batch_pipeline_ready && !gpu_ensure_text_batch_pipeline(device))
@@ -3660,7 +3629,6 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     .format = glyph->format,
   };
   ctx->glyph_count++;
-  ctx->attempted_native = true;
   return true;
 }
 
@@ -5474,8 +5442,11 @@ static double gpu_draw_text(RenCache *rc, RenSurface *surface, RenFont **fonts, 
     gpu_abort("SDLGPU native text command buffer unavailable");
   if (!gpu_flush_window_batches(text_context.window_data, GPU_BATCH_QUEUE_ALL & ~GPU_BATCH_QUEUE_TEXT))
     gpu_abort("SDLGPU native batch flush before text failed");
-  text_context.collect_overlay = gpu_native_text_supported(text_context.window_data->device)
-      && text_context.window_data->frame.texture;
+  GpuWindowData *data = text_context.window_data;
+  text_context.device = data->device;
+  text_context.command_buffer = data->command_buffer;
+  text_context.target_frame = &data->frame;
+  text_context.collect_overlay = gpu_native_text_supported(data->device) && data->frame.texture;
   if (!text_context.collect_overlay)
     gpu_abort("SDLGPU native text pipeline unavailable");
   double end_x = ren_draw_text_cb_ex(
@@ -5483,11 +5454,9 @@ static double gpu_draw_text(RenCache *rc, RenSurface *surface, RenFont **fonts, 
   );
   bool used_native = gpu_queue_text_batch(&text_context);
   SDL_free(text_context.glyphs);
-  if (!used_native && text_context.have_dirty_rect)
+  if (!used_native && text_context.glyph_count > 0)
     gpu_abort("SDLGPU native text queue failed");
   if (style & (FONT_STYLE_UNDERLINE | FONT_STYLE_STRIKETHROUGH)) {
-    RenWindow *ren = rc->target;
-    GpuWindowData *data = ren->backend_data;
     if (!gpu_flush_pending_text_barrier(data))
       gpu_abort("SDLGPU native text flush before decorations failed");
     int height = ren_font_group_get_height(fonts);
