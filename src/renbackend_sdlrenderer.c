@@ -7,27 +7,7 @@
 typedef struct {
   SDL_Renderer *renderer;
   SDL_Texture *texture;
-  Uint64 stats_frames;
-  Uint64 stats_update_calls;
-  Uint64 stats_individual_uploads;
-  Uint64 stats_bounded_uploads;
-  Uint64 stats_full_uploads;
-  Uint64 stats_uploaded_bytes;
 } SdlRendererWindowData;
-
-static bool sdlrenderer_env_flag(const char *name, bool fallback) {
-  const char *value = SDL_getenv(name);
-  if (!value || !*value)
-    return fallback;
-  return SDL_strcasecmp(value, "0") != 0
-      && SDL_strcasecmp(value, "false") != 0
-      && SDL_strcasecmp(value, "no") != 0
-      && SDL_strcasecmp(value, "off") != 0;
-}
-
-static bool sdlrenderer_stats_enabled(void) {
-  return sdlrenderer_env_flag("PRAGTICAL_SDLRENDERER_STATS", false);
-}
 
 static SdlRendererWindowData *sdlrenderer_window_data(RenWindow *ren) {
   if (!ren->backend_data) {
@@ -38,22 +18,6 @@ static SdlRendererWindowData *sdlrenderer_window_data(RenWindow *ren) {
     }
   }
   return ren->backend_data;
-}
-
-static void sdlrenderer_print_stats(SdlRendererWindowData *data) {
-  if (!data || !sdlrenderer_stats_enabled() || data->stats_frames == 0)
-    return;
-
-  fprintf(
-    stderr,
-    "sdlrenderer stats: frames=%llu update_calls=%llu individual_uploads=%llu bounded_uploads=%llu full_uploads=%llu uploaded_bytes=%llu\n",
-    (unsigned long long) data->stats_frames,
-    (unsigned long long) data->stats_update_calls,
-    (unsigned long long) data->stats_individual_uploads,
-    (unsigned long long) data->stats_bounded_uploads,
-    (unsigned long long) data->stats_full_uploads,
-    (unsigned long long) data->stats_uploaded_bytes
-  );
 }
 
 static void sdlrenderer_query_surface_scale(RenWindow *ren, float *scale_x, float *scale_y) {
@@ -147,7 +111,6 @@ static void sdlrenderer_resize_window(RenWindow *ren) {
 static void sdlrenderer_destroy_window(RenWindow *ren) {
   SdlRendererWindowData *data = ren->backend_data;
   if (data) {
-    sdlrenderer_print_stats(data);
     sdlrenderer_destroy_texture(data);
     if (data->renderer)
       SDL_DestroyRenderer(data->renderer);
@@ -248,8 +211,6 @@ static void sdlrenderer_upload_rect(
     + rect.y * surface->pitch
     + rect.x * bytes_per_pixel;
   SDL_UpdateTexture(data->texture, &rect, pixels, surface->pitch);
-  data->stats_update_calls++;
-  data->stats_uploaded_bytes += (Uint64) rect.w * (Uint64) rect.h * (Uint64) bytes_per_pixel;
 }
 
 static void sdlrenderer_present_window_rects(RenCache *cache, RenRect *rects, int count) {
@@ -281,10 +242,8 @@ static void sdlrenderer_present_window_rects(RenCache *cache, RenRect *rects, in
     if (full_upload) {
       SDL_Rect full = { .x = 0, .y = 0, .w = surface->w, .h = surface->h };
       sdlrenderer_upload_rect(cache, data, full);
-      data->stats_full_uploads++;
     } else if (bounded_upload) {
       sdlrenderer_upload_rect(cache, data, bounds);
-      data->stats_bounded_uploads++;
     } else {
       for (int i = 0; i < count; i++) {
         SDL_Rect rect = sdlrenderer_scale_rect(cache, rects[i]);
@@ -292,11 +251,9 @@ static void sdlrenderer_present_window_rects(RenCache *cache, RenRect *rects, in
           continue;
         sdlrenderer_upload_rect(cache, data, rect);
       }
-      data->stats_individual_uploads += (Uint64) upload_count;
     }
   }
 
-  data->stats_frames++;
   SDL_RenderTexture(data->renderer, data->texture, NULL, NULL);
   SDL_RenderPresent(data->renderer);
   if (!ren->shown) {
