@@ -202,6 +202,7 @@ top:
     case SDL_EVENT_WINDOW_EXPOSED:
       {
         RenWindow* window_renderer = ren_find_window_from_id(e.window.windowID);
+        if(!window_renderer) return 0;
         rencache_invalidate(&window_renderer->cache);
         lua_pushstring(L, "exposed");
         return 1;

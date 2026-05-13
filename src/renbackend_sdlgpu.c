@@ -946,6 +946,16 @@ static void gpu_bind_batch_pipeline(
   }
 }
 
+static void gpu_bind_fragment_sampler(
+  SDL_GPURenderPass *pass, SDL_GPUTexture *texture, SDL_GPUSampler *sampler
+) {
+  SDL_GPUTextureSamplerBinding binding;
+  SDL_zero(binding);
+  binding.texture = texture;
+  binding.sampler = sampler;
+  SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+}
+
 static Uint32 gpu_emit_texture_quad(
   GpuTextureQuadVertex *vertices, SDL_Rect dst, float u0, float v0, float u1, float v1
 ) {
@@ -1895,11 +1905,7 @@ static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *c
     );
     gpu_bind_batch_vertex_buffer(pass, data->frame.quad_vertex_buffer);
 
-    SDL_GPUTextureSamplerBinding sampler_binding;
-    SDL_zero(sampler_binding);
-    sampler_binding.texture = data->pixels_texture;
-    sampler_binding.sampler = gpu_canvas_sampler;
-    SDL_BindGPUFragmentSamplers(pass, 0, &sampler_binding, 1);
+    gpu_bind_fragment_sampler(pass, data->pixels_texture, gpu_canvas_sampler);
     SDL_DrawGPUPrimitives(pass, vertex_count, 1, 0, 0);
     SDL_EndGPURenderPass(pass);
   }
@@ -3347,11 +3353,6 @@ static bool gpu_draw_solid_rect_to_bridge(
   SDL_SetGPUViewport(pass, &viewport);
   SDL_SetGPUScissor(pass, &dst);
 
-  SDL_GPUTextureSamplerBinding binding;
-  SDL_zero(binding);
-  binding.texture = gpu_solid_white_texture;
-  binding.sampler = gpu_text_sampler;
-
   GpuTextVertexUniforms vertex_uniforms = {
     .dst = { dst.x, dst.y, dst.w, dst.h },
     .uv = { 0, 0, 1, 1 },
@@ -3370,7 +3371,7 @@ static bool gpu_draw_solid_rect_to_bridge(
   SDL_BindGPUGraphicsPipeline(pass, replace ? gpu_text_replace_pipeline : gpu_text_pipeline);
   SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
   SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
-  SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+  gpu_bind_fragment_sampler(pass, gpu_solid_white_texture, gpu_text_sampler);
   SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
   SDL_EndGPURenderPass(pass);
   return true;
@@ -3493,11 +3494,6 @@ static bool gpu_draw_validation_probe(GpuWindowData *data, SDL_GPUCommandBuffer 
   SDL_SetGPUViewport(pass, &viewport);
   SDL_SetGPUScissor(pass, &rect);
 
-  SDL_GPUTextureSamplerBinding binding;
-  SDL_zero(binding);
-  binding.texture = gpu_solid_white_texture;
-  binding.sampler = gpu_text_sampler;
-
   GpuTextVertexUniforms vertex_uniforms = {
     .dst = { rect.x, rect.y, rect.w, rect.h },
     .uv = { 0, 0, 1, 1 },
@@ -3511,7 +3507,7 @@ static bool gpu_draw_validation_probe(GpuWindowData *data, SDL_GPUCommandBuffer 
   SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
   SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
   SDL_BindGPUGraphicsPipeline(pass, gpu_text_pipeline);
-  SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+  gpu_bind_fragment_sampler(pass, gpu_solid_white_texture, gpu_text_sampler);
   SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
   SDL_EndGPURenderPass(pass);
 
@@ -3745,16 +3741,11 @@ static bool gpu_draw_text_batches_to_bridge(
 
     gpu_bind_batch_pipeline(pass, run->material, &bound_pipeline);
 
-    SDL_GPUTextureSamplerBinding sampler_binding;
-    SDL_zero(sampler_binding);
-    sampler_binding.texture = run->material.texture;
-    sampler_binding.sampler = run->material.sampler;
-
     GpuTextBatchFragmentUniforms fragment_uniforms = {
       .format = run->material.glyph_format,
     };
     SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
-    SDL_BindGPUFragmentSamplers(pass, 0, &sampler_binding, 1);
+    gpu_bind_fragment_sampler(pass, run->material.texture, run->material.sampler);
     SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
   }
 
@@ -3840,11 +3831,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
 
     gpu_bind_batch_pipeline(pass, run->material, &bound_pipeline);
 
-    SDL_GPUTextureSamplerBinding sampler_binding;
-    SDL_zero(sampler_binding);
-    sampler_binding.texture = run->material.texture;
-    sampler_binding.sampler = run->material.sampler;
-    SDL_BindGPUFragmentSamplers(pass, 0, &sampler_binding, 1);
+    gpu_bind_fragment_sampler(pass, run->material.texture, run->material.sampler);
     SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
   }
 
@@ -3980,11 +3967,6 @@ static bool gpu_blit_texture_to_bridge(
   SDL_Rect scissor = { .x = x1, .y = y1, .w = x2 - x1, .h = y2 - y1 };
   SDL_SetGPUScissor(pass, &scissor);
 
-  SDL_GPUTextureSamplerBinding binding;
-  SDL_zero(binding);
-  binding.texture = src->texture;
-  binding.sampler = gpu_canvas_sampler;
-
   GpuTextVertexUniforms vertex_uniforms = {
     .dst = { x1, y1, x2 - x1, y2 - y1 },
     .uv = {
@@ -3998,7 +3980,7 @@ static bool gpu_blit_texture_to_bridge(
 
   SDL_BindGPUGraphicsPipeline(pass, pipeline);
   SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
-  SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+  gpu_bind_fragment_sampler(pass, src->texture, gpu_canvas_sampler);
   SDL_DrawGPUPrimitives(pass, 6, 1, 0, 0);
   SDL_EndGPURenderPass(pass);
   if (replace_pipeline)
