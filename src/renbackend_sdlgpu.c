@@ -432,10 +432,10 @@ typedef struct {
 } GpuRectVertex;
 
 typedef struct {
-  float x, y;
-  float u, v;
+  float dst[4];
+  float uv[4];
   float color[4];
-} GpuTextBatchVertex;
+} GpuTextBatchInstance;
 
 typedef struct {
   GpuWindowData *window_data;
@@ -1073,20 +1073,22 @@ static Uint32 gpu_emit_rect_quad(GpuRectVertex *vertices, SDL_Rect rect, const f
   return 6;
 }
 
-static Uint32 gpu_emit_text_quad(
-  GpuTextBatchVertex *vertices, SDL_Rect dst, float u0, float v0, float u1, float v1, const float color[4]
+static Uint32 gpu_emit_text_instance(
+  GpuTextBatchInstance *instance, SDL_Rect dst, float u0, float v0, float u1, float v1, const float color[4]
 ) {
-  float x0 = dst.x;
-  float y0 = dst.y;
-  float x1 = dst.x + dst.w;
-  float y1 = dst.y + dst.h;
-  vertices[0] = (GpuTextBatchVertex) { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } };
-  vertices[1] = (GpuTextBatchVertex) { x1, y0, u1, v0, { color[0], color[1], color[2], color[3] } };
-  vertices[2] = (GpuTextBatchVertex) { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } };
-  vertices[3] = (GpuTextBatchVertex) { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } };
-  vertices[4] = (GpuTextBatchVertex) { x1, y1, u1, v1, { color[0], color[1], color[2], color[3] } };
-  vertices[5] = (GpuTextBatchVertex) { x0, y1, u0, v1, { color[0], color[1], color[2], color[3] } };
-  return 6;
+  instance->dst[0] = dst.x;
+  instance->dst[1] = dst.y;
+  instance->dst[2] = dst.w;
+  instance->dst[3] = dst.h;
+  instance->uv[0] = u0;
+  instance->uv[1] = v0;
+  instance->uv[2] = u1;
+  instance->uv[3] = v1;
+  instance->color[0] = color[0];
+  instance->color[1] = color[1];
+  instance->color[2] = color[2];
+  instance->color[3] = color[3];
+  return 1;
 }
 
 static Uint32 gpu_emit_texture_quad(
@@ -3072,23 +3074,23 @@ static SDL_GPUGraphicsPipeline *gpu_create_text_batch_graphics_pipeline(SDL_GPUD
   SDL_GPUVertexBufferDescription vertex_buffer;
   SDL_zero(vertex_buffer);
   vertex_buffer.slot = 0;
-  vertex_buffer.pitch = sizeof(GpuTextBatchVertex);
-  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
+  vertex_buffer.pitch = sizeof(GpuTextBatchInstance);
+  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE;
 
   SDL_GPUVertexAttribute vertex_attributes[3];
   SDL_zeroa(vertex_attributes);
   vertex_attributes[0].location = 0;
   vertex_attributes[0].buffer_slot = 0;
-  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
   vertex_attributes[0].offset = 0;
   vertex_attributes[1].location = 1;
   vertex_attributes[1].buffer_slot = 0;
-  vertex_attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
-  vertex_attributes[1].offset = offsetof(GpuTextBatchVertex, u);
+  vertex_attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+  vertex_attributes[1].offset = offsetof(GpuTextBatchInstance, uv);
   vertex_attributes[2].location = 2;
   vertex_attributes[2].buffer_slot = 0;
   vertex_attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
-  vertex_attributes[2].offset = offsetof(GpuTextBatchVertex, color);
+  vertex_attributes[2].offset = offsetof(GpuTextBatchInstance, color);
 
   SDL_GPUColorTargetDescription color_target;
   SDL_zero(color_target);
@@ -3702,15 +3704,15 @@ static bool gpu_draw_text_batches_to_bridge(
 
   GpuBatchRun *runs = gpu_ensure_batch_runs(frame, glyph_count);
 
-  Uint32 max_vertices = (Uint32) glyph_count * 6;
-  Uint32 upload_size = max_vertices * sizeof(GpuTextBatchVertex);
+  Uint32 max_instances = (Uint32) glyph_count;
+  Uint32 upload_size = max_instances * sizeof(GpuTextBatchInstance);
   gpu_ensure_bridge_text_buffers(device, frame, upload_size);
 
-  GpuTextBatchVertex *vertices = SDL_MapGPUTransferBuffer(device, frame->text_transfer, true);
-  if (!vertices)
+  GpuTextBatchInstance *instances = SDL_MapGPUTransferBuffer(device, frame->text_transfer, true);
+  if (!instances)
     return false;
 
-  Uint32 vertex_count = 0;
+  Uint32 instance_count = 0;
   int run_count = 0;
 
   for (int i = 0; i < glyph_count; i++) {
@@ -3749,22 +3751,24 @@ static bool gpu_draw_text_batches_to_bridge(
     gpu_color_to_float(glyph->color, color);
 
     GpuBatchRun *run = gpu_batch_append_run(
-      runs, &run_count, gpu_text_batch_material(glyph->texture, glyph->format), vertex_count
+      runs, &run_count, gpu_text_batch_material(glyph->texture, glyph->format), instance_count
     );
 
-    Uint32 quad_vertices = gpu_emit_text_quad(vertices + vertex_count, clipped, u0, v0, u1, v1, color);
-    vertex_count += quad_vertices;
-    run->vertex_count += quad_vertices;
+    Uint32 emitted_instances = gpu_emit_text_instance(
+      instances + instance_count, clipped, u0, v0, u1, v1, color
+    );
+    instance_count += emitted_instances;
+    run->vertex_count += emitted_instances;
   }
 
   SDL_UnmapGPUTransferBuffer(device, frame->text_transfer);
 
-  if (vertex_count == 0) {
+  if (instance_count == 0) {
     return true;
   }
 
   gpu_upload_batch_vertices(
-    cmd, frame->text_transfer, frame->text_vertex_buffer, vertex_count * sizeof(GpuTextBatchVertex)
+    cmd, frame->text_transfer, frame->text_vertex_buffer, instance_count * sizeof(GpuTextBatchInstance)
   );
 
   SDL_Rect target_clip = { .x = 0, .y = 0, .w = surface->w, .h = surface->h };
@@ -3787,7 +3791,7 @@ static bool gpu_draw_text_batches_to_bridge(
     };
     SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
     gpu_bind_fragment_sampler(pass, run->material.texture, run->material.sampler);
-    SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
+    SDL_DrawGPUPrimitives(pass, 6, run->vertex_count, 0, run->first_vertex);
   }
 
   SDL_EndGPURenderPass(pass);
