@@ -153,6 +153,7 @@ typedef struct {
   GpuWindowData *prev_active_frame_window_data;
   bool surface_valid;
   bool texture_valid;
+  bool region_active;
   bool region_modified;
 } GpuCanvasData;
 
@@ -4020,8 +4021,11 @@ static void gpu_end_frame(UNUSED RenCache *cache, UNUSED RenRect *rects, UNUSED 
 }
 
 static void gpu_submit_canvas_region_command(GpuCanvasData *data) {
-  if (!data || !data->command_buffer)
+  if (!data || !data->command_buffer) {
+    if (data)
+      data->region_modified = false;
     return;
+  }
 
   SDL_GPUCommandBuffer *cmd = data->command_buffer;
   data->command_buffer = NULL;
@@ -4046,25 +4050,34 @@ static void gpu_submit_canvas_region_command(GpuCanvasData *data) {
   }
 }
 
+static SDL_GPUCommandBuffer *gpu_begin_canvas_region_command(GpuCanvasData *data) {
+  if (!data)
+    return NULL;
+  if (data->command_buffer)
+    return data->command_buffer;
+  if (!data->device)
+    data->device = gpu_retain_device();
+
+  data->command_buffer = SDL_AcquireGPUCommandBuffer(data->device);
+  if (!data->command_buffer)
+    gpu_abort("SDL_AcquireGPUCommandBuffer failed");
+  data->prev_active_frame_device = gpu_active_frame_device;
+  data->prev_active_frame_command_buffer = gpu_active_frame_command_buffer;
+  data->prev_active_frame_window_data = gpu_active_frame_window_data;
+  gpu_active_frame_device = data->device;
+  gpu_active_frame_command_buffer = data->command_buffer;
+  gpu_active_frame_window_data = NULL;
+  gpu_sync_canvas_texture(data, data->command_buffer);
+  return data->command_buffer;
+}
+
 static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, bool native_only) {
   if (!cache->window_target) {
     GpuCanvasData *data = cache->backend_data;
-    if (!data || data->command_buffer)
-      return;
-    if (!data->device)
-      data->device = gpu_retain_device();
-
-    data->command_buffer = SDL_AcquireGPUCommandBuffer(data->device);
-    if (!data->command_buffer)
-      gpu_abort("SDL_AcquireGPUCommandBuffer failed");
-    data->region_modified = false;
-    data->prev_active_frame_device = gpu_active_frame_device;
-    data->prev_active_frame_command_buffer = gpu_active_frame_command_buffer;
-    data->prev_active_frame_window_data = gpu_active_frame_window_data;
-    gpu_active_frame_device = data->device;
-    gpu_active_frame_command_buffer = data->command_buffer;
-    gpu_active_frame_window_data = NULL;
-    gpu_sync_canvas_texture(data, data->command_buffer);
+    if (data) {
+      data->region_active = true;
+      data->region_modified = false;
+    }
     return;
   }
 
@@ -4078,6 +4091,8 @@ static void gpu_end_region(RenCache *cache, UNUSED RenRect rect, UNUSED bool nat
   if (!cache->window_target) {
     GpuCanvasData *data = cache->backend_data;
     gpu_submit_canvas_region_command(data);
+    if (data)
+      data->region_active = false;
     return;
   }
 
@@ -4434,6 +4449,10 @@ static SDL_GPUCommandBuffer *gpu_canvas_command_buffer(GpuCanvasData *data, bool
   if (data->command_buffer) {
     *owned = false;
     return data->command_buffer;
+  }
+  if (data->region_active) {
+    *owned = false;
+    return gpu_begin_canvas_region_command(data);
   }
 
   SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(data->device);
