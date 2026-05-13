@@ -3729,14 +3729,16 @@ static bool gpu_draw_text_batches_to_bridge(
   SDL_GPURenderPass *pass = gpu_begin_batch_render_pass(
     cmd, frame->texture, frame->texture_w, frame->texture_h, &target_clip
   );
-  SDL_BindGPUGraphicsPipeline(pass, gpu_text_batch_pipeline);
 
   gpu_bind_batch_vertex_buffer(pass, frame->text_vertex_buffer);
 
+  SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   for (int i = 0; i < run_count; i++) {
     GpuBatchRun *run = &runs[i];
     if (run->vertex_count == 0)
       continue;
+
+    gpu_bind_batch_pipeline(pass, run->material, &bound_pipeline);
 
     SDL_GPUTextureSamplerBinding sampler_binding;
     SDL_zero(sampler_binding);
