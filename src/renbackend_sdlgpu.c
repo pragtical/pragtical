@@ -973,6 +973,13 @@ static void gpu_bind_fragment_sampler(
   SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
 }
 
+static void gpu_color_to_float(RenColor color, float out[4]) {
+  out[0] = (float) color.r / 255.0f;
+  out[1] = (float) color.g / 255.0f;
+  out[2] = (float) color.b / 255.0f;
+  out[3] = (float) color.a / 255.0f;
+}
+
 static Uint32 gpu_emit_texture_quad(
   GpuTextureQuadVertex *vertices, SDL_Rect dst, float u0, float v0, float u1, float v1
 ) {
@@ -2203,14 +2210,8 @@ static bool gpu_draw_poly_vertices_to_bridge(
 
   gpu_bind_batch_vertex_buffer(pass, frame->poly_vertex_buffer);
 
-  GpuPolyFragmentUniforms fragment_uniforms = {
-    .color = {
-      (float) color.r / 255.0f,
-      (float) color.g / 255.0f,
-      (float) color.b / 255.0f,
-      (float) color.a / 255.0f,
-    },
-  };
+  GpuPolyFragmentUniforms fragment_uniforms;
+  gpu_color_to_float(color, fragment_uniforms.color);
   SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
   SDL_DrawGPUPrimitives(pass, vertex_count, 1, 0, 0);
   SDL_EndGPURenderPass(pass);
@@ -2306,14 +2307,8 @@ static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cm
     if (poly->vertex_count == 0 || poly->clip.w <= 0 || poly->clip.h <= 0)
       continue;
 
-    GpuPolyFragmentUniforms fragment_uniforms = {
-      .color = {
-        (float) poly->color.r / 255.0f,
-        (float) poly->color.g / 255.0f,
-        (float) poly->color.b / 255.0f,
-        (float) poly->color.a / 255.0f,
-      },
-    };
+    GpuPolyFragmentUniforms fragment_uniforms;
+    gpu_color_to_float(poly->color, fragment_uniforms.color);
     SDL_SetGPUScissor(pass, &poly->clip);
     SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
     SDL_DrawGPUPrimitives(pass, poly->vertex_count, 1, poly->first_vertex, 0);
@@ -3281,12 +3276,8 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     float y0 = native->rect.y;
     float x1 = native->rect.x + native->rect.w;
     float y1 = native->rect.y + native->rect.h;
-    float color[4] = {
-      (float) native->color.r / 255.0f,
-      (float) native->color.g / 255.0f,
-      (float) native->color.b / 255.0f,
-      (float) native->color.a / 255.0f,
-    };
+    float color[4];
+    gpu_color_to_float(native->color, color);
     const GpuRectVertex quad[6] = {
       { x0, y0, { color[0], color[1], color[2], color[3] } },
       { x1, y0, { color[0], color[1], color[2], color[3] } },
@@ -3364,14 +3355,9 @@ static bool gpu_draw_solid_rect_to_bridge(
     .target = { frame->texture_w, frame->texture_h, 0, 0 },
   };
   GpuTextFragmentUniforms fragment_uniforms = {
-    .color = {
-      (float) color.r / 255.0f,
-      (float) color.g / 255.0f,
-      (float) color.b / 255.0f,
-      (float) color.a / 255.0f,
-    },
     .format = EGlyphFormatGrayscale,
   };
+  gpu_color_to_float(color, fragment_uniforms.color);
 
   SDL_BindGPUGraphicsPipeline(pass, replace ? gpu_text_replace_pipeline : gpu_text_pipeline);
   SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
@@ -3684,12 +3670,8 @@ static bool gpu_draw_text_batches_to_bridge(
     float v0 = (float) (src_y + clipped.y - dst.y) / (float) texture->texture_h;
     float u1 = (float) (glyph->src_x + clipped.x - dst.x + clipped.w) / (float) texture->texture_w;
     float v1 = (float) (src_y + clipped.y - dst.y + clipped.h) / (float) texture->texture_h;
-    float color[4] = {
-      (float) glyph->color.r / 255.0f,
-      (float) glyph->color.g / 255.0f,
-      (float) glyph->color.b / 255.0f,
-      (float) glyph->color.a / 255.0f,
-    };
+    float color[4];
+    gpu_color_to_float(glyph->color, color);
 
     GpuBatchRun *run = gpu_batch_append_run(
       runs, &run_count, gpu_text_batch_material(texture->texture, glyph->format), vertex_count
