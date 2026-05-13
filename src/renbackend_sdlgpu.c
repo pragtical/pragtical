@@ -946,6 +946,25 @@ static void gpu_bind_batch_pipeline(
   }
 }
 
+static Uint32 gpu_emit_texture_quad(
+  GpuTextureQuadVertex *vertices, SDL_Rect dst, float u0, float v0, float u1, float v1
+) {
+  float x0 = dst.x;
+  float y0 = dst.y;
+  float x1 = dst.x + dst.w;
+  float y1 = dst.y + dst.h;
+  GpuTextureQuadVertex quad[6] = {
+    { x0, y0, u0, v0 },
+    { x1, y0, u1, v0 },
+    { x1, y1, u1, v1 },
+    { x0, y0, u0, v0 },
+    { x1, y1, u1, v1 },
+    { x0, y1, u0, v1 },
+  };
+  SDL_memcpy(vertices, quad, sizeof(quad));
+  return SDL_arraysize(quad);
+}
+
 static bool gpu_color_equal(RenColor a, RenColor b) {
   return a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
 }
@@ -1853,24 +1872,11 @@ static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *c
   Uint32 vertex_count = 0;
   for (int i = 0; i < data->pending_pixel_count; i++) {
     GpuQueuedPixels *pixels = &data->pending_pixels[i];
-    float x0 = pixels->dst.x;
-    float y0 = pixels->dst.y;
-    float x1 = pixels->dst.x + pixels->dst.w;
-    float y1 = pixels->dst.y + pixels->dst.h;
     float u0 = 0.0f;
     float v0 = (float) pixels->atlas_y / (float) data->pixels_texture_h;
     float u1 = (float) pixels->dst.w / (float) data->pixels_texture_w;
     float v1 = (float) (pixels->atlas_y + pixels->dst.h) / (float) data->pixels_texture_h;
-    GpuTextureQuadVertex quad[6] = {
-      { x0, y0, u0, v0 },
-      { x1, y0, u1, v0 },
-      { x1, y1, u1, v1 },
-      { x0, y0, u0, v0 },
-      { x1, y1, u1, v1 },
-      { x0, y1, u0, v1 },
-    };
-    SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
-    vertex_count += SDL_arraysize(quad);
+    vertex_count += gpu_emit_texture_quad(vertices + vertex_count, pixels->dst, u0, v0, u1, v1);
   }
   SDL_UnmapGPUTransferBuffer(data->device, data->frame.quad_transfer);
 
@@ -3800,21 +3806,11 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
       runs, &run_count, gpu_canvas_batch_material(canvas->texture, canvas->mode), vertex_count
     );
 
-    float x0 = canvas->dst.x;
-    float y0 = canvas->dst.y;
-    float x1 = canvas->dst.x + canvas->dst.w;
-    float y1 = canvas->dst.y + canvas->dst.h;
-    GpuTextureQuadVertex quad[6] = {
-      { x0, y0, canvas->u0, canvas->v0 },
-      { x1, y0, canvas->u1, canvas->v0 },
-      { x1, y1, canvas->u1, canvas->v1 },
-      { x0, y0, canvas->u0, canvas->v0 },
-      { x1, y1, canvas->u1, canvas->v1 },
-      { x0, y1, canvas->u0, canvas->v1 },
-    };
-    SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
-    vertex_count += SDL_arraysize(quad);
-    run->vertex_count += SDL_arraysize(quad);
+    Uint32 quad_vertices = gpu_emit_texture_quad(
+      vertices + vertex_count, canvas->dst, canvas->u0, canvas->v0, canvas->u1, canvas->v1
+    );
+    vertex_count += quad_vertices;
+    run->vertex_count += quad_vertices;
   }
 
   SDL_UnmapGPUTransferBuffer(data->device, data->frame.quad_transfer);
