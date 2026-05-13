@@ -81,6 +81,7 @@ typedef enum {
 typedef struct {
   GpuBatchPipeline pipeline;
   SDL_GPUTexture *texture;
+  SDL_GPUSampler *sampler;
   unsigned char glyph_format;
 } GpuBatchMaterial;
 
@@ -849,6 +850,7 @@ static Uint32 gpu_align_u32(Uint32 value, Uint32 alignment) {
 static bool gpu_batch_material_equal(GpuBatchMaterial a, GpuBatchMaterial b) {
   return a.pipeline == b.pipeline &&
     a.texture == b.texture &&
+    a.sampler == b.sampler &&
     a.glyph_format == b.glyph_format;
 }
 
@@ -877,6 +879,7 @@ static GpuBatchMaterial gpu_text_batch_material(SDL_GPUTexture *texture, unsigne
   return (GpuBatchMaterial) {
     .pipeline = GPU_BATCH_PIPELINE_TEXT,
     .texture = texture,
+    .sampler = gpu_text_sampler,
     .glyph_format = format,
   };
 }
@@ -887,6 +890,7 @@ static GpuBatchMaterial gpu_canvas_batch_material(SDL_GPUTexture *texture, GpuTe
       ? GPU_BATCH_PIPELINE_CANVAS_REPLACE
       : GPU_BATCH_PIPELINE_CANVAS_BLEND,
     .texture = texture,
+    .sampler = gpu_canvas_sampler,
     .glyph_format = 0,
   };
 }
@@ -895,6 +899,7 @@ static GpuBatchMaterial gpu_rect_batch_material(bool replace) {
   return (GpuBatchMaterial) {
     .pipeline = replace ? GPU_BATCH_PIPELINE_RECT_REPLACE : GPU_BATCH_PIPELINE_RECT_BLEND,
     .texture = NULL,
+    .sampler = NULL,
     .glyph_format = 0,
   };
 }
@@ -3721,7 +3726,7 @@ static bool gpu_draw_text_batches_to_bridge(
     SDL_GPUTextureSamplerBinding sampler_binding;
     SDL_zero(sampler_binding);
     sampler_binding.texture = run->material.texture;
-    sampler_binding.sampler = gpu_text_sampler;
+    sampler_binding.sampler = run->material.sampler;
 
     GpuTextBatchFragmentUniforms fragment_uniforms = {
       .format = run->material.glyph_format,
@@ -3859,7 +3864,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
     SDL_GPUTextureSamplerBinding sampler_binding;
     SDL_zero(sampler_binding);
     sampler_binding.texture = run->material.texture;
-    sampler_binding.sampler = gpu_canvas_sampler;
+    sampler_binding.sampler = run->material.sampler;
     SDL_BindGPUFragmentSamplers(pass, 0, &sampler_binding, 1);
     SDL_DrawGPUPrimitives(pass, run->vertex_count, 1, run->first_vertex, 0);
   }
