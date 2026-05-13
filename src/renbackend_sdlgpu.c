@@ -85,6 +85,12 @@ typedef struct {
 } GpuBatchMaterial;
 
 typedef struct {
+  GpuBatchMaterial material;
+  Uint32 first_vertex;
+  Uint32 vertex_count;
+} GpuBatchRun;
+
+typedef struct {
   SDL_Surface *surface;
   SDL_GPUTexture *texture;
   SDL_GPUTransferBuffer *transfer;
@@ -844,6 +850,19 @@ static bool gpu_batch_material_equal(GpuBatchMaterial a, GpuBatchMaterial b) {
   return a.pipeline == b.pipeline &&
     a.texture == b.texture &&
     a.glyph_format == b.glyph_format;
+}
+
+static GpuBatchRun *gpu_batch_append_run(
+  GpuBatchRun *runs, int *run_count, GpuBatchMaterial material, Uint32 first_vertex
+) {
+  if (*run_count == 0 || !gpu_batch_material_equal(runs[*run_count - 1].material, material)) {
+    runs[(*run_count)++] = (GpuBatchRun) {
+      .material = material,
+      .first_vertex = first_vertex,
+      .vertex_count = 0,
+    };
+  }
+  return &runs[*run_count - 1];
 }
 
 static bool gpu_color_equal(RenColor a, RenColor b) {
@@ -3094,12 +3113,6 @@ static bool gpu_ensure_solid_white_texture(SDL_GPUDevice *device, SDL_GPUCommand
   return true;
 }
 
-typedef struct {
-  GpuBatchMaterial material;
-  Uint32 first_vertex;
-  Uint32 vertex_count;
-} GpuRectBatchRun;
-
 static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuffer *cmd) {
   if (!data || data->pending_native_rect_count == 0)
     return true;
@@ -3128,7 +3141,7 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     return true;
   }
 
-  GpuRectBatchRun *runs = SDL_malloc((size_t) rect_count * sizeof(GpuRectBatchRun));
+  GpuBatchRun *runs = SDL_malloc((size_t) rect_count * sizeof(GpuBatchRun));
   if (!runs) {
     fprintf(stderr, "Error allocating SDL GPU rect batch runs\n");
     exit(1);
@@ -3152,14 +3165,9 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     if (native->rect.w <= 0 || native->rect.h <= 0)
       continue;
 
-    GpuBatchMaterial material = gpu_rect_batch_material(native->replace);
-    if (run_count == 0 || !gpu_batch_material_equal(runs[run_count - 1].material, material)) {
-      runs[run_count++] = (GpuRectBatchRun) {
-        .material = material,
-        .first_vertex = emitted_vertices,
-        .vertex_count = 0,
-      };
-    }
+    GpuBatchRun *run = gpu_batch_append_run(
+      runs, &run_count, gpu_rect_batch_material(native->replace), emitted_vertices
+    );
 
     float x0 = native->rect.x;
     float y0 = native->rect.y;
@@ -3182,7 +3190,7 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     SDL_memcpy(out, quad, sizeof(quad));
     out += SDL_arraysize(quad);
     emitted_vertices += SDL_arraysize(quad);
-    runs[run_count - 1].vertex_count += SDL_arraysize(quad);
+    run->vertex_count += SDL_arraysize(quad);
   }
   SDL_UnmapGPUTransferBuffer(data->device, data->rect_transfer);
 
@@ -3223,7 +3231,7 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
 
   SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   for (int i = 0; i < run_count; i++) {
-    GpuRectBatchRun *run = &runs[i];
+    GpuBatchRun *run = &runs[i];
     if (run->vertex_count == 0)
       continue;
 
@@ -3567,12 +3575,6 @@ static bool gpu_queue_text_batch(GpuTextDrawContext *ctx) {
   return true;
 }
 
-typedef struct {
-  GpuBatchMaterial material;
-  Uint32 first_vertex;
-  Uint32 vertex_count;
-} GpuTextBatchRun;
-
 static bool gpu_draw_text_batches_to_bridge(
   SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd, GpuFrameBridge *frame,
   SDL_Surface *surface, GpuQueuedGlyph *glyphs, int glyph_count,
@@ -3585,7 +3587,7 @@ static bool gpu_draw_text_batches_to_bridge(
   if (!gpu_ensure_text_batch_pipeline(device))
     return false;
 
-  GpuTextBatchRun *runs = SDL_malloc((size_t) glyph_count * sizeof(GpuTextBatchRun));
+  GpuBatchRun *runs = SDL_malloc((size_t) glyph_count * sizeof(GpuBatchRun));
   if (!runs) {
     fprintf(stderr, "Error allocating SDL GPU text batch runs\n");
     exit(1);
@@ -3648,14 +3650,9 @@ static bool gpu_draw_text_batches_to_bridge(
       (float) glyph->color.a / 255.0f,
     };
 
-    GpuBatchMaterial material = gpu_text_batch_material(texture->texture, glyph->format);
-    if (run_count == 0 || !gpu_batch_material_equal(runs[run_count - 1].material, material)) {
-      runs[run_count++] = (GpuTextBatchRun) {
-        .material = material,
-        .first_vertex = vertex_count,
-        .vertex_count = 0,
-      };
-    }
+    GpuBatchRun *run = gpu_batch_append_run(
+      runs, &run_count, gpu_text_batch_material(texture->texture, glyph->format), vertex_count
+    );
 
     GpuTextBatchVertex quad[6] = {
       { x0, y0, u0, v0, { color[0], color[1], color[2], color[3] } },
@@ -3667,7 +3664,7 @@ static bool gpu_draw_text_batches_to_bridge(
     };
     SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
     vertex_count += SDL_arraysize(quad);
-    runs[run_count - 1].vertex_count += SDL_arraysize(quad);
+    run->vertex_count += SDL_arraysize(quad);
   }
 
   SDL_UnmapGPUTransferBuffer(device, frame->text_transfer);
@@ -3717,7 +3714,7 @@ static bool gpu_draw_text_batches_to_bridge(
   SDL_PushGPUVertexUniformData(cmd, 0, &vertex_uniforms, sizeof(vertex_uniforms));
 
   for (int i = 0; i < run_count; i++) {
-    GpuTextBatchRun *run = &runs[i];
+    GpuBatchRun *run = &runs[i];
     if (run->vertex_count == 0)
       continue;
 
@@ -3739,12 +3736,6 @@ static bool gpu_draw_text_batches_to_bridge(
   return true;
 }
 
-typedef struct {
-  GpuBatchMaterial material;
-  Uint32 first_vertex;
-  Uint32 vertex_count;
-} GpuCanvasBatchRun;
-
 static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer *cmd) {
   if (!data || !cmd || !data->frame.texture || data->pending_canvas_count == 0)
     return true;
@@ -3761,7 +3752,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
   if (needs_replace_pipeline && !gpu_ensure_canvas_batch_replace_pipeline(data->device))
     return false;
 
-  GpuCanvasBatchRun *runs = SDL_malloc((size_t) data->pending_canvas_count * sizeof(GpuCanvasBatchRun));
+  GpuBatchRun *runs = SDL_malloc((size_t) data->pending_canvas_count * sizeof(GpuBatchRun));
   if (!runs) {
     fprintf(stderr, "Error allocating SDL GPU canvas batch runs\n");
     exit(1);
@@ -3784,14 +3775,9 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
     if (!canvas->texture || canvas->dst.w <= 0 || canvas->dst.h <= 0)
       continue;
 
-    GpuBatchMaterial material = gpu_canvas_batch_material(canvas->texture, canvas->mode);
-    if (run_count == 0 || !gpu_batch_material_equal(runs[run_count - 1].material, material)) {
-      runs[run_count++] = (GpuCanvasBatchRun) {
-        .material = material,
-        .first_vertex = vertex_count,
-        .vertex_count = 0,
-      };
-    }
+    GpuBatchRun *run = gpu_batch_append_run(
+      runs, &run_count, gpu_canvas_batch_material(canvas->texture, canvas->mode), vertex_count
+    );
 
     float x0 = canvas->dst.x;
     float y0 = canvas->dst.y;
@@ -3807,7 +3793,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
     };
     SDL_memcpy(vertices + vertex_count, quad, sizeof(quad));
     vertex_count += SDL_arraysize(quad);
-    runs[run_count - 1].vertex_count += SDL_arraysize(quad);
+    run->vertex_count += SDL_arraysize(quad);
   }
 
   SDL_UnmapGPUTransferBuffer(data->device, data->frame.quad_transfer);
@@ -3858,7 +3844,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
 
   SDL_GPUGraphicsPipeline *bound_pipeline = NULL;
   for (int i = 0; i < run_count; i++) {
-    GpuCanvasBatchRun *run = &runs[i];
+    GpuBatchRun *run = &runs[i];
     if (run->vertex_count == 0)
       continue;
 
