@@ -1346,15 +1346,12 @@ static Uint32 gpu_atlas_upload_size(SDL_Surface *surface, GlyphMetric *metric, U
   return *row_stride * (metric->y1 - metric->y0);
 }
 
-static GpuAtlasTexture *gpu_atlas_find_texture(GpuAtlasData *data, GlyphMetric *metric) {
+static GpuAtlasTexture *gpu_atlas_find_texture(GpuAtlasData *data, SDL_Surface *surface, GlyphMetric *metric) {
   for (size_t i = 0; i < data->texture_count; i++) {
     GpuAtlasTexture *texture = &data->textures[i];
     if (texture->format == metric->format
         && texture->atlas_idx == metric->atlas_idx
-        && texture->surface_idx == metric->surface_idx
-        && texture->x1 == metric->x1
-        && texture->y0 == metric->y0
-        && texture->y1 == metric->y1)
+        && texture->surface_idx == metric->surface_idx)
       return texture;
   }
 
@@ -1374,9 +1371,9 @@ static GpuAtlasTexture *gpu_atlas_find_texture(GpuAtlasData *data, GlyphMetric *
   texture->format = metric->format;
   texture->atlas_idx = metric->atlas_idx;
   texture->surface_idx = metric->surface_idx;
-  texture->x1 = metric->x1;
-  texture->y0 = metric->y0;
-  texture->y1 = metric->y1;
+  texture->x1 = surface->w;
+  texture->y0 = 0;
+  texture->y1 = surface->h;
   return texture;
 }
 
@@ -1388,18 +1385,15 @@ static GpuAtlasTexture *gpu_atlas_lookup_texture(RenAtlas *atlas, GlyphMetric *m
     GpuAtlasTexture *texture = &data->textures[i];
     if (texture->format == metric->format
         && texture->atlas_idx == metric->atlas_idx
-        && texture->surface_idx == metric->surface_idx
-        && texture->x1 == metric->x1
-        && texture->y0 == metric->y0
-        && texture->y1 == metric->y1)
+        && texture->surface_idx == metric->surface_idx)
       return texture;
   }
   return NULL;
 }
 
-static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *texture, GlyphMetric *metric) {
-  int width = metric->x1;
-  int height = metric->y1 - metric->y0;
+static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *texture, SDL_Surface *surface) {
+  int width = surface->w;
+  int height = surface->h;
   if (texture->texture && texture->texture_w == width && texture->texture_h == height)
     return;
 
@@ -1507,7 +1501,7 @@ static bool gpu_validate_atlas_upload(
   SDL_zero(source);
   source.texture = texture;
   source.x = 0;
-  source.y = 0;
+  source.y = metric->y0;
   source.w = metric->x1;
   source.h = height;
   source.d = 1;
@@ -1618,8 +1612,8 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
   if (!data->device)
     data->device = gpu_retain_device();
 
-  GpuAtlasTexture *texture = gpu_atlas_find_texture(data, metric);
-  gpu_atlas_ensure_texture(data->device, texture, metric);
+  GpuAtlasTexture *texture = gpu_atlas_find_texture(data, surface, metric);
+  gpu_atlas_ensure_texture(data->device, texture, surface);
 
   Uint32 row_stride = 0;
   Uint32 upload_size = gpu_atlas_upload_size(surface, metric, &row_stride);
@@ -1642,14 +1636,7 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
 
   SDL_GPUCommandBuffer *cmd = NULL;
   bool submit_upload = false;
-  bool sync_upload = false;
-  if (gpu_native_text_supported(data->device) && gpu_active_frame_device == data->device && gpu_active_frame_command_buffer) {
-    cmd = SDL_AcquireGPUCommandBuffer(data->device);
-    if (!cmd)
-      gpu_abort("SDL_AcquireGPUCommandBuffer failed");
-    submit_upload = true;
-    sync_upload = true;
-  } else if (gpu_active_frame_device == data->device && gpu_active_frame_command_buffer) {
+  if (gpu_active_frame_device == data->device && gpu_active_frame_command_buffer) {
     cmd = gpu_active_frame_command_buffer;
   } else {
     cmd = SDL_AcquireGPUCommandBuffer(data->device);
@@ -1669,7 +1656,7 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
   SDL_zero(destination);
   destination.texture = texture->texture;
   destination.x = 0;
-  destination.y = 0;
+  destination.y = metric->y0;
   destination.w = metric->x1;
   destination.h = metric->y1 - metric->y0;
   destination.d = 1;
@@ -1682,14 +1669,7 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
       data->device, texture->texture, surface, metric, cmd, row_stride
     );
     if (!submitted) {
-      if (sync_upload) {
-        SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
-        if (!fence)
-          gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
-        if (!SDL_WaitForGPUFences(data->device, true, &fence, 1))
-          gpu_abort("SDL_WaitForGPUFences failed");
-        SDL_ReleaseGPUFence(data->device, fence);
-      } else if (!SDL_SubmitGPUCommandBuffer(cmd)) {
+      if (!SDL_SubmitGPUCommandBuffer(cmd)) {
         gpu_abort("SDL_SubmitGPUCommandBuffer failed");
       }
     }
@@ -3739,14 +3719,10 @@ static bool gpu_draw_text_batches_to_bridge(
     if (!SDL_GetRectIntersection(&clipped, &glyph->clip, &clipped) || clipped.w <= 0 || clipped.h <= 0)
       continue;
 
-    int src_y = glyph->src_y - (int) glyph->metric.y0;
-    if (src_y < 0)
-      src_y = 0;
-
     float u0 = (float) (glyph->src_x + clipped.x - dst.x) / (float) glyph->texture_w;
-    float v0 = (float) (src_y + clipped.y - dst.y) / (float) glyph->texture_h;
+    float v0 = (float) (glyph->src_y + clipped.y - dst.y) / (float) glyph->texture_h;
     float u1 = (float) (glyph->src_x + clipped.x - dst.x + clipped.w) / (float) glyph->texture_w;
-    float v1 = (float) (src_y + clipped.y - dst.y + clipped.h) / (float) glyph->texture_h;
+    float v1 = (float) (glyph->src_y + clipped.y - dst.y + clipped.h) / (float) glyph->texture_h;
     float color[4];
     gpu_color_to_float(glyph->color, color);
 
