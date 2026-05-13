@@ -454,10 +454,6 @@ typedef struct {
   bool batch_pipeline_ready;
 } GpuTextDrawContext;
 
-typedef struct {
-  bool native_text;
-} GpuTextNativeCheck;
-
 static void gpu_abort(const char *message) {
   fprintf(stderr, "%s: %s\n", message, SDL_GetError());
   exit(1);
@@ -865,6 +861,16 @@ static void gpu_ensure_window_rect_buffers(GpuWindowData *data, Uint32 size) {
 
 static Uint32 gpu_align_u32(Uint32 value, Uint32 alignment) {
   return (value + alignment - 1) & ~(alignment - 1);
+}
+
+static Uint32 gpu_grow_upload_size(Uint32 current, Uint32 required, Uint32 minimum) {
+  Uint32 size = current > minimum ? current : minimum;
+  while (size < required) {
+    if (size > SDL_MAX_UINT32 / 2)
+      return required;
+    size *= 2;
+  }
+  return size;
 }
 
 static bool gpu_batch_material_equal(GpuBatchMaterial a, GpuBatchMaterial b) {
@@ -1525,6 +1531,8 @@ static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *tex
 static void gpu_atlas_ensure_transfer(SDL_GPUDevice *device, GpuAtlasTexture *texture, Uint32 size) {
   if (texture->transfer && texture->transfer_size >= size)
     return;
+
+  size = gpu_grow_upload_size(texture->transfer_size, size, 16 * 1024);
 
   if (texture->transfer)
     SDL_ReleaseGPUTransferBuffer(device, texture->transfer);
@@ -3748,14 +3756,6 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   return true;
 }
 
-static bool gpu_check_native_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
-  GpuTextNativeCheck *check = userdata;
-  if (glyph->format >= EGlyphFormatSize ||
-      !gpu_ensure_native_glyph_texture(NULL, glyph->atlas, glyph->metric))
-    check->native_text = false;
-  return true;
-}
-
 static GpuQueuedGlyph *gpu_append_pending_text_glyph(GpuWindowData *data) {
   if (data->pending_text_glyph_count >= data->pending_text_glyph_capacity) {
     int capacity = data->pending_text_glyph_capacity ? data->pending_text_glyph_capacity * 2 : 512;
@@ -5464,9 +5464,7 @@ static bool gpu_can_native_text(
       !gpu_ensure_solid_white_texture(data->device, data->command_buffer))
     return false;
 
-  GpuTextNativeCheck check = { .native_text = true };
-  ren_draw_text_cb_ex(surface, fonts, text, len, x, y, color, tab, gpu_check_native_text_glyph, &check, false);
-  return check.native_text;
+  return true;
 }
 
 static bool gpu_can_native_canvas(
