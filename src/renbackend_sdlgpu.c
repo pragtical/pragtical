@@ -4346,11 +4346,6 @@ static bool gpu_copy_canvas_native(RenCache *dst, RenCache *src, int x, int y, b
   bool clear_transparent_dst = !dst_data->texture_valid
       && gpu_bridge_has_pending_upload(&dst_data->frame)
       && gpu_surface_is_fully_transparent(dst_data->frame.surface);
-  if (source_needs_upload || !dst_data->texture_valid ||
-      gpu_bridge_has_pending_upload(&dst_data->frame)) {
-    if (!SDL_WaitForGPUIdle(dst_data->device))
-      gpu_abort("SDL_WaitForGPUIdle failed before SDLGPU canvas copy");
-  }
 
   GpuFrameBridge temp_src;
   SDL_zero(temp_src);
@@ -4385,12 +4380,6 @@ static bool gpu_copy_canvas_native(RenCache *dst, RenCache *src, int x, int y, b
     gpu_destroy_bridge_resources(dst_data->device, &temp_src);
     return false;
   }
-  if (!gpu_submit_and_wait(dst_data->device, cmd))
-    gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
-
-  cmd = SDL_AcquireGPUCommandBuffer(dst_data->device);
-  if (!cmd)
-    gpu_abort("SDL_AcquireGPUCommandBuffer failed");
 
   bool copied = gpu_blit_texture_to_bridge(
     dst_data->device,
