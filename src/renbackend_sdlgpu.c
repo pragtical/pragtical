@@ -857,10 +857,10 @@ static void gpu_atlas_copy_glyph_to_transfer(SDL_Surface *surface, GlyphMetric *
         dst_pixel[2] = src_pixel[2];
         dst_pixel[3] = src_pixel[3];
       } else if (metric->format == EGlyphFormatSubpixel) {
-        Uint8 coverage = (Uint8) (((int) src_pixel[0] + (int) src_pixel[1] + (int) src_pixel[2] + 1) / 3);
-        dst_pixel[0] = coverage;
-        dst_pixel[1] = coverage;
-        dst_pixel[2] = coverage;
+        Uint8 coverage = SDL_max(src_pixel[0], SDL_max(src_pixel[1], src_pixel[2]));
+        dst_pixel[0] = src_pixel[2];
+        dst_pixel[1] = src_pixel[1];
+        dst_pixel[2] = src_pixel[0];
         dst_pixel[3] = coverage;
       } else {
         dst_pixel[0] = src_pixel[0];
@@ -954,9 +954,9 @@ static bool gpu_validate_atlas_upload(
       } else if (metric->format == EGlyphFormatSubpixel) {
         const Uint8 *cpu_px = cpu_row + x * SDL_BYTESPERPIXEL(surface->format);
         Uint8 coverage = SDL_max(cpu_px[0], SDL_max(cpu_px[1], cpu_px[2]));
-        expected_b = coverage;
-        expected_g = coverage;
-        expected_r = coverage;
+        expected_b = cpu_px[2];
+        expected_g = cpu_px[1];
+        expected_r = cpu_px[0];
         expected_a = coverage;
       } else {
         expected_b = cpu_row[x * SDL_BYTESPERPIXEL(surface->format)];
@@ -2505,7 +2505,7 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
     .src_y = glyph->src_y,
     .width = glyph->width,
     .height = glyph->height,
-    .format = glyph->format == EGlyphFormatSubpixel ? EGlyphFormatGrayscale : glyph->format,
+    .format = glyph->format,
   };
   ctx->attempted_native = true;
   return true;
