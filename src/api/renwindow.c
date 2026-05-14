@@ -121,7 +121,7 @@ static int f_get_color(lua_State *L) {
   SDL_Surface *surface = rencache_get_surface(&window_renderer->cache).surface;
   SDL_Color color = {0, 0, 0, 255};
 
-  if (surface && x >= 0 && y >= 0 && x <= surface->w && y <= surface->h) {
+  if (surface && x >= 0 && y >= 0 && x < surface->w && y < surface->h) {
     Uint8 *pixels = (Uint8*)surface->pixels;
     int bpp = SDL_BYTESPERPIXEL(surface->format);
 
