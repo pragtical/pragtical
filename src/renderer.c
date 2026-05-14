@@ -2058,7 +2058,11 @@ static void ren_remove_window(RenWindow *window_renderer) {
   for (size_t i = 0; i < window_count; ++i) {
     if (window_list[i] == window_renderer) {
       window_count -= 1;
-      memmove(&window_list[i], &window_list[i+1], window_count - i);
+      memmove(
+        &window_list[i],
+        &window_list[i + 1],
+        (window_count - i) * sizeof(*window_list)
+      );
       return;
     }
   }
@@ -2167,7 +2171,7 @@ RenWindow* ren_find_window(SDL_Window *window) {
 
 RenWindow* ren_find_window_from_id(uint32_t id) {
   SDL_Window *window = SDL_GetWindowFromID(id);
-  return ren_find_window(window);
+  return window ? ren_find_window(window) : NULL;
 }
 
 RenWindow* ren_get_target_window(void) {
