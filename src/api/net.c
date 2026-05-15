@@ -186,7 +186,7 @@ static int f_open_tcp(lua_State* L) {
   unsigned short port = luaL_checkinteger(L, 2);
   bool ssl = lua_isnoneornil(L, 3) ? false : lua_toboolean(L, 3);
 
-  NET_StreamSocket* socket = NET_CreateClient(address->address, port);
+  NET_StreamSocket* socket = NET_CreateClient(address->address, port, 0);
 
   if (socket == NULL) {
     lua_pushnil(L);
@@ -263,7 +263,7 @@ static int f_open_udp(lua_State* L) {
   Address* address = (Address*) luaL_checkudata(L, 1, API_TYPE_NET_ADDRESS);
   unsigned short port = luaL_checkinteger(L, 2);
 
-  NET_DatagramSocket* socket = NET_CreateDatagramSocket(address->address, port);
+  NET_DatagramSocket* socket = NET_CreateDatagramSocket(address->address, port, 0);
 
   if (socket == NULL) {
     lua_pushnil(L);
@@ -295,7 +295,7 @@ static int f_create_server(lua_State* L) {
   }
 
   NET_Server* server = NET_CreateServer(
-    address ? address->address : NULL, port
+    address ? address->address : NULL, port, 0
   );
 
   if (server == NULL) {
@@ -514,7 +514,6 @@ static int m_tcp_get_address(lua_State* L) {
   Address* addr = (Address*) lua_newuserdata(L, sizeof(Address));
   addr->address = address;
   addr->hostname[0] = '\0';
-  NET_RefAddress(addr->address);
   luaL_setmetatable(L, API_TYPE_NET_ADDRESS);
 
   return 1;
