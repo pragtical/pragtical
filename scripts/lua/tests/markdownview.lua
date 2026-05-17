@@ -158,6 +158,52 @@ print("hello")
     test.equal(blocks[1].items[2].text, "Done task")
   end)
 
+  test.test("appends markdown incrementally at block boundaries", function()
+    local view = MarkdownView("# One\n\nFirst paragraph.\n\n")
+    local before_blocks = view.blocks
+    local before_first_block = view.blocks[1]
+
+    local incremental = view:append_markdown("## Two\n\nSecond paragraph with **bold**.\n")
+
+    test.equal(incremental, true)
+    test.equal(view.text, "# One\n\nFirst paragraph.\n\n## Two\n\nSecond paragraph with **bold**.\n")
+    test.equal(view.blocks, before_blocks)
+    test.equal(view.blocks[1], before_first_block)
+    test.equal(#view.blocks, 4)
+    test.equal(view.blocks[3].type, "heading")
+    test.equal(view.blocks[3].text, "Two")
+    test.equal(view.blocks[4].type, "paragraph")
+    test.equal(view.blocks[4].text, "Second paragraph with **bold**.")
+  end)
+
+  test.test("falls back to full parse when append continues a block", function()
+    local view = MarkdownView("First")
+    local before_blocks = view.blocks
+
+    local incremental = view:append_markdown(" paragraph")
+
+    test.equal(incremental, false)
+    test.equal(view.text, "First paragraph")
+    test.not_equal(view.blocks, before_blocks)
+    test.equal(#view.blocks, 1)
+    test.equal(view.blocks[1].type, "paragraph")
+    test.equal(view.blocks[1].text, "First paragraph")
+  end)
+
+  test.test("appends to existing layout when no footnotes need rebuilding", function()
+    local view = MarkdownView("# One\n\nFirst paragraph.\n\n")
+    view.size.x = 400
+    local layout = view:ensure_layout()
+    local before_commands = #layout.commands
+
+    local incremental = view:append_markdown("## Two\n\nSecond paragraph.\n")
+
+    test.equal(incremental, true)
+    test.equal(view.layout, layout)
+    test.ok(#view.layout.commands > before_commands)
+    test.equal(#view.blocks, 4)
+  end)
+
   test.test("parses nested list indentation", function()
     local blocks = MarkdownView.parse_blocks([[
 - Parent

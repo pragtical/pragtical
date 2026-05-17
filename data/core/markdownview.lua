@@ -75,6 +75,7 @@ local CODE_FENCE_SYNTAX_CACHE = {}
 local parse_inline
 local parse_inline_lines
 local extract_single_image
+local render_blocks
 
 local function make_style_color(key, fallback)
   return {
@@ -1642,6 +1643,7 @@ local function build_footnotes_block(footnotes)
   end
   return {
     type = "footnotes",
+    generated = true,
     items = items
   }
 end
@@ -2348,7 +2350,7 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
   return y + table_height + BLOCK_SPACING, total_width
 end
 
-local function render_blocks(self, commands, y, blocks, width, x_offset, fonts, accent_color, anchors)
+render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, accent_color, anchors)
   local content_width = 0
   x_offset = x_offset or 0
 
@@ -2884,6 +2886,103 @@ function MarkdownView:set_text(text)
   self.blocks, self.references, self.footnotes = parse_document(self.text)
   self:invalidate_layout()
 end
+
+local function has_incremental_append_boundary(existing_text, appended_text)
+  if existing_text == "" or appended_text == "" then
+    return true
+  end
+  return existing_text:match("\n%s*\n$") ~= nil
+    or (existing_text:match("\n$") and appended_text:match("^%s*\n")) ~= nil
+end
+
+local function remove_generated_footnotes_block(blocks)
+  local block = blocks[#blocks]
+  if block and block.type == "footnotes" and block.generated then
+    blocks[#blocks] = nil
+  end
+end
+
+local function append_blocks(target, source)
+  for _, block in ipairs(source) do
+    target[#target + 1] = block
+  end
+end
+
+local function append_layout_blocks(self, blocks)
+  local layout = self.layout
+  if not layout or #blocks == 0 then
+    return false
+  end
+
+  local width = math.max(self.size.x - style.padding.x * 2, 1)
+  if layout.width ~= width then
+    return false
+  end
+
+  local fonts = self:get_font_cache()
+  local y = layout.height > 0 and (layout.height + BLOCK_SPACING) or 0
+  local next_y, content_width = render_blocks(
+    self,
+    layout.commands,
+    y,
+    blocks,
+    width,
+    0,
+    fonts,
+    COLOR_ACCENT,
+    layout.anchors
+  )
+  layout.height = next_y > 0 and (next_y - BLOCK_SPACING) or 0
+  layout.content_width = math.max(layout.content_width, content_width)
+  return true
+end
+
+---Appends markdown to the preview, reparsing only the appended blocks when safe.
+---
+---Markdown can continue the previous block across a line boundary. When the
+---existing text and appended text do not meet at a blank block boundary, this
+---falls back to `set_text` so the rendered document remains equivalent.
+---@param text string?
+---@return boolean incremental True when only appended blocks were parsed.
+function MarkdownView:append_text(text)
+  text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  if text == "" then
+    return true
+  end
+
+  local existing_text = self.text or ""
+  if not has_incremental_append_boundary(existing_text, text) then
+    self:set_text(existing_text .. text)
+    return false
+  end
+
+  self.text = existing_text .. text
+  local had_footnotes_block = self.blocks[#self.blocks]
+    and self.blocks[#self.blocks].type == "footnotes"
+    and self.blocks[#self.blocks].generated
+  remove_generated_footnotes_block(self.blocks)
+
+  local state = {
+    references = self.references,
+    footnote_definitions = self.footnotes.definitions
+  }
+  local blocks = parse_blocks_from_lines(split_lines(text), state)
+  prepare_blocks(blocks, self.references, self.footnotes)
+  append_blocks(self.blocks, blocks)
+
+  local footnotes_block = build_footnotes_block(self.footnotes)
+  if footnotes_block then
+    prepare_blocks({ footnotes_block }, self.references, self.footnotes)
+    self.blocks[#self.blocks + 1] = footnotes_block
+  end
+
+  if had_footnotes_block or footnotes_block or not append_layout_blocks(self, blocks) then
+    self:invalidate_layout()
+  end
+  return true
+end
+
+MarkdownView.append_markdown = MarkdownView.append_text
 
 ---Refreshes preview contents from the bound document.
 function MarkdownView:refresh_from_doc()
