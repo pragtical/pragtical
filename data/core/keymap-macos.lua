@@ -51,7 +51,7 @@ local function keymap_macos(keymap)
     ["cmd+z"] = "doc:undo",
     ["cmd+y"] = "doc:redo",
     ["cmd+x"] = "doc:cut",
-    ["cmd+c"] = "doc:copy",
+    ["cmd+c"] = { "markdown-view:copy", "doc:copy" },
     ["cmd+v"] = "doc:paste",
     ["ctrl+insert"] = "doc:copy",
     ["shift+insert"] = "doc:paste",
