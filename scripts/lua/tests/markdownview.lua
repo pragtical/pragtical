@@ -158,6 +158,92 @@ print("hello")
     test.equal(blocks[1].items[2].text, "Done task")
   end)
 
+  test.test("appends markdown incrementally at block boundaries", function()
+    local view = MarkdownView("# One\n\nFirst paragraph.\n\n")
+    local before_blocks = view.blocks
+    local before_first_block = view.blocks[1]
+
+    local incremental = view:append_markdown("## Two\n\nSecond paragraph with **bold**.\n")
+
+    test.equal(incremental, true)
+    test.equal(view.text, "# One\n\nFirst paragraph.\n\n## Two\n\nSecond paragraph with **bold**.\n")
+    test.equal(view.blocks, before_blocks)
+    test.equal(view.blocks[1], before_first_block)
+    test.equal(#view.blocks, 4)
+    test.equal(view.blocks[3].type, "heading")
+    test.equal(view.blocks[3].text, "Two")
+    test.equal(view.blocks[4].type, "paragraph")
+    test.equal(view.blocks[4].text, "Second paragraph with **bold**.")
+  end)
+
+  test.test("falls back to full parse when append continues a block", function()
+    local view = MarkdownView("First")
+    local before_blocks = view.blocks
+
+    local incremental = view:append_markdown(" paragraph")
+
+    test.equal(incremental, false)
+    test.equal(view.text, "First paragraph")
+    test.not_equal(view.blocks, before_blocks)
+    test.equal(#view.blocks, 1)
+    test.equal(view.blocks[1].type, "paragraph")
+    test.equal(view.blocks[1].text, "First paragraph")
+  end)
+
+  test.test("renders partial text without mutating parsed markdown", function()
+    local view = MarkdownView("# Session\n\n## User\n\nHello")
+    view.size.x = 400
+    local before_blocks = view.blocks
+    local before_text = view.text
+    local before_height = view:get_scrollable_size()
+
+    view:set_partial_text("streaming **literal** text")
+
+    test.equal(view.text, before_text)
+    test.equal(view.blocks, before_blocks)
+    test.equal(view.partial_text, "streaming **literal** text")
+    test.ok(view:get_scrollable_size() > before_height)
+  end)
+
+  test.test("clears partial text without changing markdown", function()
+    local view = MarkdownView("# Session\n\n## Assistant\n\nHello")
+    local before_text = view.text
+
+    view:set_partial_text("temporary")
+    view:clear_partial_text()
+
+    test.equal(view.partial_text, nil)
+    test.equal(view.text, before_text)
+  end)
+
+  test.test("commits partial text as final markdown", function()
+    local view = MarkdownView("# Session\n\n## User\n\nHello")
+    view:set_partial_text("temporary **literal**")
+
+    local incremental = view:commit_partial_text("\n\n## Assistant\n\nHello **world**.")
+
+    test.equal(incremental, true)
+    test.equal(view.partial_text, nil)
+    test.equal(view.text:find("temporary", 1, true), nil)
+    test.equal(view.text:find("Hello **world**.", 1, true) ~= nil, true)
+    test.equal(view.blocks[#view.blocks].type, "paragraph")
+    test.equal(view.blocks[#view.blocks].text, "Hello **world**.")
+  end)
+
+  test.test("appends to existing layout when no footnotes need rebuilding", function()
+    local view = MarkdownView("# One\n\nFirst paragraph.\n\n")
+    view.size.x = 400
+    local layout = view:ensure_layout()
+    local before_commands = #layout.commands
+
+    local incremental = view:append_markdown("## Two\n\nSecond paragraph.\n")
+
+    test.equal(incremental, true)
+    test.equal(view.layout, layout)
+    test.ok(#view.layout.commands > before_commands)
+    test.equal(#view.blocks, 4)
+  end)
+
   test.test("parses nested list indentation", function()
     local blocks = MarkdownView.parse_blocks([[
 - Parent
