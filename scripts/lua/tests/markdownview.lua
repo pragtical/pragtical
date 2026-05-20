@@ -3,6 +3,7 @@ local core = require "core"
 local command = require "core.command"
 local config = require "core.config"
 local http = require "core.http"
+local keymap = require "core.keymap"
 local style = require "core.style"
 local test = require "core.test"
 local DocView = require "core.docview"
@@ -242,6 +243,172 @@ print("hello")
     test.equal(view.layout, layout)
     test.ok(#view.layout.commands > before_commands)
     test.equal(#view.blocks, 4)
+  end)
+
+  test.test("selects rendered text with the mouse", function()
+    local view = MarkdownView("# Title\n\nParagraph one")
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 400
+    view.size.y = 300
+    local layout = view:ensure_layout()
+    local paragraph_command
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        local text = {}
+        for _, fragment in ipairs(command.fragments) do
+          text[#text + 1] = fragment.text or ""
+        end
+        if table.concat(text) == "Paragraph one" then
+          paragraph_command = command
+          break
+        end
+      end
+    end
+
+    test.not_nil(paragraph_command)
+    local y = style.padding.y + paragraph_command.y + paragraph_command.height / 2
+    view:on_mouse_pressed("left", style.padding.x + paragraph_command.x, y, 1)
+    view:on_mouse_moved(style.padding.x + paragraph_command.x + 1000, y, 1000, 0)
+    view:on_mouse_released("left", style.padding.x + paragraph_command.x + 1000, y)
+
+    test.equal(view:get_selected_text(), "Paragraph one")
+  end)
+
+  test.test("copies selected rendered text", function()
+    local view = MarkdownView("# Title\n\nParagraph one")
+    view.size.x = 400
+    view.selection_anchor = 1
+    view.selection_cursor = 6
+
+    test.equal(view:copy_selection(), true)
+    test.equal(system.get_clipboard(), "Title")
+
+    local node = core.root_view:get_active_node_default()
+    node:add_view(view)
+    node:set_active_view(view)
+    system.set_clipboard("")
+    test.equal(command.perform("markdown-view:copy"), true)
+    test.equal(system.get_clipboard(), "Title")
+    local copy_shortcut = PLATFORM == "Mac OS X" and "cmd+c" or "ctrl+c"
+    test.equal(keymap.map[copy_shortcut][1], "markdown-view:copy")
+    test.equal(keymap.map[copy_shortcut][2], "doc:copy")
+    node:remove_view(core.root_view.root_node, view)
+  end)
+
+  test.test("shows context copy entries for markdown targets", function(context)
+    local contextmenu = require "plugins.contextmenu"
+    local link_view = MarkdownView("[inline](https://example.com)")
+    link_view.position.x = 0
+    link_view.position.y = 0
+    link_view.size.x = 420
+    link_view.size.y = 240
+    core.set_active_view(link_view)
+
+    local link
+    for _, command_item in ipairs(link_view:ensure_layout().commands) do
+      if command_item.links then
+        link = command_item.links[1]
+        break
+      end
+    end
+    test.not_nil(link)
+
+    local function has_menu_item(text)
+      for _, item in ipairs(contextmenu.items or {}) do
+        if item.text == text then
+          return true
+        end
+      end
+      return false
+    end
+
+    local x = style.padding.x + link.x + 1
+    local y = style.padding.y + link.y + 1
+    test.equal(contextmenu:show(x, y), true)
+    test.equal(has_menu_item("Copy Link"), true)
+    test.equal(has_menu_item("Copy Image Link"), false)
+    contextmenu:hide()
+
+    local image_path = context.project_temp_root .. PATHSEP .. "diagram.png"
+    local source_path = context.project_temp_root .. PATHSEP .. "source.md"
+    write_file(image_path, "not-a-real-png")
+    write_file(source_path, "[![Diagram](diagram.png)](https://example.com/diagram)\n")
+
+    local original_load_image = canvas.load_image
+    canvas.load_image = function()
+      return {
+        get_size = function()
+          return 80, 40
+        end,
+        scaled = function(_, width, height)
+          return {
+            get_size = function()
+              return width, height
+            end
+          }
+        end
+      }
+    end
+
+    local image_view = MarkdownView(source_path)
+    image_view.position.x = 0
+    image_view.position.y = 0
+    image_view.size.x = 420
+    image_view.size.y = 240
+    local image = image_view:ensure_layout().commands[1]
+    canvas.load_image = original_load_image
+    core.set_active_view(image_view)
+
+    x = style.padding.x + image.x + 1
+    y = style.padding.y + image.y + 1
+    test.equal(contextmenu:show(x, y), true)
+    test.equal(has_menu_item("Copy Link"), true)
+    test.equal(has_menu_item("Copy Image Link"), true)
+    test.equal(image_view.markdown_context_target.link_url, "https://example.com/diagram")
+    test.equal(image_view.markdown_context_target.image_url, "diagram.png")
+    contextmenu:hide()
+
+    write_file(source_path, "![Diagram](diagram.png)\n")
+    image_view = MarkdownView(source_path)
+    image_view.position.x = 0
+    image_view.position.y = 0
+    image_view.size.x = 420
+    image_view.size.y = 240
+    canvas.load_image = function()
+      return {
+        get_size = function()
+          return 80, 40
+        end,
+        scaled = function(_, width, height)
+          return {
+            get_size = function()
+              return width, height
+            end
+          }
+        end
+      }
+    end
+    image = image_view:ensure_layout().commands[1]
+    canvas.load_image = original_load_image
+    core.set_active_view(image_view)
+    x = style.padding.x + image.x + 1
+    y = style.padding.y + image.y + 1
+    test.equal(contextmenu:show(x, y), true)
+    test.equal(has_menu_item("Copy Link"), false)
+    test.equal(has_menu_item("Copy Image Link"), true)
+    contextmenu:hide()
+
+    local plain_view = MarkdownView("plain text")
+    plain_view.position.x = 0
+    plain_view.position.y = 0
+    plain_view.size.x = 420
+    plain_view.size.y = 240
+    core.set_active_view(plain_view)
+    contextmenu:show(style.padding.x + 1, style.padding.y + 1)
+    test.equal(has_menu_item("Copy Link"), false)
+    test.equal(has_menu_item("Copy Image Link"), false)
+    contextmenu:hide()
   end)
 
   test.test("parses nested list indentation", function()
@@ -1026,6 +1193,7 @@ Text with a footnote.[^note]
     test.equal(layout.commands[1].x, 0)
     test.equal(layout.commands[1].width, layout.width)
     test.equal(layout.commands[1].height, math.floor(400 * (layout.width / 800)))
+    test.equal(layout.commands[1].image_url, "diagram.png")
   end)
 
   test.test("downloads remote markdown images to the cache", function()
@@ -1151,6 +1319,8 @@ Text with a footnote.[^note]
     test.equal(second_image.y, first_image.y)
     test.equal(first_image.link_url, "https://github.com/pragtical/pragtical/actions/workflows/rolling.yml")
     test.equal(second_image.link_url, "https://discord.gg/8V2yJtn3Fc")
+    test.equal(first_image.image_url, "https://github.com/pragtical/pragtical/actions/workflows/rolling.yml/badge.svg")
+    test.equal(second_image.image_url, "https://discord.com/api/guilds/1285023036071743542/widget.png?style=shield")
     test.equal(#download_opts, 2)
     test.equal(download_opts[1].url, "https://github.com/pragtical/pragtical/actions/workflows/rolling.yml/badge.svg")
     test.equal(download_opts[2].url, "https://discord.com/api/guilds/1285023036071743542/widget.png?style=shield")
@@ -1163,6 +1333,18 @@ Text with a footnote.[^note]
 
     local x = view.position.x + style.padding.x + second_image.x + 1
     local y = view.position.y + style.padding.y + second_image.y + 1
+    local target = view:get_context_target_at(x, y)
+    test.equal(target.link_url, "https://discord.gg/8V2yJtn3Fc")
+    test.equal(target.image_url, "https://discord.com/api/guilds/1285023036071743542/widget.png?style=shield")
+    view.markdown_context_target = target
+    core.set_active_view(view)
+    system.set_clipboard("")
+    test.equal(command.perform("markdown-view:copy-link"), true)
+    test.equal(system.get_clipboard(), target.link_url)
+    system.set_clipboard("")
+    test.equal(command.perform("markdown-view:copy-image-link"), true)
+    test.equal(system.get_clipboard(), target.image_url)
+
     view:on_mouse_moved(x, y, 0, 0)
     test.equal(view.cursor, "hand")
     view:on_mouse_pressed("left", x, y, 1)
@@ -1297,6 +1479,15 @@ For more detailed instructions visit: https://pragtical.dev/docs/setup/building
 
     local x = view.position.x + style.padding.x + target.x + 1
     local y = view.position.y + style.padding.y + target.y + 1
+    local context_target = view:get_context_target_at(x, y)
+    test.equal(context_target.link_url, "https://example.com")
+    test.equal(context_target.image_url, nil)
+    view.markdown_context_target = context_target
+    core.set_active_view(view)
+    system.set_clipboard("")
+    test.equal(command.perform("markdown-view:copy-link"), true)
+    test.equal(system.get_clipboard(), "https://example.com")
+
     view:on_mouse_moved(x, y, 0, 0)
     test.equal(view.cursor, "hand")
     test.equal(tooltip, "Open https://example.com")

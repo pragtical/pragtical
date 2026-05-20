@@ -110,6 +110,41 @@ end, {
 })
 
 command.add(function()
+  if core.active_view:extends(MarkdownView) and core.active_view:has_selection() then
+    return true, core.active_view
+  end
+  return false
+end, {
+  ["markdown-view:copy"] = function(mv)
+    mv:copy_selection()
+  end
+})
+
+local function markdown_context_target_predicate(kind)
+  return function()
+    local mv = core.active_view
+    local target = mv and mv.markdown_context_target
+    local url = target and target[kind .. "_url"]
+    if mv and mv:extends(MarkdownView) and url then
+      return true, mv, target
+    end
+    return false
+  end
+end
+
+command.add(markdown_context_target_predicate("link"), {
+  ["markdown-view:copy-link"] = function(_, target)
+    system.set_clipboard(target.link_url)
+  end
+})
+
+command.add(markdown_context_target_predicate("image"), {
+  ["markdown-view:copy-image-link"] = function(_, target)
+    system.set_clipboard(target.image_url)
+  end
+})
+
+command.add(function()
   if not core.active_view:extends(MarkdownView) then
     return false
   end

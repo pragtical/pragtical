@@ -88,6 +88,26 @@ end
 
 menu:register("core.docview", cmds)
 
+local function markdown_context_target_predicate(kind)
+  return function(x, y)
+    local view = core.active_view
+    if not (view and view:extends(MarkdownView)) then
+      return false
+    end
+    view.markdown_context_target = view:get_context_target_at(x, y)
+    return view.markdown_context_target
+      and view.markdown_context_target[kind .. "_url"] ~= nil
+  end
+end
+
+menu:register(markdown_context_target_predicate("link"), {
+  { text = "Copy Link", command = "markdown-view:copy-link" }
+})
+
+menu:register(markdown_context_target_predicate("image"), {
+  { text = "Copy Image Link", command = "markdown-view:copy-image-link" }
+})
+
 menu:register("core.markdownview", {
   { text = "View Raw", command = "markdown-view:view-raw" }
 })

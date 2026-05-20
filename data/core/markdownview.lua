@@ -151,6 +151,9 @@ end
 ---@field font renderer.font?
 ---@field last_doc_change_id integer?
 ---@field hovered_link_url string?
+---@field selection_anchor integer?
+---@field selection_cursor integer?
+---@field selecting boolean?
 local MarkdownView = View:extend()
 
 function MarkdownView:__tostring() return "MarkdownView" end
@@ -1747,6 +1750,7 @@ local function tokenize_segments(self, segments, fontset, base_color, accent_col
             image = image,
             width = width,
             height = height,
+            image_url = segment.image_url,
             url = segment.url,
             is_space = false
           }
@@ -2287,6 +2291,7 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
           width = cell.width,
           height = cell.height,
           image = cell.image,
+          image_url = cell.url,
           link_url = cell.link_url
         }
       else
@@ -2583,6 +2588,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
             width = image_width,
             height = image_height,
             image = image,
+            image_url = block.url,
             link_url = block.link_url
           }
           y = y + image_height + BLOCK_SPACING
@@ -2653,6 +2659,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
               width = item_width,
               height = item_height,
               image = image,
+              image_url = image_block.url,
               link_url = image_block.link_url
             }
           else
@@ -2792,6 +2799,156 @@ local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, 
   core.pop_clip_rect()
 end
 
+local function command_text(command)
+  local text = {}
+  for _, fragment in ipairs(command.fragments or {}) do
+    if fragment.text and fragment.text ~= "" then
+      text[#text + 1] = fragment.text
+    end
+  end
+  return table.concat(text)
+end
+
+local function collect_selectable_lines(self)
+  local lines = {}
+  local text = {}
+  local position = 1
+
+  local function append_commands(commands)
+    for _, command in ipairs(commands or {}) do
+      if command.type == "text" then
+        local line_text = command_text(command)
+        if line_text ~= "" then
+          if #text > 0 then
+            text[#text + 1] = "\n"
+            position = position + 1
+          end
+          lines[#lines + 1] = {
+            command = command,
+            text = line_text,
+            start = position,
+            stop = position + #line_text
+          }
+          text[#text + 1] = line_text
+          position = position + #line_text
+        end
+      end
+    end
+  end
+
+  append_commands(self:ensure_layout().commands)
+  local partial_layout = self:ensure_partial_layout()
+  if partial_layout then
+    append_commands(partial_layout.commands)
+  end
+
+  return lines, table.concat(text)
+end
+
+local function measure_fragment_prefix(command, fragment, text, width)
+  if command.tabbed then
+    return fragment.font:get_width(text, { tab_offset = width })
+  end
+  return fragment.font:get_width(text)
+end
+
+local function text_offset_x(command, offset)
+  local width = 0
+  local remaining = offset
+
+  for _, fragment in ipairs(command.fragments or {}) do
+    local text = fragment.text or ""
+    if text ~= "" then
+      if remaining <= 0 then
+        break
+      elseif remaining >= #text then
+        width = width + fragment.width
+        remaining = remaining - #text
+      else
+        local prefix = text:sub(1, remaining)
+        while remaining > 0 and common.is_utf8_cont(text, remaining + 1) do
+          remaining = remaining - 1
+          prefix = text:sub(1, remaining)
+        end
+        width = width + measure_fragment_prefix(command, fragment, prefix, width)
+        break
+      end
+    end
+  end
+
+  return width
+end
+
+local function nearest_text_position(command, line, x)
+  local relative_x = x - command.x
+  if relative_x <= 0 then
+    return line.start
+  end
+
+  local position = line.start
+  local cursor_x = 0
+  for _, fragment in ipairs(command.fragments or {}) do
+    local text = fragment.text or ""
+    for char in common.utf8_chars(text) do
+      local next_x = cursor_x + measure_fragment_prefix(command, fragment, char, cursor_x)
+      if relative_x < cursor_x + (next_x - cursor_x) / 2 then
+        return position
+      end
+      cursor_x = next_x
+      position = position + #char
+    end
+  end
+  return line.stop
+end
+
+local function sorted_selection(self)
+  local anchor, cursor = self.selection_anchor, self.selection_cursor
+  if not anchor or not cursor or anchor == cursor then
+    return nil
+  end
+  return math.min(anchor, cursor), math.max(anchor, cursor)
+end
+
+local function draw_selection(self, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+  local selection_start, selection_stop = sorted_selection(self)
+  if not selection_start then
+    return
+  end
+
+  core.push_clip_rect(clip_x, clip_y, clip_w, clip_h)
+  for _, line in ipairs(collect_selectable_lines(self)) do
+    local from = math.max(selection_start, line.start)
+    local to = math.min(selection_stop, line.stop)
+    if from < to then
+      local command = line.command
+      local x1 = start_x + command.x + text_offset_x(command, from - line.start)
+      local x2 = start_x + command.x + text_offset_x(command, to - line.start)
+      renderer.draw_rect(x1, start_y + command.y, math.max(x2 - x1, 1), command.height, style.selection)
+    end
+  end
+  core.pop_clip_rect()
+end
+
+local function image_fragment_at(command, x, y)
+  if command.type ~= "text" or not command.fragments then
+    return nil
+  end
+  if y < command.y or y >= command.y + command.height then
+    return nil
+  end
+
+  local fragment_x = command.x
+  for _, fragment in ipairs(command.fragments) do
+    local width = fragment.width or 0
+    if fragment.type == "image" and fragment.image_url
+      and x >= fragment_x and x < fragment_x + width
+    then
+      return fragment
+    end
+    fragment_x = fragment_x + width
+  end
+end
+
 ---Constructor.
 ---@param source? string|core.markdownview.source
 ---@param title? string
@@ -2814,6 +2971,9 @@ function MarkdownView:new(source, title)
   self.font_cache = nil
   self.font = nil
   self.last_doc_change_id = nil
+  self.selection_anchor = nil
+  self.selection_cursor = nil
+  self.selecting = false
 
   if type(source) == "table" then
     self.linked_doc = source.linked_doc or source.doc
@@ -3396,6 +3556,15 @@ function MarkdownView:draw_at(x, y, width, height, background, show_scrollbars)
     self:update_scrollbar()
   end
   local ox, oy = self:get_content_offset()
+  draw_selection(
+    self,
+    ox + style.padding.x,
+    oy + style.padding.y,
+    x,
+    y,
+    width,
+    height
+  )
   draw_layout_commands(
     layout.commands,
     ox + style.padding.x,
@@ -3428,6 +3597,82 @@ function MarkdownView:on_scale_change()
   self:invalidate_layout()
 end
 
+---Returns whether the preview has selected text.
+---@return boolean
+function MarkdownView:has_selection()
+  return sorted_selection(self) ~= nil
+end
+
+---Clears the active text selection.
+function MarkdownView:clear_selection()
+  self.selection_anchor = nil
+  self.selection_cursor = nil
+  self.selecting = false
+  core.redraw = true
+end
+
+---Returns the selected rendered text.
+---@return string
+function MarkdownView:get_selected_text()
+  local selection_start, selection_stop = sorted_selection(self)
+  if not selection_start then
+    return ""
+  end
+  local _, text = collect_selectable_lines(self)
+  return text:sub(selection_start, selection_stop - 1)
+end
+
+---Copies the selected rendered text to the system clipboard.
+---@return boolean copied
+function MarkdownView:copy_selection()
+  local text = self:get_selected_text()
+  if text == "" then
+    return false
+  end
+  system.set_clipboard(text)
+  return true
+end
+
+---Returns the selectable text position nearest to the given mouse position.
+---@param x number
+---@param y number
+---@return integer
+function MarkdownView:get_text_position_at(x, y)
+  local lines = collect_selectable_lines(self)
+  if #lines == 0 then
+    return 1
+  end
+
+  local ox, oy = self:get_content_offset()
+  local content_x = x - ox - style.padding.x
+  local content_y = y - oy - style.padding.y
+  local closest = lines[1]
+  local closest_distance = math.huge
+
+  for _, line in ipairs(lines) do
+    local command = line.command
+    if content_y >= command.y and content_y < command.y + command.height then
+      return nearest_text_position(command, line, content_x)
+    end
+
+    local distance
+    if content_y < command.y then
+      distance = command.y - content_y
+    else
+      distance = content_y - (command.y + command.height)
+    end
+    if distance < closest_distance then
+      closest = line
+      closest_distance = distance
+    end
+  end
+
+  if content_y < closest.command.y then
+    return closest.start
+  end
+  return closest.stop
+end
+
 ---Returns the URL under the given mouse position, if any.
 ---@param x number
 ---@param y number
@@ -3452,6 +3697,52 @@ function MarkdownView:get_link_at(x, y)
         local ry = start_y + link.y
         if x >= rx and y >= ry and x < rx + link.width and y < ry + link.height then
           return link.url
+        end
+      end
+    end
+  end
+end
+
+---Returns a context-copy target under the given mouse position, if any.
+---@param x number
+---@param y number
+---@return { link_url: string?, image_url: string? }?
+function MarkdownView:get_context_target_at(x, y)
+  local layout = self:ensure_layout()
+  local ox, oy = self:get_content_offset()
+  local start_x = ox + style.padding.x
+  local start_y = oy + style.padding.y
+  local content_x = x - start_x
+  local content_y = y - start_y
+
+  for _, command in ipairs(layout.commands) do
+    if command.type == "image" and command.image_url then
+      if content_x >= command.x and content_y >= command.y
+        and content_x < command.x + command.width
+        and content_y < command.y + command.height
+      then
+        return {
+          image_url = command.image_url,
+          link_url = command.link_url
+        }
+      end
+    end
+
+    local image_fragment = image_fragment_at(command, content_x, content_y)
+    if image_fragment then
+      return {
+        image_url = image_fragment.image_url,
+        link_url = image_fragment.url
+      }
+    end
+
+    if command.links then
+      for _, link in ipairs(command.links) do
+        if content_x >= link.x and content_y >= link.y
+          and content_x < link.x + link.width
+          and content_y < link.y + link.height
+        then
+          return { link_url = link.url }
         end
       end
     end
@@ -3561,6 +3852,26 @@ function MarkdownView:on_mouse_pressed(button, x, y, clicks)
       self:open_link(url)
       return true
     end
+
+    local position = self:get_text_position_at(x, y)
+    self.selection_anchor = position
+    self.selection_cursor = position
+    self.selecting = true
+    core.redraw = true
+    return true
+  end
+end
+
+---@param button string
+---@param x number
+---@param y number
+---@return boolean?
+function MarkdownView:on_mouse_released(button, x, y)
+  MarkdownView.super.on_mouse_released(self, button, x, y)
+  if button == "left" and self.selecting then
+    self.selecting = false
+    core.redraw = true
+    return true
   end
 end
 
@@ -3573,16 +3884,25 @@ function MarkdownView:on_mouse_moved(x, y, dx, dy)
   if MarkdownView.super.on_mouse_moved(self, x, y, dx, dy) then
     return true
   end
+  if self.selecting then
+    local position = self:get_text_position_at(x, y)
+    if self.selection_cursor ~= position then
+      self.selection_cursor = position
+      core.redraw = true
+    end
+    self.cursor = "ibeam"
+    return true
+  end
   local url = self:get_link_at(x, y)
   self:set_hovered_link(url)
-  self.cursor = url and "hand" or "arrow"
+  self.cursor = url and "hand" or "ibeam"
 end
 
 ---Clears hover state when the mouse leaves the preview.
 function MarkdownView:on_mouse_left()
   MarkdownView.super.on_mouse_left(self)
   self:set_hovered_link(nil)
-  self.cursor = "arrow"
+  self.cursor = "ibeam"
 end
 
 ---Refreshes the preview when the bound document changes.
@@ -3604,6 +3924,7 @@ function MarkdownView:draw()
   local start_x = ox + style.padding.x
   local start_y = oy + style.padding.y
 
+  draw_selection(self, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
   draw_layout_commands(layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
   local partial_layout = self:ensure_partial_layout()
   if partial_layout then
