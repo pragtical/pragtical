@@ -58,6 +58,7 @@ local loading_text = ""
 local coroutine_running = false
 local cache_expiration_time = 0
 local last_indexed_projects = ""
+local active_find_file_label = "Open File From Project"
 
 local function basedir_files()
   local files_return = {}
@@ -103,7 +104,7 @@ local function update_suggestions()
   if
     core.active_view == core.command_view
     and
-    core.command_view.label == "Open File From Project: "
+    core.command_view.label == active_find_file_label .. ": "
   then
     core.command_view:update_suggestions()
   end
@@ -305,12 +306,19 @@ local function is_file(file_path)
   return false
 end
 
-local function open_file_in_project(project, path)
+local function file_in_project(project, path)
   local filename = project:absolute_path(
     common.home_expand(path)
   )
   if is_file(filename) then
-    local line_num = line_number or 1
+    return filename
+  end
+end
+
+local function open_file_in_project(project, path, line)
+  local filename = file_in_project(project, path)
+  if filename then
+    local line_num = line or 1
     local view = core.open_file(filename)
 
     if view:is(DocView) then
@@ -347,8 +355,47 @@ local function get_visited_files()
   return files
 end
 
+local function parse_line_number(text)
+  local path, line = text:match("^(.-):(%d*)$")
+  if path then
+    return path, tonumber(line)
+  end
+  return text, nil
+end
+
+local function submit_project_file(text, selection_callback, selected_line)
+  local parsed_line
+  text, parsed_line = parse_line_number(text)
+  selected_line = parsed_line or selected_line
+  if multiple_projects then
+    local project_name, file_path = text:match(
+      "^([^"..PATHSEP.."]+)"..PATHSEP.."(.*)"
+    )
+    if project_name then
+      for _, project in ipairs(core.projects) do
+        if project_name == common.basename(project.path) then
+          if selection_callback then
+            local filename = file_in_project(project, file_path)
+            if filename then selection_callback(filename, selected_line) end
+            return
+          end
+          return open_file_in_project(project, file_path, selected_line)
+        end
+      end
+    end
+  end
+
+  local project = multiple_projects and core.projects[1] or core.current_project()
+  if selection_callback then
+    local filename = file_in_project(project, text)
+    if filename then selection_callback(filename, selected_line) end
+    return
+  end
+  open_file_in_project(project, text, selected_line)
+end
+
 command.add(nil, {
-  ["core:find-file"] = function()
+  ["core:find-file"] = function(label, selection_callback)
     if not coroutine_running then
       if #core.projects > 1 then
         multiple_projects = true
@@ -385,38 +432,18 @@ command.add(nil, {
       last_indexed_projects = current_projects
     end
 
-    core.command_view:enter("Open File From Project", {
+    active_find_file_label = label or "Open File From Project"
+    core.command_view:enter(active_find_file_label, {
       submit = function(text, suggestion)
         if not suggestion then
           if text == "" then return end
-          local path = text:gsub(":(%d*)$", "") -- Remove any trailing colon and digits - line number is stored when suggesting
-          return open_file_in_project(core.current_project(), path)
+          return submit_project_file(text, selection_callback)
         end
-        text = suggestion.text
-        if multiple_projects then
-          local project_name, file_path = text:match(
-            "^([^"..PATHSEP.."]+)"..PATHSEP.."(.*)"
-          )
-          if project_name then
-            for _, project in ipairs(core.projects) do
-              if project_name == common.basename(project.path) then
-                return open_file_in_project(project, file_path)
-              end
-            end
-          end
-        end
-        -- Default to the first project if project not found by name
-        open_file_in_project(core.projects[1], text)
+        submit_project_file(suggestion.text, selection_callback, line_number)
       end,
       suggest = function(text)
         -- Remove line number from path and store for later use (e.g., "filename.lua:42" becomes "filename.lua")
-        local filename, ln = text:match("^(.-):(%d*)$")
-        if filename then
-          text = filename
-          line_number = tonumber(ln)
-        else
-          line_number = nil
-        end
+        text, line_number = parse_line_number(text)
 
         local results = {}
 
@@ -460,7 +487,7 @@ keymap.add({
 core.status_view:add_item({
   predicate = function()
     return core.active_view == core.command_view
-      and core.command_view.label == "Open File From Project: "
+      and core.command_view.label == active_find_file_label .. ": "
   end,
   name = "command:find-file-matches",
   alignment = StatusView.Item.LEFT,
@@ -479,7 +506,7 @@ core.status_view:add_item({
 core.status_view:add_item({
   predicate = function()
     return core.active_view == core.command_view
-      and core.command_view.label == "Open File From Project: "
+      and core.command_view.label == active_find_file_label .. ": "
       and not coroutine_running
       and config.plugins.findfile.enable_cache
       and #project_files > 0

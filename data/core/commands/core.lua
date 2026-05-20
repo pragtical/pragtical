@@ -26,7 +26,7 @@ local function check_directory_path(path)
     return abs_path
 end
 
-local function open_file(use_dialog, label, selection_callback)
+local function open_file(use_dialog, label, selection_callback, allow_directories)
   local view = core.active_view
   local default_text, root_dir, filename = "", core.root_project().path, ""
   if view.doc and view.doc.abs_filename then
@@ -39,7 +39,7 @@ local function open_file(use_dialog, label, selection_callback)
     end
   end
 
-  if use_dialog then
+  if use_dialog and not allow_directories then
     core.open_file_dialog(core.window, function(status, result)
       if status == "accept" then
       	for _, filename in ipairs(result --[[ @as string[] ]]) do
@@ -97,6 +97,9 @@ local function open_file(use_dialog, label, selection_callback)
         core.error("Cannot open file %s: %s", text, err)
       elseif --[[@cast path_stat -nil]] path_stat.type == 'dir' then
         -- TODO: remove the above cast once https://github.com/LuaLS/lua-language-server/discussions/3102 is implemented.
+        if allow_directories and selection_callback then
+          return true
+        end
         core.error("Cannot open %s, is a folder", text)
       else
         return true
@@ -262,8 +265,8 @@ command.add(nil, {
     })
   end,
 
-  ["core:open-file"] = function(label, selection_callback)
-    open_file(config.use_system_file_picker, label, selection_callback)
+  ["core:open-file"] = function(label, selection_callback, allow_directories)
+    open_file(config.use_system_file_picker, label, selection_callback, allow_directories)
   end,
 
   ["core:open-file-picker"] = function()
