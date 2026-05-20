@@ -19,6 +19,7 @@
 #include "channel.h"
 
 #include <errno.h>
+#include <stdbool.h>
 #include <string.h>
 
 typedef struct channel_value_pair {
@@ -33,6 +34,7 @@ typedef struct channel_value_pair {
 
 typedef struct channel_value {
   int type;
+  bool received;
 
   union {
     char boolean;
@@ -253,42 +255,54 @@ static int channelGiven(unsigned int target, unsigned int current)
   return !(t.i < 0 && c.i > 0);
 }
 
-static const ChannelValue* channelFirst(const Channel* c)
+static void channelAcknowledge(Channel* c, ChannelValue* v)
 {
-  ChannelValue* v;
-
-  SDL_LockMutex(c->mutex);
-  if (c->queue.first == NULL){
-    SDL_UnlockMutex(c->mutex);
-    return NULL;
+  if (v && !v->received) {
+    v->received = true;
+    ++c->received;
   }
-
-  v = c->queue.first;
-  SDL_UnlockMutex(c->mutex);
-
-  return v;
 }
 
-static const ChannelValue* channelLast(const Channel *c)
+/* Push the first channel value onto the Lua stack while holding the lock.
+ * Returns 1 (always pushes one value: the value or nil). */
+static int channelFirst(const Channel* c, lua_State* L)
 {
-  ChannelValue* last = NULL;
-
   SDL_LockMutex(c->mutex);
   if (c->queue.first == NULL) {
+    lua_pushnil(L);
     SDL_UnlockMutex(c->mutex);
-    return NULL;
+    return 1;
+  }
+
+  channelValuePush(L, c->queue.first);
+  SDL_UnlockMutex(c->mutex);
+
+  return 1;
+}
+
+/* Push the last channel value onto the Lua stack while holding the lock.
+ * Returns 1 (always pushes one value: the value or nil). */
+static int channelLast(const Channel *c, lua_State* L)
+{
+  SDL_LockMutex(c->mutex);
+  if (c->queue.first == NULL) {
+    lua_pushnil(L);
+    SDL_UnlockMutex(c->mutex);
+    return 1;
   }
 
   /* queue.last points to the `next` of the last element, so we can backtrack */
-  last = (ChannelValue*)((uintptr_t)c->queue.last - offsetof(ChannelValue, next));
-
+  ChannelValue* last = (ChannelValue*)((uintptr_t)c->queue.last - offsetof(ChannelValue, next));
+  channelValuePush(L, last);
   SDL_UnlockMutex(c->mutex);
 
-  return last;
+  return 1;
 }
 
-static int channelPush(Channel* c, ChannelValue* v)
+static unsigned int channelPush(Channel* c, ChannelValue* v)
 {
+  unsigned int id;
+
   SDL_LockMutex(c->mutex);
 
   v->next = NULL;
@@ -297,29 +311,35 @@ static int channelPush(Channel* c, ChannelValue* v)
   /* set the last element to new next */
   c->queue.last = &v->next;
 
+  id = ++c->sent;
+
   SDL_UnlockMutex(c->mutex);
   SDL_BroadcastCondition(c->cond);
 
-  return ++c->sent;
+  return id;
 }
 
-static const ChannelValue* channelWait(Channel *c)
+/* Wait for a value and push it onto the Lua stack while holding the lock.
+ * Returns 1 (always pushes one value: the value or nil). */
+static int channelWait(Channel *c, lua_State* L)
 {
   SDL_LockMutex(c->mutex);
   while (c->queue.first == NULL)
     SDL_WaitCondition(c->cond, c->mutex);
 
-  ++c->received;
+  channelAcknowledge(c, c->queue.first);
+
+  channelValuePush(L, c->queue.first);
 
   SDL_UnlockMutex(c->mutex);
   SDL_BroadcastCondition(c->cond);
 
-  return c->queue.first;
+  return 1;
 }
 
 static void channelSupply(Channel* c, ChannelValue* v)
 {
-  unsigned id;
+  unsigned int id;
 
   /* channelPush handles its own locking; avoid locking twice (deadlock) */
   id = channelPush(c, v);
@@ -360,6 +380,7 @@ static void channelPop(Channel* c)
   }
 
   ChannelValue* previous_first = c->queue.first;
+  channelAcknowledge(c, previous_first);
 
   c->queue.first = previous_first->next;
 
@@ -535,14 +556,8 @@ int m_channel_first(lua_State *L)
   Channel* self = ((ChannelContainer*)luaL_checkudata(
     L, 1, API_TYPE_CHANNEL
   ))->channel;
-  const ChannelValue* v;
 
-  if ((v = channelFirst(self)) == NULL)
-    lua_pushnil(L);
-  else
-    channelValuePush(L, v);
-
-  return 1;
+  return channelFirst(self, L);
 }
 
 /*
@@ -556,14 +571,8 @@ int m_channel_last(lua_State *L)
   Channel* self = ((ChannelContainer*)luaL_checkudata(
     L, 1, API_TYPE_CHANNEL
   ))->channel;
-  const ChannelValue* v;
 
-  if ((v = channelLast(self)) == NULL)
-    lua_pushnil(L);
-  else
-    channelValuePush(L, v);
-
-  return 1;
+  return channelLast(self, L);
 }
 
 /*
@@ -662,16 +671,8 @@ int m_channel_wait(lua_State *L)
   Channel* self = ((ChannelContainer*)luaL_checkudata(
     L, 1, API_TYPE_CHANNEL
   ))->channel;
-  const ChannelValue* v;
 
-  if ((v = channelWait(self)) == NULL)
-    lua_pushnil(L);
-  else
-    channelValuePush(L, v);
-
-  SDL_BroadcastCondition(self->cond);
-
-  return 1;
+  return channelWait(self, L);
 }
 
 /* --------------------------------------------------------
@@ -687,8 +688,7 @@ int mm_channel_gc(lua_State *L)
     L, 1, API_TYPE_CHANNEL
   ))->channel;
 
-  (void)SDL_AtomicDecRef(&self->ref);
-  if (SDL_GetAtomicInt(&self->ref) == 0)
+  if (SDL_AtomicDecRef(&self->ref))
     channelFree(self);
 
   return 0;
