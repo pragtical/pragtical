@@ -245,6 +245,35 @@ print("hello")
     test.equal(#view.blocks, 4)
   end)
 
+  test.test("renders horizontal lines using the caret color", function()
+    local view = MarkdownView([[
+# Heading
+
+---
+
+Paragraph with a footnote.[^note]
+
+[^note]: Footnote body.
+]])
+    view.size.x = 420
+    view.size.y = 240
+
+    local layout = view:ensure_layout()
+    local rule_height = math.max(style.divider_size, 1)
+    local caret_lines = 0
+
+    for _, command in ipairs(layout.commands) do
+      if command.type == "rect"
+        and command.height == rule_height
+        and MarkdownView.resolve_color(command.color) == style.caret
+      then
+        caret_lines = caret_lines + 1
+      end
+    end
+
+    test.equal(caret_lines, 3)
+  end)
+
   test.test("selects rendered text with the mouse", function()
     local view = MarkdownView("# Title\n\nParagraph one")
     view.position.x = 0
@@ -275,6 +304,80 @@ print("hello")
     test.equal(view:get_selected_text(), "Paragraph one")
   end)
 
+  test.test("shows selected text in code blocks", function()
+    local view = MarkdownView("```lua\nlocal x = 1\n```")
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 400
+    view.size.y = 300
+    local layout = view:ensure_layout()
+    local code_command
+
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" and command.tabbed then
+        code_command = command
+        break
+      end
+    end
+
+    test.not_nil(code_command)
+    local y = style.padding.y + code_command.y + code_command.height / 2
+    view:on_mouse_pressed("left", style.padding.x + code_command.x, y, 1)
+    view:on_mouse_moved(style.padding.x + code_command.x + 1000, y, 1000, 0)
+    view:on_mouse_released("left", style.padding.x + code_command.x + 1000, y)
+    test.equal(view:get_selected_text(), "local x = 1")
+
+    local events = {}
+    local original_draw_text = renderer.draw_text
+    local original_draw_rect = renderer.draw_rect
+    local original_push_clip_rect = core.push_clip_rect
+    local original_pop_clip_rect = core.pop_clip_rect
+
+    view.draw_background = function() end
+    view.draw_scrollbar = function() end
+    core.push_clip_rect = function() end
+    core.pop_clip_rect = function() end
+    renderer.draw_rect = function(_, _, _, _, color)
+      if color == style.background2 then
+        events[#events + 1] = "code-background"
+      elseif color == style.selection then
+        events[#events + 1] = "selection"
+      end
+    end
+    renderer.draw_text = function(font, text, x, y, color, opts)
+      if text ~= "" then
+        events[#events + 1] = "text"
+      end
+      return x + font:get_width(text, opts)
+    end
+
+    view:draw()
+
+    renderer.draw_text = original_draw_text
+    renderer.draw_rect = original_draw_rect
+    core.push_clip_rect = original_push_clip_rect
+    core.pop_clip_rect = original_pop_clip_rect
+
+    local code_background_index
+    local selection_index
+    local text_index
+    for index, event in ipairs(events) do
+      if event == "code-background" and not code_background_index then
+        code_background_index = index
+      elseif event == "selection" and not selection_index then
+        selection_index = index
+      elseif event == "text" and selection_index and not text_index then
+        text_index = index
+      end
+    end
+
+    test.not_nil(code_background_index)
+    test.not_nil(selection_index)
+    test.not_nil(text_index)
+    test.ok(code_background_index < selection_index)
+    test.ok(selection_index < text_index)
+  end)
+
   test.test("copies selected rendered text", function()
     local view = MarkdownView("# Title\n\nParagraph one")
     view.size.x = 400
@@ -294,6 +397,55 @@ print("hello")
     test.equal(keymap.map[copy_shortcut][1], "markdown-view:copy")
     test.equal(keymap.map[copy_shortcut][2], "doc:copy")
     node:remove_view(core.root_view.root_node, view)
+  end)
+
+  test.test("shows context copy entry when markdown text is selected", function()
+    local contextmenu = require "plugins.contextmenu"
+    local view = MarkdownView("# Title\n\nParagraph one")
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 420
+    view.size.y = 240
+    core.set_active_view(view)
+
+    local function has_menu_item(text)
+      for _, item in ipairs(contextmenu.items or {}) do
+        if item.text == text then
+          return true
+        end
+      end
+      return false
+    end
+
+    view.selection_anchor = 1
+    view.selection_cursor = 6
+    test.equal(contextmenu:show(style.padding.x + 1, style.padding.y + 1), true)
+    test.equal(has_menu_item("Copy"), true)
+    contextmenu:hide()
+
+    view:clear_selection()
+    test.equal(contextmenu:show(style.padding.x + 1, style.padding.y + 1), false)
+    test.equal(has_menu_item("Copy"), false)
+    contextmenu:hide()
+  end)
+
+  test.test("keeps arrow cursor over the scrollbar", function()
+    local lines = {}
+    for i = 1, 40 do
+      lines[i] = "Line " .. i
+    end
+    local view = MarkdownView(table.concat(lines, "\n\n"))
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 300
+    view.size.y = 80
+    view:ensure_layout()
+    view:update_scrollbar()
+
+    local x, y, w, h = view.v_scrollbar:get_thumb_rect()
+    view.cursor = "ibeam"
+    test.equal(view:on_mouse_moved(x + w / 2, y + h / 2, 0, 0), true)
+    test.equal(view.cursor, "arrow")
   end)
 
   test.test("shows context copy entries for markdown targets", function(context)

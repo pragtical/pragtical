@@ -100,6 +100,7 @@ local COLOR_ACCENT = make_style_color("accent", COLOR_TEXT)
 local COLOR_DIM = make_style_color("dim", COLOR_TEXT)
 local COLOR_BACKGROUND = make_style_color("background")
 local COLOR_BACKGROUND2 = make_style_color("background2", COLOR_BACKGROUND)
+local COLOR_CARET = make_style_color("caret", COLOR_ACCENT)
 local COLOR_DIVIDER = make_style_color("divider")
 local COLOR_LINK = make_syntax_color("function", COLOR_ACCENT)
 
@@ -2387,7 +2388,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
           y = y - BLOCK_SPACING + RULE_GAP / 2,
           width = available_width,
           height = RULE_HEIGHT,
-          color = COLOR_DIVIDER
+          color = COLOR_CARET
         }
         y = y + RULE_GAP
       end
@@ -2441,7 +2442,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
           y = y + RULE_GAP,
           width = available_width,
           height = RULE_HEIGHT,
-          color = COLOR_DIVIDER
+          color = COLOR_CARET
         }
         y = y + RULE_GAP * 2 + RULE_HEIGHT
       end
@@ -2694,7 +2695,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
         y = y + RULE_GAP,
         width = available_width,
         height = RULE_HEIGHT,
-        color = COLOR_DIVIDER
+        color = COLOR_CARET
       }
       y = y + RULE_GAP * 2 + RULE_HEIGHT + BLOCK_SPACING
       content_width = math.max(content_width, x_offset + available_width)
@@ -2735,13 +2736,22 @@ local function make_shared_fontset(font)
   }
 end
 
-local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+local function should_draw_command(command, phase)
+  if phase == "background" then
+    return command.type == "rect"
+  elseif phase == "foreground" then
+    return command.type ~= "rect"
+  end
+  return true
+end
+
+local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h, phase)
   core.push_clip_rect(clip_x, clip_y, clip_w, clip_h)
 
   for _, command in ipairs(commands) do
     local x = start_x + command.x
     local y = start_y + command.y
-    if y + command.height >= clip_y and y <= clip_y + clip_h then
+    if should_draw_command(command, phase) and y + command.height >= clip_y and y <= clip_y + clip_h then
       if command.type == "rect" then
         renderer.draw_rect(x, y, command.width, command.height, resolve_color(command.color))
       elseif command.type == "checkbox" then
@@ -3556,6 +3566,29 @@ function MarkdownView:draw_at(x, y, width, height, background, show_scrollbars)
     self:update_scrollbar()
   end
   local ox, oy = self:get_content_offset()
+  local partial_layout = self:ensure_partial_layout()
+  draw_layout_commands(
+    layout.commands,
+    ox + style.padding.x,
+    oy + style.padding.y,
+    x,
+    y,
+    width,
+    height,
+    "background"
+  )
+  if partial_layout then
+    draw_layout_commands(
+      partial_layout.commands,
+      ox + style.padding.x,
+      oy + style.padding.y,
+      x,
+      y,
+      width,
+      height,
+      "background"
+    )
+  end
   draw_selection(
     self,
     ox + style.padding.x,
@@ -3572,9 +3605,9 @@ function MarkdownView:draw_at(x, y, width, height, background, show_scrollbars)
     x,
     y,
     width,
-    height
+    height,
+    "foreground"
   )
-  local partial_layout = self:ensure_partial_layout()
   if partial_layout then
     draw_layout_commands(
       partial_layout.commands,
@@ -3583,7 +3616,8 @@ function MarkdownView:draw_at(x, y, width, height, background, show_scrollbars)
       x,
       y,
       width,
-      height
+      height,
+      "foreground"
     )
   end
   if show_scrollbars then
@@ -3882,6 +3916,7 @@ end
 ---@return boolean?
 function MarkdownView:on_mouse_moved(x, y, dx, dy)
   if MarkdownView.super.on_mouse_moved(self, x, y, dx, dy) then
+    self.cursor = "arrow"
     return true
   end
   if self.selecting then
@@ -3924,11 +3959,15 @@ function MarkdownView:draw()
   local start_x = ox + style.padding.x
   local start_y = oy + style.padding.y
 
-  draw_selection(self, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
-  draw_layout_commands(layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+  draw_layout_commands(layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h, "background")
   local partial_layout = self:ensure_partial_layout()
   if partial_layout then
-    draw_layout_commands(partial_layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+    draw_layout_commands(partial_layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h, "background")
+  end
+  draw_selection(self, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+  draw_layout_commands(layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h, "foreground")
+  if partial_layout then
+    draw_layout_commands(partial_layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h, "foreground")
   end
   self:draw_scrollbar()
 end

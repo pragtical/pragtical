@@ -88,6 +88,15 @@ end
 
 menu:register("core.docview", cmds)
 
+local function markdown_selection_predicate()
+  local view = core.active_view
+  return view and view:extends(MarkdownView) and view:has_selection()
+end
+
+menu:register(markdown_selection_predicate, {
+  { text = "Copy", command = "markdown-view:copy" }
+})
+
 local function markdown_context_target_predicate(kind)
   return function(x, y)
     local view = core.active_view
