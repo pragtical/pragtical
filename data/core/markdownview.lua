@@ -2877,6 +2877,7 @@ end
 ---Invalidates the cached layout so it will be rebuilt on the next draw.
 function MarkdownView:invalidate_layout()
   self.layout = nil
+  self.partial_layout = nil
 end
 
 ---Replaces the preview text and reparses the markdown document.
@@ -2884,7 +2885,84 @@ end
 function MarkdownView:set_text(text)
   self.text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
   self.blocks, self.references, self.footnotes = parse_document(self.text)
+  self.partial_text = nil
+  self.partial_layout = nil
   self:invalidate_layout()
+end
+
+local function make_plain_text_segments(text)
+  local segments = {}
+  local pos = 1
+
+  while pos <= #text do
+    local start, finish = text:find("\n", pos, true)
+    local value = start and text:sub(pos, start - 1) or text:sub(pos)
+    if value ~= "" then
+      segments[#segments + 1] = {
+        kind = "text",
+        text = value
+      }
+    end
+    if not start then
+      break
+    end
+    segments[#segments + 1] = {
+      kind = "linebreak",
+      text = ""
+    }
+    pos = finish + 1
+  end
+
+  if #segments == 0 then
+    segments[#segments + 1] = {
+      kind = "text",
+      text = ""
+    }
+  end
+
+  return segments
+end
+
+---Sets temporary plain text rendered after the parsed markdown document.
+---
+---The partial text is intended for streaming output. It is displayed literally
+---and does not mutate the parsed markdown document until committed.
+---@param text string?
+function MarkdownView:set_partial_text(text)
+  text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+  if text == "" then
+    self:clear_partial_text()
+    return
+  end
+  if self.partial_text == text then
+    return
+  end
+  self.partial_text = text
+  self.partial_layout = nil
+  core.redraw = true
+end
+
+---Clears temporary plain text rendered after the parsed markdown document.
+function MarkdownView:clear_partial_text()
+  if not self.partial_text then
+    return
+  end
+  self.partial_text = nil
+  self.partial_layout = nil
+  core.redraw = true
+end
+
+---Commits the partial text by appending final markdown to the document.
+---@param markdown_text string?
+---@return boolean incremental True when only appended blocks were parsed.
+function MarkdownView:commit_partial_text(markdown_text)
+  local text = markdown_text
+  if text == nil then
+    text = self.partial_text
+  end
+  self.partial_text = nil
+  self.partial_layout = nil
+  return self:append_markdown(text)
 end
 
 local function has_incremental_append_boundary(existing_text, appended_text)
@@ -2892,6 +2970,7 @@ local function has_incremental_append_boundary(existing_text, appended_text)
     return true
   end
   return existing_text:match("\n%s*\n$") ~= nil
+    or appended_text:match("^[ \t]*\n[ \t]*\n") ~= nil
     or (existing_text:match("\n$") and appended_text:match("^%s*\n")) ~= nil
 end
 
@@ -2949,6 +3028,9 @@ function MarkdownView:append_text(text)
   if text == "" then
     return true
   end
+
+  self.partial_text = nil
+  self.partial_layout = nil
 
   local existing_text = self.text or ""
   if not has_incremental_append_boundary(existing_text, text) then
@@ -3215,16 +3297,64 @@ function MarkdownView:ensure_layout()
   return self.layout
 end
 
+---Builds the render command list for temporary partial text.
+---@return table?
+function MarkdownView:ensure_partial_layout()
+  if not self.partial_text then
+    return nil
+  end
+
+  local layout = self:ensure_layout()
+  local width = layout.width
+  if self.partial_layout and self.partial_layout.width == width then
+    return self.partial_layout
+  end
+
+  local fonts = self:get_font_cache()
+  local commands = {}
+  local y = layout.height > 0 and (layout.height + BLOCK_SPACING) or 0
+  local next_y, content_width = add_paragraph(
+    commands,
+    y,
+    {
+      view = self,
+      segments = make_plain_text_segments(self.partial_text)
+    },
+    fonts.body,
+    COLOR_TEXT,
+    COLOR_ACCENT,
+    width,
+    0,
+    0,
+    PARAGRAPH_SPACING
+  )
+
+  self.partial_layout = {
+    width = width,
+    height = next_y > 0 and (next_y - BLOCK_SPACING) or layout.height,
+    content_width = content_width,
+    commands = commands
+  }
+
+  return self.partial_layout
+end
+
 ---@return number
 function MarkdownView:get_scrollable_size()
   local layout = self:ensure_layout()
-  return layout.height + style.padding.y * 2
+  local partial_layout = self:ensure_partial_layout()
+  local height = partial_layout and partial_layout.height or layout.height
+  return height + style.padding.y * 2
 end
 
 ---@return number
 function MarkdownView:get_h_scrollable_size()
   local layout = self:ensure_layout()
-  return layout.content_width + style.padding.x * 2
+  local partial_layout = self:ensure_partial_layout()
+  local content_width = partial_layout
+    and math.max(layout.content_width, partial_layout.content_width)
+    or layout.content_width
+  return content_width + style.padding.x * 2
 end
 
 ---Returns the rendered size for the given outer width.
@@ -3234,8 +3364,13 @@ end
 function MarkdownView:get_rendered_size(width)
   self.size.x = width
   local layout = self:ensure_layout()
-  return layout.content_width + style.padding.x * 2,
-    layout.height + style.padding.y * 2
+  local partial_layout = self:ensure_partial_layout()
+  local content_width = partial_layout
+    and math.max(layout.content_width, partial_layout.content_width)
+    or layout.content_width
+  local height = partial_layout and partial_layout.height or layout.height
+  return content_width + style.padding.x * 2,
+    height + style.padding.y * 2
 end
 
 ---Draws the markdown contents at an arbitrary rectangle.
@@ -3270,6 +3405,18 @@ function MarkdownView:draw_at(x, y, width, height, background, show_scrollbars)
     width,
     height
   )
+  local partial_layout = self:ensure_partial_layout()
+  if partial_layout then
+    draw_layout_commands(
+      partial_layout.commands,
+      ox + style.padding.x,
+      oy + style.padding.y,
+      x,
+      y,
+      width,
+      height
+    )
+  end
   if show_scrollbars then
     self:draw_scrollbar()
   end
@@ -3458,6 +3605,10 @@ function MarkdownView:draw()
   local start_y = oy + style.padding.y
 
   draw_layout_commands(layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+  local partial_layout = self:ensure_partial_layout()
+  if partial_layout then
+    draw_layout_commands(partial_layout.commands, start_x, start_y, clip_x, clip_y, clip_w, clip_h)
+  end
   self:draw_scrollbar()
 end
 
