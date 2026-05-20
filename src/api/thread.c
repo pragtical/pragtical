@@ -85,9 +85,7 @@ static const char* reader(lua_State *L, LoadState *state, size_t *size)
 
 static void destroy(LuaThread *t)
 {
-  (void)SDL_AtomicDecRef(&t->ref);
-
-  if (SDL_GetAtomicInt(&t->ref) <= 0) {
+  if (SDL_AtomicDecRef(&t->ref)) {
     lua_close(t->L);
     SDL_free(t);
   }
@@ -391,7 +389,8 @@ static int f_thread_create(lua_State *L)
 
   thread->ptr = SDL_CreateThread((SDL_ThreadFunction)callback, name, thread);
   if (thread->ptr == NULL) {
-    luaL_error(L, SDL_GetError());
+    lua_pushnil(L);
+    lua_pushstring(L, SDL_GetError());
     goto failure;
   }
 
@@ -438,6 +437,11 @@ static int m_thread_get_id(lua_State *L)
     L, 1, API_TYPE_THREAD
   ))->thread;
 
+  if (self->ptr == NULL) {
+    lua_pushnil(L);
+    return 1;
+  }
+
   lua_pushinteger(L, SDL_GetThreadID(self->ptr));
 
   return 1;
@@ -454,6 +458,11 @@ static int m_thread_get_name(lua_State *L)
   LuaThread* self = ((ThreadContainer*)luaL_checkudata(
     L, 1, API_TYPE_THREAD
   ))->thread;
+
+  if (self->ptr == NULL) {
+    lua_pushnil(L);
+    return 1;
+  }
 
   lua_pushstring(L, SDL_GetThreadName(self->ptr));
 
@@ -474,6 +483,7 @@ static int m_thread_wait(lua_State *L)
   int status;
 
   SDL_WaitThread(self->ptr, &status);
+  self->ptr = NULL;
   self->clean = true;
 
   lua_pushinteger(L, status);
@@ -516,6 +526,7 @@ static int mm_thread_gc(lua_State *L)
   if (!self->clean) {
     self->clean = true;
     SDL_DetachThread(self->ptr);
+    self->ptr = NULL;
   }
 
   /* this can take place before or after the thread callback ends
@@ -534,7 +545,10 @@ static int mm_thread_tostring(lua_State *L)
     L, 1, API_TYPE_THREAD
   ))->thread;
 
-  lua_pushfstring(L, "thread %d", SDL_GetThreadID(self->ptr));
+  if (self->ptr == NULL)
+    lua_pushstring(L, "thread <finished>");
+  else
+    lua_pushfstring(L, "thread %d", SDL_GetThreadID(self->ptr));
 
   return 1;
 }
