@@ -1,5 +1,37 @@
 # Changes Log
 
+## [3.10.1] - 2026-05-20
+
+### Enhancements
+
+* Add incremental parsing support to MarkdownView
+  ([#485](https://github.com/pragtical/pragtical/pull/485))
+
+* Add MarkdownView copy interactions
+  ([#489](https://github.com/pragtical/pragtical/pull/489))
+
+* Add selection_callback and allow_directories to file-open commands
+  ([#487](https://github.com/pragtical/pragtical/pull/487))
+
+* Polish MarkdownView selection behavior
+  ([07499bc8](https://github.com/pragtical/pragtical/commit/07499bc8))
+
+### Fixes
+
+* Another batch of thread api fixes
+  ([#488](https://github.com/pragtical/pragtical/pull/488))
+
+* Filter non used events on the events queue
+  ([#486](https://github.com/pragtical/pragtical/pull/486))
+
+### Build System
+
+* Fix build for new sdl3_net changes
+  ([#483](https://github.com/pragtical/pragtical/pull/483))
+
+* SDL3_Net: pin to latest pre-release
+  ([46b3d698](https://github.com/pragtical/pragtical/commit/46b3d698))
+
 ## [3.10.0] - 2026-05-12
 
 ### New Features
@@ -3334,6 +3366,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.10.1]: https://github.com/pragtical/pragtical/releases/tag/v3.10.1
 [3.10.0]: https://github.com/pragtical/pragtical/releases/tag/v3.10.0
 [3.9.0]: https://github.com/pragtical/pragtical/releases/tag/v3.9.0
 [3.8.7]: https://github.com/pragtical/pragtical/releases/tag/v3.8.7
