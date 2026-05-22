@@ -4,6 +4,7 @@ local settings = require "plugins.settings"
 local Button = require "widget.button"
 local TextBox = require "widget.textbox"
 local Toggle = require "widget.toggle"
+local SettingsView = getmetatable(settings.ui)
 
 local function find_child(view, class)
   local childs = view.childs
@@ -18,18 +19,29 @@ end
 test.describe("settings", function()
   local old_test_settings
   local old_settings_config
+  local old_settings_plugins
+  local old_plugin_sections
+  local old_test_settings_module
 
   test.before_each(function()
     old_test_settings = config.plugins.test_settings
     old_settings_config = settings.config
+    old_settings_plugins = settings.plugins
+    old_plugin_sections = settings.plugin_sections
+    old_test_settings_module = package.preload["plugins.test_settings"]
     config.plugins.test_settings = {}
     settings.config = {}
+    settings.plugins = {}
+    settings.plugin_sections = {}
     os.remove(USERDIR .. "/user_settings.lua")
   end)
 
   test.after_each(function()
     config.plugins.test_settings = old_test_settings
     settings.config = old_settings_config
+    settings.plugins = old_settings_plugins
+    settings.plugin_sections = old_plugin_sections
+    package.preload["plugins.test_settings"] = old_test_settings_module
     os.remove(USERDIR .. "/user_settings.lua")
   end)
 
@@ -144,6 +156,9 @@ test.describe("settings", function()
 
     test.equal(config.plugins.test_settings.project.name, "Website")
     test.equal(settings.config.plugins.test_settings.project.name, "Website")
+
+    local saved = dofile(USERDIR .. "/user_settings.lua")
+    test.equal(saved.config.plugins.test_settings.project.name, "Website")
   end)
 
   test.it("resolves sub config prefixes relative to plugin context", function()
@@ -184,6 +199,9 @@ test.describe("settings", function()
     test.equal(config.plugins.test_settings.project.name, "Website")
     test.equal(settings.config.plugins.test_settings.project.name, "Website")
     test.equal(config.project, nil)
+
+    local saved = dofile(USERDIR .. "/user_settings.lua")
+    test.equal(saved.config.plugins.test_settings.project.name, "Website")
   end)
 
   test.it("inherits plugin paths for sub config views without a prefix", function()
@@ -226,4 +244,134 @@ test.describe("settings", function()
     test.equal(settings.config.plugins.test_settings.name, "Website")
     test.equal(config.name, nil)
   end)
+
+  test.it("resolves sub config prefixes relative to parent prefixes", function()
+    local old_show_config = settings.show_config
+    local opened_view
+
+    settings.show_config = function(title, spec, context)
+      opened_view = old_show_config(title, spec, context)
+      return opened_view
+    end
+
+    local view = old_show_config("Parent Settings", {
+      path_prefix = "plugins.test_settings",
+      {
+        label = "Open Preferences",
+        title = "Project Preferences",
+        type = settings.type.SUBCONFIG,
+        spec = {
+          path_prefix = "project",
+          {
+            label = "Project Name",
+            path = "name",
+            type = settings.type.STRING,
+            default = "Demo"
+          }
+        }
+      }
+    })
+
+    local button = find_child(view, Button)
+    test.not_nil(button)
+    button:on_click()
+    settings.show_config = old_show_config
+
+    local textbox = find_child(opened_view, TextBox)
+    test.not_nil(textbox)
+    textbox:on_change("Website")
+
+    test.equal(config.plugins.test_settings.project.name, "Website")
+    test.equal(settings.config.plugins.test_settings.project.name, "Website")
+    test.equal(config.project, nil)
+
+    local saved = dofile(USERDIR .. "/user_settings.lua")
+    test.equal(saved.config.plugins.test_settings.project.name, "Website")
+    test.equal(saved.config.project, nil)
+  end)
+
+  test.it("loads runtime sub config values into generated views", function()
+    local old_show_config = settings.show_config
+    local opened_view
+
+    config.plugins.test_settings = {
+      project = {
+        name = "Website"
+      }
+    }
+
+    settings.show_config = function(title, spec, context)
+      opened_view = old_show_config(title, spec, context)
+      return opened_view
+    end
+
+    local view = old_show_config("Parent Settings", {
+      path_prefix = "plugins.test_settings",
+      {
+        label = "Open Preferences",
+        title = "Project Preferences",
+        type = settings.type.SUBCONFIG,
+        spec = {
+          path_prefix = "project",
+          {
+            label = "Project Name",
+            path = "name",
+            type = settings.type.STRING,
+            default = "Demo"
+          }
+        }
+      }
+    })
+
+    local button = find_child(view, Button)
+    test.not_nil(button)
+    button:on_click()
+    settings.show_config = old_show_config
+
+    local textbox = find_child(opened_view, TextBox)
+    test.not_nil(textbox)
+    test.equal(textbox:get_text(), "Website")
+  end)
+
+  test.it("merges saved plugin sub config values into global config", function()
+    package.preload["plugins.test_settings"] = function()
+      config.plugins.test_settings.config_spec = {
+        name = "Test Settings",
+        {
+          label = "Open Preferences",
+          title = "Project Preferences",
+          type = settings.type.SUBCONFIG,
+          spec = {
+            path_prefix = "project",
+            sections = {
+              General = {
+                {
+                  label = "Project Name",
+                  path = "name",
+                  type = settings.type.STRING,
+                  default = "Demo"
+                }
+              }
+            }
+          }
+        }
+      }
+      return true
+    end
+
+    settings.config = {
+      plugins = {
+        test_settings = {
+          project = {
+            name = "Website"
+          }
+        }
+      }
+    }
+
+    SettingsView.enable_plugin(settings.ui, "test_settings")
+
+    test.equal(config.plugins.test_settings.project.name, "Website")
+  end)
+
 end)

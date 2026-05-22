@@ -165,6 +165,9 @@ function settings.add(section, options, plugin_name, overwrite)
     if not settings[category][section][plugin_name] then
       settings[category][section][plugin_name] = {}
     end
+    if type(options.sections) == "table" then
+      settings[category][section][plugin_name].sections = options.sections
+    end
     for _, option in ipairs(options) do
       table.insert(settings[category][section][plugin_name], option)
     end
@@ -1056,6 +1059,40 @@ local function set_config_value(conf, path, value)
   element[sections[sections_count]] = value
 end
 
+---Resolve a settings option path from a render context.
+---@param option settings.option
+---@param context? string|table
+---@return string|nil
+local function resolve_option_path(option, context)
+  if type(option.path) ~= "string" then return nil end
+  if type(context) == "string" then
+    return "plugins." .. context .. "." .. option.path
+  end
+  if type(context) == "table" and type(context.path_prefix) == "string" and context.path_prefix ~= "" then
+    return context.path_prefix .. "." .. option.path
+  end
+  return option.path
+end
+
+---Resolve a generated config path prefix against an inherited render context.
+---@param path_prefix string
+---@param context? string|table
+---@return string
+local function resolve_path_prefix(path_prefix, context)
+  if path_prefix:find("^plugins%.") then return path_prefix end
+  if type(context) == "string" and context ~= "" then
+    return "plugins." .. context .. "." .. path_prefix
+  end
+  if
+    type(context) == "table"
+    and type(context.path_prefix) == "string"
+    and context.path_prefix ~= ""
+  then
+    return context.path_prefix .. "." .. path_prefix
+  end
+  return path_prefix
+end
+
 ---Get a list of system and user installed plugins.
 ---@return table<integer, string>
 local function get_installed_plugins()
@@ -1305,22 +1342,52 @@ end
 ---Load the user_settings.lua stored options for a plugin into global config.
 ---@param plugin_name string
 ---@param options settings.option[]
-local function merge_plugin_settings(plugin_name, options)
-  for _, option in pairs(options) do
-    if type(option.path) == "string" then
-      local path = "plugins." .. plugin_name .. "." .. option.path
-      local saved_value = get_config_value(settings.config, path)
-      if type(saved_value) ~= "nil" then
-        local otype = type(option.type) == "string" and option.type:lower() or ""
-        if option.type == settings.type.FONT or otype == "font" then
-          merge_font_settings(option, path, saved_value)
-        else
-          set_config_value(config, path, saved_value)
+---@param context? string|table
+local function merge_plugin_settings(plugin_name, options, context)
+  context = context or plugin_name
+
+  local function merge_option(option)
+    local otype = type(option.type) == "string" and option.type:lower() or ""
+    if option.type == settings.type.SUBCONFIG or otype == "subconfig" then
+      if type(option.spec) == "table" then
+        local subcontext = context
+        if type(option.spec.path_prefix) == "string" and option.spec.path_prefix ~= "" then
+          subcontext = {
+            path_prefix = resolve_path_prefix(option.spec.path_prefix, context)
+          }
         end
-        if option.on_apply then
-          option.on_apply(saved_value)
+        merge_plugin_settings(plugin_name, option.spec, subcontext)
+      end
+    else
+      local path = resolve_option_path(option, context)
+      if type(path) == "string" then
+        local saved_value = get_config_value(settings.config, path)
+        if type(saved_value) ~= "nil" then
+          if option.type == settings.type.FONT or otype == "font" then
+            merge_font_settings(option, path, saved_value)
+          else
+            set_config_value(config, path, saved_value)
+          end
+          if option.on_apply then
+            option.on_apply(saved_value)
+          end
         end
       end
+    end
+  end
+
+  if type(options.sections) == "table" then
+    for _, section in pairs(options.sections) do
+      local section_options = section.options or section
+      if type(section_options) == "table" then
+        for _, option in ipairs(section_options) do
+          merge_option(option)
+        end
+      end
+    end
+  else
+    for _, option in ipairs(options) do
+      merge_option(option)
     end
   end
 end
@@ -1454,33 +1521,6 @@ function Settings:new()
   self:load_keymap_settings()
 
   self:setup_about()
-end
-
----Resolve a settings option path from a render context.
----@param option settings.option
----@param context? string|table
----@return string|nil
-local function resolve_option_path(option, context)
-  if type(option.path) ~= "string" then return nil end
-  if type(context) == "string" then
-    return "plugins." .. context .. "." .. option.path
-  end
-  if type(context) == "table" and type(context.path_prefix) == "string" and context.path_prefix ~= "" then
-    return context.path_prefix .. "." .. option.path
-  end
-  return option.path
-end
-
----Resolve a generated config path prefix against an inherited render context.
----@param path_prefix string
----@param context? string|table
----@return string
-local function resolve_path_prefix(path_prefix, context)
-  if path_prefix:find("^plugins%.") then return path_prefix end
-  if type(context) == "string" and context ~= "" then
-    return "plugins." .. context .. "." .. path_prefix
-  end
-  return path_prefix
 end
 
 ---Helper function to add control for core, plugin, and standalone settings.
