@@ -65,7 +65,8 @@ settings.type = {
   FONT = 7,
   FILE = 8,
   DIRECTORY = 9,
-  COLOR = 10
+  COLOR = 10,
+  SUBCONFIG = 11
 }
 
 ---@alias settings.types
@@ -79,6 +80,7 @@ settings.type = {
 ---| `settings.type.FILE`
 ---| `settings.type.DIRECTORY`
 ---| `settings.type.COLOR`
+---| `settings.type.SUBCONFIG`
 
 ---Represents a setting to render on a settings pane.
 ---@class settings.option
@@ -112,6 +114,10 @@ settings.type = {
 ---@field public icon string
 ---Command or function executed when a BUTTON is clicked
 ---@field public on_click nil | string | fun(button:string, x:integer, y:integer)
+---Title used when opening a SUBCONFIG view.
+---@field public title string
+---Spec used when opening a SUBCONFIG view.
+---@field public spec settings.config_spec|settings.option[]
 ---Optional function executed when the option value is applied.
 ---@field public on_apply nil | fun(value:any)
 ---When FILE or DIRECTORY this flag tells the path should exist.
@@ -119,6 +125,15 @@ settings.type = {
 ---Lua patterns used on FILE or DIRECTORY to filter browser results and
 ---also force the selection to match one of the filters.
 ---@field public filters table<integer,string>
+
+---Represents a standalone settings specification.
+---@class settings.config_spec
+---Title displayed by the generated configuration view.
+---@field public name string
+---Optional config path prefix prepended to all option paths.
+---@field public path_prefix string
+---Optional named sections. Each section value is a `settings.option[]`.
+---@field public sections table<string, settings.option[]>|table<integer, table>
 
 ---Add a new settings section to the settings UI
 ---@param section string
@@ -1441,14 +1456,40 @@ function Settings:new()
   self:setup_about()
 end
 
----Helper function to add control for both core and plugin settings.
----@oaram pane widget
+---Resolve a settings option path from a render context.
 ---@param option settings.option
----@param plugin_name? string | nil
-local function add_control(pane, option, plugin_name)
+---@param context? string|table
+---@return string|nil
+local function resolve_option_path(option, context)
+  if type(option.path) ~= "string" then return nil end
+  if type(context) == "string" then
+    return "plugins." .. context .. "." .. option.path
+  end
+  if type(context) == "table" and type(context.path_prefix) == "string" and context.path_prefix ~= "" then
+    return context.path_prefix .. "." .. option.path
+  end
+  return option.path
+end
+
+---Resolve a generated config path prefix against an inherited render context.
+---@param path_prefix string
+---@param context? string|table
+---@return string
+local function resolve_path_prefix(path_prefix, context)
+  if path_prefix:find("^plugins%.") then return path_prefix end
+  if type(context) == "string" and context ~= "" then
+    return "plugins." .. context .. "." .. path_prefix
+  end
+  return path_prefix
+end
+
+---Helper function to add control for core, plugin, and standalone settings.
+---@param pane widget
+---@param option settings.option
+---@param context? string|table Plugin name or standalone render context.
+local function add_control(pane, option, context)
   local found = false
-  local path = type(plugin_name) ~= "nil" and
-    "plugins." .. plugin_name .. "." .. option.path or option.path
+  local path = resolve_option_path(option, context)
   local option_value = nil
   if type(path) ~= "nil" then
     option_value = get_config_value(config, path, option.default)
@@ -1519,6 +1560,16 @@ local function add_control(pane, option, plugin_name)
       elseif command_type == "function" then
         button.on_click = option.on_click
       end
+    end
+    widget = button
+    found = true
+
+  elseif option.type == settings.type.SUBCONFIG then
+    ---@type widget.button
+    local button = Button(pane, option.label)
+    button:set_icon("P")
+    function button:on_click()
+      settings.show_config(option.title or option.label, option.spec, context)
     end
     widget = button
     found = true
@@ -2160,6 +2211,159 @@ local contributors_list = {
   end
 end
 
+---Layout settings controls inside a widget.
+---@param childs widget[]
+---@param width number
+local function layout_settings_childs(childs, width)
+  local prev_child = nil
+  for pos=#childs, 1, -1 do
+    local child = childs[pos]
+    local x, y = 10, (10 * SCALE)
+    if prev_child then
+      if
+        (prev_child:is(Label) and not prev_child.desc)
+        or
+        (child:is(Label) and child.desc)
+      then
+        y = prev_child:get_bottom() + (10 * SCALE)
+      elseif not child:is(Line) then
+        y = prev_child:get_bottom() + (30 * SCALE)
+      end
+    end
+    if child:is(Line) then
+      x = 0
+    elseif
+      child:is(ItemsList) or child:is(FilePicker)
+      or
+      child:is(TextBox) or child:is(Container)
+    then
+      child:set_size(width - 20)
+    end
+    child:set_position(x, y)
+    prev_child = child
+  end
+end
+
+---Layout settings controls inside a folding book.
+---@param section widget.foldingbook
+local function layout_settings_section(section)
+  section:set_size(
+    section.parent.size.x - style.padding.x,
+    section:get_real_height()
+  )
+  section:set_position(style.padding.x / 2, 0)
+
+  for _, pane in ipairs(section.panes) do
+    layout_settings_childs(pane.container.childs, pane.container:get_width())
+  end
+end
+
+---@class settings.configview : widget
+---@field private sections widget.foldingbook?
+---@field private config_spec settings.config_spec
+local ConfigView = Widget:extend()
+
+---Return whether a table looks like a settings option.
+---@param value any
+---@return boolean
+local function is_option(value)
+  return type(value) == "table" and type(value.label) == "string"
+end
+
+---Return standalone config sections from a spec.
+---@param title string
+---@param spec settings.config_spec|settings.option[]
+---@return table[]
+local function config_spec_sections(title, spec)
+  if type(spec.sections) ~= "table" then
+    return {
+      {
+        name = spec.name or title,
+        options = spec
+      }
+    }
+  end
+
+  local result = {}
+  if #spec.sections > 0 then
+    for index, section in ipairs(spec.sections) do
+      if type(section) == "table" then
+        table.insert(result, {
+          name = section.name or section.label or tostring(index),
+          options = section.options or section
+        })
+      end
+    end
+  else
+    local names = {}
+    for name in pairs(spec.sections) do table.insert(names, name) end
+    table.sort(names)
+    for _, name in ipairs(names) do
+      table.insert(result, {
+        name = tostring(name),
+        options = spec.sections[name]
+      })
+    end
+  end
+  return result
+end
+
+---Create a generated settings view from a config spec.
+---@param title string
+---@param spec settings.config_spec|settings.option[]
+---@param context? string|table Plugin name or standalone render context inherited from the opener.
+function ConfigView:new(title, spec, context)
+  ConfigView.super.new(self, nil, false)
+  self.name = title
+  self.defer_draw = false
+  self.border.width = 0
+  self.draggable = false
+  self.scrollable = true
+  self.config_spec = spec
+
+  context = type(context) == "table" and common.merge({}, context) or context
+  if type(spec.path_prefix) == "string" and spec.path_prefix ~= "" then
+    context = { path_prefix = resolve_path_prefix(spec.path_prefix, context) }
+  end
+
+  if type(spec.sections) == "table" then
+    self.sections = FoldingBook(self)
+    self.sections.border.width = 0
+    self.sections.scrollable = false
+    for _, section in ipairs(config_spec_sections(title, spec)) do
+      local pane = self.sections:add_pane(section.name, section.name)
+      for _, option in ipairs(section.options or {}) do
+        if is_option(option) then
+          add_control(pane, option, context)
+        end
+      end
+    end
+  else
+    for _, option in ipairs(spec) do
+      if is_option(option) then
+        add_control(self, option, context)
+      end
+    end
+  end
+end
+
+function ConfigView:draw_background()
+  ConfigView.super.draw_background(self, style.background)
+end
+
+---Reposition generated settings controls.
+function ConfigView:update()
+  if not ConfigView.super.update(self) then return end
+  if self.sections then
+    layout_settings_section(self.sections)
+  else
+    layout_settings_childs(self.childs, self:get_width())
+  end
+  if self.size.x == 0 and self.size.y == 0 then
+    self:schedule_update(true)
+  end
+end
+
 ---Reposition and resize core and plugin widgets.
 function Settings:update()
   if not Settings.super.update(self) then return end
@@ -2168,12 +2372,6 @@ function Settings:update()
 
   for _, section in ipairs({self.core_sections, self.plugin_sections}) do
     if section.parent:is_visible() then
-      section:set_size(
-        section.parent.size.x - (style.padding.x),
-        section:get_real_height()
-      )
-      section:set_position(style.padding.x / 2, 0)
-
       if section == self.plugin_sections and command.is_valid("plugin-manager:show") then
         -- accomodate plugin manager button
         self.plugin_button:set_position(
@@ -2182,35 +2380,7 @@ function Settings:update()
         )
       end
 
-      for _, pane in ipairs(section.panes) do
-        local prev_child = nil
-        for pos=#pane.container.childs, 1, -1 do
-          local child = pane.container.childs[pos]
-          local x, y = 10, (10 * SCALE)
-          if prev_child then
-            if
-              (prev_child:is(Label) and not prev_child.desc)
-              or
-              (child:is(Label) and child.desc)
-            then
-              y = prev_child:get_bottom() + (10 * SCALE)
-            elseif not child:is(Line) then
-              y = prev_child:get_bottom() + (30 * SCALE)
-            end
-          end
-          if child:is(Line) then
-            x = 0
-          elseif
-            child:is(ItemsList) or child:is(FilePicker)
-            or
-            child:is(TextBox) or child:is(Container)
-          then
-            child:set_size(pane.container:get_width() - 20)
-          end
-          child:set_position(x, y)
-          prev_child = child
-        end
-      end
+      layout_settings_section(section)
     end
   end
 
@@ -2237,6 +2407,34 @@ end
 function Settings:try_close(do_close)
   self.super.try_close(self, do_close)
   self:hide()
+end
+
+---Open a settings view in the active node.
+---@param view widget
+local function open_settings_view(view)
+  view:show()
+  local node = core.root_view:get_active_node_default()
+  node:add_view(view)
+  node:set_active_view(view)
+end
+
+---Show a generated configuration view.
+---@param title string
+---@param spec settings.config_spec|settings.option[]
+---@param context? string|table Plugin name or standalone render context inherited from the opener.
+---@return settings.configview|nil view
+function settings.show_config(title, spec, context)
+  if type(title) ~= "string" or title == "" then
+    core.error("Settings: show_config requires a title")
+    return nil
+  end
+  if type(spec) ~= "table" then
+    core.error("Settings: show_config requires a config spec table")
+    return nil
+  end
+  local view = ConfigView(title, spec, context)
+  open_settings_view(view)
+  return view
 end
 
 --------------------------------------------------------------------------------
