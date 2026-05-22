@@ -18,6 +18,7 @@
 #include "../system_events.h"
 #ifdef _WIN32
   #include <direct.h>
+  #include <io.h>
   #include <windows.h>
   #include <fileapi.h>
   #include "../utfconv.h"

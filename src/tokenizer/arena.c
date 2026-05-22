@@ -9,7 +9,9 @@
   #ifndef alignof
     #define alignof _Alignof
   #endif
-  typedef long double max_align_t;
+  #ifndef __clang__
+    typedef long double max_align_t;
+  #endif
 #else
   #include <stdalign.h>
 #endif

@@ -10,9 +10,11 @@
   #ifndef alignof
     #define alignof _Alignof
   #endif
-  /* max_align_t is a compiler defined type, but
-  ** MSVC doesn't provide it, so we'll have to improvise */
-  typedef long double max_align_t;
+  #ifndef __clang__
+    /* max_align_t is a compiler defined type, but
+    ** MSVC doesn't provide it, so we'll have to improvise */
+    typedef long double max_align_t;
+  #endif
 #else
   #include <stdalign.h>
 #endif
