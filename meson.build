@@ -4,7 +4,7 @@ project('pragtical',
     license : 'MIT',
     meson_version : '>= 0.63',
     default_options : [
-        'c_std=gnu11',
+        'c_std=gnu11,c11',
         'wrap_mode=nofallback'
     ]
 )
