@@ -111,7 +111,7 @@ local python_type = {
 -- (in order to make something like this work: Tuple[Tuple[int, str], float])
 table.insert(
   python_type.patterns, 1,
-  { pattern = { "%[", "%]" }, syntax = python_type }
+  { pattern = { "%[", "%]" }, type = "normal", syntax = python_type }
 )
 
 
@@ -123,15 +123,15 @@ local not_python_type = {
 
 table.insert(
   not_python_type.patterns, 1,
-  { pattern = { "%[", "%]" }, syntax = not_python_type }
+  { pattern = { "%[", "%]" }, type = "normal", syntax = not_python_type }
 )
 table.insert(
   not_python_type.patterns, 1,
-  { pattern = { "{",  "}"  }, syntax = not_python_type }
+  { pattern = { "{",  "}"  }, type = "normal", syntax = not_python_type }
 )
 table.insert(
   python_fstring.patterns, 1,
-  { pattern = { "{",  "}"  }, syntax = not_python_type }
+  { pattern = { "{",  "}"  }, type = "normal", syntax = not_python_type }
 )
 
 
@@ -159,7 +159,7 @@ local python_func = {
 
 table.insert(
   python_func.patterns, 1,
-  { pattern = { "%(", "%)" }, syntax = python_func }
+  { pattern = { "%(", "%)" }, type = "normal", syntax = python_func }
 )
 
 
@@ -175,8 +175,8 @@ syntax.add {
     { pattern = "#.*", type = "comment" },
     { pattern = { '^%s*"""', '"""' }, type = "comment" },
 
-    { pattern = { "%[", "%]" }, syntax = not_python_type },
-    { pattern = { "{", "}"  }, syntax = not_python_type },
+    { pattern = { "%[", "%]" }, type = "normal", syntax = not_python_type },
+    { pattern = { "{", "}"  }, type = "normal", syntax = not_python_type },
 
     -- this and the following prevent one-liner highlight bugs
     { pattern = { "^%s*()def%f[%s]", ":()%s*$" },
