@@ -2738,7 +2738,7 @@ end
 
 local function should_draw_command(command, phase)
   if phase == "background" then
-    return command.type == "rect"
+    return command.type == "rect" or command.type == "text"
   elseif phase == "foreground" then
     return command.type ~= "rect"
   end
@@ -2774,13 +2774,15 @@ local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, 
         local tab_offset = 0
         for _, fragment in ipairs(command.fragments) do
           if fragment.type == "image" then
-            local draw_y = y + math.max(math.floor((command.height - fragment.height) / 2), 0)
-            renderer.draw_canvas(fragment.image, cursor_x, draw_y)
+            if phase ~= "background" then
+              local draw_y = y + math.max(math.floor((command.height - fragment.height) / 2), 0)
+              renderer.draw_canvas(fragment.image, cursor_x, draw_y)
+            end
             cursor_x = cursor_x + fragment.width
           else
             local font_height = fragment.font:get_height()
             local draw_y = y + (command.height - font_height) / 2
-            if fragment.background then
+            if fragment.background and phase ~= "foreground" then
               renderer.draw_rect(
                 cursor_x - INLINE_CODE_PADDING_X,
                 draw_y - INLINE_CODE_PADDING_Y,
@@ -2789,14 +2791,18 @@ local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, 
                 resolve_color(fragment.background)
               )
             end
-            cursor_x = renderer.draw_text(
-              fragment.font,
-              fragment.text,
-              cursor_x,
-              draw_y,
-              resolve_color(fragment.color),
-              command.tabbed and { tab_offset = tab_offset } or nil
-            )
+            if phase ~= "background" then
+              cursor_x = renderer.draw_text(
+                fragment.font,
+                fragment.text,
+                cursor_x,
+                draw_y,
+                resolve_color(fragment.color),
+                command.tabbed and { tab_offset = tab_offset } or nil
+              )
+            else
+              cursor_x = cursor_x + fragment.width
+            end
           end
           if command.tabbed then
             tab_offset = cursor_x - x
