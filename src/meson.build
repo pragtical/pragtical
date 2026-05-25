@@ -218,13 +218,20 @@ executable('pragtical',
 )
 
 if host_machine.system() == 'windows'
+    # MSVC generates pragtical.lib/.exp as side effects of linking. Without a
+    # distinct implib name, the .exe and .com builds race to write the same
+    # files in parallel and one fails with LNK1104.
+    pragtical_com_link_args = pragtical_link_args
+    if cc.get_id() == 'msvc' or cc.get_id() == 'clang-cl'
+        pragtical_com_link_args += '/IMPLIB:pragtical_com.lib'
+    endif
     executable('pragtical',
         pragtical_sources + pragtical_rc,
         include_directories: pragtical_includes,
         dependencies: pragtical_deps,
         c_args: pragtical_cargs,
         objc_args: pragtical_cargs,
-        link_args: pragtical_link_args,
+        link_args: pragtical_com_link_args,
         link_whole: pragtical_link_whole,
         name_suffix: 'com',
         install_dir: pragtical_bindir,
