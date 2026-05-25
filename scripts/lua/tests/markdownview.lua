@@ -159,6 +159,58 @@ print("hello")
     test.equal(blocks[1].items[2].text, "Done task")
   end)
 
+  test.test("parses document frontmatter as a block", function()
+    local blocks = MarkdownView.parse_blocks([[
+---
+slug: pragtical-v3101-release
+title: Pragtical v3.10.1 Release
+authors: jgmdev
+---
+
+# Release Notes
+]])
+
+    test.equal(#blocks, 2)
+    test.equal(blocks[1].type, "frontmatter")
+    test.same(blocks[1].lines, {
+      "slug: pragtical-v3101-release",
+      "title: Pragtical v3.10.1 Release",
+      "authors: jgmdev"
+    })
+    test.equal(blocks[2].type, "heading")
+    test.equal(blocks[2].text, "Release Notes")
+  end)
+
+  test.test("renders frontmatter lines without collapsing them", function()
+    local view = MarkdownView([[
+---
+slug: pragtical-v3101-release
+title: Pragtical v3.10.1 Release
+authors: jgmdev
+---
+
+# Release Notes
+]])
+    view.size.x = 640
+    view.size.y = 360
+
+    local text_lines = {}
+    for _, command in ipairs(view:ensure_layout().commands) do
+      if command.type == "text" then
+        local fragments = {}
+        for _, fragment in ipairs(command.fragments or {}) do
+          fragments[#fragments + 1] = fragment.text or ""
+        end
+        text_lines[#text_lines + 1] = table.concat(fragments)
+      end
+    end
+
+    test.equal(text_lines[1], "slug: pragtical-v3101-release")
+    test.equal(text_lines[2], "title: Pragtical v3.10.1 Release")
+    test.equal(text_lines[3], "authors: jgmdev")
+    test.equal(text_lines[4], "Release Notes")
+  end)
+
   test.test("appends markdown incrementally at block boundaries", function()
     local view = MarkdownView("# One\n\nFirst paragraph.\n\n")
     local before_blocks = view.blocks

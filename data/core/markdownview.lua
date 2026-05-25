@@ -205,6 +205,27 @@ local function is_rule(line)
   return true
 end
 
+local function is_frontmatter_delimiter(line)
+  return trim(line) == "---"
+end
+
+local function parse_frontmatter(lines)
+  if not is_frontmatter_delimiter(lines[1] or "") then
+    return nil
+  end
+
+  local frontmatter_lines = {}
+  for i = 2, #lines do
+    if is_frontmatter_delimiter(lines[i]) then
+      return {
+        type = "frontmatter",
+        lines = frontmatter_lines
+      }, i + 1
+    end
+    frontmatter_lines[#frontmatter_lines + 1] = lines[i]
+  end
+end
+
 local function get_heading(line)
   local marks, text = line:match("^%s*(#+)%s+(.-)%s*$")
   if marks and #marks <= 6 then
@@ -1270,15 +1291,23 @@ extract_single_image = function(segments)
   end
 end
 
-local function parse_blocks_from_lines(lines, state)
+local function parse_blocks_from_lines(lines, state, allow_frontmatter)
   local blocks = {}
   local i = 1
+
+  if allow_frontmatter then
+    local frontmatter, next_index = parse_frontmatter(lines)
+    if frontmatter then
+      blocks[#blocks + 1] = frontmatter
+      i = next_index
+    end
+  end
 
   local function parse_nested_lines(nested_lines)
     if #nested_lines == 0 then
       return {}
     end
-    return parse_blocks_from_lines(nested_lines, state)
+    return parse_blocks_from_lines(nested_lines, state, false)
   end
 
   while i <= #lines do
@@ -1657,7 +1686,7 @@ local function parse_document(text)
     references = {},
     footnote_definitions = {}
   }
-  local blocks = parse_blocks_from_lines(split_lines(text), state)
+  local blocks = parse_blocks_from_lines(split_lines(text), state, true)
   local footnotes = {
     definitions = state.footnote_definitions,
     numbers = {},
@@ -2573,6 +2602,10 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
       local used_width
       y, used_width = add_code_block(commands, y, block.lines, fonts.code, block.info, available_width, x_offset)
       content_width = math.max(content_width, x_offset + used_width)
+    elseif block.type == "frontmatter" then
+      local used_width
+      y, used_width = add_code_block(commands, y, block.lines, fonts.code, "yaml", available_width, x_offset)
+      content_width = math.max(content_width, x_offset + used_width)
     elseif block.type == "table" then
       local used_width
       y, used_width = add_table_block(self, commands, y, block, fonts.body, accent_color, available_width, x_offset)
@@ -3224,7 +3257,7 @@ function MarkdownView:append_text(text)
     references = self.references,
     footnote_definitions = self.footnotes.definitions
   }
-  local blocks = parse_blocks_from_lines(split_lines(text), state)
+  local blocks = parse_blocks_from_lines(split_lines(text), state, existing_text == "")
   prepare_blocks(blocks, self.references, self.footnotes)
   append_blocks(self.blocks, blocks)
 
