@@ -14,7 +14,7 @@ struct dirmonitor_internal {
 };
 
 
-static struct dirmonitor_internal* init_dirmonitor() {
+static struct dirmonitor_internal* init_dirmonitor(void) {
   struct dirmonitor_internal* monitor = SDL_calloc(1, sizeof(struct dirmonitor_internal));
   monitor->fd = kqueue();
   return monitor;

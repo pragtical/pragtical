@@ -14,7 +14,7 @@ struct dirmonitor_internal {
 CFRunLoopRef main_run_loop;
 
 
-static struct dirmonitor_internal* init_dirmonitor() {
+static struct dirmonitor_internal* init_dirmonitor(void) {
   static bool mainloop_registered = false;
   if (!mainloop_registered) {
     main_run_loop = CFRunLoopGetCurrent();

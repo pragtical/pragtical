@@ -11,7 +11,7 @@
 #include "dirmonitor.h"
 
 extern "C" {
-struct dirmonitor_internal* init_dirmonitor();
+struct dirmonitor_internal* init_dirmonitor(void);
 void deinit_dirmonitor(struct dirmonitor_internal*);
 int get_changes_dirmonitor(struct dirmonitor_internal*, char*, int);
 int translate_changes_dirmonitor(struct dirmonitor_internal*, char*, int, int (*)(int, const char*, void*), void*);
@@ -27,7 +27,7 @@ struct dirmonitor_internal {
 };
 
 
-struct dirmonitor_internal* init_dirmonitor() {
+struct dirmonitor_internal* init_dirmonitor(void) {
   struct dirmonitor_internal* monitor = (struct dirmonitor_internal*)SDL_calloc(sizeof(struct dirmonitor_internal), 1);
   monitor->fd = create_inode_watcher(0);
   pipe(monitor->sig);
