@@ -17,7 +17,7 @@ int get_changes_dirmonitor(struct dirmonitor_internal*, char*, int);
 int translate_changes_dirmonitor(struct dirmonitor_internal*, char*, int, int (*)(int, const char*, void*), void*);
 int add_dirmonitor(struct dirmonitor_internal*, const char*);
 void remove_dirmonitor(struct dirmonitor_internal*, int);
-int get_mode_dirmonitor();
+int get_mode_dirmonitor(void);
 }
 
 struct dirmonitor_internal {
@@ -75,7 +75,7 @@ static void remove_dirmonitor(struct dirmonitor_internal* monitor, int fd) {
   inode_watcher_remove_watch(monitor->fd, fd);
 }
 
-static int get_mode_dirmonitor() { return 2; }
+static int get_mode_dirmonitor(void) { return 2; }
 
 struct dirmonitor_backend dirmonitor_inodewatcher = {
   .name = "inodewatcher"

@@ -217,7 +217,7 @@ static void remove_dirmonitor(struct dirmonitor_internal* monitor, int fd) {
 }
 
 
-static int get_mode_dirmonitor() { return 1; }
+static int get_mode_dirmonitor(void) { return 1; }
 
 struct dirmonitor_backend dirmonitor_fsevents = {
   .name = "fsevents",

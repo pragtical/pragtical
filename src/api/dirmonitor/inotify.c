@@ -55,7 +55,7 @@ static void remove_dirmonitor(struct dirmonitor_internal* monitor, int fd) {
 }
 
 
-static int get_mode_dirmonitor() { return 2; }
+static int get_mode_dirmonitor(void) { return 2; }
 
 struct dirmonitor_backend dirmonitor_inotify = {
   .name = "inotify",

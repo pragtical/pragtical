@@ -157,7 +157,7 @@ static size_t regex_offset_relative(int64_t pos, size_t len) {
     return pos;
   else if (pos == 0)
     return 1;
-  else if (pos < -len)  /* inverted comparison */
+  else if (pos < -(int64_t)len)  /* inverted comparison */
     return 1;  /* clip to 1 */
   else return len + pos + 1;
 }
