@@ -14,7 +14,7 @@ struct dirmonitor_internal {
 CFRunLoopRef main_run_loop;
 
 
-static struct dirmonitor_internal* init_dirmonitor() {
+static struct dirmonitor_internal* init_dirmonitor(void) {
   static bool mainloop_registered = false;
   if (!mainloop_registered) {
     main_run_loop = CFRunLoopGetCurrent();
@@ -217,7 +217,7 @@ static void remove_dirmonitor(struct dirmonitor_internal* monitor, int fd) {
 }
 
 
-static int get_mode_dirmonitor() { return 1; }
+static int get_mode_dirmonitor(void) { return 1; }
 
 struct dirmonitor_backend dirmonitor_fsevents = {
   .name = "fsevents",
