@@ -378,6 +378,95 @@ Paragraph with a footnote.[^note]
     test.ok(selection_index < text_index)
   end)
 
+  test.test("shows selected text in inline code spans", function()
+    local view = MarkdownView("Paragraph with `inline code` text")
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 400
+    view.size.y = 300
+    local layout = view:ensure_layout()
+    local code_command
+    local code_fragment
+    local code_x = 0
+
+    for _, command in ipairs(layout.commands) do
+      if command.type == "text" then
+        local fragment_x = 0
+        for _, fragment in ipairs(command.fragments) do
+          if fragment.background then
+            code_command = command
+            code_fragment = fragment
+            code_x = fragment_x
+            break
+          end
+          fragment_x = fragment_x + (fragment.width or 0)
+        end
+      end
+      if code_command then
+        break
+      end
+    end
+
+    test.not_nil(code_command)
+    test.not_nil(code_fragment)
+    local start_x = style.padding.x + code_command.x + code_x
+    local y = style.padding.y + code_command.y + code_command.height / 2
+    view:on_mouse_pressed("left", start_x, y, 1)
+    view:on_mouse_moved(start_x + code_fragment.width + 1, y, code_fragment.width + 1, 0)
+    view:on_mouse_released("left", start_x + code_fragment.width + 1, y)
+    test.equal(view:get_selected_text(), "inline code")
+
+    local events = {}
+    local original_draw_text = renderer.draw_text
+    local original_draw_rect = renderer.draw_rect
+    local original_push_clip_rect = core.push_clip_rect
+    local original_pop_clip_rect = core.pop_clip_rect
+
+    view.draw_background = function() end
+    view.draw_scrollbar = function() end
+    core.push_clip_rect = function() end
+    core.pop_clip_rect = function() end
+    renderer.draw_rect = function(_, _, _, _, color)
+      if color == style.background2 then
+        events[#events + 1] = "inline-code-background"
+      elseif color == style.selection then
+        events[#events + 1] = "selection"
+      end
+    end
+    renderer.draw_text = function(font, text, x, y, color, opts)
+      if text ~= "" then
+        events[#events + 1] = "text"
+      end
+      return x + font:get_width(text, opts)
+    end
+
+    view:draw()
+
+    renderer.draw_text = original_draw_text
+    renderer.draw_rect = original_draw_rect
+    core.push_clip_rect = original_push_clip_rect
+    core.pop_clip_rect = original_pop_clip_rect
+
+    local code_background_index
+    local selection_index
+    local text_index
+    for index, event in ipairs(events) do
+      if event == "inline-code-background" and not code_background_index then
+        code_background_index = index
+      elseif event == "selection" and not selection_index then
+        selection_index = index
+      elseif event == "text" and selection_index and not text_index then
+        text_index = index
+      end
+    end
+
+    test.not_nil(code_background_index)
+    test.not_nil(selection_index)
+    test.not_nil(text_index)
+    test.ok(code_background_index < selection_index)
+    test.ok(selection_index < text_index)
+  end)
+
   test.test("copies selected rendered text", function()
     local view = MarkdownView("# Title\n\nParagraph one")
     view.size.x = 400
