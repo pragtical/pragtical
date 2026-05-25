@@ -570,16 +570,16 @@ static void tokenizer_token_buffer_push_tokens(
 ) {
   if (results->count > 2) {
     lua_Integer current = results->values[0];
-    for (int segment_idx = 1; segment_idx < results->count; segment_idx++) {
-      lua_Integer next = segment_idx < (results->count - 1)
-        ? results->values[segment_idx + 1]
+    for (int segment_idx = 2; segment_idx <= results->count; segment_idx++) {
+      lua_Integer next = segment_idx < results->count
+        ? results->values[segment_idx]
         : results->values[1] + 1;
       lua_Integer finish = next - 1;
       if (finish >= current) {
         const char *segment = NULL;
         size_t segment_len = 0;
         tokenizer_text_slice(text, current, finish, &segment, &segment_len);
-        const char *type = tokenizer_pattern_type(pattern, segment_idx);
+        const char *type = tokenizer_pattern_type(pattern, segment_idx - 1);
         type = tokenizer_symbol_or_type(syntax, type, segment, segment_len);
         tokenizer_token_buffer_push_slice(
           buffer,
@@ -1235,6 +1235,10 @@ static bool tokenizer_find_text(
     }
 
     if (out->count < 2) return false;
+    if (anchored && out->values[0] != next) {
+      tokenizer_find_results_reset(out);
+      return false;
+    }
     current_end = out->values[1];
     if (!close) return true;
     if (!tokenizer_match_is_escaped(text, out->values[0], &pattern->escape)) {
