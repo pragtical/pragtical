@@ -5,8 +5,37 @@ local core   = require "core"
 ---@class core.syntax
 local syntax = {}
 
+---@alias core.syntax.matcher string|string[]
+---@alias core.syntax.token_type string|string[]
+
+---A single tokenization rule in a syntax definition.
+---
+---Exactly one of `pattern` or `regex` should be set. A string matcher is used
+---for a single token; a table matcher is used as `{ opener, closer, escape? }`
+---for a multi-token region that may optionally enter a nested syntax.
+---@class core.syntax.pattern
+---@field pattern? core.syntax.matcher Lua pattern matcher.
+---@field regex? core.syntax.matcher Regex matcher.
+---@field type? core.syntax.token_type Token type, or capture token types.
+---@field syntax? core.syntax.syntax|string Nested syntax table or syntax lookup key.
+---@field disabled? boolean True when the rule should be ignored by tokenizers.
+
+---A language syntax definition used by syntax plugins and tokenizers.
+---@class core.syntax.syntax
+---@field name? string Display name of the syntax.
+---@field files? string|string[] Lua patterns matched against file paths.
+---@field headers? string|string[] Lua patterns matched against file headers.
+---@field comment? string Single-line comment marker.
+---@field block_comment? string[] Pair of block comment delimiters.
+---@field symbol_pattern? string Lua pattern used for document symbols.
+---@field space_handling? boolean Whether `syntax.add` should append whitespace optimization rules.
+---@field patterns core.syntax.pattern[] Tokenization rules.
+---@field symbols table<string,string> Token type overrides for exact symbol text.
+
+---@type core.syntax.syntax[]
 syntax.items = {}
 
+---@type core.syntax.syntax
 syntax.plain_text_syntax = { name = "Plain Text", patterns = {}, symbols = {} }
 
 
@@ -37,6 +66,14 @@ local function check_pattern(pattern_type, pattern)
   return ok --[[@as boolean]], err
 end
 
+---Register a syntax definition.
+---
+---The syntax is appended to the syntax registry and later entries take
+---precedence when file or header patterns have the same match length. Syntax
+---patterns are validated before registration; malformed token patterns are
+---disabled and reported with `core.warn`.
+---
+---@param t core.syntax.syntax Syntax definition to register.
 function syntax.add(t)
   if type(t.space_handling) ~= "boolean" then t.space_handling = true end
 
@@ -94,6 +131,14 @@ local function find(string, field)
   return best_syntax
 end
 
+---Return the best syntax for a file path or header.
+---
+---File path patterns are checked first, followed by header patterns. When no
+---registered syntax matches, this returns `syntax.plain_text_syntax`.
+---
+---@param filename? string File path or name used for `files` pattern matching.
+---@param header? string Initial file contents used for `headers` pattern matching.
+---@return core.syntax.syntax syntax Best matching syntax, or plain text.
 function syntax.get(filename, header)
   return (filename and find(filename, "files"))
       or (header and find(header, "headers"))

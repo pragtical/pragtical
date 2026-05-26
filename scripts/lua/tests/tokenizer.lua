@@ -158,6 +158,31 @@ test.describe("tokenizer", function()
     })
   end)
 
+  test.test("reports native syntax compilation stats", function()
+    local syntax = {
+      patterns = {
+        { pattern = "[%a_][%w_]*", type = "symbol" },
+        { regex = [[\d+]], type = "number" },
+        { pattern = "%s+", type = "normal" },
+      },
+      symbols = {}
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    tokenizer.tokenize(syntax, "name 123", string.char(0))
+    local stats = tokenizer.get_syntax_stats(syntax)
+    tokenizer.set_use_native(using_native)
+
+    test.type(stats, "table")
+    test.equal(stats.patterns, 3)
+    test.type(stats.compiled_patterns, "number")
+    test.type(stats.fallback_patterns, "number")
+    test.type(stats.skipped_by_starter, "number")
+    test.type(stats.pattern_stats, "table")
+    test.equal(#stats.pattern_stats, 3)
+  end)
+
   test.test("keeps non-ascii identifiers on the utf8 pattern fallback", function()
     local syntax = {
       patterns = {
@@ -177,6 +202,29 @@ test.describe("tokenizer", function()
       "symbol", "café",
       "operator", " =",
       "symbol", " año"
+    })
+  end)
+
+  test.test("keeps optional leading lua pattern atoms searchable", function()
+    local syntax = {
+      patterns = {
+        { pattern = "%.?%d+", type = "number" },
+        { pattern = "[%a_][%w_]*", type = "symbol" },
+        { pattern = "%s+", type = "normal" },
+      },
+      symbols = {}
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenizer.tokenize(syntax, "value 1 .2", string.char(0))
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    test.same(tokens, {
+      "symbol", "value",
+      "number", " 1",
+      "number", " .2"
     })
   end)
 
@@ -288,6 +336,49 @@ test.describe("tokenizer", function()
       "keyword", "function",
       "symbol", " demo",
       "normal", "("
+    })
+  end)
+
+  test.test("closes zero-width regex subsyntax on the same line", function()
+    local signature_syntax = {
+      patterns = {
+        { pattern = "[%a_][%w_]*", type = "symbol" }
+      },
+      symbols = {
+        ["function"] = "keyword"
+      }
+    }
+    local syntax = {
+      patterns = {
+        {
+          regex = {
+            [[(?=function\s+[a-zA-Z_][a-zA-Z0-9_\.:]*\s*\()]],
+            [[\)]]
+          },
+          type = "normal",
+          syntax = signature_syntax
+        },
+        { pattern = "[%a_][%w_]*", type = "normal" }
+      },
+      symbols = {}
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenizer.tokenize(
+      syntax,
+      "function Highlighter:reset()\n",
+      string.char(0)
+    )
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    test.same(tokens, {
+      "keyword", "function",
+      "symbol", " Highlighter",
+      "normal", ":",
+      "symbol", "reset",
+      "normal", "()\n"
     })
   end)
 
