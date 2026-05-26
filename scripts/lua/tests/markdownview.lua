@@ -172,6 +172,7 @@ authors: jgmdev
 
     test.equal(#blocks, 2)
     test.equal(blocks[1].type, "frontmatter")
+    test.equal(blocks[1].info, "yaml")
     test.same(blocks[1].lines, {
       "slug: pragtical-v3101-release",
       "title: Pragtical v3.10.1 Release",
@@ -181,13 +182,78 @@ authors: jgmdev
     test.equal(blocks[2].text, "Release Notes")
   end)
 
+  test.test("parses toml frontmatter as a block", function()
+    local blocks = MarkdownView.parse_blocks([[
++++
+title = "My Article Title"
+date = 2024-01-15
+author = "John Doe"
+tags = ["markdown", "tutorial", "web"]
++++
+
+# Article
+]])
+
+    test.equal(#blocks, 2)
+    test.equal(blocks[1].type, "frontmatter")
+    test.equal(blocks[1].info, "toml")
+    test.same(blocks[1].lines, {
+      'title = "My Article Title"',
+      "date = 2024-01-15",
+      'author = "John Doe"',
+      'tags = ["markdown", "tutorial", "web"]'
+    })
+    test.equal(blocks[2].type, "heading")
+  end)
+
+  test.test("parses json frontmatter as a block", function()
+    local blocks = MarkdownView.parse_blocks([[
+;;;
+{
+  "title": "My Article Title",
+  "date": "2024-01-15",
+  "author": "John Doe",
+  "tags": ["markdown", "tutorial", "web"]
+}
+;;;
+
+# Article
+]])
+
+    test.equal(#blocks, 2)
+    test.equal(blocks[1].type, "frontmatter")
+    test.equal(blocks[1].info, "json")
+    test.same(blocks[1].lines, {
+      "{",
+      '  "title": "My Article Title",',
+      '  "date": "2024-01-15",',
+      '  "author": "John Doe",',
+      '  "tags": ["markdown", "tutorial", "web"]',
+      "}"
+    })
+    test.equal(blocks[2].type, "heading")
+  end)
+
+  test.test("does not parse mismatched frontmatter delimiters", function()
+    local blocks = MarkdownView.parse_blocks([[
++++
+title = "My Article Title"
+---
+
+# Article
+]])
+
+    test.not_equal(blocks[1].type, "frontmatter")
+  end)
+
   test.test("renders frontmatter lines without collapsing them", function()
     local view = MarkdownView([[
----
-slug: pragtical-v3101-release
-title: Pragtical v3.10.1 Release
-authors: jgmdev
----
++++
+title = "My Article Title"
+date = 2024-01-15
+author = "John Doe"
+tags = ["markdown", "tutorial", "web"]
++++
 
 # Release Notes
 ]])
@@ -205,10 +271,11 @@ authors: jgmdev
       end
     end
 
-    test.equal(text_lines[1], "slug: pragtical-v3101-release")
-    test.equal(text_lines[2], "title: Pragtical v3.10.1 Release")
-    test.equal(text_lines[3], "authors: jgmdev")
-    test.equal(text_lines[4], "Release Notes")
+    test.equal(text_lines[1], 'title = "My Article Title"')
+    test.equal(text_lines[2], "date = 2024-01-15")
+    test.equal(text_lines[3], 'author = "John Doe"')
+    test.equal(text_lines[4], 'tags = ["markdown", "tutorial", "web"]')
+    test.equal(text_lines[5], "Release Notes")
   end)
 
   test.test("appends markdown incrementally at block boundaries", function()

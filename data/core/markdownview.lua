@@ -205,20 +205,29 @@ local function is_rule(line)
   return true
 end
 
-local function is_frontmatter_delimiter(line)
-  return trim(line) == "---"
+local FRONTMATTER_DELIMITERS = {
+  ["---"] = "yaml",
+  ["+++"] = "toml",
+  [";;;"] = "json"
+}
+
+local function get_frontmatter_info(line)
+  return FRONTMATTER_DELIMITERS[trim(line)]
 end
 
 local function parse_frontmatter(lines)
-  if not is_frontmatter_delimiter(lines[1] or "") then
+  local delimiter = trim(lines[1] or "")
+  local info = get_frontmatter_info(delimiter)
+  if not info then
     return nil
   end
 
   local frontmatter_lines = {}
   for i = 2, #lines do
-    if is_frontmatter_delimiter(lines[i]) then
+    if trim(lines[i]) == delimiter then
       return {
         type = "frontmatter",
+        info = info,
         lines = frontmatter_lines
       }, i + 1
     end
@@ -2604,7 +2613,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
       content_width = math.max(content_width, x_offset + used_width)
     elseif block.type == "frontmatter" then
       local used_width
-      y, used_width = add_code_block(commands, y, block.lines, fonts.code, "yaml", available_width, x_offset)
+      y, used_width = add_code_block(commands, y, block.lines, fonts.code, block.info, available_width, x_offset)
       content_width = math.max(content_width, x_offset + used_width)
     elseif block.type == "table" then
       local used_width
