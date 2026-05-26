@@ -2062,7 +2062,7 @@ void ren_draw_poly(RenSurface *rs, RenPoint *points, unsigned short npoints, Ren
 }
 
 /******************* Rectangles **********************/
-static inline RenColor blend_pixel(RenColor dst, RenColor src) {
+static inline UNUSED RenColor blend_pixel(RenColor dst, RenColor src) {
   int ia = 0xff - src.a;
   dst.r = ((src.r * src.a) + (dst.r * ia)) >> 8;
   dst.g = ((src.g * src.a) + (dst.g * ia)) >> 8;

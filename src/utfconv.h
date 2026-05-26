@@ -1,7 +1,7 @@
 #ifndef MBSEC_H
 #define MBSEC_H
 
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 #define UNUSED __attribute__((__unused__))
 #else
 #define UNUSED
