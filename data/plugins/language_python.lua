@@ -150,7 +150,7 @@ local python_func = {
       type = { "normal", "string" },
       syntax = python_type
     },
-    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, syntax = python_type },
+    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, type = "normal", syntax = python_type },
 
   }, python_patterns),
 
@@ -233,7 +233,7 @@ syntax.add {
     },
 
     -- type declarations eg: variable_name: type1 | type2
-    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, syntax = python_type },
+    { pattern = { ":%s*%f[%a]", "%f[^%[%]%w_| \t]" }, type = "normal", syntax = python_type },
 
   }, python_patterns),
 
