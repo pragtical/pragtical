@@ -925,6 +925,9 @@ end
 --------------------------------------------------------------------------------
 ipc:register_method("core.open_file", function(file)
   if system.get_file_info(file) then
+    if system.get_window_mode(core.window) == "minimized" then
+      system.set_window_mode(core.window, "normal")
+    end
     system.raise_window(core.window)
     core.root_view:open_doc(core.open_doc(file))
   end
@@ -932,6 +935,9 @@ end, {{name = "file", type = "string"}})
 
 ipc:register_method("core.open_directory", function(directory)
   if system.get_file_info(directory) then
+    if system.get_window_mode(core.window) == "minimized" then
+      system.set_window_mode(core.window, "normal")
+    end
     system.raise_window(core.window)
     core.add_project(directory)
   end
@@ -939,6 +945,9 @@ end, {{name = "directory", type = "string"}})
 
 ipc:register_method("core.change_directory", function(directory)
   if system.get_file_info(directory) then
+    if system.get_window_mode(core.window) == "minimized" then
+      system.set_window_mode(core.window, "normal")
+    end
     system.raise_window(core.window)
     if directory == core.root_project().path then return end
     core.confirm_close_docs(core.docs, function(dirpath)
