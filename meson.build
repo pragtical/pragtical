@@ -120,6 +120,13 @@ else
 endif
 pragtical_cargs += '-DPRAGTICAL_ARCH_TUPLE="@0@"'.format(arch_tuple)
 
+# Silence MSVC/clang-cl deprecation warnings for standard CRT functions
+# (strcpy/strerror/getenv/freopen/...). The "secure" *_s variants are
+# non-portable MSVC extensions; we use the standard functions intentionally.
+if cc.get_argument_syntax() == 'msvc'
+    pragtical_cargs += '-D_CRT_SECURE_NO_WARNINGS'
+endif
+
 #===============================================================================
 # Linker Settings
 #===============================================================================

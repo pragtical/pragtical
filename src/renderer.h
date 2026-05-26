@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifdef __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 #define UNUSED __attribute__((__unused__))
 #else
 #define UNUSED
