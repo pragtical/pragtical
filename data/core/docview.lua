@@ -8,6 +8,7 @@ local ime = require "core.ime"
 local View = require "core.view"
 
 local CACHE_LINE_LEN = 500
+local LONG_LINE_EXTRA_PIXELS = 2000
 
 local IME_VIEW = nil
 local IME_STATE = {line1 = 0, col1 = 0, line2 = 0, col2 = 0, w = 0, h = 0}
@@ -46,6 +47,32 @@ local DocView = View:extend()
 function DocView:__tostring() return "DocView" end
 
 DocView.context = "session"
+
+local function utf8_previous_start(text, col)
+  col = common.clamp(col, 1, #text)
+  while col > 1 and common.is_utf8_cont(text, col) do
+    col = col - 1
+  end
+  return col
+end
+
+local function utf8_next_start(text, col)
+  if col >= #text then return #text end
+  col = utf8_previous_start(text, col)
+  return utf8extra.next(text, col) or #text
+end
+
+local function utf8_char_end(text, col)
+  col = utf8_previous_start(text, col)
+  local next_col = utf8extra.next(text, col)
+  return next_col and (next_col - 1) or #text
+end
+
+local function trim_token_to_col(text, col, max_col)
+  local length = max_col - col + 1
+  if length >= #text then return text end
+  return text:sub(1, length)
+end
 
 ---Helper to move cursor vertically while preserving horizontal offset.
 ---@param dv core.docview
@@ -290,7 +317,7 @@ end
 function DocView:get_visible_cols_range(line, extra_cols)
   extra_cols = extra_cols or 100
 
-  local text = self.doc.lines[line]
+  local text = self.doc:get_utf8_line(line)
   local line_len = #text
   if line_len == 1 then return 1, 1, 1, 1 end
 
@@ -348,7 +375,7 @@ function DocView:get_col_x_offset(line, col)
   local column = 1
   local xoffset = 0
   local cache = self.doc.cache.col_x
-  local line_len = #self.doc.lines[line]
+  local line_len = #self.doc:get_utf8_line(line)
   if line_len > CACHE_LINE_LEN then
     if cache[line] and cache[line][col] then
       return cache[line][col]
@@ -382,6 +409,15 @@ function DocView:get_col_x_offset(line, col)
         return xoffset
       end
     else
+      if line_len > CACHE_LINE_LEN then
+        local chunk = text:sub(1, col - column)
+        xoffset = xoffset + font:get_width(chunk, {tab_offset = xoffset})
+        column = col
+        if cache[line] then
+          cache[line][column] = xoffset
+        end
+        return xoffset
+      end
       for char in common.utf8_chars(text) do
         if column >= col then
           return xoffset
@@ -407,23 +443,40 @@ end
 ---@param x number Horizontal pixel offset
 ---@return integer col Column number (byte offset)
 function DocView:get_x_offset_col(line, x)
-  local line_text = self.doc.lines[line]
+  if x <= 0 then return 1 end
+
+  local line_text = self.doc:get_utf8_line(line)
   local line_len = #line_text
 
   -- we leverage the caching already present on col_x, this works on all lines,
   -- but for the moment lets do it only on the cached lines and keep original
   -- code logic intact
   if line_len > CACHE_LINE_LEN then
-    local xo, pxo, last_col = 0, 0, 0
-    for col, _ in utf8extra.next, line_text do
-      pxo = xo
-      xo = self:get_col_x_offset(line, col)
-      if xo >= x or col >= line_len then
-        local w = xo - pxo
-        return (xo - x > w / 2) and last_col or col
+    local low = 1
+    local high = utf8_previous_start(line_text, line_len)
+
+    while low < high do
+      local mid = utf8_previous_start(line_text, math.floor((low + high) / 2))
+      if mid < low then mid = low end
+
+      if self:get_col_x_offset(line, mid) < x then
+        local next_col = utf8_next_start(line_text, mid)
+        if next_col <= low then break end
+        low = next_col
+      else
+        high = mid
       end
-      last_col = col
     end
+
+    if low <= 1 then return 1 end
+
+    local prev_col = utf8_previous_start(line_text, low - 1)
+    local prev_x = self:get_col_x_offset(line, prev_col)
+    local next_x = self:get_col_x_offset(line, low)
+    if x - prev_x < next_x - x then
+      return prev_col
+    end
+    return low
   end
 
   local xoffset, i = 0, 1
@@ -800,13 +853,44 @@ function DocView:draw_line_text(line, x, y)
 
   local col = 1
   local start_tx = tx
-  for tidx, type, text in self.doc.highlighter:each_token(line) do
+  local line_text = self.doc:get_utf8_line(line)
+  local line_len = #line_text
+  local visible_col1, visible_col2
+  if line_len > CACHE_LINE_LEN and #search_selections == 0 then
+    local gw = self:get_gutter_width()
+    local visible_width = math.max(0, self.size.x - gw)
+    local left_x = math.max(0, self.scroll.x - LONG_LINE_EXTRA_PIXELS)
+    local right_x = self.scroll.x + visible_width + LONG_LINE_EXTRA_PIXELS
+    visible_col1 = self:get_x_offset_col(line, left_x)
+    visible_col2 = utf8_char_end(line_text, self:get_x_offset_col(line, right_x))
+    tx = x + self:get_col_x_offset(line, visible_col1)
+    col = visible_col1
+  end
+  local token_start_col = 1
+  for tidx = 1, tokens_count, 2 do
+    local type, text = tokens[tidx], tokens[tidx + 1]
+    local token_col = token_start_col
+    token_start_col = token_start_col + #text
+    if visible_col1 then
+      local token_end = token_start_col - 1
+      if token_end < visible_col1 then goto continue end
+      if token_col < visible_col1 then
+        text = text:sub(visible_col1 - token_col + 1)
+        token_col = visible_col1
+      end
+      col = token_col
+    end
     if #search_selections == 0 then
       local color = style.syntax[type] or style.syntax["normal"]
       local font = style.syntax_fonts[type] or default_font
       if font ~= default_font then font:set_tab_size(indent_size) end
       -- do not render newline, fixes issue #1164
       if tidx == last_token then text = text:sub(1, -2) end
+      if visible_col2 then
+        if col > visible_col2 then break end
+        text = trim_token_to_col(text, col, visible_col2)
+        col = col + #text
+      end
       tx = renderer.draw_text(font, text, tx, ty, color, {tab_offset = tx - start_tx})
       if tx > self.position.x + self.size.x then break end
     else
@@ -841,6 +925,7 @@ function DocView:draw_line_text(line, x, y)
         if tx > self.position.x + self.size.x then break end
       end
     end
+    ::continue::
   end
   return self:get_line_height()
 end

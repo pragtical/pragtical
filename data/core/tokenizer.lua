@@ -533,6 +533,7 @@ function tokenizer.each_token(t, scol)
   local tcount, start, col = #t, 1, nil
   if scol then
     local ccol = 1
+    start = tcount + 2
     for i=1, tcount, 2 do
       local text = t[i+1]
       local len = #text
@@ -541,7 +542,7 @@ function tokenizer.each_token(t, scol)
         col = scol - ccol + 1
         break
       end
-      ccol = ccol + len + 1
+      ccol = ccol + len
     end
   end
   local state = {t = t, tcount = tcount, col = col}
