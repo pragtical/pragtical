@@ -44,6 +44,21 @@ typedef struct {
   TokenizerSymbol *items;
 } TokenizerSymbolTable;
 
+typedef struct {
+  unsigned char bytes[32];
+  bool any;
+  bool maybe_non_ascii;
+  bool unknown;
+} TokenizerStarterSet;
+
+typedef enum {
+  TOKENIZER_FAST_NONE,
+  TOKENIZER_FAST_LITERAL,
+  TOKENIZER_FAST_LINE_COMMENT,
+  TOKENIZER_FAST_CHAR_SET_ONE,
+  TOKENIZER_FAST_IDENTIFIER
+} TokenizerFastKind;
+
 struct TokenizerSyntax;
 
 typedef struct {
@@ -55,6 +70,9 @@ typedef struct {
   bool whole_line[2];
   regex_pattern regex[2];
   bool regex_ready[2];
+  TokenizerStarterSet starters[2];
+  TokenizerFastKind fast_kind[2];
+  TokenizerString fast_literal[2];
   TokenizerString code[2];
   TokenizerString anchored_code[2];
   TokenizerString escape;
@@ -205,6 +223,7 @@ static void tokenizer_pattern_free(TokenizerPattern *self) {
   for (int i = 0; i < 2; i++) {
     tokenizer_string_free(&self->code[i]);
     tokenizer_string_free(&self->anchored_code[i]);
+    tokenizer_string_free(&self->fast_literal[i]);
     if (self->regex_ready[i]) {
       regex_pattern_uninit(&self->regex[i]);
       self->regex_ready[i] = false;
@@ -959,6 +978,226 @@ static void tokenizer_import_symbols(lua_State *L, int syntax_idx, TokenizerSynt
   }
 }
 
+static void tokenizer_starter_add(TokenizerStarterSet *set, unsigned char ch) {
+  set->bytes[ch / 8] |= (unsigned char) (1u << (ch % 8));
+  set->any = true;
+}
+
+static void tokenizer_starter_add_range(
+  TokenizerStarterSet *set,
+  unsigned char first,
+  unsigned char last
+) {
+  for (unsigned int ch = first; ch <= last; ch++) {
+    tokenizer_starter_add(set, (unsigned char) ch);
+  }
+}
+
+static bool tokenizer_starter_has(const TokenizerStarterSet *set, unsigned char ch) {
+  return (set->bytes[ch / 8] & (unsigned char) (1u << (ch % 8))) != 0;
+}
+
+static void tokenizer_starter_add_lua_class(TokenizerStarterSet *set, char ch) {
+  switch (ch) {
+    case 'a': case 'l': case 'u':
+      tokenizer_starter_add_range(set, 'A', 'Z');
+      tokenizer_starter_add_range(set, 'a', 'z');
+      set->maybe_non_ascii = true;
+      break;
+    case 'd':
+      tokenizer_starter_add_range(set, '0', '9');
+      set->maybe_non_ascii = true;
+      break;
+    case 'x':
+      tokenizer_starter_add_range(set, '0', '9');
+      tokenizer_starter_add_range(set, 'A', 'F');
+      tokenizer_starter_add_range(set, 'a', 'f');
+      break;
+    case 'w':
+      tokenizer_starter_add_range(set, 'A', 'Z');
+      tokenizer_starter_add_range(set, 'a', 'z');
+      tokenizer_starter_add_range(set, '0', '9');
+      set->maybe_non_ascii = true;
+      break;
+    case 's':
+      tokenizer_starter_add(set, ' ');
+      tokenizer_starter_add(set, '\t');
+      tokenizer_starter_add(set, '\r');
+      tokenizer_starter_add(set, '\n');
+      tokenizer_starter_add(set, '\f');
+      tokenizer_starter_add(set, '\v');
+      set->maybe_non_ascii = true;
+      break;
+    case 'p':
+      for (unsigned int c = 0; c < 128; c++) {
+        if (ispunct(c)) tokenizer_starter_add(set, (unsigned char) c);
+      }
+      set->maybe_non_ascii = true;
+      break;
+    default:
+      set->unknown = true;
+      break;
+  }
+}
+
+static void tokenizer_compute_lua_starters(
+  const char *code,
+  size_t code_len,
+  TokenizerStarterSet *set
+) {
+  memset(set, 0, sizeof(*set));
+  size_t i = 0;
+  while (i + 1 < code_len && code[i] == '(' && code[i + 1] == ')') i += 2;
+  if (i >= code_len) {
+    set->unknown = true;
+    return;
+  }
+
+  unsigned char ch = (unsigned char) code[i];
+  if (ch == '%' && i + 1 < code_len) {
+    char esc = code[i + 1];
+    if (strchr("ADLSUWPXCGZz", esc) || esc == 'b' || esc == 'f' || isdigit((unsigned char) esc)) {
+      set->unknown = true;
+    } else if (strchr("adluwxsp", esc)) {
+      tokenizer_starter_add_lua_class(set, esc);
+    } else {
+      tokenizer_starter_add(set, (unsigned char) esc);
+    }
+    return;
+  }
+
+  if (ch == '[') {
+    i++;
+    if (i < code_len && code[i] == '^') {
+      set->unknown = true;
+      return;
+    }
+    for (; i < code_len && code[i] != ']'; i++) {
+      if (code[i] == '%' && i + 1 < code_len) {
+        char esc = code[++i];
+        if (strchr("ADLSUWPXSCGZz", esc)) {
+          set->unknown = true;
+          return;
+        }
+        if (strchr("adluwxsp", esc)) tokenizer_starter_add_lua_class(set, esc);
+        else tokenizer_starter_add(set, (unsigned char) esc);
+      } else if (i + 2 < code_len && code[i + 1] == '-' && code[i + 2] != ']') {
+        unsigned char first = (unsigned char) code[i];
+        unsigned char last = (unsigned char) code[i + 2];
+        if (first > last || first >= 128 || last >= 128) {
+          set->unknown = true;
+          return;
+        }
+        tokenizer_starter_add_range(set, first, last);
+        i += 2;
+      } else if ((unsigned char) code[i] >= 128) {
+        set->maybe_non_ascii = true;
+      } else {
+        tokenizer_starter_add(set, (unsigned char) code[i]);
+      }
+    }
+    if (i >= code_len) set->unknown = true;
+    return;
+  }
+
+  if (ch == '.' || ch == '$' || ch == '(' || ch == ')') {
+    set->unknown = true;
+  } else if (ch >= 128) {
+    set->maybe_non_ascii = true;
+  } else {
+    tokenizer_starter_add(set, ch);
+  }
+}
+
+static bool tokenizer_lua_pattern_literal(
+  const char *code,
+  size_t code_len,
+  TokenizerString *out
+) {
+  char *data = (char *) malloc(code_len + 1);
+  if (!data) return false;
+  size_t len = 0;
+  for (size_t i = 0; i < code_len; i++) {
+    unsigned char ch = (unsigned char) code[i];
+    if (ch == '%') {
+      if (++i >= code_len) {
+        free(data);
+        return false;
+      }
+      data[len++] = code[i];
+    } else if (strchr("^$*+?.([%-", ch)) {
+      free(data);
+      return false;
+    } else {
+      data[len++] = (char) ch;
+    }
+  }
+  data[len] = '\0';
+  if (len == 0) {
+    free(data);
+    return false;
+  }
+  out->data = data;
+  out->len = len;
+  return true;
+}
+
+static bool tokenizer_lua_pattern_char_set_one(const char *code, size_t code_len) {
+  if (code_len < 3 || code[0] != '[' || code[1] == '^') return false;
+  size_t i = 1;
+  while (i < code_len && code[i] != ']') {
+    if (code[i] == '%' && i + 1 < code_len) {
+      char esc = code[i + 1];
+      if (strchr("ADLSUWPXSCGZz", esc)) return false;
+      i += 2;
+    } else {
+      i++;
+    }
+  }
+  return i == code_len - 1;
+}
+
+static void tokenizer_import_fast_info(TokenizerPattern *pattern, int part) {
+  const TokenizerString *code = &pattern->code[part];
+  pattern->fast_kind[part] = TOKENIZER_FAST_NONE;
+  if (pattern->is_regex) {
+    (void) code;
+    pattern->starters[part].unknown = true;
+    return;
+  }
+  tokenizer_compute_lua_starters(code->data, code->len, &pattern->starters[part]);
+
+  TokenizerString literal = {0};
+  if (tokenizer_lua_pattern_literal(code->data, code->len, &literal)) {
+    pattern->fast_literal[part] = literal;
+    pattern->fast_kind[part] = TOKENIZER_FAST_LITERAL;
+    return;
+  }
+
+  if (code->len > 2 && memcmp(code->data + code->len - 2, ".*", 2) == 0) {
+    TokenizerString prefix = {0};
+    if (tokenizer_lua_pattern_literal(code->data, code->len - 2, &prefix)) {
+      pattern->fast_literal[part] = prefix;
+      pattern->fast_kind[part] = TOKENIZER_FAST_LINE_COMMENT;
+      return;
+    }
+  }
+
+  if (
+    (code->len == sizeof("[%a_][%w_]*") - 1 &&
+     memcmp(code->data, "[%a_][%w_]*", code->len) == 0) ||
+    (code->len == sizeof("%a[%w_]*") - 1 &&
+     memcmp(code->data, "%a[%w_]*", code->len) == 0)
+  ) {
+    pattern->fast_kind[part] = TOKENIZER_FAST_IDENTIFIER;
+    return;
+  }
+
+  if (tokenizer_lua_pattern_char_set_one(code->data, code->len)) {
+    pattern->fast_kind[part] = TOKENIZER_FAST_CHAR_SET_ONE;
+  }
+}
+
 static void tokenizer_import_code_part(
   lua_State *L,
   TokenizerPattern *pattern,
@@ -973,6 +1212,7 @@ static void tokenizer_import_code_part(
   size_t code_len = whole_line ? raw_len - 1 : raw_len;
   pattern->code[part] = tokenizer_string_dup(code, code_len);
   pattern->anchored_code[part] = tokenizer_string_dup_anchored(code, code_len);
+  tokenizer_import_fast_info(pattern, part);
 
   if (pattern->is_regex) {
     regex_pattern_result result = regex_pattern_init(code, code_len);
@@ -1161,6 +1401,110 @@ static bool tokenizer_match_is_escaped(
   return (count % 2) != 0;
 }
 
+static const char *tokenizer_memfind(
+  const char *haystack,
+  size_t haystack_len,
+  const char *needle,
+  size_t needle_len
+) {
+  if (needle_len == 0) return haystack;
+  if (needle_len > haystack_len) return NULL;
+  const char *end = haystack + haystack_len - needle_len;
+  for (const char *p = haystack; p <= end; p++) {
+    if (*p == *needle && memcmp(p, needle, needle_len) == 0) return p;
+  }
+  return NULL;
+}
+
+static bool tokenizer_fast_is_identifier_start(unsigned char ch) {
+  return ch == '_' || isalpha(ch);
+}
+
+static bool tokenizer_fast_is_identifier_continue(unsigned char ch) {
+  return ch == '_' || isalnum(ch);
+}
+
+static bool tokenizer_fast_match_text(
+  const TokenizerText *text,
+  const TokenizerPattern *pattern,
+  int part,
+  lua_Integer next,
+  bool anchored,
+  TokenizerFindResults *out
+) {
+  TokenizerFastKind kind = pattern->fast_kind[part];
+  if (kind == TOKENIZER_FAST_NONE) return false;
+
+  size_t byte_pos = tokenizer_text_byte_at(text, next);
+  if (byte_pos == 0 || byte_pos > text->byte_len + 1) return false;
+  const char *start = text->text + byte_pos - 1;
+  size_t remaining = byte_pos <= text->byte_len ? text->byte_len - byte_pos + 1 : 0;
+
+  if (kind == TOKENIZER_FAST_LITERAL || kind == TOKENIZER_FAST_LINE_COMMENT) {
+    const TokenizerString *literal = &pattern->fast_literal[part];
+    const char *match = NULL;
+    if (anchored) {
+      if (remaining >= literal->len && memcmp(start, literal->data, literal->len) == 0) {
+        match = start;
+      }
+    } else {
+      match = tokenizer_memfind(start, remaining, literal->data, literal->len);
+    }
+    if (!match) return false;
+
+    size_t match_byte = (size_t) (match - text->text) + 1;
+    lua_Integer match_char = (lua_Integer) tokenizer_text_char_from_boundary(text, match_byte);
+    lua_Integer end_char;
+    if (kind == TOKENIZER_FAST_LINE_COMMENT) {
+      end_char = (lua_Integer) text->char_len;
+    } else {
+      size_t end_byte = match_byte + literal->len - 1;
+      end_char = (lua_Integer) tokenizer_text_char_from_byte(text, end_byte);
+    }
+    tokenizer_find_results_push(out, match_char);
+    tokenizer_find_results_push(out, end_char);
+    return true;
+  }
+
+  if (kind == TOKENIZER_FAST_IDENTIFIER) {
+    if (!text->is_ascii || remaining == 0) return false;
+    unsigned char first = (unsigned char) *start;
+    if (!tokenizer_fast_is_identifier_start(first)) return false;
+    size_t len = 1;
+    while (len < remaining && tokenizer_fast_is_identifier_continue((unsigned char) start[len])) {
+      len++;
+    }
+    tokenizer_find_results_push(out, next);
+    tokenizer_find_results_push(out, next + (lua_Integer) len - 1);
+    return true;
+  }
+
+  if (kind == TOKENIZER_FAST_CHAR_SET_ONE) {
+    if (!text->is_ascii || pattern->starters[part].unknown) return false;
+    const char *match = NULL;
+    if (anchored) {
+      if (remaining > 0 &&
+          tokenizer_starter_has(&pattern->starters[part], (unsigned char) *start)) {
+        match = start;
+      }
+    } else {
+      for (size_t i = 0; i < remaining; i++) {
+        if (tokenizer_starter_has(&pattern->starters[part], (unsigned char) start[i])) {
+          match = start + i;
+          break;
+        }
+      }
+    }
+    if (!match) return false;
+    lua_Integer match_char = next + (lua_Integer) (match - start);
+    tokenizer_find_results_push(out, match_char);
+    tokenizer_find_results_push(out, match_char);
+    return true;
+  }
+
+  return false;
+}
+
 static bool tokenizer_find_text(
   lua_State *L,
   const TokenizerText *text,
@@ -1186,21 +1530,25 @@ static bool tokenizer_find_text(
     tokenizer_find_results_reset(out);
 
     if (!pattern->is_regex) {
-      const TokenizerString *code = anchored ? &pattern->anchored_code[part] : &pattern->code[part];
-      bool found = Lutf8_find_noalloc(
-        text->text,
-        text->byte_len,
-        code->data,
-        code->len,
-        next,
-        false,
-        true,
-        tokenizer_find_results_push_int64,
-        out,
-        NULL
-      );
-      if (!found || out->count == 0) {
-        return false;
+      if (tokenizer_fast_match_text(text, pattern, part, next, anchored, out)) {
+        /* handled by fast path */
+      } else {
+        const TokenizerString *code = anchored ? &pattern->anchored_code[part] : &pattern->code[part];
+        bool found = Lutf8_find_noalloc_from_byte(
+          text->text,
+          text->byte_len,
+          code->data,
+          code->len,
+          tokenizer_text_byte_at(text, next),
+          false,
+          true,
+          tokenizer_find_results_push_int64,
+          out,
+          NULL
+        );
+        if (!found || out->count == 0) {
+          return false;
+        }
       }
     } else {
       tokenizer_find_results_reset(scratch);

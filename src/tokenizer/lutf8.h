@@ -129,6 +129,13 @@ bool Lutf8_find_noalloc(
   utf8_pattern_offset_writer_t writer, void* writer_ctx,
   const char** errmsg
 );
+bool Lutf8_find_noalloc_from_byte(
+  const char* s, size_t len,
+  const char* pattern, size_t pattern_len,
+  size_t byte_offset, bool plain, bool find,
+  utf8_pattern_offset_writer_t writer, void* writer_ctx,
+  const char** errmsg
+);
 utf8_pattern_result_result_t Lutf8_match(
   const char* s, size_t len,
   const char* pattern, size_t pattern_len,

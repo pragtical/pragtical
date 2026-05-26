@@ -82,6 +82,30 @@ test.describe("tokenizer", function()
     })
   end)
 
+  test.test("keeps regex matches after normal text", function()
+    local syntax = {
+      patterns = {
+        { regex = [[-?\d+]], type = "number" },
+        { pattern = "[=]", type = "operator" },
+        { pattern = "[%a_][%w_]*", type = "symbol" }
+      },
+      symbols = {}
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenizer.tokenize(syntax, "(3==value", string.char(0))
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    test.same(tokens, {
+      "normal", "(",
+      "number", "3",
+      "operator", "==",
+      "symbol", "value"
+    })
+  end)
+
   test.test("tokenizes lua patterns with multiple position captures", function()
     local syntax = {
       patterns = {
@@ -98,6 +122,61 @@ test.describe("tokenizer", function()
     test.same(tokens, {
       "keyword", "static",
       "keyword", " const"
+    })
+  end)
+
+  test.test("tokenizes common language pattern shapes with native fast paths", function()
+    local syntax = {
+      patterns = {
+        { pattern = "//.*", type = "comment" },
+        { pattern = { "/%*", "%*/" }, type = "comment" },
+        { pattern = { '"', '"', '\\' }, type = "string" },
+        { pattern = "[%+%-=/%*]", type = "operator" },
+        { pattern = "[%a_][%w_]*", type = "symbol" },
+      },
+      symbols = {
+        ["let"] = "keyword"
+      }
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenizer.tokenize(
+      syntax,
+      [[let value = "text" // trailing]],
+      string.char(0)
+    )
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    test.same(tokens, {
+      "keyword", "let",
+      "symbol", " value",
+      "operator", " =",
+      "string", ' "text"',
+      "comment", " // trailing"
+    })
+  end)
+
+  test.test("keeps non-ascii identifiers on the utf8 pattern fallback", function()
+    local syntax = {
+      patterns = {
+        { pattern = "[%a_][%w_]*", type = "symbol" },
+        { pattern = "[%+%-=]", type = "operator" }
+      },
+      symbols = {}
+    }
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenizer.tokenize(syntax, "café = año", string.char(0))
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    test.same(tokens, {
+      "symbol", "café",
+      "operator", " =",
+      "symbol", " año"
     })
   end)
 
