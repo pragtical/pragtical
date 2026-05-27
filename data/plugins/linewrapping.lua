@@ -9,6 +9,15 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local translate = require "core.doc.translate"
 
+local function get_font(default_font, type, indent_size)
+  local font = style.syntax_fonts[type] or default_font
+  if font ~= default_font then font:set_tab_size(indent_size) end
+  return font
+end
+
+local function get_width(font, text, tab_offset)
+  return font:get_width(text, { tab_offset = tab_offset })
+end
 
 ---Configuration options for `linewrapping` plugin.
 ---@class config.plugins.linewrapping
@@ -100,16 +109,20 @@ end
 function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
   local xoffset, last_i, i, last_space, last_width, begin_width = 0, 1, 1, nil, 0, 0
   local splits = { 1 }
+  local _, indent_size = doc:get_indent_info()
+  default_font:set_tab_size(indent_size)
   for idx, type, text in get_tokens(doc, line) do
-    local font = style.syntax_fonts[type] or default_font
+    local font = get_font(default_font, type, indent_size)
     if idx == 1 or idx == math.huge and config.plugins.linewrapping.indent then
       local _, indent_end = text:find("^%s+")
-      if indent_end then begin_width = font:get_width(text:sub(1, indent_end)) end
+      if indent_end then
+        begin_width = get_width(font, text:sub(1, indent_end), 0)
+      end
     end
-    local w = font:get_width(text)
+    local w = get_width(font, text, xoffset)
     if xoffset + w > width then
       for char in common.utf8_chars(text) do
-        w = font:get_width(char)
+        w = get_width(font, char, xoffset)
         xoffset = xoffset + w
         if xoffset > width then
           if mode == "word" and last_space then
@@ -117,7 +130,9 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
             xoffset = w + begin_width + (xoffset - last_width)
           else
             table.insert(splits, i)
-            xoffset = w + begin_width
+            xoffset = begin_width
+            w = get_width(font, char, xoffset)
+            xoffset = xoffset + w
           end
           last_space = nil
         elseif char == ' ' then
@@ -307,14 +322,16 @@ local function get_line_col_from_index_and_x(docview, idx, x)
   local xoffset, last_i, i = (col ~= 1 and docview.wrapped_line_offsets[line] or 0), col, 1
   if x < xoffset then return line, col end
   local default_font = docview:get_font()
+  local _, indent_size = doc:get_indent_info()
+  default_font:set_tab_size(indent_size)
   for _, type, text in doc.highlighter:each_token(line) do
-    local font, w = style.syntax_fonts[type] or default_font, 0
+    local font, w = get_font(default_font, type, indent_size), 0
     for char in common.utf8_chars(text) do
       if i >= col then
         if xoffset >= x then
           return line, (xoffset - x > (w / 2) and last_i or i)
         end
-        w = font:get_width(char)
+        w = get_width(font, char, xoffset)
         xoffset = xoffset + w
       end
       last_i = i
@@ -418,6 +435,51 @@ function DocView:get_visible_line_range()
   return minline, maxline
 end
 
+local old_get_visible_cols_range = DocView.get_visible_cols_range
+function DocView:get_visible_cols_range(line, extra_cols)
+  if not self.wrapped_settings then
+    return old_get_visible_cols_range(self, line, extra_cols)
+  end
+  extra_cols = extra_cols or 100
+
+  local first_line_idx = self.wrapped_line_to_idx[line]
+  if not first_line_idx then return 0, 0, 0, 0 end
+
+  local _, y, _, y2 = self:get_content_bounds()
+  local lh = self:get_line_height()
+  local first_visible_idx = math.max(1, math.floor(y / lh))
+  local last_visible_idx = math.min(get_total_wrapped_lines(self), math.floor(y2 / lh) + 1)
+  local next_line_idx = self.wrapped_line_to_idx[line + 1] or (get_total_wrapped_lines(self) + 1)
+  local first_idx = math.max(first_visible_idx, first_line_idx)
+  local last_idx = math.min(last_visible_idx, next_line_idx - 1)
+  if first_idx > last_idx then return 0, 0, 0, 0 end
+
+  local text = self.doc:get_utf8_line(line)
+  local line_len = #text
+  local _, col1 = get_idx_line_col(self, first_idx)
+  local next_line, next_col = get_idx_line_col(self, last_idx + 1)
+  local col2 = next_line == line and next_col - 1 or line_len
+
+  col1 = math.max(1, col1 - extra_cols)
+  col2 = math.min(line_len, col2 + extra_cols)
+
+  local ucol1, ucol2 = col1, col2
+  local cache = self.doc.cache.ulen
+  local ulen = cache[line]
+  if not ulen then
+    ulen = text:ulen(nil, nil, true)
+    cache[line] = ulen
+  end
+  if ulen < line_len then
+    ucol1 = text:ulen(1, col1, true)
+    ucol2 = text:ulen(1, col2, true)
+    col1 = text:ucharpos(ucol1)
+    col2 = text:ucharpos(ucol2)
+  end
+
+  return col1, col2, ucol1, ucol2
+end
+
 local old_get_x_offset_col = DocView.get_x_offset_col
 function DocView:get_x_offset_col(line, x)
   if not self.wrapped_settings then return old_get_x_offset_col(self, line, x) end
@@ -432,18 +494,20 @@ function DocView:get_col_x_offset(line, col, line_end)
   local idx, ncol, count, scol = get_line_idx_col_count(self, line, col, line_end)
   local xoffset, i = (scol ~= 1 and self.wrapped_line_offsets[line] or 0), 1
   local default_font = self:get_font()
+  local _, indent_size = self.doc:get_indent_info()
+  default_font:set_tab_size(indent_size)
   for _, type, text in self.doc.highlighter:each_token(line) do
     if i + #text >= scol then
       if i < scol then
         text = text:sub(scol - i + 1)
         i = scol
       end
-      local font = style.syntax_fonts[type] or default_font
+      local font = get_font(default_font, type, indent_size)
       for char in common.utf8_chars(text) do
         if i >= col then
           return xoffset
         end
-        xoffset = xoffset + font:get_width(char)
+        xoffset = xoffset + get_width(font, char, xoffset)
         i = i + #char
       end
     else
@@ -479,19 +543,22 @@ function DocView:draw_line_text(line, x, y)
   local lh = self:get_line_height()
   local idx, _, count = get_line_idx_col_count(self, line)
   local total_offset = 1
+  local _, indent_size = self.doc:get_indent_info()
+  default_font:set_tab_size(indent_size)
   for _, type, text in self.doc.highlighter:each_token(line) do
     local color = style.syntax[type] or style.syntax["normal"]
-    local font = style.syntax_fonts[type] or default_font
+    local font = get_font(default_font, type, indent_size)
+    if text:sub(-1) == "\n" then text = text:sub(1, -2) end
     local token_offset = 1
     -- Split tokens if we're at the end of the document.
     while text ~= nil and token_offset <= #text do
       local next_line, next_line_start_col = get_idx_line_col(self, idx + 1)
       if next_line ~= line then
-        next_line_start_col = #self.doc.lines[line]
+        next_line_start_col = #self.doc.lines[line] + 1
       end
       local max_length = next_line_start_col - total_offset
       local rendered_text = text:sub(token_offset, token_offset + max_length - 1)
-      tx = renderer.draw_text(font, rendered_text, tx, ty, color)
+      tx = renderer.draw_text(font, rendered_text, tx, ty, color, { tab_offset = tx - x })
       total_offset = total_offset + #rendered_text
       if total_offset ~= next_line_start_col or max_length == 0 then break end
       token_offset = token_offset + #rendered_text
@@ -562,7 +629,9 @@ end
 
 local old_translate_end_of_line = translate.end_of_line
 function translate.end_of_line(doc, line, col)
-  if not core.active_view or core.active_view.doc ~= doc or not core.active_view.wrapped_settings then old_translate_end_of_line(doc, line, col) end
+  if not core.active_view or core.active_view.doc ~= doc or not core.active_view.wrapped_settings then
+    return old_translate_end_of_line(doc, line, col)
+  end
   local idx, ncol = get_line_idx_col_count(core.active_view, line, col)
   local nline, ncol2 = get_idx_line_col(core.active_view, idx + 1)
   if nline ~= line then return line, math.huge end
@@ -571,7 +640,9 @@ end
 
 local old_translate_start_of_line = translate.start_of_line
 function translate.start_of_line(doc, line, col)
-  if not core.active_view or core.active_view.doc ~= doc or not core.active_view.wrapped_settings then old_translate_start_of_line(doc, line, col) end
+  if not core.active_view or core.active_view.doc ~= doc or not core.active_view.wrapped_settings then
+    return old_translate_start_of_line(doc, line, col)
+  end
   local idx, ncol = get_line_idx_col_count(core.active_view, line, col)
   local nline, ncol2 = get_idx_line_col(core.active_view, idx - 1)
   if nline ~= line then return line, 1 end
