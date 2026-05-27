@@ -1,0 +1,10 @@
+[service.demo]
+enabled = true
+count = 3
+path = "/srv/demo"
+
+[[items]]
+id = 1
+label = "alpha"
+
+LABEL UUID aufs autofs bdev binder binfmt_misc bpf btrfs cgroup cgroup2 configfs cpuset debugfs devpts devtmpfs ecryptfs ext2 ext3 ext4 fuse fuseblk fusectl hfs hfsplus hugetlbfs jfs minix mqueue msdos nfs nfs4 nfsd none ntfs pipefs proc pstore qnx4 ramfs rpc_pipefs securityfs sockfs squashfs swap sysfs tmpfs tracefs ufs vfat xfs ;

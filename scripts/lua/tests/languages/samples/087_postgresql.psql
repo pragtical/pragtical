@@ -1,0 +1,36 @@
+CREATE TABLE widgets (
+  id serial PRIMARY KEY,
+  name text NOT NULL,
+  enabled boolean DEFAULT true
+);
+
+INSERT INTO widgets(name) VALUES ('alpha'), ('beta');
+SELECT id, name FROM widgets WHERE enabled IS TRUE ORDER BY name;
+
+ALTER TABLE widgets ADD COLUMN tags text[] DEFAULT ARRAY[]::text[];
+CREATE UNIQUE INDEX widgets_name_idx ON widgets (lower(name));
+CREATE VIEW active_widgets AS
+  SELECT id, name, tags FROM widgets
+  WHERE enabled AND name LIKE 'a%'
+  GROUP BY id, name, tags
+  HAVING count(*) >= 1;
+
+WITH updated AS (
+  UPDATE widgets
+     SET enabled = false
+   WHERE id IN (SELECT id FROM widgets WHERE name = 'beta')
+   RETURNING id
+)
+DELETE FROM widgets WHERE id IN (SELECT id FROM updated);
+
+CREATE OR REPLACE FUNCTION widget_count(prefix text)
+RETURNS integer
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  total integer;
+BEGIN
+  SELECT count(*) INTO total FROM widgets WHERE name ILIKE prefix || '%';
+  RETURN total;
+END;
+$$;

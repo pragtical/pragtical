@@ -1,0 +1,13 @@
+class Widget {
+  var name = "demo";
+
+  func init(name) {
+    self.name = name;
+  }
+
+  func render(items) {
+    for (var item in items) {
+      if (item.enabled) System.print("%s:%s" % [name, item.label]);
+    }
+  }
+}

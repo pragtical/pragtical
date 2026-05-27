@@ -1,0 +1,14 @@
+module demo
+
+type Widget = {
+  name: String,
+}
+
+fn render(widget: Widget, items: [String]) -> String {
+  for item in items {
+    if item != "" {
+      print(widget.name + ":" + item)
+    }
+  }
+  return widget.name
+}

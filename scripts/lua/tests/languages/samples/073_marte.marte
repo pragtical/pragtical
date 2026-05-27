@@ -1,0 +1,17 @@
++Application = {
+  Class = RealTimeApplication
+  +Functions = {
+    Class = ReferenceContainer
+    +GAMTimer = {
+      Class = IOGAM
+      InputSignals = {
+        Counter = {
+          Type = uint32
+          DataSource = Timer
+        }
+      }
+    }
+  }
+}
+
+true false 0x10 .NaN .inf ;

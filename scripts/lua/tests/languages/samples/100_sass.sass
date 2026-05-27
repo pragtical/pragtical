@@ -1,0 +1,12 @@
+$accent: #7c3aed
+
+=button($color)
+  color: $color
+  border: 1px solid darken($color, 10%)
+
+.panel
+  display: grid
+  gap: 1rem
+  &[data-state="open"]
+    .button
+      +button($accent)

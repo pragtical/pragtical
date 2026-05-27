@@ -1,0 +1,37 @@
+@import url("theme.css");
+
+:root {
+  --accent-color: #7c3aed;
+}
+
+.card[data-state="open"] > .title::before {
+  content: ">";
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  color: var(--accent-color);
+}
+
+@media (min-width: 48rem) {
+  .card:hover { transform: translateX(1px); }
+}
+
+@supports (display: grid) {
+  .layout {
+    display: grid;
+    grid-template-areas:
+      "header header"
+      "nav main";
+    animation: fade-in 160ms ease-out both;
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(0.25rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+input[type="checkbox"]:checked + label::after {
+  content: attr(data-label);
+  color: hsl(142 70% 35%);
+}
+

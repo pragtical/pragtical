@@ -1,0 +1,11 @@
+structure Widget
+  name: string
+end
+
+function render(widget, items)
+  for item in items do
+    if item.enabled then
+      print(widget.name .. ":" .. item.label)
+    end
+  end
+end

@@ -1,0 +1,13 @@
+# Gemtext Fixture
+
+This page contains a small real Gemtext document.
+
+=> https://example.test Example link
+=> /docs Local documentation
+
+## List
+
+* first item
+* second item
+
+> quoted text

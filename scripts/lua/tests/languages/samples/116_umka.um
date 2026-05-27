@@ -1,0 +1,15 @@
+type Widget = struct {
+  name: str
+}
+
+fn render(w: Widget, items: []str): str {
+  for item in items {
+    printf("%s:%s\n", w.name, item)
+  }
+  return w.name
+}
+
+fn main() {
+  var w = Widget{name: "demo"}
+  render(w, []str{"alpha", "beta"})
+}

@@ -53,7 +53,8 @@ local function push_tokens(t, syn, pattern, full_text, find_results)
   else
     local start, fin = find_results[1], find_results[2]
     local text = full_text:usub(start, fin)
-    push_token(t, syn.symbols[text] or pattern.type, text)
+    local type = type(pattern.type) == "table" and pattern.type[1] or pattern.type
+    push_token(t, syn.symbols[text] or type, text)
   end
 end
 
@@ -108,9 +109,9 @@ local function retrieve_syntax_state(incoming_syntax, state)
 end
 
 ---Return the list of syntaxes used in the specified state.
----@param base_syntax table @The initial base syntax (the syntax of the file)
+---@param base_syntax core.syntax.syntax @The initial base syntax (the syntax of the file)
 ---@param state string @The state of the tokenizer to extract from
----@return table @Array of syntaxes starting from the innermost one
+---@return core.syntax.syntax[] @Array of syntaxes starting from the innermost one
 local function lua_extract_subsyntaxes(base_syntax, state)
   local current_syntax
   local t = {}
@@ -235,7 +236,7 @@ local function find_text(text, p, offset, at_start, close)
   return table.unpack(res)
 end
 
----@param incoming_syntax table
+---@param incoming_syntax core.syntax.syntax
 ---@param text string
 ---@param state? string
 ---@param resume? table
@@ -469,7 +470,7 @@ end
 ---This should be called when switching tokenizer backends so syntax tables are
 ---reimported by the native tokenizer on their next use.
 ---
----@param root_syntax? table Optional syntax table to clear before clearing the global syntax registries.
+---@param root_syntax? core.syntax.syntax Optional syntax table to clear before clearing the global syntax registries.
 function tokenizer.clear_native_cache(root_syntax)
   local visited = {}
   clear_native_cache_from_syntax(root_syntax, visited)
@@ -489,7 +490,7 @@ end
 ---out of time, a third return value is included with resume information that
 ---can be passed back into this function to continue tokenizing the same line.
 ---
----@param incoming_syntax table The syntax to tokenize against.
+---@param incoming_syntax core.syntax.syntax The syntax to tokenize against.
 ---@param text string The line text to tokenize.
 ---@param state? string Current tokenizer state.
 ---@param resume? table Resume information returned by a previous incomplete call.
@@ -503,11 +504,22 @@ end
 
 ---Return the list of syntaxes active for a tokenizer state.
 ---
----@param base_syntax table The base syntax of the document.
+---@param base_syntax core.syntax.syntax The base syntax of the document.
 ---@param state string Tokenizer state previously returned by `tokenize`.
----@return table syntaxes Array of syntaxes starting from the innermost one.
+---@return core.syntax.syntax[] syntaxes Array of syntaxes starting from the innermost one.
 function tokenizer.extract_subsyntaxes(base_syntax, state)
   return active_tokenizer.extract_subsyntaxes(base_syntax, state)
+end
+
+---Return native tokenizer compilation and runtime counters for a syntax.
+---
+---The pure Lua backend has no compiled representation, so this returns nil
+---unless the native backend is active.
+---@param syntax core.syntax.syntax
+---@return table?
+function tokenizer.get_syntax_stats(syntax)
+  if not using_native or not native_tokenizer.get_syntax_stats then return nil end
+  return native_tokenizer.get_syntax_stats(syntax)
 end
 
 

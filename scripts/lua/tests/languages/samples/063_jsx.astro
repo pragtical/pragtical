@@ -1,0 +1,13 @@
+import React, { useMemo } from "react";
+
+export function Panel({ title, items = [] }) {
+  const total = useMemo(() => items.length, [items]);
+  return (
+    <section className="panel" data-count={total}>
+      <h1>{title ?? "Untitled"}</h1>
+      {items.map((item) => <button key={item.id} onClick={() => item.run()}>{item.label}</button>)}
+    </section>
+  );
+}
+
+Infinity NaN arguments async await break case catch class const continue debugger default delete do else export extends false finally for from function get if import in instanceof let new null return set static super switch this throw true try typeof undefined var void while with yield ;

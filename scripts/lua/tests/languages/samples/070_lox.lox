@@ -1,0 +1,13 @@
+class Widget {
+  init(name) {
+    this.name = name;
+  }
+
+  render(items) {
+    for (var i = 0; i < items.count; i = i + 1) {
+      print this.name + ":" + items[i];
+    }
+  }
+}
+
+var widget = Widget("demo");

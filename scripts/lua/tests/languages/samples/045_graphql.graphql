@@ -1,0 +1,17 @@
+schema { query: Query mutation: Mutation }
+
+interface Node { id: ID! }
+
+type User implements Node {
+  id: ID!
+  name: String!
+  roles(limit: Int = 10): [String!]!
+}
+
+type Query {
+  user(id: ID!): User
+}
+
+mutation Rename($id: ID!, $name: String!) {
+  renameUser(id: $id, name: $name) { id name }
+}

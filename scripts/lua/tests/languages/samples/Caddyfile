@@ -1,0 +1,25 @@
+example.test {
+  encode zstd gzip
+  root * /srv/www
+  file_server
+  templates
+  log
+  tls internal
+  redir /old /new 308
+  try_files {path} /index.html
+
+  handle_path /api/* {
+    respond "ok"
+    reverse_proxy localhost:8080
+  }
+
+  @static
+  header @static Cache-Control "public, max-age=3600"
+
+  route /admin/* {
+    basicauth {
+      admin $2a$14$abcdefghijklmnopqrstuu
+    }
+    php_fastcgi unix//run/php/php-fpm.sock
+  }
+}

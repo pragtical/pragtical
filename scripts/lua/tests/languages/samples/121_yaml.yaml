@@ -1,0 +1,15 @@
+---
+name: demo
+enabled: true
+items:
+  - id: 1
+    label: alpha
+  - id: 2
+    label: beta
+script: |
+  echo "hello"
+anchors:
+  defaults: &defaults
+    retries: 3
+  job:
+    <<: *defaults

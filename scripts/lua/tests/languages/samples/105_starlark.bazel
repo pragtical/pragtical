@@ -1,0 +1,14 @@
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "fixture",
+    srcs = ["fixture.cc"],
+    hdrs = ["fixture.h"],
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "fixture_test",
+    srcs = ["fixture_test.cc"],
+    deps = [":fixture"],
+)

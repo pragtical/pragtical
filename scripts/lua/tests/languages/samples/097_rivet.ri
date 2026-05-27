@@ -1,0 +1,15 @@
+<rivet>
+set title "Fixture"
+set items {alpha beta gamma}
+</rivet>
+
+<section>
+  <h1><? puts $title ?></h1>
+  <ul>
+  <rivet>
+  foreach item $items {
+    puts "<li>$item</li>"
+  }
+  </rivet>
+  </ul>
+</section>

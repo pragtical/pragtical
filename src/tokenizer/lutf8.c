@@ -1383,6 +1383,87 @@ bool Lutf8_find_noalloc(
   );
 }
 
+bool Lutf8_find_noalloc_from_byte(
+  const char* s, size_t len,
+  const char* pattern, size_t pattern_len,
+  size_t byte_offset, bool plain, bool find,
+  utf8_pattern_offset_writer_t writer, void* writer_ctx,
+  const char** errmsg
+) {
+  const char *es = s + len;
+  const char *p = pattern;
+  const char *ep = pattern + pattern_len;
+
+  if (errmsg) *errmsg = NULL;
+  if (byte_offset < 1) byte_offset = 1;
+  if (byte_offset > len + 1) return false;
+  const char *init = s + byte_offset - 1;
+  if (!find) {
+    return Lutf8_find_internal(
+      s, len, pattern, pattern_len, pattern_get_index(init, s, es) + 1,
+      plain, find, NULL, writer, writer_ctx, errmsg
+    );
+  }
+
+  if (find && (plain || pattern_nospecials(p, ep))) {
+    const char *s2 = pattern_lmemfind(init, es - init, p, ep - p);
+    if (s2) {
+      const char *e2 = s2 + (ep - p);
+      if (e2 < es && iscont(e2)) e2 = utf8_next(e2, es);
+      int64_t offset = pattern_get_index(s2, s, es) + 1;
+      if (!pattern_write_offset(NULL, writer, writer_ctx, offset, errmsg) ||
+          !pattern_write_offset(NULL, writer, writer_ctx,
+            offset + pattern_get_index(e2, s2, es) - 1, errmsg)) {
+        return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  MatchState ms;
+  memset(&ms, 0, sizeof(ms));
+  ms.result = NULL;
+  int anchor = (*p == '^');
+  if (anchor) p++;
+  ms.matchdepth = MAXCCALLS;
+  ms.src_init = s;
+  ms.src_end = es;
+  ms.p_end = ep;
+
+  do {
+    const char *res;
+    ms.level = 0;
+    ms.errmsg = NULL;
+    res = pattern_match(&ms, init, p);
+    if (ms.errmsg) break;
+    if (res != NULL) {
+      if (find) {
+        int64_t offset = pattern_get_index(init, s, es) + 1;
+        if (!pattern_write_offset(NULL, writer, writer_ctx, offset, errmsg) ||
+            !pattern_write_offset(NULL, writer, writer_ctx,
+              offset + utf8_length(init, res) - 1, errmsg) ||
+            !pattern_push_captures_filtered(
+              &ms, NULL, NULL, NULL, writer, writer_ctx, true, errmsg
+            )) {
+          return false;
+        }
+      } else if (!pattern_push_captures_filtered(
+        &ms, init, res, NULL, writer, writer_ctx, false, errmsg
+      )) {
+        return false;
+      }
+      if (ms.errmsg) break;
+      return true;
+    }
+    if (init == es) break;
+    init = utf8_next(init, es);
+  } while (init <= es && !anchor);
+
+  if (ms.errmsg && errmsg) *errmsg = ms.errmsg;
+  return false;
+}
+
 utf8_pattern_result_result_t Lutf8_match(
   const char* s, size_t len,
   const char* pattern, size_t pattern_len,

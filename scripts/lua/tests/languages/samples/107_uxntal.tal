@@ -1,0 +1,11 @@
+|0100
+@on-reset ( -> )
+  #48 #65 #6c #6c #6f print-string
+BRK
+
+@print-string ( c* -> )
+  &loop
+    LDAk #18 DEO
+    INC2 LDAk ?&loop
+  POP2
+JMP2r

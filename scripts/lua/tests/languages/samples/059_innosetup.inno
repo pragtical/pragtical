@@ -1,0 +1,22 @@
+[Setup]
+AppId={{12345678-1234-1234-1234-123456789abc}
+AppName=Fixture App
+AppVersion=1.0.0
+DefaultDirName={autopf}\Fixture
+OutputBaseFilename=fixture
+Compression=lzma
+SolidCompression=yes
+
+[Files]
+Source: "bin\fixture.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\Fixture"; Filename: "{app}\fixture.exe"
+
+[Code]
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+end;
+
+AllowNoIcons AppId AppName AppPublisher AppPublisherURL AppSupportURL AppUpdatesURL AppVerName AppVersion ArchitecturesAllowed ArchitecturesInstallIn64BitMode Code Components Compression CustomMessages DefaultDirName DefaultGroupName Dirs DisableDirPage DisableFinishedPage DisableProgramGroupPage DisableReadyPage False Files INI Icons InstallDelete LangOptions Languages Local Messages No OutputBaseFilename PrivilegesRequired PrivilegesRequiredOverridesAllowed Registry Run Setup SolidCompression Tasks True Types UninstallDelete UninstallFilesDir UninstallRun Uninstallable UserInfoPage WizardStyle Yes any false int no not private protected public str true void yes ;

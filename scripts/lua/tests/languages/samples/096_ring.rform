@@ -1,0 +1,12 @@
+load "stdlib.ring"
+
+class Widget
+  name = "demo"
+
+  func render items
+    for item in items
+      if item[:enabled]
+        see name + ":" + item[:label] + nl
+      ok
+    next
+end

@@ -1,0 +1,10 @@
+<% content_for :title, "Fixture" %>
+
+<section class="panel">
+  <h1><%= @title %></h1>
+  <% @items.each do |item| %>
+    <% if item.enabled? %>
+      <button data-id="<%= item.id %>"><%= h item.label %></button>
+    <% end %>
+  <% end %>
+</section>

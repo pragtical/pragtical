@@ -1,0 +1,14 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: fixture 1.0\n"
+"Language: en\n"
+
+#: src/app.c:10
+msgid "Open File"
+msgstr ""
+
+#: src/app.c:20
+msgid "Saved %d file"
+msgid_plural "Saved %d files"
+msgstr[0] ""
+msgstr[1] ""
