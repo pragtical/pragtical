@@ -121,6 +121,37 @@ end)
     test.ok(removed, remove_err)
   end)
 
+  test.test("reports nested files with relative paths", function(context)
+    local nested_dir = context.temp_root .. PATHSEP .. "nested"
+    local ok, err = common.mkdirp(nested_dir)
+    test.ok(ok, err)
+
+    write_file(nested_dir .. PATHSEP .. "init.lua", [[
+local test = require "core.test"
+
+test.test("passes", function()
+  test.ok(true)
+end)
+]])
+
+    local seen = {}
+    local runner, run_err = test.run(context.temp_root, {
+      on_result = function(item)
+        table.insert(seen, item.full_name)
+      end
+    })
+    test.not_nil(runner, run_err)
+
+    while runner.status == "running" do
+      coroutine.yield(0.01)
+    end
+
+    test.equal(runner.status, "passed")
+    test.same(seen, {
+      "nested/init.lua > passes"
+    })
+  end)
+
   test.test("quits on finish and sets failure exit status", function()
     local quit_called = false
     local force_quit
