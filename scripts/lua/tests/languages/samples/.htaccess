@@ -1,0 +1,31 @@
+Options -Indexes +FollowSymLinks
+DirectoryIndex index.php index.html
+ErrorDocument 404 /errors/not-found.html
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteCond %{HTTPS} !=on
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^ index.php [L,QSA]
+</IfModule>
+
+<FilesMatch "\.(?:css|js|png|jpg|webp)$">
+  Header set Cache-Control "public, max-age=31536000, immutable"
+  Require all granted
+</FilesMatch>
+
+<LimitExcept GET POST HEAD>
+  Require all denied
+</LimitExcept>
+
+AuthType Basic
+AuthName "Private Area"
+AuthUserFile /srv/app/.htpasswd
+Require valid-user
+
+SetEnv APP_ENV production
+AddType application/javascript .mjs
+AddOutputFilterByType DEFLATE text/html text/css application/javascript

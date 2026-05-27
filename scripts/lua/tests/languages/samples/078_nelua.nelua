@@ -1,0 +1,35 @@
+global function render(name: string, count: integer): string
+  local output = name
+  for i = 1, count do
+    output = output .. tostring(i)
+  end
+  return output
+end
+
+global record Widget
+  name: string
+  count: integer
+end
+
+local function update(widget: *Widget): string
+  defer print("updated")
+  switch widget.count do
+  case 0 then
+    return "empty"
+  else
+    while widget.count > 0 do
+      widget.count = widget.count - 1
+      if widget.count == 1 then
+        continue
+      end
+    end
+  end
+  return render(widget.name, 3)
+end
+
+##[[
+local generated = true
+]]
+
+local widget: Widget = { name = "demo", count = 3 }
+print(update(&widget))

@@ -1,0 +1,42 @@
+pkgname=fixture
+pkgbase=fixture-suite
+pkgver=1.0.0
+pkgrel=1
+epoch=1
+pkgdesc="Tokenizer fixture package"
+arch=('x86_64')
+url="https://example.test"
+license=('MIT')
+depends=('glibc')
+makedepends=('git' 'meson' 'ninja')
+checkdepends=('python-pytest')
+optdepends=('sqlite: database backend')
+provides=("fixture=${pkgver}")
+conflicts=('fixture-git')
+backup=('etc/fixture.conf')
+options=('!strip' 'debug')
+source=("fixture-${pkgver}.tar.gz" "fix-build.patch")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "fixture-${pkgver}"
+  patch -Np1 -i "${srcdir}/fix-build.patch"
+  ./configure --prefix=/usr
+}
+
+build() {
+  cd "fixture-${pkgver}"
+  arch-meson build -Dtests=true
+  meson compile -C build
+}
+
+check() {
+  cd "fixture-${pkgver}"
+  meson test -C build --print-errorlogs
+}
+
+package() {
+  cd "fixture-${pkgver}"
+  DESTDIR="$pkgdir" meson install -C build
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

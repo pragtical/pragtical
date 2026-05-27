@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Fixture</title>
+    <style>.card[data-state="open"] { color: rebeccapurple; }</style>
+  </head>
+  <body>
+    <!-- nested markup and attributes -->
+    <main id="app" class="layout">
+      <section data-count="3"><h1>Title</h1><p>Hello <strong>world</strong>.</p></section>
+      <script type="module">export const value = document.querySelector("#app");</script>
+      <form method="post" action="/save">
+        <label for="name">Name</label>
+        <input id="name" name="name" required pattern="[A-Za-z]+" value="Demo">
+        <button type="submit" data-action="save">Save</button>
+      </form>
+      <template id="row-template">
+        <article class="row"><slot name="label"></slot></article>
+      </template>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+[core]
+name = demo
+enabled = true
+path = ${HOME}/.config/demo
+
+[network]
+host = localhost
+port = 8080

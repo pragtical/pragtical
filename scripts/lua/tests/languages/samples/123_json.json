@@ -1,0 +1,10 @@
+{
+  "name": "demo",
+  "enabled": true,
+  "count": 42,
+  "items": [
+    { "id": 1, "label": "alpha" },
+    { "id": 2, "label": null }
+  ],
+  "nested": { "path": "a.b[0]" }
+}

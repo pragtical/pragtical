@@ -1,0 +1,5 @@
+package "demo" version="1.0.0" enabled=true {
+  node id=1 label="alpha"
+  node id=2 label="beta"
+  settings retries=3 timeout="30s"
+}

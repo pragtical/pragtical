@@ -1,0 +1,9 @@
+[service.demo]
+enabled = true
+count = 3
+path = "/srv/demo"
+
+[[items]]
+id = 1
+label = "alpha"
+

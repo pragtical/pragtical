@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<project name="demo">
+  <target id="build" enabled="true">
+    <command><![CDATA[echo "build"]]></command>
+    <dependency ref="prepare" />
+  </target>
+</project>

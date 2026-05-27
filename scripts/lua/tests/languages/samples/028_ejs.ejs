@@ -1,0 +1,9 @@
+<layout name="demo">
+  <component id="main" enabled="true">
+    <title>{{ title | escape }}</title>
+    <script>
+      function render(items) { return items.map(item => item.label).join(", "); }
+    </script>
+  </component>
+</layout>
+

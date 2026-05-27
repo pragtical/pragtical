@@ -1,0 +1,15 @@
+class Widget {
+  var name = "demo"
+
+  fun init(input) {
+    name = input
+  }
+
+  fun render(items) {
+    foreach item in items {
+      if item.enabled {
+        print(name + ":" + item.label)
+      }
+    }
+  }
+}

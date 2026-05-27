@@ -1,0 +1,17 @@
+using Gtk 4.0;
+
+template $DemoWindow : Gtk.ApplicationWindow {
+  title: "Fixture";
+  default-width: 480;
+  default-height: 320;
+
+  Gtk.Box {
+    orientation: vertical;
+    Gtk.Label title {
+      label: _("Hello");
+    }
+    Gtk.Button action_button {
+      label: _("Run");
+    }
+  }
+}

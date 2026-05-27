@@ -1,0 +1,8 @@
+contract Widget:
+  event Rendered:
+    name: String[32]
+    count: u256
+
+  pub fn render(self, name: String[32], count: u256):
+    if count > 0:
+      emit Rendered(name, count)

@@ -1,0 +1,6 @@
+-cp src
+-main demo.Main
+-D analyzer-optimize
+-D source-map-content
+-js build/app.js
+--macro include('demo')

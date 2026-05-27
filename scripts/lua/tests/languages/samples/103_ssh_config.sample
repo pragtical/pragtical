@@ -1,0 +1,10 @@
+[service.demo]
+enabled = true
+count = 3
+path = "/srv/demo"
+
+[[items]]
+id = 1
+label = "alpha"
+
+AddressFamily BatchMode CheckHostIP Ciphers ConnectTimeout EscapeChar ForwardAgent ForwardX11 ForwardX11Trusted GSSAPIAuthentication GSSAPIDelegateCredentials GSSAPIKeyExchange GSSAPITrustDNS HashKnownHosts Host HostName HostbasedAuthentication IdentitiesOnly IdentityFile MACs PermitLocalCommand Port ProxyCommand RekeyLimit SendEnv StrictHostKeyChecking Subsystem Tunnel TunnelDevice User VisualHostKey any ask no yes ;

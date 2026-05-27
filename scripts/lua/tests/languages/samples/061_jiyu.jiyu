@@ -1,0 +1,13 @@
+module demo
+
+type Widget struct {
+  name string
+}
+
+fn render(widget Widget, items []string) string {
+  let output = ""
+  for item in items {
+    output = output + widget.name + ":" + item
+  }
+  return output
+}

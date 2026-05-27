@@ -1,0 +1,11 @@
+title = "Demo"
+enabled = true
+count = 42
+date = 2026-05-26T12:00:00Z
+
+[owner]
+name = "Pragtical"
+
+[[items]]
+id = 1
+label = "alpha"
