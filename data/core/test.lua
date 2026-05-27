@@ -739,6 +739,8 @@ end
 
 local function run_sync(path, options)
   options = options or {}
+  local info = system.get_file_info(path)
+  local root_is_file = info and info.type == "file"
   local files, errmsg = test.discover(path)
   if not files then
     return nil, errmsg
@@ -780,6 +782,9 @@ local function run_sync(path, options)
         duration = 0
       }, options.on_result)
     else
+      suite.name = root_is_file
+        and common.basename(file_result.relative_path)
+        or file_result.relative_path
       run_suite_node(suite, file_result, {}, {}, {}, options.on_result)
     end
     yield_to_ui()
