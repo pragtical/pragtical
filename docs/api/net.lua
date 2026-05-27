@@ -183,11 +183,15 @@ function net.tcp:get_address() end
 function net.tcp:get_status() end
 
 ---
----Get the current connection status without waiting.
+---Write bytes to the connection.
+---
+---This may write only part of the provided data. A return value of 0 means the
+---connection is not ready to accept more bytes yet; retry later. On error this
+---returns nil and an error message.
 ---
 ---@param data string
----@return boolean written
----@return string? errmsg Error message if not written.
+---@return integer? bytes_written
+---@return string? errmsg Error message on error.
 function net.tcp:write(data) end
 
 ---
