@@ -375,11 +375,12 @@ local function write_all(conn, data, should_abort)
     local abort_err = should_abort and should_abort()
     if abort_err then return nil, abort_err end
 
-    local ok = conn:write(data:sub(total_sent + 1))
-    if not ok then
+    local sent, err = conn:write(data:sub(total_sent + 1))
+    if err then return nil, err end
+    if not sent or sent == 0 then
       coroutine.yield(0.05)
     else
-      total_sent = #data
+      total_sent = total_sent + sent
     end
   end
 

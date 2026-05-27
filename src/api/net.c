@@ -1,5 +1,6 @@
 #include <SDL3_net/SDL_net.h>
 #include <stdbool.h>
+#include <stdio.h>
 
 #include <lua.h>
 #include <lauxlib.h>
@@ -27,6 +28,7 @@ typedef struct Connection {
   ConnectionType type;
   Uint16 port;
   bool is_ssl;
+  char ssl_io_error[256];
   mbedtls_ssl_context ssl;
   mbedtls_ssl_config conf;
   mbedtls_x509_crt cacert;
@@ -50,23 +52,52 @@ static char CACERT_BUNDLE[1024] = { 0 };
 
 
 static int sdl_mbedtls_send(void *ctx, const unsigned char *buf, size_t len) {
-  NET_StreamSocket *sock = ctx;
+  Connection *self = ctx;
 
-  if (NET_WriteToStreamSocket(sock, buf, (int)len)) {
+  if (NET_WriteToStreamSocket(self->socket, buf, (int)len)) {
     return (int)len;
   }
 
+  snprintf(
+    self->ssl_io_error,
+    sizeof(self->ssl_io_error),
+    "SDL_net write failed: %s",
+    SDL_GetError()
+  );
   return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
 }
 
 static int sdl_mbedtls_recv(void *ctx, unsigned char *buf, size_t len) {
-  NET_StreamSocket *sock = ctx;
-  int rc = NET_ReadFromStreamSocket(sock, buf, (int)len);
+  Connection *self = ctx;
+  int rc = NET_ReadFromStreamSocket(self->socket, buf, (int)len);
 
   if (rc > 0) return rc;
   if (rc == 0) return MBEDTLS_ERR_SSL_WANT_READ;
 
+  snprintf(
+    self->ssl_io_error,
+    sizeof(self->ssl_io_error),
+    "SDL_net read failed: %s",
+    SDL_GetError()
+  );
   return MBEDTLS_ERR_SSL_INTERNAL_ERROR;
+}
+
+static void push_ssl_error(lua_State *L, int rc, Connection *conn) {
+  char errbuf[128];
+  mbedtls_strerror(rc, errbuf, sizeof(errbuf));
+
+  if (conn && conn->ssl_io_error[0] != '\0') {
+    lua_pushfstring(
+      L,
+      "%s (%d); %s",
+      errbuf,
+      rc,
+      conn->ssl_io_error
+    );
+  } else {
+    lua_pushfstring(L, "%s (%d)", errbuf, rc);
+  }
 }
 
 static bool is_ssl_retryable_read(int rc) {
@@ -74,6 +105,12 @@ static bool is_ssl_retryable_read(int rc) {
     rc == MBEDTLS_ERR_SSL_WANT_READ ||
     rc == MBEDTLS_ERR_SSL_WANT_WRITE ||
     rc == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET;
+}
+
+static bool is_ssl_retryable_write(int rc) {
+  return
+    rc == MBEDTLS_ERR_SSL_WANT_READ ||
+    rc == MBEDTLS_ERR_SSL_WANT_WRITE;
 }
 
 bool load_cacert_bundle(mbedtls_x509_crt *cacert) {
@@ -199,6 +236,7 @@ static int f_open_tcp(lua_State* L) {
   self->socket = socket;
   self->port = port;
   self->is_ssl = ssl;
+  self->ssl_io_error[0] = '\0';
 
   luaL_setmetatable(L, API_TYPE_NET_TCP);
 
@@ -238,7 +276,7 @@ static int f_open_tcp(lua_State* L) {
       goto ssl_error;
 
     mbedtls_ssl_set_bio(
-      &self->ssl, self->socket, sdl_mbedtls_send, sdl_mbedtls_recv, NULL
+      &self->ssl, self, sdl_mbedtls_send, sdl_mbedtls_recv, NULL
     );
   }
 
@@ -251,10 +289,8 @@ ssl_error:
   mbedtls_x509_crt_free(&self->cacert);
   NET_DestroyStreamSocket(socket);
 
-  char errbuf[128];
-  mbedtls_strerror(rc, errbuf, sizeof(errbuf));
   lua_pushnil(L);
-  lua_pushstring(L, errbuf);
+  push_ssl_error(L, rc, self);
 
   return 2;
 }
@@ -471,6 +507,7 @@ static int m_tcp_wait_until_connected(lua_State* L) {
   // Now check handshake status if ssl enabled
   hand_shake:
   if (self->is_ssl) {
+    self->ssl_io_error[0] = '\0';
     int rc = mbedtls_ssl_handshake(&self->ssl);
     if (rc == 0) {
       lua_pushstring(L, "success");
@@ -486,10 +523,8 @@ static int m_tcp_wait_until_connected(lua_State* L) {
       }
       lua_pushstring(L, "waiting");
     } else {
-      char errbuf[128];
-      mbedtls_strerror(rc, errbuf, sizeof(errbuf));
       lua_pushstring(L, "failure");
-      lua_pushstring(L, errbuf);
+      push_ssl_error(L, rc, self);
       ret++;
     }
     return ret;
@@ -546,6 +581,7 @@ static int m_tcp_get_status(lua_State* L) {
 
   // If TCP succeeded and it's SSL, do handshake
   if (self->is_ssl) {
+    self->ssl_io_error[0] = '\0';
     int rc = mbedtls_ssl_handshake(&self->ssl);
 
     if (rc == 0) {
@@ -553,10 +589,8 @@ static int m_tcp_get_status(lua_State* L) {
     } else if (rc == MBEDTLS_ERR_SSL_WANT_READ || rc == MBEDTLS_ERR_SSL_WANT_WRITE) {
       lua_pushstring(L, "waiting");
     } else {
-      char errbuf[128];
-      mbedtls_strerror(rc, errbuf, sizeof(errbuf));
       lua_pushstring(L, "failure");
-      lua_pushstring(L, errbuf);
+      push_ssl_error(L, rc, self);
       ret++;
     }
     return ret;
@@ -576,22 +610,23 @@ static int m_tcp_write(lua_State* L) {
     bool sent = NET_WriteToStreamSocket(self->socket, data, data_len);
 
     if (!sent) {
-      lua_pushboolean(L, 0);
+      lua_pushnil(L);
       lua_pushstring(L, SDL_GetError());
       return 2;
     }
 
-    lua_pushboolean(L, 1);
+    lua_pushinteger(L, data_len);
   } else {
+    self->ssl_io_error[0] = '\0';
     int rc = mbedtls_ssl_write(&self->ssl, (const unsigned char*)data, data_len);
-    if (rc >= 0) {
-      lua_pushboolean(L, 1);
+    if (rc > 0) {
+      lua_pushinteger(L, rc);
+    } else if (rc == 0 || is_ssl_retryable_write(rc)) {
+      lua_pushinteger(L, 0);
     } else {
       // Real error
-      char errbuf[128];
-      mbedtls_strerror(rc, errbuf, sizeof(errbuf));
-      lua_pushboolean(L, 0);
-      lua_pushstring(L, errbuf);
+      lua_pushnil(L);
+      push_ssl_error(L, rc, self);
       return 2;
     }
   }
@@ -649,16 +684,15 @@ static int m_tcp_read(lua_State* L) {
       lua_pushlstring(L, data, received);
     }
   } else {
+    self->ssl_io_error[0] = '\0';
     int rc = mbedtls_ssl_read(&self->ssl, (unsigned char*) data, max_len);
     if (rc >= 0) {
       lua_pushlstring(L, data, rc);
     } else if (is_ssl_retryable_read(rc)) {
       lua_pushstring(L, "");
     } else {
-      char errbuf[128];
-      mbedtls_strerror(rc, errbuf, sizeof(errbuf));
       lua_pushnil(L);
-      lua_pushstring(L, errbuf);
+      push_ssl_error(L, rc, self);
       return_count = 2;
     }
   }
