@@ -68,10 +68,18 @@ local function load_language_plugins(path)
 end
 
 local function files_key(files)
-  if type(files) == "table" then
-    return table.concat(files, "|")
+  local function normalize(value)
+    return tostring(value or ""):gsub("\\", "/")
   end
-  return tostring(files or "")
+
+  if type(files) == "table" then
+    local normalized = {}
+    for i, value in ipairs(files) do
+      normalized[i] = normalize(value)
+    end
+    return table.concat(normalized, "|")
+  end
+  return normalize(files)
 end
 
 local function syntax_key(name, files)
