@@ -3157,7 +3157,7 @@ function MarkdownView:new(source, title)
   self.partial_layout = nil
   self.partial_commit_stale_frame = nil
   self.append_stale_frame = nil
-  self.transient_stale_follow_bottom = nil
+  self.preserved_scroll = nil
   self.font_cache = nil
   self.font = nil
   self.last_doc_change_id = nil
@@ -3365,7 +3365,6 @@ function MarkdownView:invalidate_layout()
   self.partial_layout = nil
   self.pending_layout = nil
   self.layouting = false
-  self.transient_stale_follow_bottom = nil
   self.virtual_block_cache = {}
   self.virtual_metrics = nil
   self.virtual_layout_cache = nil
@@ -3397,26 +3396,31 @@ local function empty_layout(width)
   }
 end
 
-local function layout_scroll_max(self, layout)
-  return math.max(0, ((layout and layout.height or 0) + style.padding.y * 2) - self.size.y)
+local function preserve_scroll_for_layout(self)
+  self.preserved_scroll = {
+    y = self.scroll.y or 0,
+    to_y = self.scroll.to.y or 0
+  }
 end
 
-local function layout_is_at_bottom(self, layout)
-  local max_scroll = layout_scroll_max(self, layout)
-  local y = math.max(self.scroll.y or 0, self.scroll.to.y or 0)
-  return max_scroll <= 1 or y >= max_scroll - 2
+local function scroll_matches_preserved(self)
+  local preserved = self.preserved_scroll
+  return preserved
+    and (self.scroll.to.y or 0) == preserved.to_y
 end
 
-local function scroll_to_layout_bottom(self, layout)
-  local max_scroll = layout_scroll_max(self, layout)
-  self.scroll.y = max_scroll
-  self.scroll.to.y = max_scroll
-end
-
-local function apply_transient_follow_bottom(self, layout)
-  if not self.transient_stale_follow_bottom then return end
-  self.transient_stale_follow_bottom = nil
-  scroll_to_layout_bottom(self, layout)
+local function restore_preserved_scroll(self)
+  if not self.preserved_scroll then
+    return false
+  end
+  local should_restore = scroll_matches_preserved(self)
+  local preserved = self.preserved_scroll
+  self.preserved_scroll = nil
+  if should_restore then
+    self.scroll.y = preserved.y
+    self.scroll.to.y = preserved.to_y
+  end
+  return should_restore
 end
 
 local function translate_command(command, y_offset)
@@ -3621,6 +3625,7 @@ local function ensure_virtual_layout(self, width)
   local rendered_start
   local rendered_stop
   local scroll_adjust = 0
+  local preserve_scroll = scroll_matches_preserved(self)
   local index = find_virtual_first_visible(metrics, visible_start)
 
   while index <= metrics.count do
@@ -3648,7 +3653,7 @@ local function ensure_virtual_layout(self, width)
     index = index + 1
   end
 
-  if scroll_adjust ~= 0 then
+  if scroll_adjust ~= 0 and not preserve_scroll then
     self.scroll.y = math.max(0, (self.scroll.y or 0) + scroll_adjust)
     self.scroll.to.y = math.max(0, (self.scroll.to.y or 0) + scroll_adjust)
     scroll_y = math.max(self.scroll.y or 0, self.scroll.to.y or 0)
@@ -3664,7 +3669,11 @@ local function ensure_virtual_layout(self, width)
     visible_start = rendered_start,
     visible_stop = rendered_stop
   }
-  apply_transient_follow_bottom(self, self.layout)
+  if preserve_scroll then
+    restore_preserved_scroll(self)
+  else
+    self.preserved_scroll = nil
+  end
   scroll_y = math.max(self.scroll.y or 0, self.scroll.to.y or 0)
   self.pending_scrollable_size = nil
   self.pending_h_scrollable_size = nil
@@ -3816,13 +3825,18 @@ function MarkdownView:commit_partial_text(markdown_text)
   if text == nil then
     text = self.partial_text
   end
+  preserve_scroll_for_layout(self)
   preserve_visible_layout(self)
   if self.stale_layout then
     self.partial_commit_stale_frame = core.frame_start
   end
   self.partial_text = nil
   self.partial_layout = nil
-  return self:append_markdown(text)
+  local incremental = self:append_markdown(text)
+  if not (self.stale_layout or self.parsing or self.layouting) then
+    self.preserved_scroll = nil
+  end
+  return incremental
 end
 
 local function has_incremental_append_boundary(existing_text, appended_text)
@@ -3893,12 +3907,14 @@ function MarkdownView:append_text(text)
   end
 
   if self.partial_text then
+    preserve_scroll_for_layout(self)
     preserve_visible_layout(self)
   end
   self.partial_text = nil
   self.partial_layout = nil
 
   if self.parsing then
+    preserve_scroll_for_layout(self)
     self:set_text(self:get_text() .. text)
     return false
   end
@@ -3906,6 +3922,7 @@ function MarkdownView:append_text(text)
   local existing_length = source_text_length(self)
   local existing_suffix = source_text_suffix(self)
   if not has_incremental_append_boundary(existing_suffix, text) then
+    preserve_scroll_for_layout(self)
     self:set_text(self:get_text() .. text)
     return false
   end
@@ -3931,10 +3948,13 @@ function MarkdownView:append_text(text)
   end
 
   if had_footnotes_block or footnotes_block or not append_layout_blocks(self, blocks) then
+    preserve_scroll_for_layout(self)
     self:invalidate_layout()
     if self.stale_layout then
       self.append_stale_frame = core.frame_start
     end
+  else
+    self.preserved_scroll = nil
   end
   return true
 end
@@ -4161,9 +4181,6 @@ function MarkdownView:ensure_layout()
       or self.append_stale_frame == core.frame_start
     )
   then
-    if layout_is_at_bottom(self, self.stale_layout) then
-      self.transient_stale_follow_bottom = true
-    end
     core.redraw = true
     return self.stale_layout
   end
@@ -4216,7 +4233,7 @@ function MarkdownView:ensure_layout()
         commands = commands,
         anchors = anchors
       }
-      apply_transient_follow_bottom(self, self.layout)
+      restore_preserved_scroll(self)
       self.partial_layout = nil
       self.pending_layout = nil
       self.pending_scrollable_size = nil
@@ -4244,7 +4261,7 @@ function MarkdownView:ensure_layout()
     commands = commands,
     anchors = anchors
   }
-  apply_transient_follow_bottom(self, self.layout)
+  restore_preserved_scroll(self)
   self.partial_layout = nil
 
   self.pending_scrollable_size = nil

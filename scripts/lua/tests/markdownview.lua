@@ -557,8 +557,9 @@ tags = ["markdown", "tutorial", "web"]
     core.frame_start = old_frame_start
 
     test.ok(final_layout ~= commit_frame_layout)
-    test.equal(view.scroll.y, final_bottom)
-    test.equal(view.scroll.to.y, final_bottom)
+    test.ok(stale_bottom < final_bottom)
+    test.equal(view.scroll.y, stale_bottom)
+    test.equal(view.scroll.to.y, stale_bottom)
     test.equal(view.partial_commit_stale_frame, nil)
   end)
 
@@ -590,9 +591,59 @@ tags = ["markdown", "tutorial", "web"]
     core.frame_start = old_frame_start
 
     test.ok(final_layout ~= append_frame_layout)
-    test.equal(view.scroll.y, final_bottom)
-    test.equal(view.scroll.to.y, final_bottom)
+    test.ok(stale_bottom < final_bottom)
+    test.ok(view.scroll.y < final_bottom)
+    test.ok(view.scroll.to.y < final_bottom)
     test.equal(view.append_stale_frame, nil)
+  end)
+
+  test.test("keeps scroll position steady after partial commit", function()
+    local old_frame_start = core.frame_start
+    core.frame_start = 3000
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Long\n\n" .. string.rep("Old paragraph.\n\n", 40))
+    view:ensure_layout()
+    view:set_partial_text(string.rep("streamed partial text\n", 20))
+    view.scroll.y = 240
+    view.scroll.to.y = 240
+
+    view:commit_partial_text("\n\n## Assistant\n\n" .. string.rep("Final paragraph.\n\n", 20))
+    view:ensure_layout()
+    core.frame_start = 3001
+    view:ensure_layout()
+    core.frame_start = old_frame_start
+
+    test.equal(view.scroll.y, 240)
+    test.equal(view.scroll.to.y, 240)
+  end)
+
+  test.test("does not restore append scroll after user scrolls", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Long\n\n" .. string.rep("Old paragraph.\n\n", 80))
+    view:ensure_layout()
+    view.async_layout_threshold = 1
+    view.scroll.y = 200
+    view.scroll.to.y = 200
+
+    view:append_text("\n\nParagraph with a footnote.[^note]\n\n[^note]: Note text.\n")
+    view:ensure_layout()
+    view.scroll.y = 320
+    view.scroll.to.y = 320
+
+    run_core_threads_until(function()
+      return not view.layouting
+    end)
+
+    test.equal(view.scroll.y, 320)
+    test.equal(view.scroll.to.y, 320)
   end)
 
   test.test("virtualized layouts render only visible markdown blocks", function()
