@@ -698,6 +698,46 @@ tags = ["markdown", "tutorial", "web"]
     test.ok((layout.visible_stop or 0) < #view.blocks)
   end)
 
+  test.test("virtualized layouts hit-test translated links", function()
+    local lines = {}
+    for i = 1, 12 do
+      lines[#lines + 1] = "## Item " .. i
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    lines[#lines + 1] = "[target](https://example.com)"
+
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 1024
+    })
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 400
+    view.size.y = 80
+
+    local layout = view:ensure_layout()
+    local link_command
+    local link
+    for _, command_item in ipairs(layout.commands) do
+      if command_item.links then
+        link_command = command_item
+        link = command_item.links[1]
+      end
+    end
+
+    test.not_nil(link_command)
+    test.not_nil(link)
+    test.ok(link_command.y > 0)
+    test.equal(link.y, link_command.y)
+    local x = style.padding.x + link.x + 1
+    local y = style.padding.y + link_command.y + 1
+    test.equal(view:get_link_at(x, y), "https://example.com")
+  end)
+
   test.test("renders partial text without mutating parsed markdown", function()
     local view = MarkdownView("# Session\n\n## User\n\nHello")
     view.size.x = 400

@@ -3427,6 +3427,18 @@ local function translate_command(command, y_offset)
   if type(copy.y) == "number" then
     copy.y = copy.y + y_offset
   end
+  if copy.links then
+    copy.links = {}
+    for i, link in ipairs(command.links) do
+      copy.links[i] = {}
+      for key, value in pairs(link) do
+        copy.links[i][key] = value
+      end
+      if type(copy.links[i].y) == "number" then
+        copy.links[i].y = copy.links[i].y + y_offset
+      end
+    end
+  end
   return copy
 end
 
