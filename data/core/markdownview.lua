@@ -26,6 +26,7 @@ local ASYNC_PARSE_THRESHOLD = 64 * 1024
 local ASYNC_LAYOUT_THRESHOLD = 64 * 1024
 local VIRTUAL_ESTIMATED_BLOCK_HEIGHT = 96
 local PARSE_YIELD_INTERVAL = 0.003
+local TEXT_SUFFIX_LIMIT = 4096
 local TABLE_BORDER = math.max(style.divider_size, 1)
 local TABLE_CELL_PADDING_X = style.padding.x
 local TABLE_CELL_PADDING_Y = math.max(common.round(style.padding.y / 2), 1)
@@ -231,7 +232,7 @@ local function set_source_text(self, text)
   text = normalize_source_text(text)
   self._text_chunks = { text }
   self._text_length = #text
-  self._text_suffix = text:sub(-4096)
+  self._text_suffix = text:sub(-TEXT_SUFFIX_LIMIT)
   rawset(self, "text", text)
   return text
 end
@@ -244,7 +245,7 @@ local function append_source_text(self, text)
   self._text_chunks = self._text_chunks or {}
   self._text_chunks[#self._text_chunks + 1] = text
   self._text_length = (self._text_length or 0) + #text
-  self._text_suffix = ((self._text_suffix or "") .. text):sub(-4096)
+  self._text_suffix = ((self._text_suffix or "") .. text):sub(-TEXT_SUFFIX_LIMIT)
   rawset(self, "text", nil)
 end
 
@@ -280,13 +281,17 @@ local FRONTMATTER_DELIMITERS = {
   [";;;"] = "json"
 }
 
-local function get_frontmatter_info(line)
-  return FRONTMATTER_DELIMITERS[trim(line)]
+local function get_frontmatter_delimiter(line)
+  local delimiter = trim(line or "")
+  return delimiter, FRONTMATTER_DELIMITERS[delimiter]
 end
 
+---Parses document-start metadata fenced by matching frontmatter delimiters.
+---@param lines string[]
+---@return table? frontmatter
+---@return integer? next_index
 local function parse_frontmatter(lines)
-  local delimiter = trim(lines[1] or "")
-  local info = get_frontmatter_info(delimiter)
+  local delimiter, info = get_frontmatter_delimiter(lines[1])
   if not info then
     return nil
   end
@@ -2729,11 +2734,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
           content_width = math.max(content_width, definition_width)
         end
       end
-    elseif block.type == "code" then
-      local used_width
-      y, used_width = add_code_block(commands, y, block.lines, fonts.code, block.info, available_width, x_offset, yield_state)
-      content_width = math.max(content_width, x_offset + used_width)
-    elseif block.type == "frontmatter" then
+    elseif block.type == "code" or block.type == "frontmatter" then
       local used_width
       y, used_width = add_code_block(commands, y, block.lines, fonts.code, block.info, available_width, x_offset, yield_state)
       content_width = math.max(content_width, x_offset + used_width)
@@ -3725,7 +3726,7 @@ function MarkdownView:get_text()
     self._text_chunks = { materialized }
   end
   self._text_length = #materialized
-  self._text_suffix = materialized:sub(-4096)
+  self._text_suffix = materialized:sub(-TEXT_SUFFIX_LIMIT)
   rawset(self, "text", materialized)
   return materialized
 end
