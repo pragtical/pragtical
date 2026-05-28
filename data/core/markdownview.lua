@@ -3323,6 +3323,7 @@ local function build_partial_layout(self, layout, partial_text)
 
   return {
     width = width,
+    base_height = layout.height,
     height = next_y > 0 and (next_y - BLOCK_SPACING) or layout.height,
     content_width = content_width,
     commands = commands
@@ -4231,6 +4232,7 @@ function MarkdownView:ensure_layout()
     anchors = anchors
   }
   apply_transient_follow_bottom(self, self.layout)
+  self.partial_layout = nil
 
   self.pending_scrollable_size = nil
   self.pending_h_scrollable_size = nil
@@ -4251,7 +4253,10 @@ function MarkdownView:ensure_partial_layout()
 
   local layout = self:ensure_layout()
   local width = layout.width
-  if self.partial_layout and self.partial_layout.width == width then
+  if self.partial_layout
+    and self.partial_layout.width == width
+    and self.partial_layout.base_height == layout.height
+  then
     return self.partial_layout
   end
 
