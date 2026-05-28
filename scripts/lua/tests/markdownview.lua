@@ -698,6 +698,33 @@ tags = ["markdown", "tutorial", "web"]
     test.ok(#layout.commands > 0)
   end)
 
+  test.test("virtualized layouts skip blocks ending at the visible boundary", function()
+    local lines = {}
+    for i = 1, 20 do
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 0
+    })
+    view.size.x = 400
+    view.size.y = 80
+
+    view:ensure_layout()
+    local first_step = view.virtual_metrics.steps[1]
+    test.not_nil(first_step)
+    view.scroll.y = first_step + style.padding.y
+    view.scroll.to.y = view.scroll.y
+
+    local layout = view:ensure_layout()
+
+    test.equal(layout.virtualized, true)
+    test.equal(layout.visible_start, 2)
+  end)
+
   test.test("virtualized layouts anchor scroll when measured heights change", function()
     local lines = {}
     for i = 1, 40 do

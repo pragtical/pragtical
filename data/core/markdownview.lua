@@ -216,7 +216,7 @@ local function split_lines(text)
   local lines = {}
   text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
   for line in (text .. "\n"):gmatch("(.-)\n") do
-    table.insert(lines, line)
+    lines[#lines + 1] = line
   end
   if #lines == 0 then
     lines[1] = ""
@@ -480,12 +480,6 @@ local function is_block_start(line)
     or get_definition_item(line)
     or get_footnote_definition(line)
     or is_html_comment_start(line)
-end
-
-local function append_wrapped_line(target, text)
-  if text ~= "" then
-    target[#target + 1] = trim(text)
-  end
 end
 
 local function normalize_link_label(label)
@@ -3578,7 +3572,7 @@ local function find_virtual_first_visible(metrics, y)
   while low <= high do
     local mid = math.floor((low + high) / 2)
     local offset = ensure_virtual_offset(metrics, mid)
-    if offset + virtual_metric_step(metrics, mid) >= y then
+    if offset + virtual_metric_step(metrics, mid) > y then
       result = mid
       high = mid - 1
     else
