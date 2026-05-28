@@ -21,7 +21,7 @@ jobs:
       CXX: ${{ matrix.config.cxx }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Set Environment Variables
         if: ${{ matrix.config.cc == 'gcc' }}
@@ -30,7 +30,7 @@ jobs:
           echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
           echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-linux-$(uname -m)-portable" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -51,7 +51,7 @@ jobs:
         if: ${{ matrix.config.cc == 'gcc' }}
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: ${{ matrix.config.cc == 'gcc' }}
         with:
           name: Linux x86_64
@@ -72,7 +72,7 @@ jobs:
       CXX: clang++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: System Information
         run: |
@@ -86,7 +86,7 @@ jobs:
           echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
           echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-macos-${{ matrix.config.arch }}" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -104,7 +104,7 @@ jobs:
       - name: Create DMG Image
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macOS DMG ${{ matrix.config.arch }}
           path: ${{ env.INSTALL_NAME }}.dmg
@@ -122,7 +122,7 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -165,7 +165,7 @@ jobs:
       - name: Package
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Windows (MSYS) ${{ matrix.config.target }}
           path: ${{ env.INSTALL_NAME }}.zip
@@ -180,14 +180,14 @@ jobs:
           - { target: x64, name: x86_64 }
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Setup Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: ${{ matrix.arch.target }}
       - name: Python Setup
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.x'
       - name: Install meson and ninja
@@ -211,7 +211,7 @@ jobs:
           Remove-Item -Recurse -Force -Path "pragtical/lib","pragtical/include"
           Compress-Archive -Path pragtical -DestinationPath "$env:INSTALL_NAME.zip"
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Windows (MSVC) ${{ matrix.arch.target }}
           path: ${{ env.INSTALL_NAME }}.zip

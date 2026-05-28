@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.tag.outputs.version }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Set Tag
         id: tag
@@ -42,7 +42,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create Release
         id: create_release
-        uses: softprops/action-gh-release@v2.2.2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.tag.outputs.version }}
           name: Pragtical ${{ steps.tag.outputs.version }}
@@ -74,14 +74,14 @@ jobs:
       CXX: g++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -110,7 +110,7 @@ jobs:
       - name: Build AppImages
         run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --nobuild --release
       - name: Upload Files
-        uses: softprops/action-gh-release@v2.2.2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
@@ -134,7 +134,7 @@ jobs:
       CXX: clang++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: System Information
         run: |
@@ -148,7 +148,7 @@ jobs:
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
           echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-macos-${{ matrix.config.arch }}" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -162,7 +162,7 @@ jobs:
         run: |
           bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --dmg --release
       - name: Upload Files
-        uses: softprops/action-gh-release@v2.2.2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
@@ -183,7 +183,7 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -222,7 +222,7 @@ jobs:
       - name: Build Installer
         run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
       - name: Upload Files
-        uses: softprops/action-gh-release@v2.2.2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.release.outputs.version }}
           draft: true
