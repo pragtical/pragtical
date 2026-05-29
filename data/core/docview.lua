@@ -142,6 +142,8 @@ function DocView:new(doc)
   self.cache_font_size = self.cache_font:get_size()
   local _, indent_size = self.doc:get_indent_info()
   self.cache_indent_size = indent_size
+  self.visual_lines_dirty = true
+  self.visual_lines = nil
 end
 
 
@@ -233,11 +235,12 @@ end
 ---Get the total scrollable height of the document.
 ---@return number height Total height in pixels
 function DocView:get_scrollable_size()
+  local row_count = self:visual_line_count()
   if not config.scroll_past_end then
     local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
-    return self:get_line_height() * (#self.doc.lines) + style.padding.y * 2 + h_scroll
+    return self:get_line_height() * row_count + style.padding.y * 2 + h_scroll
   end
-  return self:get_line_height() * (#self.doc.lines - 1) + self.size.y
+  return self:get_line_height() * (row_count - 1) + self.size.y
 end
 
 
@@ -283,12 +286,219 @@ function DocView:get_line_screen_position(line, col)
   local x, y = self:get_content_offset()
   local lh = self:get_line_height()
   local gw = self:get_gutter_width()
-  y = y + (line-1) * lh + style.padding.y
+  y = y + (self:visual_row_from_position(line, col) - 1) * lh + style.padding.y
   if col then
     return x + gw + self:get_col_x_offset(line, col), y
   else
     return x + gw, y
   end
+end
+
+
+---Mark the visual-line model dirty.
+---@param from_line? integer First line that changed (reserved for incremental rebuilds)
+function DocView:invalidate_visual_lines(from_line)
+  self.visual_lines_dirty = true
+  if not self.visual_lines_invalid_from or not from_line then
+    self.visual_lines_invalid_from = from_line
+  else
+    self.visual_lines_invalid_from = math.min(self.visual_lines_invalid_from, from_line)
+  end
+end
+
+
+---Return plugin-provided hidden document lines.
+---@return table<integer, boolean>? hidden_lines
+function DocView:get_hidden_lines()
+  return nil
+end
+
+
+---Return visual row start columns for a document line.
+---@param line integer
+---@return integer[]? starts
+function DocView:get_line_wraps(line)
+  return nil
+end
+
+
+---Rebuild the composed visual-line model.
+---@param from_line? integer Reserved for future incremental rebuilds
+function DocView:rebuild_visual_lines(from_line)
+  local hidden = self:get_hidden_lines() or {}
+  local rows = {}
+  local line_to_first_row = {}
+  local line_row_count = {}
+
+  for line = 1, #self.doc.lines do
+    if not hidden[line] then
+      local starts = self:get_line_wraps(line)
+      if not starts or #starts == 0 then
+        starts = { 1 }
+      elseif starts[1] ~= 1 then
+        local copy = { 1 }
+        for i = 1, #starts do
+          copy[#copy + 1] = starts[i]
+        end
+        starts = copy
+      end
+
+      line_to_first_row[line] = #rows + 1
+      line_row_count[line] = #starts
+      for i = 1, #starts do
+        rows[#rows + 1] = { line = line, col = starts[i] }
+      end
+    end
+  end
+
+  if #rows == 0 then
+    rows[1] = { line = 1, col = 1 }
+    line_to_first_row[1] = 1
+    line_row_count[1] = 1
+  end
+
+  self.visual_lines = {
+    rows = rows,
+    line_to_first_row = line_to_first_row,
+    line_row_count = line_row_count,
+    hidden_lines = hidden
+  }
+  self.visual_lines_dirty = false
+  self.visual_lines_invalid_from = nil
+
+  if self.on_visual_lines_rebuilt then
+    self:on_visual_lines_rebuilt()
+  end
+end
+
+
+function DocView:get_visual_lines()
+  if self.visual_lines_dirty or not self.visual_lines then
+    self:rebuild_visual_lines(self.visual_lines_invalid_from)
+  end
+  return self.visual_lines
+end
+
+
+---Get the total number of visual rows.
+---@return integer count
+function DocView:visual_line_count()
+  return #self:get_visual_lines().rows
+end
+
+
+---Convert a visual row to a real document position.
+---@param row integer
+---@return integer line
+---@return integer col
+function DocView:visual_position_from_row(row)
+  local rows = self:get_visual_lines().rows
+  row = common.clamp(row, 1, #rows)
+  local item = rows[row]
+  return item.line, item.col
+end
+
+
+---Convert a real document position to a visual row.
+---@param line integer
+---@param col? integer
+---@return integer row
+function DocView:visual_row_from_position(line, col)
+  local model = self:get_visual_lines()
+  if line > #self.doc.lines then
+    return #model.rows + 1
+  end
+  local first = model.line_to_first_row[line]
+  if not first then
+    while line > 1 and not model.line_to_first_row[line] do
+      line = line - 1
+    end
+    first = model.line_to_first_row[line] or 1
+  end
+
+  if not col then
+    return first
+  end
+
+  local row_count = model.line_row_count[line] or 1
+  local best = first
+  for row = first + 1, first + row_count - 1 do
+    if col >= model.rows[row].col then
+      best = row
+    else
+      break
+    end
+  end
+  return best
+end
+
+
+---Get the first visual row and row count for a real document line.
+---@param line integer
+---@return integer? first_row
+---@return integer row_count
+function DocView:visual_rows_for_line(line)
+  local model = self:get_visual_lines()
+  return model.line_to_first_row[line], model.line_row_count[line] or 0
+end
+
+
+---Return whether a document line contributes visual rows.
+---@param line integer
+---@return boolean
+function DocView:is_line_visible(line)
+  return self:get_visual_lines().line_to_first_row[line] ~= nil
+end
+
+
+---Convert a virtual line offset (from get_visible_line_range) to a real
+---document position. This is an identity function by default; plugins like
+---codefolding or linewrapping override it to map visible rows to real lines.
+---Plugins that iterate visible lines should call this to get the real line
+---and column.
+---@param offset integer Virtual line index (1-based)
+---@return integer line Real document line
+---@return integer col  Column (always 1 for the identity case)
+function DocView:position_from_offset(offset)
+  return self:visual_position_from_row(offset)
+end
+
+
+---Convert a real document position to its virtual line offset. This is an
+---identity function by default; plugins that collapse, wrap or otherwise
+---virtualize visible rows should override it with their own mapping.
+---@param line integer Real document line
+---@param col? integer Optional column
+---@return integer offset Virtual line index (1-based)
+function DocView:offset_from_position(line, col)
+  return self:visual_row_from_position(line, col)
+end
+
+
+---Iterate visible rows as virtual offset plus real document position.
+---@return fun():integer?, integer?, integer?
+function DocView:each_visible_line()
+  local offset, max_offset = self:get_visible_line_range()
+  offset = offset - 1
+  return function()
+    while offset < max_offset do
+      offset = offset + 1
+      local line, col = self:position_from_offset(offset)
+      if line then
+        return offset, line, col
+      end
+    end
+  end
+end
+
+
+---Get the visual height occupied by a real document line.
+---Wrapped lines may span more than one row.
+---@param line integer Real document line
+---@return number height
+function DocView:get_line_visual_height(line)
+  local _, count = self:visual_rows_for_line(line)
+  return math.max(1, count) * self:get_line_height()
 end
 
 
@@ -361,7 +571,7 @@ function DocView:get_visible_line_range()
   local x, y, x2, y2 = self:get_content_bounds()
   local lh = self:get_line_height()
   local minline = math.max(1, math.floor((y - style.padding.y) / lh) + 1)
-  local maxline = math.min(#self.doc.lines, math.floor((y2 - style.padding.y) / lh) + 1)
+  local maxline = math.min(self:visual_line_count(), math.floor((y2 - style.padding.y) / lh) + 1)
   return minline, maxline
 end
 
@@ -508,16 +718,28 @@ function DocView:get_x_offset_col(line, x)
 end
 
 
+---Resolve a visual row-local horizontal offset to a document column.
+---@param row integer Visual row
+---@param x number Horizontal offset from text origin
+---@return integer col
+function DocView:get_visual_line_col_from_x(row, x)
+  local line = self:visual_position_from_row(row)
+  return self:get_x_offset_col(line, x)
+end
+
+
 ---Convert screen coordinates to document line/column.
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
 ---@return integer line Line number
 ---@return integer col Column number
 function DocView:resolve_screen_position(x, y)
-  local ox, oy = self:get_line_screen_position(1)
-  local line = math.floor((y - oy) / self:get_line_height()) + 1
-  line = common.clamp(line, 1, #self.doc.lines)
-  local col = self:get_x_offset_col(line, x - ox)
+  local ox, oy = self:get_content_offset()
+  local gw = self:get_gutter_width()
+  local line_y = oy + style.padding.y
+  local row = math.floor((y - line_y) / self:get_line_height()) + 1
+  local line = self:visual_position_from_row(row)
+  local col = self:get_visual_line_col_from_x(row, x - ox - gw)
   return line, col
 end
 
@@ -528,7 +750,8 @@ end
 ---@param instant? boolean Jump immediately without animation
 function DocView:scroll_to_line(line, ignore_if_visible, instant)
   local min, max = self:get_visible_line_range()
-  if not (ignore_if_visible and line > min and line < max) then
+  local row = self:visual_row_from_position(line, 1)
+  if not (ignore_if_visible and row > min and row < max) then
     local x, y = self:get_line_screen_position(line)
     local ox, oy = self:get_content_offset()
     local _, _, _, scroll_h = self.h_scrollbar:get_track_rect()
@@ -775,6 +998,12 @@ end
 ---Update the view state each frame.
 ---Handles cache invalidation, auto-scrolling to caret, and blink timing.
 function DocView:update()
+  local change_id = self.doc.get_change_id and self.doc:get_change_id()
+  if self.visual_lines_change_id ~= change_id then
+    self.visual_lines_change_id = change_id
+    self:invalidate_visual_lines()
+  end
+
   -- clear cache if font or indent size changed
   local font = self:get_font()
   local _, indent_size = self.doc:get_indent_info()
@@ -1058,7 +1287,8 @@ function DocView:draw_overlay()
     -- draw caret if it overlaps this line
     local T = config.blink_period
     for _, line1, col1, line2, col2 in self.doc:get_selections() do
-      if line1 >= minline and line1 <= maxline
+      local row = self:visual_row_from_position(line1, col1)
+      if row >= minline and row <= maxline
       and system.window_has_focus(core.window) then
         if ime.editing then
           self:draw_ime_decoration(line1, col1, line2, col2)
@@ -1085,19 +1315,39 @@ function DocView:draw()
   local minline, maxline = self:get_visible_line_range()
   local lh = self:get_line_height()
 
-  local x, y = self:get_line_screen_position(minline)
+  local x, y = self:get_content_offset()
   local gw, gpad = self:get_gutter_width()
-  for i = minline, maxline do
-    y = y + (self:draw_line_gutter(i, self.position.x, y, gpad and gw - gpad or gw) or lh)
+  y = y + (minline - 1) * lh + style.padding.y
+  local drawn_gutters = {}
+  for row = minline, maxline do
+    local line = self:visual_position_from_row(row)
+    if line and not drawn_gutters[line] then
+      local first_row = self:visual_row_from_position(line, 1)
+      local line_y = y - (row - first_row) * lh
+      self:draw_line_gutter(line, self.position.x, line_y, gpad and gw - gpad or gw)
+      drawn_gutters[line] = true
+    end
+    y = y + lh
   end
 
+  local gw, gpad = self:get_gutter_width()
   local pos = self.position
-  x, y = self:get_line_screen_position(minline)
+  x, y = self:get_content_offset()
+  x = x + gw
+  y = y + (minline - 1) * lh + style.padding.y
   -- the clip below ensure we don't write on the gutter region. On the
   -- right side it is redundant with the Node's clip.
   core.push_clip_rect(pos.x + gw, pos.y, self.size.x - gw, self.size.y)
-  for i = minline, maxline do
-    y = y + (self:draw_line_body(i, x, y) or lh)
+  local drawn_lines = {}
+  for row = minline, maxline do
+    local line = self:visual_position_from_row(row)
+    if line and not drawn_lines[line] then
+      local first_row = self:visual_row_from_position(line, 1)
+      local line_y = y - (row - first_row) * lh
+      self:draw_line_body(line, x, line_y)
+      drawn_lines[line] = true
+    end
+    y = y + lh
   end
   self:draw_overlay()
   core.pop_clip_rect()

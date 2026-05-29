@@ -2,6 +2,9 @@ local test = require "core.test"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local LineWrapping = require "plugins.linewrapping"
+local config = require "core.config"
+require "plugins.codefold"
+dofile("subprojects/plugins/plugins/indentguide.lua")
 
 local function make_view(text)
   local doc = Doc(nil, nil, true)
@@ -39,6 +42,24 @@ local function with_draw_text(fn)
   if not ok then error(err, 0) end
 end
 
+local function with_draw_rect(fn)
+  local original = renderer.draw_rect
+  local calls = {}
+  renderer.draw_rect = function(x, y, w, h, color)
+    calls[#calls + 1] = {
+      x = x,
+      y = y,
+      w = w,
+      h = h,
+      color = color
+    }
+  end
+
+  local ok, err = pcall(fn, calls)
+  renderer.draw_rect = original
+  if not ok then error(err, 0) end
+end
+
 test.describe("linewrapping", function()
   test.test("draw_line_text keeps final wrapped segment", function()
     local view = make_view("abcdef")
@@ -57,5 +78,180 @@ test.describe("linewrapping", function()
       end
       test.equal(table.concat(text), "abcdef")
     end)
+  end)
+
+  test.test("position helpers map wrapped rows and document lines", function()
+    local view = make_view("abcdef")
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("ab"))
+
+    local line, col = view:position_from_offset(2)
+    test.equal(line, 1)
+    test.ok(col > 1)
+
+    local first_offset = view:offset_from_position(1, 1)
+    local end_offset = view:offset_from_position(2, 1)
+    test.equal(first_offset, 1)
+    test.ok(end_offset > first_offset)
+  end)
+
+  test.test("visible line helpers expose wrapped rows", function()
+    local view = make_view("abcdef")
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("ab"))
+
+    local rows = {}
+    for offset, line, col in view:each_visible_line() do
+      rows[#rows + 1] = { offset = offset, line = line, col = col }
+    end
+
+    test.ok(#rows > 1)
+    test.equal(rows[1].offset, 1)
+    test.equal(rows[1].line, 1)
+    test.equal(rows[1].col, 1)
+    test.equal(view:get_line_visual_height(1), #rows * view:get_line_height())
+  end)
+
+  test.test("indent guides cover all wrapped visual rows", function()
+    local previous = config.plugins.indentguide.enabled
+    config.plugins.indentguide.enabled = true
+
+    local view = make_view("  abcdefghij")
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("  abc"))
+    view.indentguide_indents[1] = 2
+
+    local expected_height = (view:offset_from_position(2, 1) - view:offset_from_position(1, 1))
+      * view:get_line_height()
+    local x, y = view:get_line_screen_position(1)
+
+    with_draw_text(function()
+      with_draw_rect(function(calls)
+        view:draw_line_text(1, x, y)
+        test.ok(#calls > 0)
+        test.equal(calls[1].h, expected_height)
+      end)
+    end)
+
+    config.plugins.indentguide.enabled = previous
+  end)
+
+  test.test("color previews use wrapped row coordinates", function()
+    dofile("subprojects/plugins/plugins/colorpreview.lua")
+    local previous = config.plugins.colorpreview.enabled
+    local previous_mode = config.plugins.colorpreview.mode
+    config.plugins.colorpreview.enabled = true
+    config.plugins.colorpreview.mode = "background"
+    config.plugins.indentguide.enabled = false
+
+    local text = "aaaa #ff0000"
+    local view = make_view(text)
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("aaaa "))
+
+    local color_col = text:find("#ff0000", 1, true)
+    local _, expected_y = view:get_line_screen_position(1, color_col)
+    local x, y = view:get_line_screen_position(1)
+
+    with_draw_text(function()
+      with_draw_rect(function(calls)
+        view:draw_line_text(1, x, y)
+
+        local found = false
+        for _, call in ipairs(calls) do
+          if call.y == expected_y and call.h == view:get_line_height() then
+            found = true
+            break
+          end
+        end
+        test.ok(found)
+      end)
+    end)
+
+    config.plugins.colorpreview.enabled = previous
+    config.plugins.colorpreview.mode = previous_mode
+  end)
+
+  test.test("selection highlights use wrapped row coordinates", function()
+    dofile("subprojects/plugins/plugins/selectionhighlight.lua")
+    if config.plugins.colorpreview then
+      config.plugins.colorpreview.enabled = false
+    end
+    config.plugins.indentguide.enabled = false
+
+    local text = "foo aaaa foo"
+    local view = make_view(text)
+    view.doc:set_selection(1, 1, 1, 4)
+
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("foo aaaa "))
+
+    local match_col = text:find("foo", 5, true)
+    local _, expected_y = view:get_line_screen_position(1, match_col)
+    local x, y = view:get_line_screen_position(1)
+
+    with_draw_text(function()
+      with_draw_rect(function(calls)
+        view:draw_line_body(1, x, y)
+
+        local found = false
+        for _, call in ipairs(calls) do
+          if call.y == expected_y then
+            found = true
+            break
+          end
+        end
+        test.ok(found)
+      end)
+    end)
+  end)
+
+  test.test("folded hidden lines do not contribute wrapped rows", function()
+    local previous_codefold = config.plugins.codefold.enabled
+    config.plugins.codefold.enabled = true
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "a\n",
+      "fold\n",
+      "hidden hidden hidden hidden\n",
+      "hidden hidden hidden hidden\n",
+      "abcdef\n",
+    }
+    doc.cache.col_x = {}
+    doc.cache.ulen = {}
+    doc.highlighter:reset()
+
+    local view = DocView(doc)
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 320
+    view.size.y = 200
+    view.cf_regions = { { start = 2, stop = 4 } }
+    view.cf_folded_regions = { 1 }
+    view.cf_fold_map = { 1, 2, 5 }
+    view.cf_unfold_map = { 1, 2, nil, nil, 3 }
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("ab"))
+
+    local rows = {}
+    for offset, line, col in view:each_visible_line() do
+      rows[#rows + 1] = { line = line, col = col }
+    end
+
+    test.equal(rows[1].line, 1)
+    test.equal(rows[2].line, 2)
+    local saw_line5 = false
+    for _, row in ipairs(rows) do
+      test.ok(row.line ~= 3 and row.line ~= 4)
+      saw_line5 = saw_line5 or row.line == 5
+    end
+    test.ok(saw_line5)
+    test.ok(view:get_line_visual_height(5) > view:get_line_height())
+
+    config.plugins.codefold.enabled = previous_codefold
   end)
 end)

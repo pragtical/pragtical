@@ -185,6 +185,7 @@ function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offs
     docview.wrapped_line_offsets = nil
     docview.wrapped_settings = nil
   end
+  docview:invalidate_visual_lines(line_offset)
 end
 
 -- When we have an insertion or deletion, we have four sections of text.
@@ -237,6 +238,7 @@ function LineWrapping.update_breaks(docview, old_line1, old_line2, net_lines)
   while line <= #docview.wrapped_line_to_idx do
     table.remove(docview.wrapped_line_to_idx)
   end
+  docview:invalidate_visual_lines(old_line1)
 end
 
 -- Draws a guide if applicable to show where wrapping is occurring.
@@ -315,7 +317,32 @@ local function get_line_idx_col_count(docview, line, col, line_end, ndoc)
   return idx, ncol, count, scol
 end
 
-local function get_line_col_from_index_and_x(docview, idx, x)
+local get_line_col_from_index_and_x
+
+local old_get_line_wraps = DocView.get_line_wraps
+function DocView:get_line_wraps(line)
+  if not self.wrapped_settings then
+    return old_get_line_wraps(self, line)
+  end
+  local idx = self.wrapped_line_to_idx[line]
+  if not idx then return nil end
+  local next_idx = self.wrapped_line_to_idx[line + 1] or (get_total_wrapped_lines(self) + 1)
+  local starts = {}
+  for i = idx, next_idx - 1 do
+    local _, col = get_idx_line_col(self, i)
+    starts[#starts + 1] = col
+  end
+  return starts
+end
+
+function DocView:get_visual_line_col_from_x(row, x)
+  if not self.wrapped_settings then
+    return self:get_x_offset_col(self:visual_position_from_row(row), x)
+  end
+  return get_line_col_from_index_and_x(self, row, x)
+end
+
+function get_line_col_from_index_and_x(docview, idx, x)
   local doc = docview.doc
   local line, col = get_idx_line_col(docview, idx)
   if idx < 1 then return 1, 1 end
@@ -386,13 +413,6 @@ function DocView:update()
   end
 end
 
-function DocView:get_scrollable_size()
-  if not config.scroll_past_end then
-    return self:get_line_height() * get_total_wrapped_lines(self) + style.padding.y * 2
-  end
-  return self:get_line_height() * (get_total_wrapped_lines(self) - 1) + self.size.y
-end
-
 local old_get_h_scrollable_size = DocView.get_h_scrollable_size
 function DocView:get_h_scrollable_size(...)
   if self.wrapping_enabled then return 0 end
@@ -423,16 +443,6 @@ function DocView:scroll_to_make_visible(line, col, instant)
   if self.wrapping_enabled then LineWrapping.update_docview_breaks(self) end
   old_scroll_to_make_visible(self, line, col, instant)
   if self.wrapped_settings then self.scroll.to.x = 0 end
-end
-
-local old_get_visible_line_range = DocView.get_visible_line_range
-function DocView:get_visible_line_range()
-  if not self.wrapped_settings then return old_get_visible_line_range(self) end
-  local x, y, x2, y2 = self:get_content_bounds()
-  local lh = self:get_line_height()
-  local minline = get_idx_line_col(self, math.max(1, math.floor(y / lh)))
-  local maxline = get_idx_line_col(self, math.min(get_total_wrapped_lines(self), math.floor(y2 / lh) + 1))
-  return minline, maxline
 end
 
 local old_get_visible_cols_range = DocView.get_visible_cols_range
@@ -515,24 +525,6 @@ function DocView:get_col_x_offset(line, col, line_end)
     end
   end
   return xoffset
-end
-
-local old_get_line_screen_position = DocView.get_line_screen_position
-function DocView:get_line_screen_position(line, col)
-  if not self.wrapped_settings then return old_get_line_screen_position(self, line, col) end
-  local idx, ncol, count = get_line_idx_col_count(self, line, col)
-  local x, y = self:get_content_offset()
-  local lh = self:get_line_height()
-  local gw = self:get_gutter_width()
-  return x + gw + (col and self:get_col_x_offset(line, col) or 0), y + (idx-1) * lh + style.padding.y
-end
-
-local old_resolve_screen_position = DocView.resolve_screen_position
-function DocView:resolve_screen_position(x, y)
-  if not self.wrapped_settings then return old_resolve_screen_position(self, x, y) end
-  local ox, oy = self:get_line_screen_position(1)
-  local idx = common.clamp(math.floor((y - oy) / self:get_line_height()) + 1, 1, get_total_wrapped_lines(self))
-  return get_line_col_from_index_and_x(self, idx, x - ox)
 end
 
 local old_draw_line_text = DocView.draw_line_text
