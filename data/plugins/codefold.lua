@@ -7,6 +7,7 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
+local tokenizer = require "core.tokenizer"
 
 ---Configuration for code folding plugin.
 ---@class config.plugins.codefold
@@ -390,6 +391,120 @@ end
 -- Fold region detection
 ---------------------------------------------------------------------
 
+---@param token_type any
+---@return boolean
+local function is_comment_token(token_type)
+  if type(token_type) == "string" then
+    return token_type:find("comment", 1, true) ~= nil
+  elseif type(token_type) == "table" then
+    for _, item in ipairs(token_type) do
+      if is_comment_token(item) then return true end
+    end
+  end
+  return false
+end
+
+---@param doc core.doc
+---@param line integer
+---@return boolean? starts_with_comment
+local function line_starts_with_comment_token(doc, line)
+  local highlighter = doc.highlighter
+  if not highlighter or not highlighter.lines then
+    return nil
+  end
+  local cached = highlighter.lines[line]
+  if not cached or cached.text ~= doc:get_utf8_line(line) or cached.resume then
+    return nil
+  end
+  if line > 1 then
+    local previous = highlighter.lines[line - 1]
+    if not previous or previous.text ~= doc:get_utf8_line(line - 1)
+      or previous.resume or cached.init_state ~= previous.state then
+      return nil
+    end
+  end
+
+  for _, token_type, text in tokenizer.each_token(cached.tokens) do
+    if text:find("%S") then
+      return is_comment_token(token_type)
+    end
+  end
+  return false
+end
+
+---@param doc core.doc
+---@param line integer
+---@return core.syntax.syntax?
+local function get_line_syntax(doc, line)
+  local current_syntax = doc.syntax
+  if not current_syntax or line <= 1 then
+    return current_syntax
+  end
+
+  local highlighter = doc.highlighter
+  if not highlighter or not highlighter.lines then
+    return current_syntax
+  end
+
+  local previous = highlighter.lines[line - 1]
+  if previous and previous.text == doc:get_utf8_line(line - 1)
+    and not previous.resume and previous.state then
+    local syntaxes = tokenizer.extract_subsyntaxes(doc.syntax, previous.state)
+    for _, syntax in pairs(syntaxes) do
+      if syntax.comment or syntax.block_comment then
+        return syntax
+      end
+    end
+  end
+  return current_syntax
+end
+
+---@param doc core.doc
+---@param line integer
+---@return boolean
+local function line_starts_with_comment_marker(doc, line)
+  local text = doc:get_utf8_line(line)
+  local _, start = text:find("^%s*")
+  text = text:sub(start + 1)
+
+  local syntax = get_line_syntax(doc, line)
+  if not syntax then return false end
+  if syntax.block_comment and text:find(syntax.block_comment[1], 1, true) == 1 then
+    return true
+  end
+  if syntax.comment and text:find(syntax.comment, 1, true) == 1 then
+    return true
+  end
+  return false
+end
+
+---@param doc core.doc
+---@param line integer
+---@return integer? stop_line
+local function block_comment_stop_line(doc, line)
+  local syntax = get_line_syntax(doc, line)
+  if not syntax or not syntax.block_comment then return nil end
+
+  local start_marker, stop_marker = syntax.block_comment[1], syntax.block_comment[2]
+  local text = doc:get_utf8_line(line)
+  local _, ws_end = text:find("^%s*")
+  text = text:sub(ws_end + 1)
+
+  local start_pos = text:find(start_marker, 1, true)
+  if start_pos ~= 1 then return nil end
+  if text:find(stop_marker, start_pos + #start_marker, true) then
+    return nil
+  end
+
+  for stop = line + 1, #doc.lines do
+    if stop % 500 == 0 then maybe_yield() end
+    if doc:get_utf8_line(stop):find(stop_marker, 1, true) then
+      return stop
+    end
+  end
+  return nil
+end
+
 ---Detect all foldable regions in the document based on indentation.
 ---A fold region starts at line `s` (indent I) and continues through line `e`
 ---where line `e+1` has indent <= I (or e is the last line).
@@ -442,17 +557,34 @@ local function detect_fold_regions(doc, invalidate_from, invalidate_to)
           stop = stop + 1
         end
       end
-      regions[#regions + 1] = {
+      local comment_stop = block_comment_stop_line(doc, line)
+      if comment_stop then
+        stop = comment_stop
+      end
+      local is_comment = line_starts_with_comment_token(doc, line)
+      local region = {
         indent = indent,
         start = line,
-        stop = stop
+        stop = stop,
+        kind = (comment_stop or is_comment) and "comment" or "indent"
       }
+      if comment_stop or is_comment ~= false or line_starts_with_comment_marker(doc, line) then
+        region.hide_tail = false
+      end
+      regions[#regions + 1] = region
       line = line + 1
     else
       line = line + 1
     end
     ::continue::
   end
+
+  table.sort(regions, function(a, b)
+    if a.start == b.start then
+      return a.stop > b.stop
+    end
+    return a.start < b.start
+  end)
 
   return regions
 end
@@ -492,7 +624,10 @@ local function build_hidden_set(self)
       for l = region.start + 1, region.stop do
         hidden[l] = true
       end
-      if config.plugins.codefold.hide_tail_on_fold and region.stop < #self.doc.lines then
+      if config.plugins.codefold.hide_tail_on_fold
+        and region.hide_tail ~= false
+        and region.stop < #self.doc.lines
+      then
         hidden[region.stop + 1] = true
       end
     end
@@ -1064,6 +1199,7 @@ end
 
 codefold._test = {
   apply_detected_regions = apply_detected_regions,
+  detect_fold_regions = detect_fold_regions,
   doc_state_key = doc_state_key,
   hash_text = hash_text,
   load_fold_state = load_fold_state,

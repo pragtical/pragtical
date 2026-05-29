@@ -8,6 +8,7 @@ local command = require "core.command"
 local config = require "core.config"
 local common = require "core.common"
 local style = require "core.style"
+local syntax = require "core.syntax"
 
 local function write_file(path, content)
   local file, err = io.open(path, "wb")
@@ -51,6 +52,24 @@ local function make_docview(lines)
   view.indentguide_indents = {}
   view.indentguide_indent_active = {}
   return view
+end
+
+local function make_c_doc(lines)
+  require "plugins.language_c"
+  local doc = Doc(nil, nil, true)
+  doc.syntax = syntax.get("test.c")
+  doc.lines = lines
+  doc.highlighter:reset()
+  return doc
+end
+
+local function make_php_doc(lines)
+  dofile("subprojects/plugins/plugins/language_php.lua")
+  local doc = Doc(nil, nil, true)
+  doc.syntax = syntax.get("test.php")
+  doc.lines = lines
+  doc.highlighter:reset()
+  return doc
 end
 
 -- Helper: compute line indent (same logic as in codefold.lua)
@@ -221,6 +240,173 @@ test.describe("codefold - region detection", function()
     test.equal(regions[1].stop, 4)
     test.equal(regions[2].start, 2)
     test.equal(regions[2].stop, 3)
+  end)
+
+  test.test("detects multiline block comment regions from tokens", function()
+    local codefold = require "plugins.codefold"
+    local doc = make_c_doc({
+      "/**\n",
+      " * Function that does something\n",
+      " */\n",
+      "function somefunction(){\n",
+      "}\n",
+    })
+    doc.highlighter:get_line(1)
+
+    local regions = codefold._test.detect_fold_regions(doc)
+
+    test.equal(regions[1].kind, "comment")
+    test.equal(regions[1].start, 1)
+    test.equal(regions[1].stop, 3)
+    test.equal(regions[1].hide_tail, false)
+  end)
+
+  test.test("block comment folds do not hide following code as tail", function()
+    local codefold = require "plugins.codefold"
+
+    local previous_start_folded = config.plugins.codefold.start_folded
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
+    config.plugins.codefold.start_folded = true
+    config.plugins.codefold.hide_tail_on_fold = true
+
+    local doc = make_c_doc({
+      "/**\n",
+      " * Function that does something\n",
+      " */\n",
+      "function somefunction(){\n",
+      "}\n",
+    })
+    local view = DocView(doc)
+    local regions = codefold._test.detect_fold_regions(doc)
+    codefold._test.apply_detected_regions(view, regions)
+
+    test.ok(view.cf_hidden_lines[2])
+    test.ok(view.cf_hidden_lines[3])
+    test.is_nil(view.cf_hidden_lines[4])
+    test.equal(view.cf_fold_map[1], 1)
+    test.equal(view.cf_fold_map[2], 4)
+
+    config.plugins.codefold.start_folded = previous_start_folded
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
+  end)
+
+  test.test("block comment delimiters inside strings do not create folds", function()
+    local codefold = require "plugins.codefold"
+    local doc = make_c_doc({
+      "const char *s = \"/* not a comment\";\n",
+      "const char *e = \"*/ not a comment\";\n",
+    })
+    doc.highlighter:get_line(1)
+
+    local regions = codefold._test.detect_fold_regions(doc)
+
+    for _, region in ipairs(regions) do
+      test.not_equal(region.kind, "comment")
+    end
+  end)
+
+  test.test("untokenized fold heads do not hide tail lines", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = make_c_doc({
+      "/**\n",
+      " * Function that does something\n",
+      " */\n",
+      "function somefunction(){\n",
+      "}\n",
+    })
+
+    local regions = codefold._test.detect_fold_regions(doc)
+
+    test.equal(regions[1].kind, "comment")
+    test.equal(regions[1].hide_tail, false)
+  end)
+
+  test.test("comment marker fold heads do not hide tail after stale tokens", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = make_c_doc({
+      "/**\n",
+      " * Function that does something\n",
+      " */\n",
+      "static function addFieldsets(\n",
+      "}\n",
+    })
+    doc.highlighter.lines[1] = {
+      init_state = nil,
+      text = doc.lines[1],
+      tokens = { "normal", doc.lines[1] },
+      state = nil
+    }
+
+    local regions = codefold._test.detect_fold_regions(doc)
+
+    test.equal(regions[1].kind, "comment")
+    test.equal(regions[1].hide_tail, false)
+  end)
+
+  test.test("php subsyntax comment markers do not hide following function", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = make_php_doc({
+      "<?php\n",
+      "/**\n",
+      " * Add a new fieldset with fields to an array of fieldsets.\n",
+      " */\n",
+      "static function addFieldsets(\n",
+      "    array $fieldsets,\n",
+      ")\n",
+      "{\n",
+      "}\n",
+    })
+    doc.highlighter:get_line(1)
+
+    local regions = codefold._test.detect_fold_regions(doc)
+
+    test.equal(regions[1].start, 2)
+    test.equal(regions[1].stop, 4)
+    test.equal(regions[1].kind, "comment")
+    test.equal(regions[1].hide_tail, false)
+
+    local previous_start_folded = config.plugins.codefold.start_folded
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
+    config.plugins.codefold.start_folded = true
+    config.plugins.codefold.hide_tail_on_fold = true
+
+    local view = DocView(doc)
+    codefold._test.apply_detected_regions(view, regions)
+
+    test.ok(view.cf_hidden_lines[3])
+    test.ok(view.cf_hidden_lines[4])
+    test.is_nil(view.cf_hidden_lines[5])
+    test.equal(view.cf_fold_map[2], 2)
+    test.equal(view.cf_fold_map[3], 5)
+
+    config.plugins.codefold.start_folded = previous_start_folded
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
+  end)
+
+  test.test("missing highlighter cache falls back to document syntax", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = make_c_doc({
+      "/**\n",
+      " * Function that does something\n",
+      " */\n",
+      "function somefunction(){\n",
+      "}\n",
+    })
+    doc.highlighter = {
+      each_token = function()
+        return function() end
+      end
+    }
+
+    local regions = codefold._test.detect_fold_regions(doc)
+
+    test.equal(regions[1].kind, "comment")
+    test.equal(regions[1].stop, 3)
+    test.equal(regions[1].hide_tail, false)
   end)
 end)
 
