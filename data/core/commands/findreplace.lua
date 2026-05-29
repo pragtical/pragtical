@@ -32,6 +32,7 @@ local function update_preview(sel, search_fn, text)
   local ok, line1, col1, line2, col2 = pcall(search_fn, last_view.doc,
     sel[1], sel[2], text, case_sensitive, find_regex)
   if ok and line1 and text ~= "" then
+    last_view:ensure_line_visible(line2)
     last_view.doc:set_selection(line2, col2, line1, col1)
     last_view:scroll_to_line(line2, true)
     found_expression = true
@@ -176,6 +177,7 @@ local function select_add_next(all)
       )
       if l1 == il1 and c1 == ic1 then break end
       if l2 and not is_in_any_selection(l2, c2) then
+        core.active_view:ensure_line_visible(l1)
         doc():add_selection(l2, c2, l1, c1)
         if not all then
           core.active_view:scroll_to_make_visible(l2, c2)
@@ -273,6 +275,7 @@ command.add(valid_for_finding, {
       local sl1, sc1, sl2, sc2 = dv.doc:get_selection(true)
       local line1, col1, line2, col2 = last_fn(dv.doc, sl2, sc2, last_text, case_sensitive, find_regex, false)
       if line1 then
+        dv:ensure_line_visible(line2)
         dv.doc:set_selection(line2, col2, line1, col1)
         dv:scroll_to_line(line2, true)
       else
@@ -288,6 +291,7 @@ command.add(valid_for_finding, {
       local sl1, sc1, sl2, sc2 = dv.doc:get_selection(true)
       local line1, col1, line2, col2 = last_fn(dv.doc, sl1, sc1, last_text, case_sensitive, find_regex, true)
       if line1 then
+        dv:ensure_line_visible(line2)
         dv.doc:set_selection(line2, col2, line1, col1)
         dv:scroll_to_line(line2, true)
       else

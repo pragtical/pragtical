@@ -1069,6 +1069,7 @@ function ResultsView:open_selected_result()
     previous_view = dv
     core.root_view.root_node:update_layout()
     local l, c1, c2 = item.line.line, item.position.col1, item.position.col2+1
+    dv:ensure_line_visible(l)
     dv.doc:set_selection(l, c2, l, c1)
     dv.doc:add_search_selection(l, c2, l, c1)
     dv:scroll_to_make_visible(l, c1, true)

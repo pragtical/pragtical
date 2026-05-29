@@ -571,6 +571,7 @@ local commands = {
           core.error("Invalid line number or unmatched string")
           return
         end
+        dv:ensure_line_visible(line)
         dv.doc:set_selection(line, 1  )
         dv:scroll_to_line(line, true)
       end,

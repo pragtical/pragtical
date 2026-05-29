@@ -185,6 +185,7 @@ function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offs
     docview.wrapped_line_offsets = nil
     docview.wrapped_settings = nil
   end
+  docview:invalidate_visual_lines(line_offset)
 end
 
 -- When we have an insertion or deletion, we have four sections of text.
@@ -237,6 +238,7 @@ function LineWrapping.update_breaks(docview, old_line1, old_line2, net_lines)
   while line <= #docview.wrapped_line_to_idx do
     table.remove(docview.wrapped_line_to_idx)
   end
+  docview:invalidate_visual_lines(old_line1)
 end
 
 -- Draws a guide if applicable to show where wrapping is occurring.
@@ -315,7 +317,38 @@ local function get_line_idx_col_count(docview, line, col, line_end, ndoc)
   return idx, ncol, count, scol
 end
 
-local function get_line_col_from_index_and_x(docview, idx, x)
+local get_line_col_from_index_and_x
+
+local old_get_line_wraps = DocView.get_line_wraps
+function DocView:get_line_wraps(line)
+  if not self.wrapped_settings then
+    return old_get_line_wraps(self, line)
+  end
+  local idx = self.wrapped_line_to_idx[line]
+  if not idx then return nil end
+  local next_idx = self.wrapped_line_to_idx[line + 1] or (get_total_wrapped_lines(self) + 1)
+  local starts = {}
+  for i = idx, next_idx - 1 do
+    local _, col = get_idx_line_col(self, i)
+    starts[#starts + 1] = col
+  end
+  return starts
+end
+
+local old_has_variable_visual_lines = DocView.has_variable_visual_lines
+function DocView:has_variable_visual_lines()
+  return self.wrapped_settings ~= nil or old_has_variable_visual_lines(self)
+end
+
+function DocView:get_visual_line_col_from_x(row, x)
+  if not self.wrapped_settings then
+    return self:get_x_offset_col(self:visual_position_from_row(row), x)
+  end
+  local _, col = get_line_col_from_index_and_x(self, row, x)
+  return col
+end
+
+function get_line_col_from_index_and_x(docview, idx, x)
   local doc = docview.doc
   local line, col = get_idx_line_col(docview, idx)
   if idx < 1 then return 1, 1 end
@@ -386,13 +419,6 @@ function DocView:update()
   end
 end
 
-function DocView:get_scrollable_size()
-  if not config.scroll_past_end then
-    return self:get_line_height() * get_total_wrapped_lines(self) + style.padding.y * 2
-  end
-  return self:get_line_height() * (get_total_wrapped_lines(self) - 1) + self.size.y
-end
-
 local old_get_h_scrollable_size = DocView.get_h_scrollable_size
 function DocView:get_h_scrollable_size(...)
   if self.wrapping_enabled then return 0 end
@@ -423,16 +449,6 @@ function DocView:scroll_to_make_visible(line, col, instant)
   if self.wrapping_enabled then LineWrapping.update_docview_breaks(self) end
   old_scroll_to_make_visible(self, line, col, instant)
   if self.wrapped_settings then self.scroll.to.x = 0 end
-end
-
-local old_get_visible_line_range = DocView.get_visible_line_range
-function DocView:get_visible_line_range()
-  if not self.wrapped_settings then return old_get_visible_line_range(self) end
-  local x, y, x2, y2 = self:get_content_bounds()
-  local lh = self:get_line_height()
-  local minline = get_idx_line_col(self, math.max(1, math.floor(y / lh)))
-  local maxline = get_idx_line_col(self, math.min(get_total_wrapped_lines(self), math.floor(y2 / lh) + 1))
-  return minline, maxline
 end
 
 local old_get_visible_cols_range = DocView.get_visible_cols_range
@@ -517,25 +533,28 @@ function DocView:get_col_x_offset(line, col, line_end)
   return xoffset
 end
 
-local old_get_line_screen_position = DocView.get_line_screen_position
-function DocView:get_line_screen_position(line, col)
-  if not self.wrapped_settings then return old_get_line_screen_position(self, line, col) end
-  local idx, ncol, count = get_line_idx_col_count(self, line, col)
-  local x, y = self:get_content_offset()
-  local lh = self:get_line_height()
-  local gw = self:get_gutter_width()
-  return x + gw + (col and self:get_col_x_offset(line, col) or 0), y + (idx-1) * lh + style.padding.y
-end
-
-local old_resolve_screen_position = DocView.resolve_screen_position
-function DocView:resolve_screen_position(x, y)
-  if not self.wrapped_settings then return old_resolve_screen_position(self, x, y) end
-  local ox, oy = self:get_line_screen_position(1)
-  local idx = common.clamp(math.floor((y - oy) / self:get_line_height()) + 1, 1, get_total_wrapped_lines(self))
-  return get_line_col_from_index_and_x(self, idx, x - ox)
-end
-
 local old_draw_line_text = DocView.draw_line_text
+local function get_search_selections(doc, line)
+  local selections = {}
+  for _, line1, col1, line2, col2 in doc:get_selections(true) do
+    if line == line1 and line <= line2
+      and doc:is_search_selection(line1, col1, line2, col2)
+    then
+      selections[#selections + 1] = { start = col1, stop = col2 }
+    end
+  end
+  return selections
+end
+
+local function is_search_selected(selections, col)
+  for _, selection in ipairs(selections) do
+    if col >= selection.start and col < selection.stop then
+      return true
+    end
+  end
+  return false
+end
+
 function DocView:draw_line_text(line, x, y)
   if not self.wrapped_settings then return old_draw_line_text(self, line, x, y) end
   local default_font = self:get_font()
@@ -544,6 +563,7 @@ function DocView:draw_line_text(line, x, y)
   local idx, _, count = get_line_idx_col_count(self, line)
   local total_offset = 1
   local _, indent_size = self.doc:get_indent_info()
+  local search_selections = get_search_selections(self.doc, line)
   default_font:set_tab_size(indent_size)
   for _, type, text in self.doc.highlighter:each_token(line) do
     local color = style.syntax[type] or style.syntax["normal"]
@@ -558,7 +578,25 @@ function DocView:draw_line_text(line, x, y)
       end
       local max_length = next_line_start_col - total_offset
       local rendered_text = text:sub(token_offset, token_offset + max_length - 1)
-      tx = renderer.draw_text(font, rendered_text, tx, ty, color, { tab_offset = tx - x })
+      if #search_selections == 0 then
+        tx = renderer.draw_text(font, rendered_text, tx, ty, color, { tab_offset = tx - x })
+      else
+        local i = 1
+        local rendered_col = total_offset
+        while i <= #rendered_text do
+          local chunk_start = i
+          local selected = is_search_selected(search_selections, rendered_col)
+          while i <= #rendered_text
+            and is_search_selected(search_selections, rendered_col) == selected
+          do
+            i = i + 1
+            rendered_col = rendered_col + 1
+          end
+          local chunk = rendered_text:sub(chunk_start, i - 1)
+          local chunk_color = selected and (style.search_selection_text or style.background) or color
+          tx = renderer.draw_text(font, chunk, tx, ty, chunk_color, { tab_offset = tx - x })
+        end
+      end
       total_offset = total_offset + #rendered_text
       if total_offset ~= next_line_start_col or max_length == 0 then break end
       token_offset = token_offset + #rendered_text
@@ -576,21 +614,32 @@ function DocView:draw_line_body(line, x, y)
   local idx0, _, count = get_line_idx_col_count(self, line)
   for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
     if line >= line1 and line <= line2 then
+      local selection_color = style.selection
+      if self.doc:is_search_selection(line1, col1, line2, col2) then
+        selection_color = style.search_selection or style.caret
+      end
       if line1 ~= line then col1 = 1 end
       if line2 ~= line then col2 = #self.doc.lines[line] + 1 end
       if col1 ~= col2 then
-        local idx1, ncol1 = get_line_idx_col_count(self, line, col1)
-        local idx2, ncol2 = get_line_idx_col_count(self, line, col2)
-        local start = 0
+        local idx1 = get_line_idx_col_count(self, line, col1)
+        local idx2 = get_line_idx_col_count(self, line, col2, true)
         for i = idx1, idx2 do
-          local x1, x2 = x + (idx1 == i and self:get_col_x_offset(line1, col1) or 0)
-          if idx2 == i then
-            x2 = x + self:get_col_x_offset(line, col2)
-          else
-            start = start + get_idx_line_length(self, i, line)
-            x2 = x + self:get_col_x_offset(line, start + 1, true)
+          local row_line, row_col = get_idx_line_col(self, i)
+          if row_line ~= line then goto continue end
+
+          local next_line, next_col = get_idx_line_col(self, i + 1)
+          local row_end_col = next_line == line and next_col or #self.doc.lines[line] + 1
+          local start_col = math.max(col1, row_col)
+          local end_col = math.min(col2, row_end_col)
+          if start_col < end_col then
+            local x1 = x + self:get_col_x_offset(line, start_col)
+            local x2 = x + self:get_col_x_offset(line, end_col, end_col == row_end_col)
+            renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, selection_color)
+          elseif start_col == end_col and col1 == col2 then
+            local x1 = x + self:get_col_x_offset(line, start_col)
+            renderer.draw_rect(x1, y + (i - idx0) * lh, 0, lh, selection_color)
           end
-          renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, style.selection)
+          ::continue::
         end
       end
     end

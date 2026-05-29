@@ -148,8 +148,21 @@ def serve_badaccept(server):
         upgrade(conn, bad_accept=True)
 
 
-server = socket.create_server(("127.0.0.1", 0), reuse_port=False)
-print(server.getsockname()[1], flush=True)
+port_path = sys.argv[2] if len(sys.argv) > 2 else None
+try:
+    server = socket.create_server(("127.0.0.1", 0), reuse_port=False)
+except PermissionError as exc:
+    if port_path:
+        with open(port_path, "w", encoding="utf-8") as fp:
+            fp.write("SKIP:" + str(exc))
+        sys.exit(0)
+    raise
+
+if port_path:
+    with open(port_path, "w", encoding="utf-8") as fp:
+        fp.write(str(server.getsockname()[1]))
+else:
+    print(server.getsockname()[1], flush=True)
 
 mode = sys.argv[1]
 with server:
@@ -170,11 +183,40 @@ local function write_file(path, content)
   file:close()
 end
 
-local function python_command(script_path, mode)
+local function python_command(script_path, mode, port_path)
   if PLATFORM == "Windows" then
-    return { "python", "-u", script_path, mode }
+    return { "python", "-u", script_path, mode, port_path }
   end
-  return { "python3", "-u", script_path, mode }
+  return { "python3", "-u", script_path, mode, port_path }
+end
+
+local function read_server_port(proc, port_path, label)
+  local deadline = system.get_time() + 5
+  while system.get_time() < deadline do
+    local file = io.open(port_path, "rb")
+    if file then
+      local content = file:read("*a")
+      file:close()
+      if content:find("^SKIP:") then
+        test.skip_now(label .. " test server cannot create local sockets")
+      end
+      local port = tonumber(content)
+      test.type(port, "number")
+      return port
+    end
+    if not proc:running() then
+      break
+    end
+    system.sleep(0.01)
+  end
+
+  proc:wait(1000, 0.01)
+  local stderr = proc.stderr:read("all") or ""
+  if stderr:find("Operation not permitted", 1, true) then
+    test.skip_now(label .. " test server cannot create local sockets")
+  end
+  local suffix = stderr ~= "" and (": " .. stderr) or ""
+  test.fail(label .. " test server did not report a port" .. suffix, 2)
 end
 
 local function wait_until(predicate, timeout, message)
@@ -191,10 +233,11 @@ end
 
 local function start_websocket_server(context, mode)
   local script_path = context.temp_root .. PATHSEP .. "websocket_test_server.py"
+  local port_path = context.temp_root .. PATHSEP .. "websocket_test_server.port"
   write_file(script_path, WEBSOCKET_SERVER_SCRIPT)
   context.server_script_paths[#context.server_script_paths + 1] = script_path
 
-  local proc = process.start(python_command(script_path, mode), {
+  local proc = process.start(python_command(script_path, mode, port_path), {
     stdout = process.REDIRECT_PIPE,
     stderr = process.REDIRECT_PIPE,
   })
@@ -202,14 +245,7 @@ local function start_websocket_server(context, mode)
 
   context.server_processes[#context.server_processes + 1] = proc
 
-  local line = proc.stdout:read("line", {
-    timeout = 5,
-    scan = 0.01,
-  })
-  test.not_nil(line, "WebSocket test server did not report a port")
-
-  local port = tonumber(line)
-  test.type(port, "number")
+  local port = read_server_port(proc, port_path, "WebSocket")
   return "ws://127.0.0.1:" .. port
 end
 
