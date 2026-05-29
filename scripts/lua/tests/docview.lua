@@ -88,6 +88,30 @@ test.describe("docview", function()
     test.equal(view:ensure_line_visible(1), 1)
   end)
 
+  test.test("plain documents use identity visual lines", function()
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "one\n",
+      "two\n",
+      "three\n"
+    }
+    doc.cache.col_x = {}
+    doc.cache.ulen = {}
+    doc.highlighter:reset()
+
+    local view = DocView(doc)
+    view:rebuild_visual_lines()
+
+    test.ok(view:get_visual_lines().identity)
+    test.equal(view:visual_line_count(), 3)
+    test.equal(view:visual_position_from_row(2), 2)
+    test.equal(view:visual_row_from_position(3, 1), 3)
+    local row, row_count = view:visual_rows_for_line(2)
+    test.equal(row, 2)
+    test.equal(row_count, 1)
+    test.ok(view:is_line_visible(3))
+  end)
+
   test.test("visual line rebuild keeps rows before invalidated line", function()
     local doc = Doc(nil, nil, true)
     doc.lines = {

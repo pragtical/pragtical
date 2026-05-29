@@ -96,6 +96,23 @@ test.describe("linewrapping", function()
     test.ok(end_offset > first_offset)
   end)
 
+  test.test("screen position resolves columns on wrapped rows", function()
+    local view = make_view("abcdef")
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("ab"))
+
+    local x, y = view:get_content_offset()
+    local gw = view:get_gutter_width()
+    local lh = view:get_line_height()
+    local line, col = view:resolve_screen_position(
+      x + gw,
+      y + style.padding.y + lh
+    )
+
+    test.equal(line, 1)
+    test.equal(col, 3)
+  end)
+
   test.test("visible line helpers expose wrapped rows", function()
     local view = make_view("abcdef")
     local font = view:get_font()
@@ -203,6 +220,37 @@ test.describe("linewrapping", function()
           end
         end
         test.ok(found)
+      end)
+    end)
+  end)
+
+  test.test("line selections span later wrapped rows", function()
+    config.plugins.indentguide.enabled = false
+
+    local view = make_view("abcdefghijkl")
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("abc"))
+
+    view.doc:set_selection(1, 4, 1, 12)
+    local start_row = view:visual_row_from_position(1, 4)
+    local end_row = view:visual_row_from_position(1, 12)
+    local expected_rows = end_row - start_row + 1
+    local x, y = view:get_line_screen_position(1)
+
+    with_draw_text(function()
+      with_draw_rect(function(calls)
+        view:draw_line_body(1, x, y)
+
+        local selected_rows = {}
+        for _, call in ipairs(calls) do
+          if call.color == style.selection and call.w > 0 then
+            selected_rows[call.y] = true
+          end
+        end
+
+        local count = 0
+        for _ in pairs(selected_rows) do count = count + 1 end
+        test.equal(count, expected_rows)
       end)
     end)
   end)

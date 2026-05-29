@@ -207,6 +207,29 @@ local function match_fold_state(doc, regions, folds)
   local folded = {}
   local used = {}
   local unmatched_folds = {}
+  local exact = {}
+  local by_text = {}
+
+  local function fold_key(line, indent, text)
+    return tostring(line) .. "\0" .. tostring(indent) .. "\0" .. tostring(text)
+  end
+
+  local function text_key(indent, text)
+    return tostring(indent) .. "\0" .. tostring(text)
+  end
+
+  for idx, candidate in ipairs(regions) do
+    if idx % 500 == 0 then maybe_yield() end
+    local text = doc.lines[candidate.start]
+    exact[fold_key(candidate.start, candidate.indent, text)] = idx
+    local key = text_key(candidate.indent, text)
+    local list = by_text[key]
+    if not list then
+      list = {}
+      by_text[key] = list
+    end
+    list[#list + 1] = idx
+  end
 
   local function use_region(idx)
     if used[idx] then return end
@@ -214,20 +237,12 @@ local function match_fold_state(doc, regions, folds)
     folded[#folded + 1] = idx
   end
 
-  for _, fold in ipairs(folds or {}) do
+  for fold_idx, fold in ipairs(folds or {}) do
+    if fold_idx % 500 == 0 then maybe_yield() end
     if type(fold) == "table" then
       local line = fold.line
       if type(line) == "number" then
-        local region
-        for idx, candidate in ipairs(regions) do
-          if candidate.start == line
-            and candidate.indent == fold.indent
-            and doc.lines[candidate.start] == fold.text
-          then
-            region = idx
-            break
-          end
-        end
+        local region = exact[fold_key(line, fold.indent, fold.text)]
         if region then
           use_region(region)
         else
@@ -239,13 +254,15 @@ local function match_fold_state(doc, regions, folds)
     end
   end
 
-  for _, fold in ipairs(unmatched_folds) do
+  for fold_idx, fold in ipairs(unmatched_folds) do
+    if fold_idx % 500 == 0 then maybe_yield() end
     if type(fold) == "table" and type(fold.text) == "string" then
       local best, best_distance
-      for idx, candidate in ipairs(regions) do
+      local candidates = by_text[text_key(fold.indent, fold.text)] or {}
+      for idx_idx, idx in ipairs(candidates) do
+        if idx_idx % 500 == 0 then maybe_yield() end
+        local candidate = regions[idx]
         if not used[idx]
-          and candidate.indent == fold.indent
-          and doc.lines[candidate.start] == fold.text
         then
           local distance = math.abs(candidate.start - (fold.line or candidate.start))
           if not best_distance or distance < best_distance then
@@ -375,6 +392,7 @@ local function build_effective_indents(doc, indent_size)
 
   local indents = {}
   for line = 1, line_count do
+    if line % 500 == 0 then maybe_yield() end
     local indent = raw[line]
     if indent >= 0 then
       indents[line] = indent
@@ -505,25 +523,95 @@ local function block_comment_stop_line(doc, line)
   return nil
 end
 
+---@param a table
+---@param b table
+---@return boolean
+local function same_region(a, b)
+  return a.start == b.start
+    and a.stop == b.stop
+    and a.indent == b.indent
+    and a.kind == b.kind
+    and a.hide_tail == b.hide_tail
+end
+
+---@param previous_regions table[]
+---@param from_line integer
+---@return integer start_line
+---@return integer prefix_count
+local function incremental_scan_start(previous_regions, from_line)
+  local start_line = from_line
+  for _, region in ipairs(previous_regions or {}) do
+    if region.start <= from_line and region.stop >= from_line then
+      start_line = math.min(start_line, region.start)
+    end
+  end
+
+  local prefix_count = 0
+  for idx, region in ipairs(previous_regions or {}) do
+    if region.stop < start_line then
+      prefix_count = idx
+    else
+      break
+    end
+  end
+  return start_line, prefix_count
+end
+
+---Find the previous non-blank line that may become a fold head.
+---@param doc core.doc
+---@param line integer
+---@param indent_size integer
+---@return integer line
+local function previous_fold_candidate_line(doc, line, indent_size)
+  for candidate = line - 1, 1, -1 do
+    if candidate % 500 == 0 then maybe_yield() end
+    if get_effective_indent(doc, candidate, indent_size) >= 0 then
+      return candidate
+    end
+  end
+  return line
+end
+
 ---Detect all foldable regions in the document based on indentation.
 ---A fold region starts at line `s` (indent I) and continues through line `e`
 ---where line `e+1` has indent <= I (or e is the last line).
 ---@param doc core.doc
 ---@param invalidate_from? integer
----@param invalidate_to? integer
+---@param previous_regions? table[]
 ---@return table[] regions
-local function detect_fold_regions(doc, invalidate_from, invalidate_to)
+local function detect_fold_regions(doc, invalidate_from, previous_regions)
   local _, indent_size = doc:get_indent_info()
   local regions = {}
   local line_count = #doc.lines
-  local indents = build_effective_indents(doc, indent_size)
+  local indents = not invalidate_from and build_effective_indents(doc, indent_size)
+  local indent_cache = {}
+  local previous_by_start = {}
+  local invalidated_line = invalidate_from
 
   local start_line = 1
   local stop_line = line_count
-  if invalidate_from then
-    -- Find the first region that might be affected
-    start_line = math.max(1, invalidate_from)
-    stop_line = math.min(line_count, invalidate_to or line_count)
+  if invalidate_from and previous_regions then
+    start_line = previous_fold_candidate_line(
+      doc,
+      math.max(1, invalidate_from),
+      indent_size
+    )
+    local prefix_count
+    start_line, prefix_count = incremental_scan_start(previous_regions, start_line)
+    for idx = 1, prefix_count do
+      regions[#regions + 1] = previous_regions[idx]
+    end
+    for idx, region in ipairs(previous_regions) do
+      previous_by_start[region.start] = idx
+    end
+  end
+
+  local function get_indent(line)
+    if indents then return indents[line] end
+    if indent_cache[line] == nil then
+      indent_cache[line] = get_effective_indent(doc, line, indent_size)
+    end
+    return indent_cache[line]
   end
 
   local line = start_line
@@ -532,7 +620,7 @@ local function detect_fold_regions(doc, invalidate_from, invalidate_to)
       maybe_yield()
     end
 
-    local indent = indents[line]
+    local indent = get_indent(line)
     if indent < 0 then
       line = line + 1
       goto continue
@@ -541,13 +629,13 @@ local function detect_fold_regions(doc, invalidate_from, invalidate_to)
     local next_line = line + 1
     if next_line > line_count then break end
 
-    local next_indent = indents[next_line]
+    local next_indent = get_indent(next_line)
     if next_indent > indent then
       -- Line `line` starts a fold region. Find where it ends.
       local stop = next_line
       while stop < line_count do
         if stop % 500 == 0 then maybe_yield() end
-        local peek_indent = indents[stop + 1]
+        local peek_indent = get_indent(stop + 1)
         if peek_indent < 0 then
           -- blank — continue
           stop = stop + 1
@@ -568,8 +656,18 @@ local function detect_fold_regions(doc, invalidate_from, invalidate_to)
         stop = stop,
         kind = (comment_stop or is_comment) and "comment" or "indent"
       }
-      if comment_stop or is_comment ~= false or line_starts_with_comment_marker(doc, line) then
+      if comment_stop or is_comment == true or line_starts_with_comment_marker(doc, line) then
         region.hide_tail = false
+      end
+      local previous_idx = previous_by_start[region.start]
+      local previous = previous_idx and previous_regions[previous_idx]
+      if previous and same_region(region, previous)
+        and (not invalidated_line or region.start > invalidated_line)
+      then
+        for idx = previous_idx, #previous_regions do
+          regions[#regions + 1] = previous_regions[idx]
+        end
+        return regions
       end
       regions[#regions + 1] = region
       line = line + 1
@@ -599,6 +697,7 @@ local function set_regions(self, regions)
   self.cf_regions = regions or {}
   self.cf_region_by_start = {}
   for idx, region in ipairs(self.cf_regions) do
+    if idx % 500 == 0 then maybe_yield() end
     self.cf_region_by_start[region.start] = idx
   end
 end
@@ -608,9 +707,35 @@ end
 local function set_folded_regions(self, folded)
   self.cf_folded_regions = folded or {}
   self.cf_folded_region_set = {}
-  for _, region_idx in ipairs(self.cf_folded_regions) do
+  for idx, region_idx in ipairs(self.cf_folded_regions) do
+    if idx % 500 == 0 then maybe_yield() end
     self.cf_folded_region_set[region_idx] = true
   end
+end
+
+---@param regions table[]
+---@param folded_regions integer[]
+---@return string signature
+local function folded_visibility_signature(regions, folded_regions)
+  if not folded_regions or #folded_regions == 0 then
+    return ""
+  end
+
+  local items = {}
+  for idx, region_idx in ipairs(folded_regions) do
+    if idx % 500 == 0 then maybe_yield() end
+    local region = regions[region_idx]
+    if region then
+      items[#items + 1] = table.concat({
+        region.start,
+        region.stop,
+        region.hide_tail == false and "0" or "1",
+      }, ":")
+    end
+  end
+  table.sort(items)
+  return tostring(config.plugins.codefold.hide_tail_on_fold) .. "|"
+    .. table.concat(items, ",")
 end
 
 ---Determine which real lines are hidden based on collapsed fold regions.
@@ -618,10 +743,12 @@ end
 ---@return table<integer, boolean> hidden_set
 local function build_hidden_set(self)
   local hidden = {}
-  for _, region_idx in ipairs(self.cf_folded_regions) do
+  for idx, region_idx in ipairs(self.cf_folded_regions) do
+    if idx % 100 == 0 then maybe_yield() end
     local region = self.cf_regions[region_idx]
     if region then
       for l = region.start + 1, region.stop do
+        if l % 500 == 0 then maybe_yield() end
         hidden[l] = true
       end
       if config.plugins.codefold.hide_tail_on_fold
@@ -644,6 +771,7 @@ local function rebuild_mappings(self)
   self.cf_unfold_map = {}
 
   for real = 1, #self.doc.lines do
+    if real % 500 == 0 then maybe_yield() end
     if not hidden[real] then
       local virtual = #self.cf_fold_map + 1
       self.cf_fold_map[virtual] = real
@@ -652,6 +780,11 @@ local function rebuild_mappings(self)
       self.cf_unfold_map[real] = nil
     end
   end
+  self.cf_visibility_signature = folded_visibility_signature(
+    self.cf_regions or {},
+    self.cf_folded_regions or {}
+  )
+  self.cf_mapping_line_count = #self.doc.lines
   self:invalidate_visual_lines()
 end
 
@@ -678,6 +811,11 @@ local function apply_detected_regions(self, regions)
     self.cf_regions or {},
     self.cf_folded_regions or {}
   )
+  local previous_signature = self.cf_visibility_signature
+    or folded_visibility_signature(
+      self.cf_regions or {},
+      self.cf_folded_regions or {}
+    )
   local should_resave = false
   set_regions(self, regions)
 
@@ -701,7 +839,22 @@ local function apply_detected_regions(self, regions)
     should_resave = #previous_folds > 0
   end
 
-  rebuild_mappings(self)
+  local new_signature = folded_visibility_signature(
+    self.cf_regions or {},
+    self.cf_folded_regions or {}
+  )
+  local mappings_missing = new_signature ~= ""
+    and (
+      not self.cf_fold_map
+      or not self.cf_unfold_map
+      or not self.cf_hidden_lines
+      or self.cf_mapping_line_count ~= #self.doc.lines
+    )
+  if mappings_missing or previous_signature ~= new_signature then
+    rebuild_mappings(self)
+  else
+    self.cf_visibility_signature = new_signature
+  end
   if should_resave then
     save_fold_state(self.doc, self.cf_regions, self.cf_folded_regions)
   end
@@ -744,7 +897,10 @@ local function recalculate(self)
   replace_recalculation_thread(self)
 
   self.cf_thread_id = core.add_thread(function()
-    apply_detected_regions(self, detect_fold_regions(self.doc))
+    apply_detected_regions(
+      self,
+      detect_fold_regions(self.doc, self.cf_invalidated_from, self.cf_regions)
+    )
     self.cf_thread_id = nil
     self.cf_invalidated = false
     self.cf_invalidated_at = nil

@@ -335,11 +335,17 @@ function DocView:get_line_wraps(line)
   return starts
 end
 
+local old_has_variable_visual_lines = DocView.has_variable_visual_lines
+function DocView:has_variable_visual_lines()
+  return self.wrapped_settings ~= nil or old_has_variable_visual_lines(self)
+end
+
 function DocView:get_visual_line_col_from_x(row, x)
   if not self.wrapped_settings then
     return self:get_x_offset_col(self:visual_position_from_row(row), x)
   end
-  return get_line_col_from_index_and_x(self, row, x)
+  local _, col = get_line_col_from_index_and_x(self, row, x)
+  return col
 end
 
 function get_line_col_from_index_and_x(docview, idx, x)
@@ -615,18 +621,25 @@ function DocView:draw_line_body(line, x, y)
       if line1 ~= line then col1 = 1 end
       if line2 ~= line then col2 = #self.doc.lines[line] + 1 end
       if col1 ~= col2 then
-        local idx1, ncol1 = get_line_idx_col_count(self, line, col1)
-        local idx2, ncol2 = get_line_idx_col_count(self, line, col2)
-        local start = 0
+        local idx1 = get_line_idx_col_count(self, line, col1)
+        local idx2 = get_line_idx_col_count(self, line, col2, true)
         for i = idx1, idx2 do
-          local x1, x2 = x + (idx1 == i and self:get_col_x_offset(line1, col1) or 0)
-          if idx2 == i then
-            x2 = x + self:get_col_x_offset(line, col2)
-          else
-            start = start + get_idx_line_length(self, i, line)
-            x2 = x + self:get_col_x_offset(line, start + 1, true)
+          local row_line, row_col = get_idx_line_col(self, i)
+          if row_line ~= line then goto continue end
+
+          local next_line, next_col = get_idx_line_col(self, i + 1)
+          local row_end_col = next_line == line and next_col or #self.doc.lines[line] + 1
+          local start_col = math.max(col1, row_col)
+          local end_col = math.min(col2, row_end_col)
+          if start_col < end_col then
+            local x1 = x + self:get_col_x_offset(line, start_col)
+            local x2 = x + self:get_col_x_offset(line, end_col, end_col == row_end_col)
+            renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, selection_color)
+          elseif start_col == end_col and col1 == col2 then
+            local x1 = x + self:get_col_x_offset(line, start_col)
+            renderer.draw_rect(x1, y + (i - idx0) * lh, 0, lh, selection_color)
           end
-          renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, selection_color)
+          ::continue::
         end
       end
     end

@@ -325,25 +325,53 @@ function DocView:get_line_wraps(line)
 end
 
 
+---Return whether this view needs a materialized visual-line model.
+---Views with wraps or other row expansions should override this.
+---@return boolean
+function DocView:has_variable_visual_lines()
+  return self.get_line_wraps ~= DocView.get_line_wraps
+end
+
+
 ---Rebuild the composed visual-line model.
 ---@param from_line? integer First document line that may have changed
 function DocView:rebuild_visual_lines(from_line)
   local hidden = self:get_hidden_lines() or {}
+  if not next(hidden) and not self:has_variable_visual_lines() then
+    self.visual_lines = {
+      identity = true,
+      line_count = math.max(1, #self.doc.lines),
+      hidden_lines = hidden
+    }
+    self.visual_lines_dirty = false
+    self.visual_lines_invalid_from = nil
+
+    if self.on_visual_lines_rebuilt then
+      self:on_visual_lines_rebuilt()
+    end
+    return
+  end
+
   local previous = self.visual_lines
   local rows, line_to_first_row, line_row_count
 
   if previous and from_line and from_line > 1 then
     local copy_until = from_line - 1
-    local row_limit = previous.line_to_first_row[copy_until]
-    if row_limit then
-      row_limit = row_limit + (previous.line_row_count[copy_until] or 1) - 1
+    local row_limit
+    if previous.identity then
+      row_limit = math.min(copy_until, previous.line_count)
     else
-      row_limit = 0
-      for line = copy_until, 1, -1 do
-        local first = previous.line_to_first_row[line]
-        if first then
-          row_limit = first + (previous.line_row_count[line] or 1) - 1
-          break
+      row_limit = previous.line_to_first_row[copy_until]
+      if row_limit then
+        row_limit = row_limit + (previous.line_row_count[copy_until] or 1) - 1
+      else
+        row_limit = 0
+        for line = copy_until, 1, -1 do
+          local first = previous.line_to_first_row[line]
+          if first then
+            row_limit = first + (previous.line_row_count[line] or 1) - 1
+            break
+          end
         end
       end
     end
@@ -352,11 +380,20 @@ function DocView:rebuild_visual_lines(from_line)
     line_to_first_row = {}
     line_row_count = {}
     for row = 1, row_limit do
-      rows[row] = previous.rows[row]
+      if previous.identity then
+        rows[row] = { line = row, col = 1 }
+      else
+        rows[row] = previous.rows[row]
+      end
     end
     for line = 1, copy_until do
-      line_to_first_row[line] = previous.line_to_first_row[line]
-      line_row_count[line] = previous.line_row_count[line]
+      if previous.identity then
+        line_to_first_row[line] = line
+        line_row_count[line] = 1
+      else
+        line_to_first_row[line] = previous.line_to_first_row[line]
+        line_row_count[line] = previous.line_row_count[line]
+      end
     end
   else
     from_line = 1
@@ -418,7 +455,8 @@ end
 ---Get the total number of visual rows.
 ---@return integer count
 function DocView:visual_line_count()
-  return #self:get_visual_lines().rows
+  local model = self:get_visual_lines()
+  return model.identity and model.line_count or #model.rows
 end
 
 
@@ -427,7 +465,12 @@ end
 ---@return integer line
 ---@return integer col
 function DocView:visual_position_from_row(row)
-  local rows = self:get_visual_lines().rows
+  local model = self:get_visual_lines()
+  if model.identity then
+    row = common.clamp(row, 1, model.line_count)
+    return row, 1
+  end
+  local rows = model.rows
   row = common.clamp(row, 1, #rows)
   local item = rows[row]
   return item.line, item.col
@@ -440,6 +483,12 @@ end
 ---@return integer row
 function DocView:visual_row_from_position(line, col)
   local model = self:get_visual_lines()
+  if model.identity then
+    if line > #self.doc.lines then
+      return model.line_count + 1
+    end
+    return common.clamp(line, 1, model.line_count)
+  end
   if line > #self.doc.lines then
     return #model.rows + 1
   end
@@ -474,6 +523,12 @@ end
 ---@return integer row_count
 function DocView:visual_rows_for_line(line)
   local model = self:get_visual_lines()
+  if model.identity then
+    if line < 1 or line > #self.doc.lines then
+      return nil, 0
+    end
+    return line, 1
+  end
   return model.line_to_first_row[line], model.line_row_count[line] or 0
 end
 
@@ -482,7 +537,11 @@ end
 ---@param line integer
 ---@return boolean
 function DocView:is_line_visible(line)
-  return self:get_visual_lines().line_to_first_row[line] ~= nil
+  local model = self:get_visual_lines()
+  if model.identity then
+    return line >= 1 and line <= #self.doc.lines
+  end
+  return model.line_to_first_row[line] ~= nil
 end
 
 

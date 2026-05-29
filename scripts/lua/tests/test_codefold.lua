@@ -408,6 +408,88 @@ test.describe("codefold - region detection", function()
     test.equal(regions[1].stop, 3)
     test.equal(regions[1].hide_tail, false)
   end)
+
+  test.test("incremental detection stops at unchanged next fold point", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "changed text\n",
+      "  changed child\n",
+      "stable fold\n",
+      "  stable child\n",
+      "later fold\n",
+      "  later child\n",
+    }
+    doc:reset_syntax()
+
+    local previous_regions = {
+      { indent = 0, start = 1, stop = 2, kind = "indent" },
+      { indent = 0, start = 3, stop = 4, kind = "indent" },
+      { indent = 0, start = 5, stop = 6, kind = "indent" },
+    }
+
+    local original_get_utf8_line = doc.get_utf8_line
+    doc.get_utf8_line = function(self, line)
+      test.ok(line < 5, "incremental detection scanned past stable fold point")
+      return original_get_utf8_line(self, line)
+    end
+
+    local regions = codefold._test.detect_fold_regions(doc, 1, previous_regions)
+
+    test.equal(#regions, 3)
+    test.equal(regions[2], previous_regions[2])
+    test.equal(regions[3], previous_regions[3])
+
+    doc.get_utf8_line = original_get_utf8_line
+  end)
+
+  test.test("incremental detection keeps scanning inside changed fold", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "outer\n",
+      "  new fold\n",
+      "    new child\n",
+      "  sibling\n",
+      "stable fold\n",
+      "  stable child\n",
+    }
+    doc:reset_syntax()
+
+    local previous_regions = {
+      { indent = 0, start = 1, stop = 4, kind = "indent" },
+      { indent = 0, start = 5, stop = 6, kind = "indent" },
+    }
+
+    local regions = codefold._test.detect_fold_regions(doc, 2, previous_regions)
+
+    test.equal(#regions, 3)
+    test.equal(regions[1].start, 1)
+    test.equal(regions[1].stop, 4)
+    test.equal(regions[2].start, 2)
+    test.equal(regions[2].stop, 3)
+    test.equal(regions[3], previous_regions[2])
+  end)
+
+  test.test("incremental detection catches fold created by next line", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "{\n",
+      "  something\n",
+      "}\n",
+    }
+    doc:reset_syntax()
+
+    local regions = codefold._test.detect_fold_regions(doc, 2, {})
+
+    test.equal(#regions, 1)
+    test.equal(regions[1].start, 1)
+    test.equal(regions[1].stop, 2)
+  end)
 end)
 
 test.describe("codefold - virtual line mapping", function()
@@ -826,6 +908,121 @@ test.describe("codefold - virtual line mapping", function()
     test.is_nil(view.cf_unfold_map[2])
 
     config.plugins.codefold.start_folded = previous_start_folded
+  end)
+
+  test.test("detected regions without folded spans skip map rebuild", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "a\n",
+      "  b\n",
+      "c\n",
+      "  d\n"
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    view.cf_regions = {}
+    view.cf_folded_regions = {}
+    view.cf_state_loaded = true
+    view.cf_fold_map = {}
+    view.cf_unfold_map = {}
+    view.cf_visibility_signature = ""
+    view.visual_lines_dirty = false
+
+    codefold._test.apply_detected_regions(view, {
+      { indent = 0, start = 1, stop = 2 },
+      { indent = 0, start = 3, stop = 4 }
+    })
+
+    test.equal(view.cf_region_by_start[1], 1)
+    test.equal(view.cf_region_by_start[3], 2)
+    test.equal(view.visual_lines_dirty, false)
+    test.equal(#view.cf_fold_map, 0)
+  end)
+
+  test.test("unchanged folded spans skip map rebuild", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "a\n",
+      "  b\n",
+      "c\n",
+      "  d\n",
+      "e\n",
+      "  f\n"
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    view.cf_regions = {
+      { indent = 0, start = 1, stop = 2 },
+      { indent = 0, start = 3, stop = 4 }
+    }
+    view.cf_folded_regions = { 1 }
+    view.cf_folded_region_set = { [1] = true }
+    view.cf_hidden_lines = { [2] = true }
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      doc.lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+    view.cf_visibility_signature = "true|1:2:1"
+    view.cf_mapping_line_count = #doc.lines
+    view.cf_state_loaded = true
+    view.visual_lines_dirty = false
+
+    codefold._test.apply_detected_regions(view, {
+      { indent = 0, start = 1, stop = 2 },
+      { indent = 0, start = 3, stop = 4 },
+      { indent = 0, start = 5, stop = 6 }
+    })
+
+    test.equal(view.cf_region_by_start[5], 3)
+    test.ok(view.cf_folded_region_set[1])
+    test.equal(view.visual_lines_dirty, false)
+    test.is_nil(view.cf_unfold_map[2])
+  end)
+
+  test.test("changed folded spans rebuild maps", function()
+    local codefold = require "plugins.codefold"
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "a\n",
+      "  b\n",
+      "  c\n",
+      "d\n"
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    view.cf_regions = {
+      { indent = 0, start = 1, stop = 2 }
+    }
+    view.cf_folded_regions = { 1 }
+    view.cf_folded_region_set = { [1] = true }
+    view.cf_hidden_lines = { [2] = true }
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      doc.lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+    view.cf_visibility_signature = "true|1:2:1"
+    view.cf_mapping_line_count = #doc.lines
+    view.cf_state_loaded = true
+    view.visual_lines_dirty = false
+
+    codefold._test.apply_detected_regions(view, {
+      { indent = 0, start = 1, stop = 3 }
+    })
+
+    test.equal(view.visual_lines_dirty, true)
+    test.ok(view.cf_hidden_lines[2])
+    test.ok(view.cf_hidden_lines[3])
+    test.is_nil(view.cf_unfold_map[3])
   end)
 
   test.test("document edits debounce fold recalculation", function()
