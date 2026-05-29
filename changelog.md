@@ -1,5 +1,68 @@
 # Changes Log
 
+## [3.11.0] - 2026-05-29
+
+### New Features
+
+* Add generated settings views
+  ([#490](https://github.com/pragtical/pragtical/pull/490))
+
+* Add code folding support
+  ([#515](https://github.com/pragtical/pragtical/pull/515))
+
+### Enhancements
+
+* Render MarkdownView frontmatter legibly
+  ([#502](https://github.com/pragtical/pragtical/pull/502))
+
+* Improve DocView long-line rendering
+  ([#507](https://github.com/pragtical/pragtical/pull/507))
+
+* Optimize native tokenizer matching for long lines
+  ([#508](https://github.com/pragtical/pragtical/pull/508))
+
+* Sync line wrapping with DocView rendering
+  ([#509](https://github.com/pragtical/pragtical/pull/509))
+
+* Add codeblock patterns for popular Markdown languages
+  ([#511](https://github.com/pragtical/pragtical/pull/511))
+
+* Return byte counts from TCP writes
+  ([#512](https://github.com/pragtical/pragtical/pull/512))
+
+* Parse large Markdown views asynchronously
+  ([#513](https://github.com/pragtical/pragtical/pull/513))
+
+### Fixes
+
+* Fix clang-cl build errors on Windows
+  ([#491](https://github.com/pragtical/pragtical/pull/491))
+
+* Avoid pragtical.lib/.exp collision in MSVC parallel builds
+  ([#493](https://github.com/pragtical/pragtical/pull/493))
+
+* Correct native tokenizer matching semantics
+  ([#496](https://github.com/pragtical/pragtical/pull/496))
+
+* Add explicit type fields to language_python pair patterns
+  ([#498](https://github.com/pragtical/pragtical/pull/498))
+  ([#503](https://github.com/pragtical/pragtical/pull/503))
+
+* Fix settings subconfig merge
+  ([64609770](https://github.com/pragtical/pragtical/commit/64609770))
+
+* Reduce unfocused wake delay when restoring focus
+  ([#504](https://github.com/pragtical/pragtical/pull/504))
+
+### Build System
+
+* Add C11 fallback for MSVC and silence clang-cl warnings
+  ([#500](https://github.com/pragtical/pragtical/pull/500))
+  ([#506](https://github.com/pragtical/pragtical/pull/506))
+
+* Update GitHub workflow dependencies
+  ([#514](https://github.com/pragtical/pragtical/pull/514))
+
 ## [3.10.1] - 2026-05-20
 
 ### Enhancements
@@ -3366,6 +3429,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.11.0]: https://github.com/pragtical/pragtical/releases/tag/v3.11.0
 [3.10.1]: https://github.com/pragtical/pragtical/releases/tag/v3.10.1
 [3.10.0]: https://github.com/pragtical/pragtical/releases/tag/v3.10.0
 [3.9.0]: https://github.com/pragtical/pragtical/releases/tag/v3.9.0
