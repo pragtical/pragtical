@@ -806,11 +806,13 @@ test.describe("codefold - virtual line mapping", function()
     core.active_view = previous_active_view
   end)
 
-  test.test("fold gutter marker color reflects folded and hover state", function()
+  test.test("fold gutter marker visibility and color reflect state", function()
     require "plugins.codefold"
 
     local previous_enabled = config.plugins.codefold.enabled
+    local previous_always_show = config.plugins.codefold.always_show_fold_markers
     config.plugins.codefold.enabled = true
+    config.plugins.codefold.always_show_fold_markers = false
 
     local view = make_docview({ "a\n", "  b\n", "c\n" })
     view.cf_regions = { { indent = 0, start = 1, stop = 2 } }
@@ -823,8 +825,18 @@ test.describe("codefold - virtual line mapping", function()
     local _, y = view:get_line_screen_position(1)
     with_common_draw_text(function(calls)
       view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
+      test.equal(#calls, 1)
+
+      view.hovering_gutter = true
+      view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
       test.equal(calls[#calls].color, style.dim or style.line_number)
 
+      view.hovering_gutter = false
+      config.plugins.codefold.always_show_fold_markers = true
+      view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
+      test.equal(calls[#calls].color, style.dim or style.line_number)
+
+      config.plugins.codefold.always_show_fold_markers = false
       view.cf_folded_regions = { 1 }
       view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
       test.equal(calls[#calls].color, style.caret)
@@ -837,6 +849,7 @@ test.describe("codefold - virtual line mapping", function()
     end)
 
     config.plugins.codefold.enabled = previous_enabled
+    config.plugins.codefold.always_show_fold_markers = previous_always_show
   end)
 
   test.test("ensure_line_visible unfolds regions containing the line", function()
@@ -1383,6 +1396,38 @@ test.describe("codefold - translate functions", function()
 
   -- Load the plugin to get access to translate overrides
   local codefold = require "plugins.codefold"
+
+  test.test("next_line falls back when no regions are folded", function()
+    local doc = Doc(nil, nil, true)
+    doc.lines = { "line1\n", "line2\n", "line3\n" }
+    doc:reset_syntax()
+
+    local dv = DocView(doc)
+    dv.cf_fold_map = {}
+    dv.cf_unfold_map = {}
+    dv.cf_folded_regions = {}
+    dv.last_x_offset = { line = 1, col = 1, offset = 0 }
+
+    local translate = require "core.docview".translate
+    local nl = translate.next_line(doc, 1, 1, dv)
+    test.equal(nl, 2)
+  end)
+
+  test.test("previous_line falls back when no regions are folded", function()
+    local doc = Doc(nil, nil, true)
+    doc.lines = { "line1\n", "line2\n", "line3\n" }
+    doc:reset_syntax()
+
+    local dv = DocView(doc)
+    dv.cf_fold_map = {}
+    dv.cf_unfold_map = {}
+    dv.cf_folded_regions = {}
+    dv.last_x_offset = { line = 2, col = 1, offset = 0 }
+
+    local translate = require "core.docview".translate
+    local nl = translate.previous_line(doc, 2, 1, dv)
+    test.equal(nl, 1)
+  end)
 
   test.test("next_line skips hidden lines", function()
     local dv = make_mock_dv(

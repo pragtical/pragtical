@@ -18,6 +18,8 @@ config.plugins.codefold = common.merge({
   start_folded = false,
   -- If true, folded regions hide the folded end-line tail.
   hide_tail_on_fold = true,
+  -- If true, all fold markers are always visible.
+  always_show_fold_markers = false,
   -- Width in pixels reserved for fold toggle indicators in the gutter.
   toggle_width = common.round(24 * SCALE),
   -- The config specification used by the settings GUI.
@@ -43,6 +45,13 @@ config.plugins.codefold = common.merge({
       path = "hide_tail_on_fold",
       type = "toggle",
       default = true
+    },
+    {
+      label = "Always Show Fold Markers",
+      description = "Always draw markers for unfolded fold regions.",
+      path = "always_show_fold_markers",
+      type = "toggle",
+      default = false
     }
   }
 }, config.plugins.codefold)
@@ -1130,6 +1139,12 @@ function DocView:draw_line_gutter(line, x, y, width)
     local region_idx = region_at_line(self, line)
     if region_idx then
       local folded = is_folded(self, region_idx)
+      if not folded
+        and not self.hovering_gutter
+        and not config.plugins.codefold.always_show_fold_markers
+      then
+        return result
+      end
       local toggle_char = folded and TOGGLE_CLOSE or TOGGLE_OPEN
       local toggle_color = folded and style.caret or (style.dim or style.line_number)
       if self.cf_hovering_toggle == line then
@@ -1279,6 +1294,18 @@ local original_previous_line = DocView.translate.previous_line
 local original_next_page = DocView.translate.next_page
 local original_previous_page = DocView.translate.previous_page
 
+---@param dv core.docview
+---@return boolean
+local function has_folded_line_maps(dv)
+  return config.plugins.codefold.enabled
+    and dv
+    and dv.cf_folded_regions
+    and #dv.cf_folded_regions > 0
+    and dv.cf_unfold_map
+    and dv.cf_fold_map
+    and #dv.cf_fold_map > 0
+end
+
 ---Skip hidden (folded) lines when moving the cursor down.
 ---@param doc core.doc
 ---@param line integer
@@ -1287,8 +1314,10 @@ local original_previous_page = DocView.translate.previous_page
 ---@return integer line
 ---@return integer col
 DocView.translate.next_line = function(doc, line, col, dv)
+  if not has_folded_line_maps(dv) then
+    return original_next_line(doc, line, col, dv)
+  end
   local function skip_hidden(l)
-    if not dv.cf_unfold_map then return l end
     while l <= #doc.lines and not dv.cf_unfold_map[l] do
       l = l + 1
     end
@@ -1308,8 +1337,10 @@ end
 
 ---Skip hidden (folded) lines when moving the cursor up.
 DocView.translate.previous_line = function(doc, line, col, dv)
+  if not has_folded_line_maps(dv) then
+    return original_previous_line(doc, line, col, dv)
+  end
   local function skip_hidden(l)
-    if not dv.cf_unfold_map then return l end
     while l >= 1 and not dv.cf_unfold_map[l] do
       l = l - 1
     end
