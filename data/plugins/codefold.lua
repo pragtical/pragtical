@@ -15,6 +15,8 @@ config.plugins.codefold = common.merge({
   enabled = true,
   -- If true, newly opened documents have all fold regions initially collapsed.
   start_folded = false,
+  -- If true, folded regions hide the folded end-line tail.
+  hide_tail_on_fold = true,
   -- Width in pixels reserved for fold toggle indicators in the gutter.
   toggle_width = common.round(24 * SCALE),
   -- The config specification used by the settings GUI.
@@ -33,14 +35,40 @@ config.plugins.codefold = common.merge({
       path = "start_folded",
       type = "toggle",
       default = false
+    },
+    {
+      label = "Hide Fold Tail",
+      description = "Hide the folded end-line tail when a region is collapsed.",
+      path = "hide_tail_on_fold",
+      type = "toggle",
+      default = true
     }
   }
 }, config.plugins.codefold)
 
 local TOGGLE_OPEN  = "\226\150\190"  -- ▾  (U+25BE)
 local TOGGLE_CLOSE = "\226\150\184"  -- ▸  (U+25B8)
+local RECALC_DEBOUNCE_SECONDS = 0.12
+---@type renderer.font?
+local CODEFOLD_FONT = nil
 
 local codefold = {}
+
+local function maybe_yield()
+  if coroutine.isyieldable() then coroutine.yield() end
+end
+
+---@param self core.docview
+---@return renderer.font
+local function get_toggle_font(self)
+  local font = self:get_font()
+  local size = common.round(font:get_size() * 1.5)
+  if not CODEFOLD_FONT or CODEFOLD_FONT ~= font or self.cf_toggle_font_size ~= size then
+    CODEFOLD_FONT = font:copy(size)
+    self.cf_toggle_font_size = size
+  end
+  return CODEFOLD_FONT
+end
 
 ---------------------------------------------------------------------
 -- Persistent state
@@ -272,6 +300,30 @@ local function get_line_indent(doc, line, indent_size, dir)
   return n
 end
 
+---Computes the indent width for a line without resolving blank lines.
+---@param doc core.doc
+---@param line integer
+---@param indent_size integer
+---@return integer indent_width (-1 for blank/whitespace-only lines)
+local function get_direct_line_indent(doc, line, indent_size)
+  if line < 1 or line > #doc.lines then
+    return -1
+  end
+  local text = doc.lines[line]
+  if not text or text == "\n" or text == "" then
+    return -1
+  end
+  local s, e = text:find("^%s*")
+  if e == #text then
+    return -1
+  end
+  local n = 0
+  for b in text:sub(s, e):gmatch(".") do
+    n = n + (b == "\t" and indent_size or 1)
+  end
+  return n
+end
+
 ---Resolve indent for a possibly-blank line by looking both directions.
 ---@param doc core.doc
 ---@param line integer
@@ -290,6 +342,50 @@ local function get_effective_indent(doc, line, indent_size)
   return above >= 0 and above or below
 end
 
+---@param doc core.doc
+---@param indent_size integer
+---@return integer[] indents
+local function build_effective_indents(doc, indent_size)
+  local line_count = #doc.lines
+  local raw = {}
+  local prev = {}
+  local next = {}
+  local last = -1
+
+  for line = 1, line_count do
+    if line % 500 == 0 then maybe_yield() end
+    local indent = get_direct_line_indent(doc, line, indent_size)
+    raw[line] = indent
+    if indent >= 0 then
+      last = indent
+    end
+    prev[line] = last
+  end
+
+  last = -1
+  for line = line_count, 1, -1 do
+    if line % 500 == 0 then maybe_yield() end
+    local indent = raw[line]
+    if indent >= 0 then
+      last = indent
+    end
+    next[line] = last
+  end
+
+  local indents = {}
+  for line = 1, line_count do
+    local indent = raw[line]
+    if indent >= 0 then
+      indents[line] = indent
+    elseif prev[line] >= 0 and next[line] >= 0 then
+      indents[line] = math.max(prev[line], next[line])
+    else
+      indents[line] = prev[line] >= 0 and prev[line] or next[line]
+    end
+  end
+  return indents
+end
+
 ---------------------------------------------------------------------
 -- Fold region detection
 ---------------------------------------------------------------------
@@ -305,6 +401,7 @@ local function detect_fold_regions(doc, invalidate_from, invalidate_to)
   local _, indent_size = doc:get_indent_info()
   local regions = {}
   local line_count = #doc.lines
+  local indents = build_effective_indents(doc, indent_size)
 
   local start_line = 1
   local stop_line = line_count
@@ -317,10 +414,10 @@ local function detect_fold_regions(doc, invalidate_from, invalidate_to)
   local line = start_line
   while line <= stop_line do
     if line % 100 == 0 then
-      coroutine.yield()
+      maybe_yield()
     end
 
-    local indent = get_effective_indent(doc, line, indent_size)
+    local indent = indents[line]
     if indent < 0 then
       line = line + 1
       goto continue
@@ -329,12 +426,13 @@ local function detect_fold_regions(doc, invalidate_from, invalidate_to)
     local next_line = line + 1
     if next_line > line_count then break end
 
-    local next_indent = get_effective_indent(doc, next_line, indent_size)
+    local next_indent = indents[next_line]
     if next_indent > indent then
       -- Line `line` starts a fold region. Find where it ends.
       local stop = next_line
       while stop < line_count do
-        local peek_indent = get_effective_indent(doc, stop + 1, indent_size)
+        if stop % 500 == 0 then maybe_yield() end
+        local peek_indent = indents[stop + 1]
         if peek_indent < 0 then
           -- blank — continue
           stop = stop + 1
@@ -363,6 +461,26 @@ end
 -- Virtual line mapping
 ---------------------------------------------------------------------
 
+---@param self core.docview
+---@param regions table[]
+local function set_regions(self, regions)
+  self.cf_regions = regions or {}
+  self.cf_region_by_start = {}
+  for idx, region in ipairs(self.cf_regions) do
+    self.cf_region_by_start[region.start] = idx
+  end
+end
+
+---@param self core.docview
+---@param folded integer[]
+local function set_folded_regions(self, folded)
+  self.cf_folded_regions = folded or {}
+  self.cf_folded_region_set = {}
+  for _, region_idx in ipairs(self.cf_folded_regions) do
+    self.cf_folded_region_set[region_idx] = true
+  end
+end
+
 ---Determine which real lines are hidden based on collapsed fold regions.
 ---@param self core.docview
 ---@return table<integer, boolean> hidden_set
@@ -374,6 +492,9 @@ local function build_hidden_set(self)
       for l = region.start + 1, region.stop do
         hidden[l] = true
       end
+      if config.plugins.codefold.hide_tail_on_fold and region.stop < #self.doc.lines then
+        hidden[region.stop + 1] = true
+      end
     end
   end
   return hidden
@@ -383,6 +504,7 @@ end
 ---@param self core.docview
 local function rebuild_mappings(self)
   local hidden = build_hidden_set(self)
+  self.cf_hidden_lines = hidden
   self.cf_fold_map = {}
   self.cf_unfold_map = {}
 
@@ -422,24 +544,25 @@ local function apply_detected_regions(self, regions)
     self.cf_folded_regions or {}
   )
   local should_resave = false
-  self.cf_regions = regions
+  set_regions(self, regions)
 
   if not self.cf_state_loaded then
     local saved_folds = load_fold_state(self.doc)
     self.cf_state_loaded = true
     if saved_folds then
-      self.cf_folded_regions = match_fold_state(self.doc, regions, saved_folds)
+      set_folded_regions(self, match_fold_state(self.doc, regions, saved_folds))
       should_resave = true
     elseif config.plugins.codefold.start_folded then
-      self.cf_folded_regions = {}
+      local folded = {}
       for idx = 1, #regions do
-        self.cf_folded_regions[#self.cf_folded_regions + 1] = idx
+        folded[#folded + 1] = idx
       end
+      set_folded_regions(self, folded)
     else
-      self.cf_folded_regions = {}
+      set_folded_regions(self, {})
     end
   else
-    self.cf_folded_regions = match_fold_state(self.doc, regions, previous_folds)
+    set_folded_regions(self, match_fold_state(self.doc, regions, previous_folds))
     should_resave = #previous_folds > 0
   end
 
@@ -449,19 +572,48 @@ local function apply_detected_regions(self, regions)
   end
 end
 
+---Replace a stale scheduled recalculation with a no-op coroutine.
+---@param self core.docview
+local function replace_recalculation_thread(self)
+  local thread_id = self.cf_thread_id
+  if not thread_id then return end
+
+  local thread = core.threads[thread_id]
+  if thread then
+    thread.cr = coroutine.create(function() end)
+    thread.wake = 0
+    thread.avg_time = nil
+    thread.time = nil
+    thread.calls = nil
+  end
+  self.cf_thread_id = nil
+end
+
+---@param self core.docview
+---@param from_line? integer
+local function schedule_recalculation(self, from_line)
+  replace_recalculation_thread(self)
+  self.cf_invalidated = true
+  self.cf_invalidated_at = system.get_time() + RECALC_DEBOUNCE_SECONDS
+  if from_line then
+    self.cf_invalidated_from = self.cf_invalidated_from
+      and math.min(self.cf_invalidated_from, from_line)
+      or from_line
+  end
+end
+
 ---Recalculate everything after fold state or document change.
 ---Runs in a background thread to avoid UI stalls on large documents.
 ---@param self core.docview
 local function recalculate(self)
-  -- Cancel any previous in-flight recalculation.
-  if self.cf_thread_id then
-    core.threads[self.cf_thread_id] = nil
-    self.cf_thread_id = nil
-  end
+  replace_recalculation_thread(self)
 
   self.cf_thread_id = core.add_thread(function()
     apply_detected_regions(self, detect_fold_regions(self.doc))
     self.cf_thread_id = nil
+    self.cf_invalidated = false
+    self.cf_invalidated_at = nil
+    self.cf_invalidated_from = nil
     core.redraw = true
   end)
 end
@@ -469,11 +621,13 @@ end
 ---Initialize fold state for a DocView.
 ---@param self core.docview
 local function init_fold_state(self)
-  self.cf_regions = {}
-  self.cf_folded_regions = {}
+  set_regions(self, {})
+  set_folded_regions(self, {})
+  self.cf_hidden_lines = nil
   self.cf_fold_map = {}
   self.cf_unfold_map = {}
-  self.cf_invalidated = true
+  self.cf_invalidated = false
+  self.cf_invalidated_at = nil
   self.cf_state_loaded = false
 end
 
@@ -484,14 +638,14 @@ local function fold_all(self)
   for idx = 1, #self.cf_regions do
     folded[#folded + 1] = idx
   end
-  self.cf_folded_regions = folded
+  set_folded_regions(self, folded)
   rebuild_mappings(self)
 end
 
 ---Unfold all regions.
 ---@param self core.docview
 local function unfold_all(self)
-  self.cf_folded_regions = {}
+  set_folded_regions(self, {})
   rebuild_mappings(self)
 end
 
@@ -500,10 +654,11 @@ end
 ---@param region_idx integer
 ---@return boolean
 local function is_folded(self, region_idx)
-  for _, idx in ipairs(self.cf_folded_regions) do
-    if idx == region_idx then
-      return true
-    end
+  if self.cf_folded_region_set and self.cf_folded_region_set[region_idx] then
+    return true
+  end
+  for _, idx in ipairs(self.cf_folded_regions or {}) do
+    if idx == region_idx then return true end
   end
   return false
 end
@@ -513,10 +668,11 @@ end
 ---@param line integer
 ---@return integer? region_idx
 local function region_at_line(self, line)
-  for idx, region in ipairs(self.cf_regions) do
-    if region.start == line then
-      return idx
-    end
+  if self.cf_region_by_start and self.cf_region_by_start[line] then
+    return self.cf_region_by_start[line]
+  end
+  for idx, region in ipairs(self.cf_regions or {}) do
+    if region.start == line then return idx end
   end
   return nil
 end
@@ -554,7 +710,7 @@ local function toggle_region(self, region_idx)
   if not was_folded then
     folded[#folded + 1] = region_idx
   end
-  self.cf_folded_regions = folded
+  set_folded_regions(self, folded)
   rebuild_mappings(self)
   save_fold_state(self.doc, self.cf_regions, self.cf_folded_regions)
 
@@ -569,6 +725,9 @@ end
 ---Safe to call when maps are not yet built (during async recalculation).
 ---@param self core.docview
 local function normalize_caret(self)
+  if not self.cf_folded_regions or #self.cf_folded_regions == 0 then
+    return
+  end
   if not self.cf_unfold_map or #self.cf_unfold_map == 0 then
     return
   end
@@ -587,7 +746,7 @@ local docview_get_hidden_lines = DocView.get_hidden_lines
 function DocView:get_hidden_lines()
   if config.plugins.codefold.enabled and self:is(DocView)
     and self.cf_folded_regions and #self.cf_folded_regions > 0 then
-    return build_hidden_set(self)
+    return self.cf_hidden_lines or build_hidden_set(self)
   end
   return docview_get_hidden_lines(self)
 end
@@ -614,7 +773,7 @@ function DocView:ensure_line_visible(line)
   end
 
   if changed then
-    self.cf_folded_regions = folded
+    set_folded_regions(self, folded)
     rebuild_mappings(self)
     save_fold_state(self.doc, self.cf_regions, self.cf_folded_regions)
     core.redraw = true
@@ -648,8 +807,11 @@ function DocView:update(...)
   end
 
   -- Recalculate if the document changed
-  if self.cf_invalidated then
+  if self.cf_invalidated
+    and (not self.cf_invalidated_at or system.get_time() >= self.cf_invalidated_at)
+  then
     self.cf_invalidated = nil
+    self.cf_invalidated_at = nil
     recalculate(self)
   end
 
@@ -684,8 +846,7 @@ function DocView:draw_line_gutter(line, x, y, width)
       end
       local lh = self:get_line_height()
       local toggle_w = config.plugins.codefold.toggle_width
-      local font = self:get_font()
-      local toggle_font = font:copy(common.round(font:get_size() * 1.5))
+      local toggle_font = get_toggle_font(self)
       local toggle_x = self.position.x + self:get_gutter_width() - toggle_w * 1.5
       local toggle_y = y
       common.draw_text(toggle_font, toggle_color, toggle_char, "right", toggle_x, toggle_y, toggle_w, lh)
@@ -749,7 +910,7 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
   -- Invalidate fold state on all views of this doc
   for _, view in ipairs(core.get_views_referencing_doc(self)) do
     if view:is(DocView) and view.cf_regions then
-      view.cf_invalidated = true
+      schedule_recalculation(view, line)
     end
   end
   return result
@@ -760,7 +921,7 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
   local result = doc_raw_remove(self, line1, col1, line2, col2, undo_stack, time)
   for _, view in ipairs(core.get_views_referencing_doc(self)) do
     if view:is(DocView) and view.cf_regions then
-      view.cf_invalidated = true
+      schedule_recalculation(view, line1)
     end
   end
   return result

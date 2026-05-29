@@ -251,7 +251,9 @@ test.describe("linewrapping", function()
 
   test.test("folded hidden lines do not contribute wrapped rows", function()
     local previous_codefold = config.plugins.codefold.enabled
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
     config.plugins.codefold.enabled = true
+    config.plugins.codefold.hide_tail_on_fold = false
 
     local doc = Doc(nil, nil, true)
     doc.lines = {
@@ -296,5 +298,6 @@ test.describe("linewrapping", function()
     test.ok(view:get_line_visual_height(5) > view:get_line_height())
 
     config.plugins.codefold.enabled = previous_codefold
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
   end)
 end)

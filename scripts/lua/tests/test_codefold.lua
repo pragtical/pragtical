@@ -225,6 +225,54 @@ test.describe("codefold - region detection", function()
 end)
 
 test.describe("codefold - virtual line mapping", function()
+  test.test("hide tail on fold is enabled by default", function()
+    require "plugins.codefold"
+
+    test.equal(config.plugins.codefold.hide_tail_on_fold, true)
+
+    local found_spec = false
+    for _, item in ipairs(config.plugins.codefold.config_spec) do
+      if item.path == "hide_tail_on_fold" then
+        found_spec = true
+        test.equal(item.default, true)
+      end
+    end
+    test.ok(found_spec)
+  end)
+
+  test.test("folded regions hide their ending boundary line", function()
+    local codefold = require "plugins.codefold"
+
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
+    local previous_start_folded = config.plugins.codefold.start_folded
+    config.plugins.codefold.hide_tail_on_fold = true
+    config.plugins.codefold.start_folded = true
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "function main()\n",
+      "  print('test')\n",
+      "end\n",
+      "print('done')\n",
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    codefold._test.apply_detected_regions(view, {
+      { indent = 0, start = 1, stop = 2 },
+    })
+
+    test.ok(view.cf_hidden_lines[2])
+    test.ok(view.cf_hidden_lines[3])
+    test.is_nil(view.cf_hidden_lines[4])
+    test.equal(#view.cf_fold_map, 2)
+    test.equal(view.cf_fold_map[1], 1)
+    test.equal(view.cf_fold_map[2], 4)
+
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
+    config.plugins.codefold.start_folded = previous_start_folded
+  end)
+
   test.test("identity mapping when no folds", function()
     local regions = {
       { start = 2, stop = 3 },
@@ -331,6 +379,9 @@ test.describe("codefold - virtual line mapping", function()
   test.test("DocView position helpers use fold maps", function()
     require "plugins.codefold"
 
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
+    config.plugins.codefold.hide_tail_on_fold = false
+
     local doc = Doc(nil, nil, true)
     doc.lines = { "a\n", "b\n", "c\n", "d\n", "e\n" }
     doc:reset_syntax()
@@ -346,6 +397,8 @@ test.describe("codefold - virtual line mapping", function()
     test.equal(col, 1)
     test.equal(view:offset_from_position(5, 1), 3)
     test.equal(view:offset_from_position(4, 1), 2)
+
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
   end)
 
   test.test("indentguide caches visible folded real lines", function()
@@ -355,8 +408,10 @@ test.describe("codefold - virtual line mapping", function()
 
     local previous = config.plugins.indentguide.enabled
     local previous_highlight = config.plugins.indentguide.highlight
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
     config.plugins.indentguide.enabled = true
     config.plugins.indentguide.highlight = false
+    config.plugins.codefold.hide_tail_on_fold = false
 
     local doc = Doc(nil, nil, true)
     doc.lines = { "a\n", "  b\n", "    c\n", "  d\n", "  e\n" }
@@ -382,6 +437,7 @@ test.describe("codefold - virtual line mapping", function()
 
     config.plugins.indentguide.enabled = previous
     config.plugins.indentguide.highlight = previous_highlight
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
   end)
 
   test.test("indentguide active range uses visible offsets", function()
@@ -504,10 +560,12 @@ test.describe("codefold - virtual line mapping", function()
       view.cf_folded_regions = { 1 }
       view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
       test.equal(calls[#calls].color, style.caret)
+      local toggle_font = view.cf_toggle_font
 
       view.cf_hovering_toggle = 1
       view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
       test.equal(calls[#calls].color, style.accent)
+      test.equal(view.cf_toggle_font, toggle_font)
     end)
 
     config.plugins.codefold.enabled = previous_enabled
@@ -553,6 +611,91 @@ test.describe("codefold - virtual line mapping", function()
     test.equal(view.cf_unfold_map[3], 3)
 
     config.plugins.codefold.enabled = previous_enabled
+  end)
+
+  test.test("detected regions build lookup caches and hidden lines", function()
+    local codefold = require "plugins.codefold"
+
+    local previous_start_folded = config.plugins.codefold.start_folded
+    config.plugins.codefold.start_folded = true
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "a\n",
+      "  b\n",
+      "c\n"
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    local regions = {
+      { indent = 0, start = 1, stop = 2 }
+    }
+
+    codefold._test.apply_detected_regions(view, regions)
+
+    test.equal(view.cf_region_by_start[1], 1)
+    test.ok(view.cf_folded_region_set[1])
+    test.ok(view.cf_hidden_lines[2])
+    test.is_nil(view.cf_unfold_map[2])
+
+    config.plugins.codefold.start_folded = previous_start_folded
+  end)
+
+  test.test("document edits debounce fold recalculation", function()
+    require "plugins.codefold"
+
+    local previous_get_views = core.get_views_referencing_doc
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "a\n",
+      "  b\n"
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    view.cf_regions = { { indent = 0, start = 1, stop = 2 } }
+    view.cf_invalidated = false
+    view.cf_invalidated_at = nil
+    view.cf_thread_id = "codefold-test-thread"
+
+    local old_thread_ran = false
+    local old_cr = coroutine.create(function()
+      old_thread_ran = true
+    end)
+    core.threads[view.cf_thread_id] = {
+      cr = old_cr,
+      wake = 999,
+      avg_time = 10,
+      time = 10,
+      calls = 1
+    }
+
+    core.get_views_referencing_doc = function(target)
+      return target == doc and { view } or {}
+    end
+
+    local before = system.get_time()
+    doc:insert(1, 1, "x")
+
+    test.ok(view.cf_invalidated)
+    test.ok(view.cf_invalidated_at and view.cf_invalidated_at >= before)
+    test.is_nil(view.cf_thread_id)
+    test.ok(core.threads["codefold-test-thread"])
+    test.not_equal(core.threads["codefold-test-thread"].cr, old_cr)
+    test.equal(core.threads["codefold-test-thread"].wake, 0)
+    test.is_nil(core.threads["codefold-test-thread"].avg_time)
+    test.is_nil(core.threads["codefold-test-thread"].time)
+    test.is_nil(core.threads["codefold-test-thread"].calls)
+
+    local ok = coroutine.resume(core.threads["codefold-test-thread"].cr)
+    test.ok(ok)
+    test.equal(coroutine.status(core.threads["codefold-test-thread"].cr), "dead")
+    test.equal(old_thread_ran, false)
+
+    core.threads["codefold-test-thread"] = nil
+    core.get_views_referencing_doc = previous_get_views
   end)
 
   test.test("select all occurrences reveals folded matches and keeps search highlight", function()

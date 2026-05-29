@@ -88,6 +88,36 @@ test.describe("docview", function()
     test.equal(view:ensure_line_visible(1), 1)
   end)
 
+  test.test("visual line rebuild keeps rows before invalidated line", function()
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "one\n",
+      "two\n",
+      "three\n",
+      "four\n"
+    }
+    doc.cache.col_x = {}
+    doc.cache.ulen = {}
+    doc.highlighter:reset()
+
+    local view = DocView(doc)
+    view:rebuild_visual_lines()
+
+    local queried = {}
+    view.get_line_wraps = function(_, line)
+      queried[line] = true
+      return nil
+    end
+
+    view:invalidate_visual_lines(3)
+    view:get_visual_lines()
+
+    test.is_nil(queried[1])
+    test.is_nil(queried[2])
+    test.ok(queried[3])
+    test.ok(queried[4])
+  end)
+
   test.test("draw_line_body uses search colors for search selections", function()
     local view = make_view("aaaa search\n")
     local col1 = view.doc.lines[1]:find("search", 1, true)

@@ -304,6 +304,9 @@ function DocView:invalidate_visual_lines(from_line)
   else
     self.visual_lines_invalid_from = math.min(self.visual_lines_invalid_from, from_line)
   end
+  if self.doc.get_change_id then
+    self.visual_lines_change_id = self.doc:get_change_id()
+  end
 end
 
 
@@ -323,14 +326,46 @@ end
 
 
 ---Rebuild the composed visual-line model.
----@param from_line? integer Reserved for future incremental rebuilds
+---@param from_line? integer First document line that may have changed
 function DocView:rebuild_visual_lines(from_line)
   local hidden = self:get_hidden_lines() or {}
-  local rows = {}
-  local line_to_first_row = {}
-  local line_row_count = {}
+  local previous = self.visual_lines
+  local rows, line_to_first_row, line_row_count
 
-  for line = 1, #self.doc.lines do
+  if previous and from_line and from_line > 1 then
+    local copy_until = from_line - 1
+    local row_limit = previous.line_to_first_row[copy_until]
+    if row_limit then
+      row_limit = row_limit + (previous.line_row_count[copy_until] or 1) - 1
+    else
+      row_limit = 0
+      for line = copy_until, 1, -1 do
+        local first = previous.line_to_first_row[line]
+        if first then
+          row_limit = first + (previous.line_row_count[line] or 1) - 1
+          break
+        end
+      end
+    end
+
+    rows = {}
+    line_to_first_row = {}
+    line_row_count = {}
+    for row = 1, row_limit do
+      rows[row] = previous.rows[row]
+    end
+    for line = 1, copy_until do
+      line_to_first_row[line] = previous.line_to_first_row[line]
+      line_row_count[line] = previous.line_row_count[line]
+    end
+  else
+    from_line = 1
+    rows = {}
+    line_to_first_row = {}
+    line_row_count = {}
+  end
+
+  for line = from_line, #self.doc.lines do
     if not hidden[line] then
       local starts = self:get_line_wraps(line)
       if not starts or #starts == 0 then
@@ -1007,10 +1042,11 @@ end
 ---Update the view state each frame.
 ---Handles cache invalidation, auto-scrolling to caret, and blink timing.
 function DocView:update()
+  local line1, col1, line2, col2 = self.doc:get_selection()
   local change_id = self.doc.get_change_id and self.doc:get_change_id()
   if self.visual_lines_change_id ~= change_id then
     self.visual_lines_change_id = change_id
-    self:invalidate_visual_lines()
+    self:invalidate_visual_lines(math.min(line1, self.last_line1 or line1))
   end
 
   -- clear cache if font or indent size changed
@@ -1028,7 +1064,6 @@ function DocView:update()
   end
 
   -- scroll to make caret visible and reset blink timer if it moved
-  local line1, col1, line2, col2 = self.doc:get_selection()
   if (line1 ~= self.last_line1 or col1 ~= self.last_col1 or
       line2 ~= self.last_line2 or col2 ~= self.last_col2) and self.size.x > 0 then
     if core.active_view == self and not ime.editing then
@@ -1187,7 +1222,7 @@ end
 
 ---Draw a complete line including highlight and selections.
 ---@param line integer Line number
-  ---@param x number Screen x coordinate
+---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
 ---@return integer height Line height
 function DocView:draw_line_body(line, x, y)
