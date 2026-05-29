@@ -22,6 +22,11 @@ local PARAGRAPH_SPACING = BLOCK_SPACING * 2
 local CHECKBOX_SIZE_RATIO = 0.75
 local IMAGE_ROW_PADDING_Y = style.padding.y
 local IMAGE_CACHE_DIR = USERDIR .. PATHSEP .. "cache"
+local ASYNC_PARSE_THRESHOLD = 64 * 1024
+local ASYNC_LAYOUT_THRESHOLD = 64 * 1024
+local VIRTUAL_ESTIMATED_BLOCK_HEIGHT = 96
+local PARSE_YIELD_INTERVAL = 0.003
+local TEXT_SUFFIX_LIMIT = 4096
 local TABLE_BORDER = math.max(style.divider_size, 1)
 local TABLE_CELL_PADDING_X = style.padding.x
 local TABLE_CELL_PADDING_Y = math.max(common.round(style.padding.y / 2), 1)
@@ -76,6 +81,7 @@ local parse_inline
 local parse_inline_lines
 local extract_single_image
 local render_blocks
+local notify_ready
 
 local function make_style_color(key, fallback)
   return {
@@ -135,6 +141,9 @@ end
 ---@field title string?
 ---@field name string?
 ---@field font renderer.font?
+---@field virtualized boolean?
+---@field virtual_overscan_px number?
+---@field estimated_block_height number?
 
 ---@class core.markdownview : core.view
 ---@overload fun(source?: string|table, title?: string):core.markdownview
@@ -156,12 +165,40 @@ end
 ---@field selection_cursor integer?
 ---@field selecting boolean?
 local MarkdownView = View:extend()
+local MarkdownView_index = MarkdownView
+MarkdownView.__index = function(self, key)
+  if key == "text" then
+    return MarkdownView_index.get_text(self)
+  end
+  return MarkdownView_index[key]
+end
 
 function MarkdownView:__tostring() return "MarkdownView" end
 
 MarkdownView.resolve_color = resolve_color
 
 MarkdownView.context = "session"
+MarkdownView.async_parse_threshold = ASYNC_PARSE_THRESHOLD
+MarkdownView.async_layout_threshold = ASYNC_LAYOUT_THRESHOLD
+
+local function can_yield_parser()
+  local thread, is_main = coroutine.running()
+  return thread and not is_main
+end
+
+local function maybe_yield_parser(state)
+  if not (state and state.yieldable) then
+    return
+  end
+
+  local now = system.get_time()
+  if now < (state.next_yield_time or 0) then
+    return
+  end
+
+  state.next_yield_time = now + PARSE_YIELD_INTERVAL
+  coroutine.yield(0)
+end
 
 local function trim(text)
   return (text:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -179,12 +216,45 @@ local function split_lines(text)
   local lines = {}
   text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
   for line in (text .. "\n"):gmatch("(.-)\n") do
-    table.insert(lines, line)
+    lines[#lines + 1] = line
   end
   if #lines == 0 then
     lines[1] = ""
   end
   return lines
+end
+
+local function normalize_source_text(text)
+  return (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
+end
+
+local function set_source_text(self, text)
+  text = normalize_source_text(text)
+  self._text_chunks = { text }
+  self._text_length = #text
+  self._text_suffix = text:sub(-TEXT_SUFFIX_LIMIT)
+  rawset(self, "text", text)
+  return text
+end
+
+local function append_source_text(self, text)
+  text = normalize_source_text(text)
+  if text == "" then
+    return
+  end
+  self._text_chunks = self._text_chunks or {}
+  self._text_chunks[#self._text_chunks + 1] = text
+  self._text_length = (self._text_length or 0) + #text
+  self._text_suffix = ((self._text_suffix or "") .. text):sub(-TEXT_SUFFIX_LIMIT)
+  rawset(self, "text", nil)
+end
+
+local function source_text_length(self)
+  return self._text_length or #(rawget(self, "text") or "")
+end
+
+local function source_text_suffix(self)
+  return self._text_suffix or rawget(self, "text") or ""
 end
 
 local function is_blank(line)
@@ -211,13 +281,17 @@ local FRONTMATTER_DELIMITERS = {
   [";;;"] = "json"
 }
 
-local function get_frontmatter_info(line)
-  return FRONTMATTER_DELIMITERS[trim(line)]
+local function get_frontmatter_delimiter(line)
+  local delimiter = trim(line or "")
+  return delimiter, FRONTMATTER_DELIMITERS[delimiter]
 end
 
+---Parses document-start metadata fenced by matching frontmatter delimiters.
+---@param lines string[]
+---@return table? frontmatter
+---@return integer? next_index
 local function parse_frontmatter(lines)
-  local delimiter = trim(lines[1] or "")
-  local info = get_frontmatter_info(delimiter)
+  local delimiter, info = get_frontmatter_delimiter(lines[1])
   if not info then
     return nil
   end
@@ -406,12 +480,6 @@ local function is_block_start(line)
     or get_definition_item(line)
     or get_footnote_definition(line)
     or is_html_comment_start(line)
-end
-
-local function append_wrapped_line(target, text)
-  if text ~= "" then
-    target[#target + 1] = trim(text)
-  end
 end
 
 local function normalize_link_label(label)
@@ -773,8 +841,8 @@ local function parse_table_block(lines, index)
   }, i
 end
 
-local function parse_cell_content(text, references, footnotes)
-  local segments = parse_inline_lines({ text }, references, footnotes)
+local function parse_cell_content(text, references, footnotes, opts)
+  local segments = parse_inline_lines({ text }, references, footnotes, opts)
   local image = extract_single_image(segments)
   if image then
     return {
@@ -930,7 +998,8 @@ local function copy_style(opts, updates)
   local res = {
     bold = opts.bold,
     italic = opts.italic,
-    strikethrough = opts.strikethrough
+    strikethrough = opts.strikethrough,
+    yield_state = opts.yield_state
   }
   if updates then
     for k, v in pairs(updates) do
@@ -994,6 +1063,8 @@ parse_inline = function(text, references, opts, footnotes)
 
   local i = 1
   while i <= #text do
+    maybe_yield_parser(opts.yield_state)
+
     local triple = text:sub(i, i + 2)
     local double = text:sub(i, i + 1)
     local char = text:sub(i, i)
@@ -1253,8 +1324,11 @@ parse_inline = function(text, references, opts, footnotes)
 end
 
 parse_inline_lines = function(lines, references, footnotes, opts)
+  opts = opts or {}
   local combined = {}
   for i, line in ipairs(lines) do
+    maybe_yield_parser(opts.yield_state)
+
     local text = ltrim(line)
     local hard_break = false
     if i < #lines and text:sub(-1) == "\\" then
@@ -1320,6 +1394,8 @@ local function parse_blocks_from_lines(lines, state, allow_frontmatter)
   end
 
   while i <= #lines do
+    maybe_yield_parser(state)
+
     local line = lines[i]
 
     if is_blank(line) then
@@ -1609,8 +1685,11 @@ local function parse_blocks_from_lines(lines, state, allow_frontmatter)
   return blocks
 end
 
-local function prepare_blocks(blocks, references, footnotes)
+local function prepare_blocks(blocks, references, footnotes, yield_state)
+  local inline_opts = yield_state and { yield_state = yield_state } or nil
   for _, block in ipairs(blocks) do
+    maybe_yield_parser(yield_state)
+
     if block.type == "paragraph" then
       local trimmed_lines = {}
       for i, line in ipairs(block.lines or { block.text }) do
@@ -1622,7 +1701,7 @@ local function prepare_blocks(blocks, references, footnotes)
         block.type = "image_row"
         block.images = image_row
       else
-        local paragraph_segments = parse_inline_lines(block.lines or { block.text }, references, footnotes)
+        local paragraph_segments = parse_inline_lines(block.lines or { block.text }, references, footnotes, inline_opts)
         local image = extract_single_image(paragraph_segments)
         if image then
           block.type = "image"
@@ -1635,32 +1714,36 @@ local function prepare_blocks(blocks, references, footnotes)
         end
       end
     elseif block.type == "heading" then
-      block.segments = parse_inline_lines(block.lines or { block.text }, references, footnotes)
+      block.segments = parse_inline_lines(block.lines or { block.text }, references, footnotes, inline_opts)
     elseif block.type == "quote" then
-      prepare_blocks(block.blocks or {}, references, footnotes)
+      prepare_blocks(block.blocks or {}, references, footnotes, yield_state)
     elseif block.type == "table" then
       for i, cell in ipairs(block.headers) do
-        block.headers[i] = parse_cell_content(cell, references, footnotes)
+        maybe_yield_parser(yield_state)
+        block.headers[i] = parse_cell_content(cell, references, footnotes, inline_opts)
       end
       for row_index, row in ipairs(block.rows) do
+        maybe_yield_parser(yield_state)
         for cell_index, cell in ipairs(row) do
-          row[cell_index] = parse_cell_content(cell, references, footnotes)
+          row[cell_index] = parse_cell_content(cell, references, footnotes, inline_opts)
         end
         block.rows[row_index] = row
       end
     elseif block.type == "definition_list" then
       for _, item in ipairs(block.items) do
-        item.term_segments = parse_inline_lines({ item.term }, references, footnotes)
+        maybe_yield_parser(yield_state)
+        item.term_segments = parse_inline_lines({ item.term }, references, footnotes, inline_opts)
         for _, definition in ipairs(item.definitions) do
-          prepare_blocks(definition.blocks or {}, references, footnotes)
+          prepare_blocks(definition.blocks or {}, references, footnotes, yield_state)
         end
       end
     elseif block.items then
       for _, item in ipairs(block.items) do
+        maybe_yield_parser(yield_state)
         if item.blocks then
-          prepare_blocks(item.blocks, references, footnotes)
+          prepare_blocks(item.blocks, references, footnotes, yield_state)
         else
-          item.segments = parse_inline_lines({ item.text }, references, footnotes)
+          item.segments = parse_inline_lines({ item.text }, references, footnotes, inline_opts)
         end
       end
     end
@@ -1690,10 +1773,13 @@ local function build_footnotes_block(footnotes)
   }
 end
 
-local function parse_document(text)
+local function parse_document(text, opts)
+  opts = opts or {}
   local state = {
     references = {},
-    footnote_definitions = {}
+    footnote_definitions = {},
+    yieldable = opts.yieldable and can_yield_parser(),
+    next_yield_time = system.get_time() + PARSE_YIELD_INTERVAL
   }
   local blocks = parse_blocks_from_lines(split_lines(text), state, true)
   local footnotes = {
@@ -1701,10 +1787,10 @@ local function parse_document(text)
     numbers = {},
     order = {}
   }
-  prepare_blocks(blocks, state.references, footnotes)
+  prepare_blocks(blocks, state.references, footnotes, state)
   local footnotes_block = build_footnotes_block(footnotes)
   if footnotes_block then
-    prepare_blocks({ footnotes_block }, state.references, footnotes)
+    prepare_blocks({ footnotes_block }, state.references, footnotes, state)
     blocks[#blocks + 1] = footnotes_block
   end
   return blocks, state.references, footnotes
@@ -1745,7 +1831,7 @@ local function get_inline_image(entry, max_height)
   return image, scaled_width, scaled_height
 end
 
-local function tokenize_segments(self, segments, fontset, base_color, accent_color)
+local function tokenize_segments(self, segments, fontset, base_color, accent_color, yield_state)
   local tokens = {}
 
   local function add_token(segment, text, is_space)
@@ -1817,6 +1903,8 @@ local function tokenize_segments(self, segments, fontset, base_color, accent_col
   end
 
   for _, segment in ipairs(segments) do
+    maybe_yield_parser(yield_state)
+
     if segment.kind == "linebreak" then
       add_token(segment, "", false)
       goto continue
@@ -1876,8 +1964,8 @@ local function append_line(lines, line, max_width)
   }, math.max(max_width, line.width)
 end
 
-local function layout_text_lines(self, segments, fontset, base_color, accent_color, max_width, first_indent, next_indent)
-  local tokens = tokenize_segments(self, segments, fontset, base_color, accent_color)
+local function layout_text_lines(self, segments, fontset, base_color, accent_color, max_width, first_indent, next_indent, yield_state)
+  local tokens = tokenize_segments(self, segments, fontset, base_color, accent_color, yield_state)
   local lines = {}
   local used_width = 0
   local line = {
@@ -1890,6 +1978,8 @@ local function layout_text_lines(self, segments, fontset, base_color, accent_col
   }
 
   for _, token in ipairs(tokens) do
+    maybe_yield_parser(yield_state)
+
     if token.type == "linebreak" then
       line, used_width = append_line(lines, line, used_width)
       goto continue
@@ -1951,7 +2041,7 @@ local function add_text_line(commands, x, y, line)
   }
 end
 
-local function add_paragraph(commands, y, block, fontset, color, accent_color, max_width, first_indent, next_indent, spacing)
+local function add_paragraph(commands, y, block, fontset, color, accent_color, max_width, first_indent, next_indent, spacing, yield_state)
   local lines, used_width = layout_text_lines(
     block.view,
     block.segments,
@@ -1960,7 +2050,8 @@ local function add_paragraph(commands, y, block, fontset, color, accent_color, m
     accent_color,
     max_width,
     first_indent,
-    next_indent
+    next_indent,
+    yield_state
   )
 
   local block_height = 0
@@ -2008,7 +2099,7 @@ local function get_code_fragments(line, code_font, code_syntax, state)
   return fragments, line_width, state
 end
 
-local function add_code_block(commands, y, lines, font, info, max_width, x_offset)
+local function add_code_block(commands, y, lines, font, info, max_width, x_offset, yield_state)
   x_offset = x_offset or 0
   local code_width = 0
   local line_height = math.max(common.round(font:get_height() * config.line_height), font:get_height())
@@ -2022,6 +2113,8 @@ local function add_code_block(commands, y, lines, font, info, max_width, x_offse
   end
 
   for i, line in ipairs(lines) do
+    maybe_yield_parser(yield_state)
+
     local fragments, line_width
     fragments, line_width, state = get_code_fragments(line, font, code_syntax, state)
     tokenized_lines[i] = fragments
@@ -2053,12 +2146,14 @@ local function add_code_block(commands, y, lines, font, info, max_width, x_offse
   return y + block_height + BLOCK_SPACING, math.max(code_width + BLOCK_PADDING_X * 2, max_width)
 end
 
-local function measure_segments(self, segments, fontset, base_color, accent_color)
-  local tokens = tokenize_segments(self, segments, fontset, base_color, accent_color)
+local function measure_segments(self, segments, fontset, base_color, accent_color, yield_state)
+  local tokens = tokenize_segments(self, segments, fontset, base_color, accent_color, yield_state)
   local min_width = 0
   local preferred_width = 0
 
   for _, token in ipairs(tokens) do
+    maybe_yield_parser(yield_state)
+
     local width = token.type == "image" and token.width or token.font:get_width(token.text)
     preferred_width = preferred_width + width
     if token.type ~= "linebreak" and not token.is_space then
@@ -2069,7 +2164,7 @@ local function measure_segments(self, segments, fontset, base_color, accent_colo
   return min_width, preferred_width
 end
 
-local function measure_table_cell(self, cell, fontset, base_color, accent_color)
+local function measure_table_cell(self, cell, fontset, base_color, accent_color, yield_state)
   if cell.type == "image" then
     local entry = self:ensure_image_entry(cell)
     if entry.status == "ready" and entry.image then
@@ -2085,10 +2180,10 @@ local function measure_table_cell(self, cell, fontset, base_color, accent_color)
     return fallback_width, fallback_width
   end
 
-  return measure_segments(self, cell.segments, fontset, base_color, accent_color)
+  return measure_segments(self, cell.segments, fontset, base_color, accent_color, yield_state)
 end
 
-local function compute_table_column_widths(self, block, body_fontset, header_fontset, accent_color, max_width)
+local function compute_table_column_widths(self, block, body_fontset, header_fontset, accent_color, max_width, yield_state)
   local columns = #block.headers
   local widths = {}
   local minimums = {}
@@ -2097,20 +2192,26 @@ local function compute_table_column_widths(self, block, body_fontset, header_fon
   available = math.max(available, columns)
 
   for col = 1, columns do
+    maybe_yield_parser(yield_state)
+
     local min_width, preferred_width = measure_table_cell(
       self,
       block.headers[col],
       header_fontset,
       COLOR_TEXT,
-      accent_color
+      accent_color,
+      yield_state
     )
     for _, row in ipairs(block.rows) do
+      maybe_yield_parser(yield_state)
+
       local cell_min, cell_preferred = measure_table_cell(
         self,
         row[col],
         body_fontset,
         COLOR_TEXT,
-        accent_color
+        accent_color,
+        yield_state
       )
       min_width = math.max(min_width, cell_min)
       preferred_width = math.max(preferred_width, cell_preferred)
@@ -2179,7 +2280,7 @@ local function compute_table_column_widths(self, block, body_fontset, header_fon
   return widths
 end
 
-local function add_table_block(self, commands, y, block, body_fontset, accent_color, max_width, x_offset)
+local function add_table_block(self, commands, y, block, body_fontset, accent_color, max_width, x_offset, yield_state)
   x_offset = x_offset or 0
   local header_fontset = {
     normal = body_fontset.bold,
@@ -2194,12 +2295,15 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
     body_fontset,
     header_fontset,
     accent_color,
-    max_width
+    max_width,
+    yield_state
   )
   local column_offsets = {}
   local total_width = TABLE_BORDER
 
   for col = 1, #column_widths do
+    maybe_yield_parser(yield_state)
+
     column_offsets[col] = total_width
     total_width = total_width + column_widths[col] + TABLE_CELL_PADDING_X * 2 + TABLE_BORDER
   end
@@ -2219,9 +2323,13 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
   local laid_out_rows = {}
   local table_height = TABLE_BORDER
   for row_index, row in ipairs(rows) do
+    maybe_yield_parser(yield_state)
+
     local row_height = 0
     local cell_layouts = {}
     for col = 1, #column_widths do
+      maybe_yield_parser(yield_state)
+
       local fontset = row.header and header_fontset or body_fontset
       local cell = row.cells[col]
       if cell.type == "image" then
@@ -2255,7 +2363,8 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
             accent_color,
             math.max(column_widths[col], 1),
             0,
-            0
+            0,
+            yield_state
           )
           local content_height = 0
           for _, line in ipairs(lines) do
@@ -2268,15 +2377,16 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
           }
         end
       else
-          local lines = layout_text_lines(
-            self,
-            cell.segments,
-            fontset,
-            COLOR_TEXT,
-            accent_color,
+        local lines = layout_text_lines(
+          self,
+          cell.segments,
+          fontset,
+          COLOR_TEXT,
+          accent_color,
           math.max(column_widths[col], 1),
           0,
-          0
+          0,
+          yield_state
         )
         local content_height = 0
         for _, line in ipairs(lines) do
@@ -2300,6 +2410,8 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
 
   local current_y = y + TABLE_BORDER
   for row_index, row in ipairs(laid_out_rows) do
+    maybe_yield_parser(yield_state)
+
     if row.header then
       commands[#commands + 1] = {
         type = "rect",
@@ -2394,11 +2506,13 @@ local function add_table_block(self, commands, y, block, body_fontset, accent_co
   return y + table_height + BLOCK_SPACING, total_width
 end
 
-render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, accent_color, anchors)
+render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, accent_color, anchors, yield_state)
   local content_width = 0
   x_offset = x_offset or 0
 
   for _, block in ipairs(blocks) do
+    maybe_yield_parser(yield_state)
+
     local available_width = math.max(width - x_offset, 1)
     if block.type == "heading" then
       local fontset = fonts.heading[block.level]
@@ -2416,7 +2530,9 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
         accent_color,
         available_width,
         0,
-        0
+        0,
+        nil,
+        yield_state
       )
       content_width = math.max(content_width, x_offset + used_width)
       if block.level <= 2 then
@@ -2446,7 +2562,8 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
         available_width,
         0,
         0,
-        PARAGRAPH_SPACING
+        PARAGRAPH_SPACING,
+        yield_state
       )
       content_width = math.max(content_width, x_offset + used_width)
     elseif block.type == "quote" then
@@ -2461,7 +2578,8 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
         x_offset + QUOTE_BAR_WIDTH + QUOTE_GAP,
         fonts,
         accent_color,
-        anchors
+        anchors,
+        yield_state
       )
       commands[#commands + 1] = {
         type = "rect",
@@ -2526,7 +2644,8 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
           content_x,
           fonts,
           accent_color,
-          anchors
+          anchors,
+          yield_state
         )
         content_width = math.max(content_width, item_width, content_x)
 
@@ -2588,7 +2707,8 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
           available_width,
           0,
           0,
-          common.round(style.padding.y / 2)
+          common.round(style.padding.y / 2),
+          yield_state
         )
         content_width = math.max(content_width, x_offset + term_width)
         for _, definition in ipairs(item.definitions) do
@@ -2602,22 +2722,19 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
             x_offset + LIST_INDENT,
             fonts,
             accent_color,
-            anchors
+            anchors,
+            yield_state
           )
           content_width = math.max(content_width, definition_width)
         end
       end
-    elseif block.type == "code" then
+    elseif block.type == "code" or block.type == "frontmatter" then
       local used_width
-      y, used_width = add_code_block(commands, y, block.lines, fonts.code, block.info, available_width, x_offset)
-      content_width = math.max(content_width, x_offset + used_width)
-    elseif block.type == "frontmatter" then
-      local used_width
-      y, used_width = add_code_block(commands, y, block.lines, fonts.code, block.info, available_width, x_offset)
+      y, used_width = add_code_block(commands, y, block.lines, fonts.code, block.info, available_width, x_offset, yield_state)
       content_width = math.max(content_width, x_offset + used_width)
     elseif block.type == "table" then
       local used_width
-      y, used_width = add_table_block(self, commands, y, block, fonts.body, accent_color, available_width, x_offset)
+      y, used_width = add_table_block(self, commands, y, block, fonts.body, accent_color, available_width, x_offset, yield_state)
       content_width = math.max(content_width, x_offset + used_width)
     elseif block.type == "image" then
       local entry = self:ensure_image_entry(block)
@@ -2656,7 +2773,9 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
           accent_color,
           available_width,
           0,
-          0
+          0,
+          nil,
+          yield_state
         )
         content_width = math.max(content_width, x_offset + used_width)
       end
@@ -3017,7 +3136,10 @@ function MarkdownView:new(source, title)
   self.image_cache = {}
   self.path = nil
   self.title = title
-  self.text = ""
+  self._text_chunks = { "" }
+  self._text_length = 0
+  self._text_suffix = ""
+  rawset(self, "text", "")
   self.blocks = {}
   self.references = {}
   self.footnotes = {
@@ -3026,18 +3148,37 @@ function MarkdownView:new(source, title)
     order = {}
   }
   self.layout = nil
+  self.partial_layout = nil
+  self.partial_commit_stale_frame = nil
+  self.append_stale_frame = nil
+  self.preserved_scroll = nil
   self.font_cache = nil
   self.font = nil
   self.last_doc_change_id = nil
   self.selection_anchor = nil
   self.selection_cursor = nil
   self.selecting = false
+  self.parsing = false
+  self._parse_generation = 0
+  self._parse_thread_key = {}
+  self.layouting = false
+  self._layout_generation = 0
+  self._layout_thread_key = {}
+  self.virtualized = false
+  self.virtual_overscan_px = nil
+  self.estimated_block_height = nil
+  self.virtual_block_cache = {}
+  self.virtual_metrics = nil
+  self.virtual_layout_cache = nil
 
   if type(source) == "table" then
     self.linked_doc = source.linked_doc or source.doc
     self.path = source.path
     self.title = source.title or source.name or title
     self.font = source.font
+    self.virtualized = source.virtualized == true
+    self.virtual_overscan_px = source.virtual_overscan_px
+    self.estimated_block_height = source.estimated_block_height
     if self.linked_doc then
       self:refresh_from_doc()
     elseif source.path then
@@ -3092,20 +3233,29 @@ function MarkdownView.is_supported(path)
   return ext == "md" or ext == "markdown"
 end
 
----Invalidates the cached layout so it will be rebuilt on the next draw.
-function MarkdownView:invalidate_layout()
-  self.layout = nil
-  self.partial_layout = nil
-end
+local function combine_visible_layout(layout, partial_layout)
+  if not partial_layout then
+    return layout
+  end
+  if not layout then
+    return partial_layout
+  end
 
----Replaces the preview text and reparses the markdown document.
----@param text string?
-function MarkdownView:set_text(text)
-  self.text = (text or ""):gsub("\r\n", "\n"):gsub("\r", "\n")
-  self.blocks, self.references, self.footnotes = parse_document(self.text)
-  self.partial_text = nil
-  self.partial_layout = nil
-  self:invalidate_layout()
+  local commands = {}
+  for _, command in ipairs(layout.commands or {}) do
+    commands[#commands + 1] = command
+  end
+  for _, command in ipairs(partial_layout.commands or {}) do
+    commands[#commands + 1] = command
+  end
+
+  return {
+    width = layout.width,
+    height = math.max(layout.height or 0, partial_layout.height or 0),
+    content_width = math.max(layout.content_width or 0, partial_layout.content_width or 0),
+    commands = commands,
+    anchors = layout.anchors or {}
+  }
 end
 
 local function make_plain_text_segments(text)
@@ -3139,6 +3289,497 @@ local function make_plain_text_segments(text)
   end
 
   return segments
+end
+
+local function build_partial_layout(self, layout, partial_text)
+  if not partial_text then
+    return nil
+  end
+
+  local fonts = self:get_font_cache()
+  local commands = {}
+  local width = layout.width
+  local y = layout.height > 0 and (layout.height + BLOCK_SPACING) or 0
+  local next_y, content_width = add_paragraph(
+    commands,
+    y,
+    {
+      view = self,
+      segments = make_plain_text_segments(partial_text)
+    },
+    fonts.body,
+    COLOR_TEXT,
+    COLOR_ACCENT,
+    width,
+    0,
+    0,
+    PARAGRAPH_SPACING
+  )
+
+  return {
+    width = width,
+    base_height = layout.height,
+    height = next_y > 0 and (next_y - BLOCK_SPACING) or layout.height,
+    content_width = content_width,
+    commands = commands
+  }
+end
+
+local function preserve_visible_layout(self)
+  if not (self.layout or self.partial_layout or self.stale_layout) then
+    return
+  end
+
+  local layout = self.layout or self.stale_layout
+  local partial_layout = self.partial_layout
+  if self.partial_text and not partial_layout and layout then
+    partial_layout = build_partial_layout(self, layout, self.partial_text)
+  end
+  local visible_layout = combine_visible_layout(layout, partial_layout)
+  self.stale_layout = visible_layout or self.stale_layout
+  if not visible_layout then
+    return
+  end
+
+  self.pending_scrollable_size = math.max(
+    self.pending_scrollable_size or 0,
+    (visible_layout.height or 0) + style.padding.y * 2
+  )
+  self.pending_h_scrollable_size = math.max(
+    self.pending_h_scrollable_size or 0,
+    (visible_layout.content_width or 0) + style.padding.x * 2
+  )
+end
+
+---Invalidates the cached layout so it will be rebuilt on the next draw.
+function MarkdownView:invalidate_layout()
+  preserve_visible_layout(self)
+  self._layout_generation = (self._layout_generation or 0) + 1
+  self.layout = nil
+  self.partial_layout = nil
+  self.pending_layout = nil
+  self.layouting = false
+  self.virtual_block_cache = {}
+  self.virtual_metrics = nil
+  self.virtual_layout_cache = nil
+end
+
+local function async_parse_threshold(self)
+  local threshold = self.async_parse_threshold
+  if threshold == nil then
+    threshold = MarkdownView.async_parse_threshold
+  end
+  return threshold or ASYNC_PARSE_THRESHOLD
+end
+
+local function async_layout_threshold(self)
+  local threshold = self.async_layout_threshold
+  if threshold == nil then
+    threshold = MarkdownView.async_layout_threshold
+  end
+  return threshold or ASYNC_LAYOUT_THRESHOLD
+end
+
+local function empty_layout(width)
+  return {
+    width = width,
+    height = 0,
+    content_width = 0,
+    commands = {},
+    anchors = {}
+  }
+end
+
+local function preserve_scroll_for_layout(self)
+  self.preserved_scroll = {
+    y = self.scroll.y or 0,
+    to_y = self.scroll.to.y or 0
+  }
+end
+
+local function scroll_matches_preserved(self)
+  local preserved = self.preserved_scroll
+  return preserved
+    and (self.scroll.to.y or 0) == preserved.to_y
+end
+
+local function restore_preserved_scroll(self)
+  if not self.preserved_scroll then
+    return false
+  end
+  local should_restore = scroll_matches_preserved(self)
+  local preserved = self.preserved_scroll
+  self.preserved_scroll = nil
+  if should_restore then
+    self.scroll.y = preserved.y
+    self.scroll.to.y = preserved.to_y
+  end
+  return should_restore
+end
+
+local function translate_command(command, y_offset)
+  local copy = {}
+  for key, value in pairs(command) do
+    copy[key] = value
+  end
+  if type(copy.y) == "number" then
+    copy.y = copy.y + y_offset
+  end
+  if copy.links then
+    copy.links = {}
+    for i, link in ipairs(command.links) do
+      copy.links[i] = {}
+      for key, value in pairs(link) do
+        copy.links[i][key] = value
+      end
+      if type(copy.links[i].y) == "number" then
+        copy.links[i].y = copy.links[i].y + y_offset
+      end
+    end
+  end
+  return copy
+end
+
+local function virtual_estimated_block_height(self)
+  return math.max(1, tonumber(self.estimated_block_height) or VIRTUAL_ESTIMATED_BLOCK_HEIGHT)
+end
+
+local function virtual_overscan(self)
+  local configured = tonumber(self.virtual_overscan_px)
+  if configured then
+    return math.max(0, configured)
+  end
+  return math.max(self.size.y * 2, virtual_estimated_block_height(self) * 4)
+end
+
+local function virtual_block_entry(self, index, block, width, fonts)
+  local cache = self.virtual_block_cache or {}
+  self.virtual_block_cache = cache
+  local entry = cache[index]
+  if entry and entry.block == block and entry.width == width then
+    return entry
+  end
+
+  local commands = {}
+  local anchors = {}
+  local y, content_width = render_blocks(self, commands, 0, { block }, width, 0, fonts, COLOR_ACCENT, anchors)
+  entry = {
+    block = block,
+    width = width,
+    commands = commands,
+    anchors = anchors,
+    step = y > 0 and y or virtual_estimated_block_height(self),
+    height = y > 0 and (y - BLOCK_SPACING) or 0,
+    content_width = content_width
+  }
+  cache[index] = entry
+  return entry
+end
+
+local function virtual_block_step(self, index, block, width)
+  local entry = self.virtual_block_cache
+    and self.virtual_block_cache[index]
+  if entry and entry.block == block and entry.width == width then
+    return entry.step
+  end
+  return virtual_estimated_block_height(self)
+end
+
+local function ensure_virtual_metrics(self, width, blocks)
+  local estimate = virtual_estimated_block_height(self)
+  local metrics = self.virtual_metrics
+  if metrics
+    and metrics.width == width
+    and metrics.blocks == blocks
+    and metrics.count == #blocks
+    and metrics.estimate == estimate
+  then
+    return metrics
+  end
+
+  local steps = {}
+  local total_step = 0
+  local content_width = 0
+  for index, block in ipairs(blocks) do
+    local entry = self.virtual_block_cache
+      and self.virtual_block_cache[index]
+    local step
+    if entry and entry.block == block and entry.width == width then
+      step = entry.step
+      steps[index] = step
+      content_width = math.max(content_width, entry.content_width or 0)
+    else
+      step = estimate
+    end
+    total_step = total_step + step
+  end
+
+  metrics = {
+    width = width,
+    blocks = blocks,
+    count = #blocks,
+    estimate = estimate,
+    steps = steps,
+    offsets = { [1] = 0 },
+    valid_to = 1,
+    total_step = total_step,
+    content_width = content_width,
+    version = 0
+  }
+  self.virtual_metrics = metrics
+  return metrics
+end
+
+local function virtual_metric_step(metrics, index)
+  return metrics.steps[index] or metrics.estimate
+end
+
+local function ensure_virtual_offset(metrics, index)
+  if index <= 1 then
+    return 0
+  end
+  if metrics.valid_to >= index then
+    return metrics.offsets[index]
+  end
+
+  local valid_to = math.max(metrics.valid_to, 1)
+  local offset = metrics.offsets[valid_to] or 0
+  for i = valid_to, index - 1 do
+    offset = offset + virtual_metric_step(metrics, i)
+    metrics.offsets[i + 1] = offset
+  end
+  metrics.valid_to = index
+  return offset
+end
+
+local function update_virtual_metric_step(metrics, index, step)
+  local previous = virtual_metric_step(metrics, index)
+  if previous == step then
+    return 0
+  end
+  metrics.steps[index] = step
+  metrics.total_step = metrics.total_step + step - previous
+  if metrics.valid_to > index then
+    metrics.valid_to = index
+  end
+  metrics.version = metrics.version + 1
+  return step - previous
+end
+
+local function find_virtual_first_visible(metrics, y)
+  local low, high = 1, metrics.count
+  local result = metrics.count + 1
+  while low <= high do
+    local mid = math.floor((low + high) / 2)
+    local offset = ensure_virtual_offset(metrics, mid)
+    if offset + virtual_metric_step(metrics, mid) > y then
+      result = mid
+      high = mid - 1
+    else
+      low = mid + 1
+    end
+  end
+  return result
+end
+
+local function ensure_virtual_layout(self, width)
+  if self.parsing then
+    return self.stale_layout or self.layout or empty_layout(width)
+  end
+
+  local blocks = self.blocks or {}
+  if #blocks == 0 then
+    self.layout = empty_layout(width)
+    self.layout.virtualized = true
+    return self.layout
+  end
+
+  local overscan = virtual_overscan(self)
+  local scroll_y = math.max(self.scroll.y or 0, self.scroll.to.y or 0)
+  local visible_start = math.max(0, scroll_y - style.padding.y - overscan)
+  local visible_stop = scroll_y + self.size.y + overscan
+  local metrics = ensure_virtual_metrics(self, width, blocks)
+  local layout_cache = self.virtual_layout_cache
+  if layout_cache
+    and layout_cache.frame_start == core.frame_start
+    and layout_cache.width == width
+    and layout_cache.scroll_y == scroll_y
+    and layout_cache.size_y == self.size.y
+    and layout_cache.overscan == overscan
+    and layout_cache.generation == self._layout_generation
+    and layout_cache.metrics_version == metrics.version
+  then
+    return layout_cache.layout
+  end
+
+  local fonts = self:get_font_cache()
+  local commands = {}
+  local anchors = {}
+  local content_width = metrics.content_width or 0
+  local rendered_start
+  local rendered_stop
+  local scroll_adjust = 0
+  local preserve_scroll = scroll_matches_preserved(self)
+  local index = find_virtual_first_visible(metrics, visible_start)
+
+  while index <= metrics.count do
+    local block_start = ensure_virtual_offset(metrics, index)
+    if block_start > visible_stop then
+      break
+    end
+
+    local block = blocks[index]
+    local entry = virtual_block_entry(self, index, block, width, fonts)
+    local step_delta = update_virtual_metric_step(metrics, index, entry.step)
+    if block_start < scroll_y and step_delta ~= 0 then
+      scroll_adjust = scroll_adjust + step_delta
+    end
+    rendered_start = rendered_start or index
+    rendered_stop = index
+    for _, command in ipairs(entry.commands or {}) do
+      commands[#commands + 1] = translate_command(command, block_start)
+    end
+    for name, anchor_y in pairs(entry.anchors or {}) do
+      anchors[name] = anchor_y + block_start
+    end
+    content_width = math.max(content_width, entry.content_width or 0)
+    metrics.content_width = math.max(metrics.content_width or 0, entry.content_width or 0)
+    index = index + 1
+  end
+
+  if scroll_adjust ~= 0 and not preserve_scroll then
+    self.scroll.y = math.max(0, (self.scroll.y or 0) + scroll_adjust)
+    self.scroll.to.y = math.max(0, (self.scroll.to.y or 0) + scroll_adjust)
+    scroll_y = math.max(self.scroll.y or 0, self.scroll.to.y or 0)
+  end
+
+  self.layout = {
+    width = width,
+    height = metrics.total_step > 0 and (metrics.total_step - BLOCK_SPACING) or 0,
+    content_width = content_width,
+    commands = commands,
+    anchors = anchors,
+    virtualized = true,
+    visible_start = rendered_start,
+    visible_stop = rendered_stop
+  }
+  if preserve_scroll then
+    restore_preserved_scroll(self)
+  else
+    self.preserved_scroll = nil
+  end
+  scroll_y = math.max(self.scroll.y or 0, self.scroll.to.y or 0)
+  self.pending_scrollable_size = nil
+  self.pending_h_scrollable_size = nil
+  self.stale_layout = nil
+  self.partial_commit_stale_frame = nil
+  self.append_stale_frame = nil
+  self.layouting = false
+  notify_ready(self)
+  if scroll_adjust == 0 then
+    self.virtual_layout_cache = {
+      frame_start = core.frame_start,
+      width = width,
+      scroll_y = scroll_y,
+      size_y = self.size.y,
+      overscan = overscan,
+      generation = self._layout_generation,
+      metrics_version = metrics.version,
+      layout = self.layout
+    }
+  else
+    self.virtual_layout_cache = nil
+  end
+  return self.layout
+end
+
+function notify_ready(self)
+  if self.parsing or self.layouting then
+    return
+  end
+  local callbacks = self._ready_callbacks
+  if not callbacks or #callbacks == 0 then
+    return
+  end
+  self._ready_callbacks = nil
+  for _, callback in ipairs(callbacks) do
+    callback(self)
+  end
+end
+
+---Returns whether markdown parsing and layout work is currently settled.
+---@return boolean
+function MarkdownView:is_ready()
+  return not (self.parsing or self.layouting)
+end
+
+---Runs a callback once current asynchronous parsing/layout work has settled.
+---@param callback fun(view: core.markdownview)
+function MarkdownView:when_ready(callback)
+  if self:is_ready() then
+    callback(self)
+    return
+  end
+  self._ready_callbacks = self._ready_callbacks or {}
+  self._ready_callbacks[#self._ready_callbacks + 1] = callback
+end
+
+---Returns the full markdown source text, materializing appended chunks lazily.
+---@return string text
+function MarkdownView:get_text()
+  local materialized = rawget(self, "text")
+  if materialized ~= nil then
+    return materialized
+  end
+  local chunks = self._text_chunks or {}
+  if #chunks == 0 then
+    materialized = ""
+  elseif #chunks == 1 then
+    materialized = chunks[1]
+  else
+    materialized = table.concat(chunks)
+    self._text_chunks = { materialized }
+  end
+  self._text_length = #materialized
+  self._text_suffix = materialized:sub(-TEXT_SUFFIX_LIMIT)
+  rawset(self, "text", materialized)
+  return materialized
+end
+
+---Replaces the preview text and reparses the markdown document.
+---@param text string?
+function MarkdownView:set_text(text)
+  text = set_source_text(self, text)
+  preserve_visible_layout(self)
+  self.partial_text = nil
+  self.partial_layout = nil
+
+  self._parse_generation = (self._parse_generation or 0) + 1
+  local generation = self._parse_generation
+  local threshold = async_parse_threshold(self)
+  if threshold >= 0 and #text > threshold then
+    self.parsing = true
+    core.add_background_thread(function()
+      local blocks, references, footnotes = parse_document(text, { yieldable = true })
+      if self._parse_generation ~= generation then
+        return
+      end
+      self.blocks = blocks
+      self.references = references
+      self.footnotes = footnotes
+      self.parsing = false
+      self:invalidate_layout()
+      notify_ready(self)
+      core.redraw = true
+    end, self._parse_thread_key)
+    core.redraw = true
+    return
+  end
+
+  self.blocks, self.references, self.footnotes = parse_document(text)
+  self.parsing = false
+  self:invalidate_layout()
+  notify_ready(self)
 end
 
 ---Sets temporary plain text rendered after the parsed markdown document.
@@ -3178,9 +3819,18 @@ function MarkdownView:commit_partial_text(markdown_text)
   if text == nil then
     text = self.partial_text
   end
+  preserve_scroll_for_layout(self)
+  preserve_visible_layout(self)
+  if self.stale_layout then
+    self.partial_commit_stale_frame = core.frame_start
+  end
   self.partial_text = nil
   self.partial_layout = nil
-  return self:append_markdown(text)
+  local incremental = self:append_markdown(text)
+  if not (self.stale_layout or self.parsing or self.layouting) then
+    self.preserved_scroll = nil
+  end
+  return incremental
 end
 
 local function has_incremental_append_boundary(existing_text, appended_text)
@@ -3208,6 +3858,9 @@ end
 local function append_layout_blocks(self, blocks)
   local layout = self.layout
   if not layout or #blocks == 0 then
+    return false
+  end
+  if layout.virtualized then
     return false
   end
 
@@ -3247,16 +3900,28 @@ function MarkdownView:append_text(text)
     return true
   end
 
+  if self.partial_text then
+    preserve_scroll_for_layout(self)
+    preserve_visible_layout(self)
+  end
   self.partial_text = nil
   self.partial_layout = nil
 
-  local existing_text = self.text or ""
-  if not has_incremental_append_boundary(existing_text, text) then
-    self:set_text(existing_text .. text)
+  if self.parsing then
+    preserve_scroll_for_layout(self)
+    self:set_text(self:get_text() .. text)
     return false
   end
 
-  self.text = existing_text .. text
+  local existing_length = source_text_length(self)
+  local existing_suffix = source_text_suffix(self)
+  if not has_incremental_append_boundary(existing_suffix, text) then
+    preserve_scroll_for_layout(self)
+    self:set_text(self:get_text() .. text)
+    return false
+  end
+
+  append_source_text(self, text)
   local had_footnotes_block = self.blocks[#self.blocks]
     and self.blocks[#self.blocks].type == "footnotes"
     and self.blocks[#self.blocks].generated
@@ -3266,18 +3931,24 @@ function MarkdownView:append_text(text)
     references = self.references,
     footnote_definitions = self.footnotes.definitions
   }
-  local blocks = parse_blocks_from_lines(split_lines(text), state, existing_text == "")
-  prepare_blocks(blocks, self.references, self.footnotes)
+  local blocks = parse_blocks_from_lines(split_lines(text), state, existing_length == 0)
+  prepare_blocks(blocks, self.references, self.footnotes, state)
   append_blocks(self.blocks, blocks)
 
   local footnotes_block = build_footnotes_block(self.footnotes)
   if footnotes_block then
-    prepare_blocks({ footnotes_block }, self.references, self.footnotes)
+    prepare_blocks({ footnotes_block }, self.references, self.footnotes, state)
     self.blocks[#self.blocks + 1] = footnotes_block
   end
 
   if had_footnotes_block or footnotes_block or not append_layout_blocks(self, blocks) then
+    preserve_scroll_for_layout(self)
     self:invalidate_layout()
+    if self.stale_layout then
+      self.append_stale_frame = core.frame_start
+    end
+  else
+    self.preserved_scroll = nil
   end
   return true
 end
@@ -3494,11 +4165,84 @@ end
 ---@return table
 function MarkdownView:ensure_layout()
   local width = math.max(self.size.x - style.padding.x * 2, 1)
+  if self.parsing then
+    return self.stale_layout or self.layout or empty_layout(width)
+  end
+
+  if self.stale_layout
+    and (
+      self.partial_commit_stale_frame == core.frame_start
+      or self.append_stale_frame == core.frame_start
+    )
+  then
+    core.redraw = true
+    return self.stale_layout
+  end
+
+  if self.virtualized then
+    return ensure_virtual_layout(self, width)
+  end
+
   if self.layout and self.layout.width == width then
     return self.layout
   end
 
+  if self.layouting and self.pending_layout and self.pending_layout.width == width then
+    return self.layout or self.pending_layout.previous or self.stale_layout or empty_layout(width)
+  end
+
   local fonts = self:get_font_cache()
+  local threshold = async_layout_threshold(self)
+  if threshold >= 0 and source_text_length(self) > threshold then
+    self.layouting = true
+    self._layout_generation = (self._layout_generation or 0) + 1
+    local generation = self._layout_generation
+    local blocks = self.blocks
+    local references = self.references
+    local footnotes = self.footnotes
+    local previous = self.layout or self.stale_layout
+    self.pending_layout = {
+      width = width,
+      previous = previous
+    }
+    core.add_background_thread(function()
+      local commands = {}
+      local anchors = {}
+      local yield_state = {
+        yieldable = can_yield_parser(),
+        next_yield_time = system.get_time() + PARSE_YIELD_INTERVAL
+      }
+      local y, content_width = render_blocks(self, commands, 0, blocks, width, 0, fonts, COLOR_ACCENT, anchors, yield_state)
+      if self._layout_generation ~= generation
+        or self.blocks ~= blocks
+        or self.references ~= references
+        or self.footnotes ~= footnotes
+      then
+        return
+      end
+      self.layout = {
+        width = width,
+        height = y > 0 and (y - BLOCK_SPACING) or 0,
+        content_width = content_width,
+        commands = commands,
+        anchors = anchors
+      }
+      restore_preserved_scroll(self)
+      self.partial_layout = nil
+      self.pending_layout = nil
+      self.pending_scrollable_size = nil
+      self.pending_h_scrollable_size = nil
+      self.stale_layout = nil
+      self.partial_commit_stale_frame = nil
+      self.append_stale_frame = nil
+      self.layouting = false
+      notify_ready(self)
+      core.redraw = true
+    end, self._layout_thread_key)
+    core.redraw = true
+    return previous or empty_layout(width)
+  end
+
   local accent_color = COLOR_ACCENT
   local commands = {}
   local anchors = {}
@@ -3511,7 +4255,16 @@ function MarkdownView:ensure_layout()
     commands = commands,
     anchors = anchors
   }
+  restore_preserved_scroll(self)
+  self.partial_layout = nil
 
+  self.pending_scrollable_size = nil
+  self.pending_h_scrollable_size = nil
+  self.stale_layout = nil
+  self.partial_commit_stale_frame = nil
+  self.append_stale_frame = nil
+  self.layouting = false
+  notify_ready(self)
   return self.layout
 end
 
@@ -3524,36 +4277,14 @@ function MarkdownView:ensure_partial_layout()
 
   local layout = self:ensure_layout()
   local width = layout.width
-  if self.partial_layout and self.partial_layout.width == width then
+  if self.partial_layout
+    and self.partial_layout.width == width
+    and self.partial_layout.base_height == layout.height
+  then
     return self.partial_layout
   end
 
-  local fonts = self:get_font_cache()
-  local commands = {}
-  local y = layout.height > 0 and (layout.height + BLOCK_SPACING) or 0
-  local next_y, content_width = add_paragraph(
-    commands,
-    y,
-    {
-      view = self,
-      segments = make_plain_text_segments(self.partial_text)
-    },
-    fonts.body,
-    COLOR_TEXT,
-    COLOR_ACCENT,
-    width,
-    0,
-    0,
-    PARAGRAPH_SPACING
-  )
-
-  self.partial_layout = {
-    width = width,
-    height = next_y > 0 and (next_y - BLOCK_SPACING) or layout.height,
-    content_width = content_width,
-    commands = commands
-  }
-
+  self.partial_layout = build_partial_layout(self, layout, self.partial_text)
   return self.partial_layout
 end
 
@@ -3562,7 +4293,7 @@ function MarkdownView:get_scrollable_size()
   local layout = self:ensure_layout()
   local partial_layout = self:ensure_partial_layout()
   local height = partial_layout and partial_layout.height or layout.height
-  return height + style.padding.y * 2
+  return math.max(height + style.padding.y * 2, self.pending_scrollable_size or 0)
 end
 
 ---@return number
@@ -3572,7 +4303,7 @@ function MarkdownView:get_h_scrollable_size()
   local content_width = partial_layout
     and math.max(layout.content_width, partial_layout.content_width)
     or layout.content_width
-  return content_width + style.padding.x * 2
+  return math.max(content_width + style.padding.x * 2, self.pending_h_scrollable_size or 0)
 end
 
 ---Returns the rendered size for the given outer width.

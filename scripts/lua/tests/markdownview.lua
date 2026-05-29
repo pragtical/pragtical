@@ -76,6 +76,19 @@ local function remove_test_path(path)
   return false, err
 end
 
+local function run_core_threads_until(predicate, timeout)
+  local deadline = system.get_time() + (timeout or 1)
+  while not predicate() and system.get_time() < deadline do
+    if coroutine.isyieldable() then
+      coroutine.yield(0)
+    else
+      core.step(system.get_time())
+    end
+    system.sleep(0.001)
+  end
+  test.ok(predicate(), "timed out waiting for core thread")
+end
+
 test.describe("markdownview", function()
   test.before_each(function(context)
     temp_root = USERDIR
@@ -286,7 +299,9 @@ tags = ["markdown", "tutorial", "web"]
     local incremental = view:append_markdown("## Two\n\nSecond paragraph with **bold**.\n")
 
     test.equal(incremental, true)
+    test.equal(rawget(view, "text"), nil)
     test.equal(view.text, "# One\n\nFirst paragraph.\n\n## Two\n\nSecond paragraph with **bold**.\n")
+    test.equal(rawget(view, "text"), "# One\n\nFirst paragraph.\n\n## Two\n\nSecond paragraph with **bold**.\n")
     test.equal(view.blocks, before_blocks)
     test.equal(view.blocks[1], before_first_block)
     test.equal(#view.blocks, 4)
@@ -296,6 +311,17 @@ tags = ["markdown", "tutorial", "web"]
     test.equal(view.blocks[4].text, "Second paragraph with **bold**.")
   end)
 
+  test.test("keeps appended markdown chunks lazy until full text is requested", function()
+    local view = MarkdownView("# One\n\nFirst paragraph.\n\n")
+
+    local incremental = view:append_markdown("## Two\n\nSecond paragraph.\n")
+
+    test.equal(incremental, true)
+    test.equal(rawget(view, "text"), nil)
+    test.equal(view:get_text(), "# One\n\nFirst paragraph.\n\n## Two\n\nSecond paragraph.\n")
+    test.equal(rawget(view, "text"), "# One\n\nFirst paragraph.\n\n## Two\n\nSecond paragraph.\n")
+  end)
+
   test.test("falls back to full parse when append continues a block", function()
     local view = MarkdownView("First")
     local before_blocks = view.blocks
@@ -303,11 +329,491 @@ tags = ["markdown", "tutorial", "web"]
     local incremental = view:append_markdown(" paragraph")
 
     test.equal(incremental, false)
+    test.equal(rawget(view, "text"), "First paragraph")
     test.equal(view.text, "First paragraph")
     test.not_equal(view.blocks, before_blocks)
     test.equal(#view.blocks, 1)
     test.equal(view.blocks[1].type, "paragraph")
     test.equal(view.blocks[1].text, "First paragraph")
+  end)
+
+  test.test("parses large replacement text on a core thread", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = 1
+
+    view:set_text("# Async\n\n" .. string.rep("Paragraph with **bold** text.\n\n", 200))
+
+    test.equal(view.parsing, true)
+    run_core_threads_until(function()
+      return not view.parsing
+    end)
+    test.equal(view.blocks[1].type, "heading")
+    test.equal(view.blocks[1].text, "Async")
+    test.equal(view.blocks[2].type, "paragraph")
+  end)
+
+  test.test("ignores stale threaded markdown parses", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = 1
+
+    view:set_text("# Old\n\n" .. string.rep("Old paragraph.\n\n", 200))
+    view.async_parse_threshold = math.huge
+    view:set_text("# New\n\nCurrent.")
+
+    run_core_threads_until(function()
+      return not view.parsing
+    end)
+    test.equal(#view.blocks, 2)
+    test.equal(view.blocks[1].text, "New")
+    test.equal(view.blocks[2].text, "Current.")
+  end)
+
+  test.test("builds large replacement layouts on a core thread", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = 1
+    view:set_text("# Async\n\n" .. string.rep("Paragraph with **bold** text.\n\n", 200))
+    view.size.x = 400
+
+    local layout = view:ensure_layout()
+
+    test.equal(view.layouting, true)
+    test.equal(layout.width, 400 - style.padding.x * 2)
+    test.equal(#layout.commands, 0)
+    run_core_threads_until(function()
+      return not view.layouting
+    end)
+    test.equal(view.layout.width, 400 - style.padding.x * 2)
+    test.ok(#view.layout.commands > 0)
+  end)
+
+  test.test("ignores stale threaded markdown layouts after resize", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = 1
+    view:set_text("# Resize\n\n" .. string.rep("Paragraph with **bold** text.\n\n", 200))
+
+    view.size.x = 300
+    view:ensure_layout()
+    view.size.x = 500
+    view:ensure_layout()
+
+    run_core_threads_until(function()
+      return not view.layouting
+    end)
+    test.equal(view.layout.width, 500 - style.padding.x * 2)
+  end)
+
+  test.test("runs ready callbacks after threaded layout settles", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = 1
+    view:set_text("# Ready\n\n" .. string.rep("Paragraph with **bold** text.\n\n", 200))
+    view.size.x = 400
+
+    view:ensure_layout()
+    local ready_width
+    view:when_ready(function(markdown_view)
+      ready_width = markdown_view.layout and markdown_view.layout.width
+    end)
+
+    test.equal(ready_width, nil)
+    run_core_threads_until(function()
+      return ready_width ~= nil
+    end)
+    test.equal(ready_width, 400 - style.padding.x * 2)
+  end)
+
+  test.test("preserves scrollable height while threaded layout rebuilds", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 100
+    view:set_text("# Old\n\n" .. string.rep("Old paragraph.\n\n", 80))
+    local old_size = view:get_scrollable_size()
+    test.ok(old_size > view.size.y)
+
+    view.async_layout_threshold = 1
+    view:set_text("# New\n\n" .. string.rep("New paragraph.\n\n", 80))
+
+    test.equal(view.layout, nil)
+    test.ok(view:get_scrollable_size() >= old_size)
+    view:clamp_scroll_position()
+    test.ok(view:get_scrollable_size() >= old_size)
+  end)
+
+  test.test("keeps previous rendered layout while threaded layout rebuilds", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view:set_text("# Old\n\n" .. string.rep("Old paragraph.\n\n", 20))
+    local old_layout = view:ensure_layout()
+    test.ok(#old_layout.commands > 0)
+
+    view.async_layout_threshold = 1
+    view:set_text("# New\n\n" .. string.rep("New paragraph.\n\n", 20))
+    local pending_layout = view:ensure_layout()
+
+    test.equal(view.layout, nil)
+    test.equal(pending_layout, old_layout)
+    test.ok(#pending_layout.commands > 0)
+  end)
+
+  test.test("keeps partial layout visible while replacement text parses", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Reasoning\n\n")
+    local base_layout = view:ensure_layout()
+    view:set_partial_text(string.rep("streamed reasoning text\n", 30))
+
+    view.async_parse_threshold = 1
+    view:set_text("# Reasoning\n\n" .. string.rep("final reasoning text\n\n", 30))
+    local pending_layout = view:ensure_layout()
+
+    test.equal(view.parsing, true)
+    test.ok(#pending_layout.commands > #base_layout.commands)
+    test.ok(view:get_scrollable_size() > base_layout.height + style.padding.y * 2)
+    run_core_threads_until(function()
+      return not view.parsing
+    end)
+  end)
+
+  test.test("keeps partial visible during replacement while base layout is stale", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Long\n\n" .. string.rep("Old paragraph.\n\n", 80))
+    local base_layout = view:ensure_layout()
+    view.stale_layout = base_layout
+    view.layout = nil
+    view:set_partial_text(string.rep("streamed partial text\n", 30))
+    view.async_parse_threshold = 1
+
+    view:set_text("# Long\n\n" .. string.rep("Final paragraph.\n\n", 80))
+    local pending_layout = view:ensure_layout()
+
+    test.equal(view.parsing, true)
+    test.ok(pending_layout.height > base_layout.height)
+    test.ok(#pending_layout.commands > #base_layout.commands)
+    run_core_threads_until(function()
+      return not view.parsing
+    end)
+  end)
+
+  test.test("keeps partial visible while commit invalidates a stale base layout", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Long\n\n" .. string.rep("Old paragraph.\n\n", 80))
+    local base_layout = view:ensure_layout()
+    view.stale_layout = base_layout
+    view.layout = nil
+    view:set_partial_text(string.rep("streamed partial text\n", 30))
+
+    local incremental = view:commit_partial_text("\n\n## Assistant\n\n" .. string.rep("Final paragraph.\n\n", 30))
+    local pending_layout = view:ensure_layout()
+
+    test.equal(incremental, true)
+    test.equal(view.partial_text, nil)
+    test.ok(pending_layout.height > base_layout.height)
+    test.ok(#pending_layout.commands > #base_layout.commands)
+  end)
+
+  test.test("keeps committed partial visible for the commit frame", function()
+    local old_frame_start = core.frame_start
+    core.frame_start = 1000
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Long\n\n" .. string.rep("Old paragraph.\n\n", 40))
+    local base_layout = view:ensure_layout()
+    view.stale_layout = base_layout
+    view.layout = nil
+    view:set_partial_text(string.rep("streamed partial text\n", 20))
+
+    view:commit_partial_text("\n\n## Assistant\n\n" .. string.rep("Final paragraph.\n\n", 20))
+    local stale_bottom = math.max(0, view.stale_layout.height + style.padding.y * 2 - view.size.y)
+    view.scroll.y = stale_bottom
+    view.scroll.to.y = stale_bottom
+    local commit_frame_layout = view:ensure_layout()
+
+    test.equal(commit_frame_layout, view.stale_layout)
+    test.ok(commit_frame_layout.height > base_layout.height)
+
+    core.frame_start = 1001
+    local final_layout = view:ensure_layout()
+    local final_bottom = math.max(0, final_layout.height + style.padding.y * 2 - view.size.y)
+    core.frame_start = old_frame_start
+
+    test.ok(final_layout ~= commit_frame_layout)
+    test.ok(stale_bottom < final_bottom)
+    test.equal(view.scroll.y, stale_bottom)
+    test.equal(view.scroll.to.y, stale_bottom)
+    test.equal(view.partial_commit_stale_frame, nil)
+  end)
+
+  test.test("keeps previous layout visible for the append frame", function()
+    local old_frame_start = core.frame_start
+    core.frame_start = 2000
+    local view = MarkdownView({
+      text = "# Long\n\n" .. string.rep("Old paragraph.\n\n", 40),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 0
+    })
+    view.size.x = 400
+    view.size.y = 120
+    local base_layout = view:ensure_layout()
+
+    view:append_text("\n\n## Assistant\n\n" .. string.rep("Final paragraph.\n\n", 20))
+    local stale_bottom = math.max(0, view.stale_layout.height + style.padding.y * 2 - view.size.y)
+    view.scroll.y = stale_bottom
+    view.scroll.to.y = stale_bottom
+    local append_frame_layout = view:ensure_layout()
+
+    test.equal(append_frame_layout, view.stale_layout)
+    test.equal(append_frame_layout, base_layout)
+
+    core.frame_start = 2001
+    local final_layout = view:ensure_layout()
+    local final_bottom = math.max(0, final_layout.height + style.padding.y * 2 - view.size.y)
+    core.frame_start = old_frame_start
+
+    test.ok(final_layout ~= append_frame_layout)
+    test.ok(stale_bottom < final_bottom)
+    test.ok(view.scroll.y < final_bottom)
+    test.ok(view.scroll.to.y < final_bottom)
+    test.equal(view.append_stale_frame, nil)
+  end)
+
+  test.test("keeps scroll position steady after partial commit", function()
+    local old_frame_start = core.frame_start
+    core.frame_start = 3000
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Long\n\n" .. string.rep("Old paragraph.\n\n", 40))
+    view:ensure_layout()
+    view:set_partial_text(string.rep("streamed partial text\n", 20))
+    view.scroll.y = 240
+    view.scroll.to.y = 240
+
+    view:commit_partial_text("\n\n## Assistant\n\n" .. string.rep("Final paragraph.\n\n", 20))
+    view:ensure_layout()
+    core.frame_start = 3001
+    view:ensure_layout()
+    core.frame_start = old_frame_start
+
+    test.equal(view.scroll.y, 240)
+    test.equal(view.scroll.to.y, 240)
+  end)
+
+  test.test("does not restore append scroll after user scrolls", function()
+    local view = MarkdownView("")
+    view.async_parse_threshold = math.huge
+    view.async_layout_threshold = math.huge
+    view.size.x = 400
+    view.size.y = 120
+    view:set_text("# Long\n\n" .. string.rep("Old paragraph.\n\n", 80))
+    view:ensure_layout()
+    view.async_layout_threshold = 1
+    view.scroll.y = 200
+    view.scroll.to.y = 200
+
+    view:append_text("\n\nParagraph with a footnote.[^note]\n\n[^note]: Note text.\n")
+    view:ensure_layout()
+    view.scroll.y = 320
+    view.scroll.to.y = 320
+
+    run_core_threads_until(function()
+      return not view.layouting
+    end)
+
+    test.equal(view.scroll.y, 320)
+    test.equal(view.scroll.to.y, 320)
+  end)
+
+  test.test("virtualized layouts render only visible markdown blocks", function()
+    local lines = {}
+    for i = 1, 80 do
+      lines[#lines + 1] = "## Item " .. i
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 0
+    })
+    view.size.x = 400
+    view.size.y = 80
+
+    local layout = view:ensure_layout()
+    test.equal(layout.virtualized, true)
+    test.ok(layout.height > view.size.y)
+    test.equal(layout.visible_start, 1)
+    test.ok(layout.visible_stop < #view.blocks)
+    test.ok(#layout.commands > 0)
+  end)
+
+  test.test("virtualized layouts materialize markdown blocks while scrolling", function()
+    local lines = {}
+    for i = 1, 80 do
+      lines[#lines + 1] = "## Item " .. i
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 0
+    })
+    view.size.x = 400
+    view.size.y = 80
+    local first_layout = view:ensure_layout()
+    view.scroll.y = math.max(0, first_layout.height - view.size.y)
+    view.scroll.to.y = view.scroll.y
+
+    local layout = view:ensure_layout()
+    test.equal(layout.virtualized, true)
+    test.ok(layout.visible_start > 1)
+    test.equal(layout.visible_stop, #view.blocks)
+    test.ok(#layout.commands > 0)
+  end)
+
+  test.test("virtualized layouts skip blocks ending at the visible boundary", function()
+    local lines = {}
+    for i = 1, 20 do
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 0
+    })
+    view.size.x = 400
+    view.size.y = 80
+
+    view:ensure_layout()
+    local first_step = view.virtual_metrics.steps[1]
+    test.not_nil(first_step)
+    view.scroll.y = first_step + style.padding.y
+    view.scroll.to.y = view.scroll.y
+
+    local layout = view:ensure_layout()
+
+    test.equal(layout.virtualized, true)
+    test.equal(layout.visible_start, 2)
+  end)
+
+  test.test("virtualized layouts anchor scroll when measured heights change", function()
+    local lines = {}
+    for i = 1, 40 do
+      lines[#lines + 1] = "## Item " .. i
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 200,
+      virtual_overscan_px = 240
+    })
+    view.size.x = 400
+    view.size.y = 80
+    view.scroll.y = 260
+    view.scroll.to.y = 260
+
+    local layout = view:ensure_layout()
+
+    test.equal(layout.virtualized, true)
+    test.ok(view.scroll.y < 260)
+    test.equal(view.scroll.y, view.scroll.to.y)
+  end)
+
+  test.test("virtualized layouts reuse same-frame visible layout", function()
+    local lines = {}
+    for i = 1, 80 do
+      lines[#lines + 1] = "## Item " .. i
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 0
+    })
+    view.size.x = 400
+    view.size.y = 80
+
+    local layout = view:ensure_layout()
+    local cached = view:ensure_layout()
+
+    test.equal(cached, layout)
+    test.not_nil(view.virtual_layout_cache)
+    test.ok((layout.visible_stop or 0) < #view.blocks)
+  end)
+
+  test.test("virtualized layouts hit-test translated links", function()
+    local lines = {}
+    for i = 1, 12 do
+      lines[#lines + 1] = "## Item " .. i
+      lines[#lines + 1] = ""
+      lines[#lines + 1] = "Body " .. i
+      lines[#lines + 1] = ""
+    end
+    lines[#lines + 1] = "[target](https://example.com)"
+
+    local view = MarkdownView({
+      text = table.concat(lines, "\n"),
+      virtualized = true,
+      estimated_block_height = 32,
+      virtual_overscan_px = 1024
+    })
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 400
+    view.size.y = 80
+
+    local layout = view:ensure_layout()
+    local link_command
+    local link
+    for _, command_item in ipairs(layout.commands) do
+      if command_item.links then
+        link_command = command_item
+        link = command_item.links[1]
+      end
+    end
+
+    test.not_nil(link_command)
+    test.not_nil(link)
+    test.ok(link_command.y > 0)
+    test.equal(link.y, link_command.y)
+    local x = style.padding.x + link.x + 1
+    local y = style.padding.y + link_command.y + 1
+    test.equal(view:get_link_at(x, y), "https://example.com")
   end)
 
   test.test("renders partial text without mutating parsed markdown", function()
