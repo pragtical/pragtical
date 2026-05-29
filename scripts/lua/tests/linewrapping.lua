@@ -3,6 +3,7 @@ local Doc = require "core.doc"
 local DocView = require "core.docview"
 local LineWrapping = require "plugins.linewrapping"
 local config = require "core.config"
+local style = require "core.style"
 require "plugins.codefold"
 dofile("subprojects/plugins/plugins/indentguide.lua")
 
@@ -202,6 +203,48 @@ test.describe("linewrapping", function()
           end
         end
         test.ok(found)
+      end)
+    end)
+  end)
+
+  test.test("search selections keep search colors on wrapped rows", function()
+    config.plugins.indentguide.enabled = false
+
+    local text = "aaaa search\n"
+    local view = make_view(text)
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("aaaa "))
+
+    local col1 = text:find("search", 1, true)
+    local col2 = col1 + #"search"
+    view.doc:set_selection(1, col1, 1, col2)
+    view.doc:add_search_selection(1, col1, 1, col2)
+
+    local x, y = view:get_line_screen_position(1)
+
+    with_draw_text(function(text_calls)
+      with_draw_rect(function(rect_calls)
+        view:draw_line_body(1, x, y)
+
+        local expected_rect_color = style.search_selection or style.caret
+        local found_rect = false
+        for _, call in ipairs(rect_calls) do
+          if call.color == expected_rect_color then
+            found_rect = true
+            break
+          end
+        end
+        test.ok(found_rect)
+
+        local expected_text_color = style.search_selection_text or style.background
+        local found_text = false
+        for _, call in ipairs(text_calls) do
+          if call.color == expected_text_color then
+            found_text = true
+            break
+          end
+        end
+        test.ok(found_text)
       end)
     end)
   end)

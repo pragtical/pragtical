@@ -4,6 +4,7 @@ local test = require "core.test"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local core = require "core"
+local command = require "core.command"
 local config = require "core.config"
 local common = require "core.common"
 local style = require "core.style"
@@ -510,6 +511,147 @@ test.describe("codefold - virtual line mapping", function()
     end)
 
     config.plugins.codefold.enabled = previous_enabled
+  end)
+
+  test.test("ensure_line_visible unfolds regions containing the line", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    config.plugins.codefold.enabled = true
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "a\n",
+      "  b\n",
+      "    c\n",
+      "  d\n",
+      "e\n"
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    view.cf_regions = {
+      { indent = 0, start = 1, stop = 4 },
+      { indent = 2, start = 2, stop = 3 }
+    }
+    view.cf_folded_regions = { 1, 2 }
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    view.cf_state_loaded = true
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      doc.lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+
+    test.is_nil(view.cf_unfold_map[3])
+
+    view:ensure_line_visible(3)
+
+    test.equal(#view.cf_folded_regions, 0)
+    test.ok(view:is_line_visible(3))
+    test.equal(view.cf_unfold_map[3], 3)
+
+    config.plugins.codefold.enabled = previous_enabled
+  end)
+
+  test.test("select all occurrences reveals folded matches and keeps search highlight", function()
+    require "plugins.codefold"
+    require "core.commands.findreplace"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_active_view = core.active_view
+    config.plugins.codefold.enabled = true
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "target\n",
+      "if ok then\n",
+      "  target\n",
+      "end\n"
+    }
+    doc:reset_syntax()
+    doc:set_selection(1, 1, 1, 7)
+
+    local view = DocView(doc)
+    view.cf_regions = {
+      { indent = 0, start = 2, stop = 3 }
+    }
+    view.cf_folded_regions = { 1 }
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    view.cf_state_loaded = true
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      doc.lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+    core.active_view = view
+
+    test.is_nil(view.cf_unfold_map[3])
+
+    command.perform("find-replace:select-add-all")
+
+    test.equal(#view.cf_folded_regions, 0)
+    test.ok(view:is_line_visible(3))
+    test.ok(#doc.selections > 4)
+    test.ok(doc:is_search_selection(3, 3, 3, 9))
+
+    config.plugins.codefold.enabled = previous_enabled
+    core.active_view = previous_active_view
+  end)
+
+  test.test("go to line fuzzy match reveals folded target line", function()
+    require "plugins.codefold"
+    require "core.commands.doc"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_active_view = core.active_view
+    config.plugins.codefold.enabled = true
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "start\n",
+      "if ok then\n",
+      "  target match\n",
+      "end\n"
+    }
+    doc:reset_syntax()
+
+    local view = DocView(doc)
+    view.cf_regions = {
+      { indent = 0, start = 2, stop = 3 }
+    }
+    view.cf_folded_regions = { 1 }
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    view.cf_state_loaded = true
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      doc.lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+    core.active_view = view
+
+    test.is_nil(view.cf_unfold_map[3])
+
+    command.perform("doc:go-to-line")
+    core.command_view:set_text("target")
+    core.command_view:update_suggestions()
+    for idx, item in ipairs(core.command_view.suggestions) do
+      if item.line == 3 then
+        core.command_view.suggestion_idx = idx
+        break
+      end
+    end
+    core.command_view:submit()
+
+    test.equal(#view.cf_folded_regions, 0)
+    test.ok(view:is_line_visible(3))
+    test.equal(doc:get_selection(), 3)
+
+    config.plugins.codefold.enabled = previous_enabled
+    core.active_view = previous_active_view
   end)
 
 end)

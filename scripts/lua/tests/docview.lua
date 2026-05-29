@@ -1,6 +1,7 @@
 local test = require "core.test"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local style = require "core.style"
 
 local function make_view(text)
   local doc = Doc(nil, nil, true)
@@ -46,6 +47,24 @@ local function with_draw_text(fn)
   if not ok then error(err, 0) end
 end
 
+local function with_draw_rect(fn)
+  local original = renderer.draw_rect
+  local calls = {}
+  renderer.draw_rect = function(x, y, w, h, color)
+    calls[#calls + 1] = {
+      x = x,
+      y = y,
+      w = w,
+      h = h,
+      color = color
+    }
+  end
+
+  local ok, err = pcall(fn, calls)
+  renderer.draw_rect = original
+  if not ok then error(err, 0) end
+end
+
 local function scan_x_offset_col(view, line, x)
   local line_text = view.doc.lines[line]
   local line_len = #line_text
@@ -63,6 +82,48 @@ local function scan_x_offset_col(view, line, x)
 end
 
 test.describe("docview", function()
+  test.test("ensure_line_visible returns the requested line by default", function()
+    local view = make_view("line\n")
+
+    test.equal(view:ensure_line_visible(1), 1)
+  end)
+
+  test.test("draw_line_body uses search colors for search selections", function()
+    local view = make_view("aaaa search\n")
+    local col1 = view.doc.lines[1]:find("search", 1, true)
+    local col2 = col1 + #"search"
+    view.doc:set_selection(1, col1, 1, col2)
+    view.doc:add_search_selection(1, col1, 1, col2)
+
+    local x, y = view:get_line_screen_position(1)
+
+    with_draw_text(function(text_calls)
+      with_draw_rect(function(rect_calls)
+        view:draw_line_body(1, x, y)
+
+        local expected_rect_color = style.search_selection or style.caret
+        local found_rect = false
+        for _, call in ipairs(rect_calls) do
+          if call.color == expected_rect_color then
+            found_rect = true
+            break
+          end
+        end
+        test.ok(found_rect)
+
+        local expected_text_color = style.search_selection_text or style.background
+        local found_text = false
+        for _, call in ipairs(text_calls) do
+          if call.color == expected_text_color then
+            found_text = true
+            break
+          end
+        end
+        test.ok(found_text)
+      end)
+    end)
+  end)
+
   test.test("draw_line_text slices long lines to the visible range", function()
     local line = string.rep("var a = 1; ", 2000)
     local view = make_view(line)

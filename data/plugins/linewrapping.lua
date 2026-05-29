@@ -528,6 +528,27 @@ function DocView:get_col_x_offset(line, col, line_end)
 end
 
 local old_draw_line_text = DocView.draw_line_text
+local function get_search_selections(doc, line)
+  local selections = {}
+  for _, line1, col1, line2, col2 in doc:get_selections(true) do
+    if line == line1 and line <= line2
+      and doc:is_search_selection(line1, col1, line2, col2)
+    then
+      selections[#selections + 1] = { start = col1, stop = col2 }
+    end
+  end
+  return selections
+end
+
+local function is_search_selected(selections, col)
+  for _, selection in ipairs(selections) do
+    if col >= selection.start and col < selection.stop then
+      return true
+    end
+  end
+  return false
+end
+
 function DocView:draw_line_text(line, x, y)
   if not self.wrapped_settings then return old_draw_line_text(self, line, x, y) end
   local default_font = self:get_font()
@@ -536,6 +557,7 @@ function DocView:draw_line_text(line, x, y)
   local idx, _, count = get_line_idx_col_count(self, line)
   local total_offset = 1
   local _, indent_size = self.doc:get_indent_info()
+  local search_selections = get_search_selections(self.doc, line)
   default_font:set_tab_size(indent_size)
   for _, type, text in self.doc.highlighter:each_token(line) do
     local color = style.syntax[type] or style.syntax["normal"]
@@ -550,7 +572,25 @@ function DocView:draw_line_text(line, x, y)
       end
       local max_length = next_line_start_col - total_offset
       local rendered_text = text:sub(token_offset, token_offset + max_length - 1)
-      tx = renderer.draw_text(font, rendered_text, tx, ty, color, { tab_offset = tx - x })
+      if #search_selections == 0 then
+        tx = renderer.draw_text(font, rendered_text, tx, ty, color, { tab_offset = tx - x })
+      else
+        local i = 1
+        local rendered_col = total_offset
+        while i <= #rendered_text do
+          local chunk_start = i
+          local selected = is_search_selected(search_selections, rendered_col)
+          while i <= #rendered_text
+            and is_search_selected(search_selections, rendered_col) == selected
+          do
+            i = i + 1
+            rendered_col = rendered_col + 1
+          end
+          local chunk = rendered_text:sub(chunk_start, i - 1)
+          local chunk_color = selected and (style.search_selection_text or style.background) or color
+          tx = renderer.draw_text(font, chunk, tx, ty, chunk_color, { tab_offset = tx - x })
+        end
+      end
       total_offset = total_offset + #rendered_text
       if total_offset ~= next_line_start_col or max_length == 0 then break end
       token_offset = token_offset + #rendered_text
@@ -568,6 +608,10 @@ function DocView:draw_line_body(line, x, y)
   local idx0, _, count = get_line_idx_col_count(self, line)
   for lidx, line1, col1, line2, col2 in self.doc:get_selections(true) do
     if line >= line1 and line <= line2 then
+      local selection_color = style.selection
+      if self.doc:is_search_selection(line1, col1, line2, col2) then
+        selection_color = style.search_selection or style.caret
+      end
       if line1 ~= line then col1 = 1 end
       if line2 ~= line then col2 = #self.doc.lines[line] + 1 end
       if col1 ~= col2 then
@@ -582,7 +626,7 @@ function DocView:draw_line_body(line, x, y)
             start = start + get_idx_line_length(self, i, line)
             x2 = x + self:get_col_x_offset(line, start + 1, true)
           end
-          renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, style.selection)
+          renderer.draw_rect(x1, y + (i - idx0) * lh, x2 - x1, lh, selection_color)
         end
       end
     end

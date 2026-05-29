@@ -407,8 +407,10 @@ local function find(reverse, not_scroll, unselect_first, no_wrap)
         text = text:ulower()
       end
       if reverse or (current_text == text or current_text == "") then
+        doc_view:ensure_line_visible(line1)
         doc:set_selection(line1, col2, line2, col1)
       else
+        doc_view:ensure_line_visible(line1)
         doc:set_selection(line1, col1, line2, col2)
       end
       if not not_scroll then

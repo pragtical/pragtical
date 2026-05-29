@@ -728,6 +728,15 @@ function DocView:get_visual_line_col_from_x(row, x)
 end
 
 
+---Ensure a document line is visible in this view.
+---Plugins that hide lines can override this to reveal the requested line.
+---@param line integer
+---@return integer line
+function DocView:ensure_line_visible(line)
+  return line
+end
+
+
 ---Convert screen coordinates to document line/column.
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate

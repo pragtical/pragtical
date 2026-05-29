@@ -592,6 +592,36 @@ function DocView:get_hidden_lines()
   return docview_get_hidden_lines(self)
 end
 
+local docview_ensure_line_visible = DocView.ensure_line_visible
+function DocView:ensure_line_visible(line)
+  line = docview_ensure_line_visible(self, line)
+  if not config.plugins.codefold.enabled or not self:is(DocView) then
+    return line
+  end
+  if not self.cf_unfold_map or self.cf_unfold_map[line] then
+    return line
+  end
+
+  local folded = {}
+  local changed = false
+  for _, region_idx in ipairs(self.cf_folded_regions or {}) do
+    local region = self.cf_regions[region_idx]
+    if region and line > region.start and line <= region.stop then
+      changed = true
+    else
+      folded[#folded + 1] = region_idx
+    end
+  end
+
+  if changed then
+    self.cf_folded_regions = folded
+    rebuild_mappings(self)
+    save_fold_state(self.doc, self.cf_regions, self.cf_folded_regions)
+    core.redraw = true
+  end
+  return line
+end
+
 ---------------------------------------------------------------------
 -- Method overrides: DocView
 ---------------------------------------------------------------------
