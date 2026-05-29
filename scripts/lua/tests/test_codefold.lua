@@ -10,6 +10,24 @@ local common = require "core.common"
 local style = require "core.style"
 local syntax = require "core.syntax"
 
+local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
+local source_root = common.dirname(
+  common.dirname(common.dirname(common.dirname(source_path)))
+)
+
+local function dofile_from_source(relative_path)
+  local candidates = {
+    relative_path,
+    source_root .. PATHSEP .. relative_path
+  }
+  for _, path in ipairs(candidates) do
+    if system.get_file_info(path) then
+      return dofile(path)
+    end
+  end
+  error("cannot find test helper: " .. relative_path, 2)
+end
+
 local function write_file(path, content)
   local file, err = io.open(path, "wb")
   test.not_nil(file, err)
@@ -64,7 +82,7 @@ local function make_c_doc(lines)
 end
 
 local function make_php_doc(lines)
-  dofile("subprojects/plugins/plugins/language_php.lua")
+  dofile_from_source("subprojects/plugins/plugins/language_php.lua")
   local doc = Doc(nil, nil, true)
   doc.syntax = syntax.get("test.php")
   doc.lines = lines
@@ -672,7 +690,7 @@ test.describe("codefold - virtual line mapping", function()
   test.test("indentguide caches visible folded real lines", function()
     local config = require "core.config"
     require "plugins.codefold"
-    dofile("subprojects/plugins/plugins/indentguide.lua")
+    dofile_from_source("subprojects/plugins/plugins/indentguide.lua")
 
     local previous = config.plugins.indentguide.enabled
     local previous_highlight = config.plugins.indentguide.highlight
@@ -711,7 +729,7 @@ test.describe("codefold - virtual line mapping", function()
   test.test("indentguide active range uses visible offsets", function()
     local config = require "core.config"
     require "plugins.codefold"
-    dofile("subprojects/plugins/plugins/indentguide.lua")
+    dofile_from_source("subprojects/plugins/plugins/indentguide.lua")
 
     local previous = config.plugins.indentguide.enabled
     local previous_highlight = config.plugins.indentguide.highlight
@@ -765,7 +783,7 @@ test.describe("codefold - virtual line mapping", function()
   test.test("smooth caret visibility uses visible offsets", function()
     local config = require "core.config"
     require "plugins.codefold"
-    dofile("subprojects/plugins/plugins/smoothcaret.lua")
+    dofile_from_source("subprojects/plugins/plugins/smoothcaret.lua")
 
     local previous_enabled = config.plugins.smoothcaret.enabled
     local previous_active_view = core.active_view
