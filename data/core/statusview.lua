@@ -1240,7 +1240,8 @@ function StatusView:update()
     self.size.y = height
   end
 
-  if self.message and system.get_time() < self.message_timeout then
+  local message_visible = self.message and system.get_time() < self.message_timeout
+  if message_visible then
     self.scroll.to.y = self.size.y
   else
     self.scroll.to.y = 0
@@ -1248,7 +1249,9 @@ function StatusView:update()
 
   StatusView.super.update(self)
 
-  self:update_active_items()
+  if not message_visible then
+    self:update_active_items()
+  end
 end
 
 
