@@ -511,16 +511,16 @@ test.describe("codefold - region detection", function()
 end)
 
 test.describe("codefold - virtual line mapping", function()
-  test.test("hide tail on fold is enabled by default", function()
+  test.test("hide tail on fold is disabled by default", function()
     require "plugins.codefold"
 
-    test.equal(config.plugins.codefold.hide_tail_on_fold, true)
+    test.equal(config.plugins.codefold.hide_tail_on_fold, false)
 
     local found_spec = false
     for _, item in ipairs(config.plugins.codefold.config_spec) do
       if item.path == "hide_tail_on_fold" then
         found_spec = true
-        test.equal(item.default, true)
+        test.equal(item.default, false)
       end
     end
     test.ok(found_spec)
@@ -870,6 +870,41 @@ test.describe("codefold - virtual line mapping", function()
     config.plugins.codefold.always_show_fold_markers = previous_always_show
   end)
 
+  test.test("fold gutter hover uses shifted marker bounds", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_always_show = config.plugins.codefold.always_show_fold_markers
+    config.plugins.codefold.enabled = true
+    config.plugins.codefold.always_show_fold_markers = true
+
+    local view = make_docview({ "a\n", "  b\n", "c\n" })
+    view.cf_regions = { { indent = 0, start = 1, stop = 2 } }
+    view.cf_folded_regions = {}
+    view.cf_fold_map = { 1, 2, 3 }
+    view.cf_unfold_map = { 1, 2, 3 }
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+
+    local _, y = view:get_line_screen_position(1)
+    local marker_x, marker_w
+    with_common_draw_text(function(calls)
+      view.hovering_gutter = true
+      view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
+      marker_x = calls[#calls].x
+      marker_w = calls[#calls].w
+    end)
+
+    view:on_mouse_moved(marker_x + marker_w / 2, y + view:get_line_height() / 2)
+    test.equal(view.cf_hovering_toggle, 1)
+
+    view:on_mouse_moved(marker_x + marker_w + 1, y + view:get_line_height() / 2)
+    test.is_nil(view.cf_hovering_toggle)
+
+    config.plugins.codefold.enabled = previous_enabled
+    config.plugins.codefold.always_show_fold_markers = previous_always_show
+  end)
+
   test.test("ensure_line_visible unfolds regions containing the line", function()
     require "plugins.codefold"
 
@@ -1000,7 +1035,7 @@ test.describe("codefold - virtual line mapping", function()
       view.cf_regions,
       view.cf_folded_regions
     )
-    view.cf_visibility_signature = "true|1:2:1"
+    view.cf_visibility_signature = "false|1:2:1"
     view.cf_mapping_line_count = #doc.lines
     view.cf_state_loaded = true
     view.visual_lines_dirty = false

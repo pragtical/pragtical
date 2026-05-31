@@ -17,7 +17,7 @@ config.plugins.codefold = common.merge({
   -- If true, newly opened documents have all fold regions initially collapsed.
   start_folded = false,
   -- If true, folded regions hide the folded end-line tail.
-  hide_tail_on_fold = true,
+  hide_tail_on_fold = false,
   -- If true, all fold markers are always visible.
   always_show_fold_markers = false,
   -- Width in pixels reserved for fold toggle indicators in the gutter.
@@ -44,7 +44,7 @@ config.plugins.codefold = common.merge({
       description = "Hide the folded end-line tail when a region is collapsed.",
       path = "hide_tail_on_fold",
       type = "toggle",
-      default = true
+      default = false
     },
     {
       label = "Always Show Fold Markers",
@@ -1132,6 +1132,11 @@ function DocView:get_gutter_width()
   return base_width + toggle_w, padding + toggle_w
 end
 
+local function fold_toggle_rect(self)
+  local toggle_w = config.plugins.codefold.toggle_width
+  return self.position.x + self:get_gutter_width() - toggle_w * 1.5, toggle_w
+end
+
 local docview_draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(line, x, y, width)
   local result = docview_draw_line_gutter(self, line, x, y, width)
@@ -1151,9 +1156,8 @@ function DocView:draw_line_gutter(line, x, y, width)
         toggle_color = style.accent
       end
       local lh = self:get_line_height()
-      local toggle_w = config.plugins.codefold.toggle_width
+      local toggle_x, toggle_w = fold_toggle_rect(self)
       local toggle_font = get_toggle_font(self)
-      local toggle_x = self.position.x + self:get_gutter_width() - toggle_w * 1.5
       local toggle_y = y
       common.draw_text(toggle_font, toggle_color, toggle_char, "right", toggle_x, toggle_y, toggle_w, lh)
     end
@@ -1191,9 +1195,8 @@ function DocView:on_mouse_moved(x, y, ...)
   local was_hovering = self.cf_hovering_toggle
   self.cf_hovering_toggle = nil
   if config.plugins.codefold.enabled and self:is(DocView) then
-    local tw = config.plugins.codefold.toggle_width
-    local gw = self:get_gutter_width()
-    if x >= self.position.x + gw - tw and x < self.position.x + gw then
+    local toggle_x, toggle_w = fold_toggle_rect(self)
+    if x >= toggle_x and x < toggle_x + toggle_w then
       local line = self:resolve_screen_position(x, y)
       if line and region_at_line(self, line) then
         self.cf_hovering_toggle = line
