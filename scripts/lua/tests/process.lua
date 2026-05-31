@@ -66,6 +66,27 @@ test.describe("process", function()
     test.type(process.strerror(1), "string")
   end)
 
+  test.test("stdin writes can return partial byte counts", function()
+    test.skip_if(PLATFORM == "Windows", "POSIX pipe capacity behavior is required")
+
+    local proc = process.start(shell_command("sleep 0.3; cat >/dev/null"), {
+      stdin = process.REDIRECT_PIPE,
+      stdout = process.REDIRECT_DISCARD,
+      stderr = process.REDIRECT_DISCARD
+    })
+
+    test.not_nil(proc)
+    local data = ("x"):rep(1024 * 1024)
+    local written, errmsg = proc:write(data)
+
+    test.type(written, "number")
+    test.is_nil(errmsg)
+    test.ok(written > 0)
+    test.ok(written < #data)
+
+    proc:kill()
+  end)
+
   test.test("does not mutate environment options", function()
     local command = PLATFORM == "Windows"
       and "echo %PRAGTICAL_PROCESS_TEST_ENV%"
