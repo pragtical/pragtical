@@ -237,8 +237,12 @@ local function read_server_port(proc, port_path, label)
         test.skip_now(label .. " test server cannot create local sockets")
       end
       local port = tonumber(content)
-      test.type(port, "number")
-      return port
+      if port then
+        return port
+      end
+      if not proc:running() then
+        test.fail(label .. " test server wrote invalid port: " .. content, 2)
+      end
     end
     if not proc:running() then
       break
