@@ -170,9 +170,13 @@ function process:read_stderr(len) end
 ---
 ---Write to stdin.
 ---
+---This may write only part of the provided data. A return value of 0 means the
+---process is not ready to accept more bytes yet; retry later. On error this
+---returns nil and an error message.
+---
 ---@param data string
 ---
----@return integer | nil bytes The amount of bytes written or nil if error.
+---@return integer | nil bytes The amount of bytes written, or nil if error.
 ---@return string? errmsg
 ---@return process.errortype | integer? errcode
 function process:write(data) end

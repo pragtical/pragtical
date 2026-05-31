@@ -1284,6 +1284,11 @@ static int f_write(lua_State *L) {
   if (written > 0)
     SDL_FlushIO(input);
 
+  if (written > 0 && written < size) {
+    lua_pushinteger(L, (lua_Integer) written);
+    return 1;
+  }
+
   if (written < size) {
     SDL_IOStatus status = SDL_GetIOStatus(input);
     if (status == SDL_IO_STATUS_NOT_READY) {
