@@ -3,6 +3,7 @@
 #include <lua.h>
 
 #include "api.h"
+#include "../renbackend.h"
 #include "../renderer.h"
 #include "../rencache.h"
 #include "../renwindow.h"
@@ -215,12 +216,10 @@ static int f_font_set_size(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
   float size = luaL_checknumber(L, 2);
   float scale = 1.0;
-#ifdef PRAGTICAL_USE_SDL_RENDERER
   RenWindow *window = ren_get_target_window();
-  if (window != NULL) {
+  if (window != NULL && strcmp(renbackend_current()->name, "sdlrenderer") == 0) {
     scale = rencache_get_surface(&window->cache).scale_x;
   }
-#endif
   ren_font_group_set_size(fonts, size, scale);
   return 0;
 }
@@ -412,6 +411,27 @@ static int f_draw_rect(lua_State *L) {
   return 0;
 }
 
+static int f_draw_pixels(lua_State *L) {
+  size_t len;
+  const char *bytes = luaL_checklstring(L, 1, &len);
+
+  lua_Integer x = luaL_checkinteger(L, 2);
+  lua_Integer y = luaL_checkinteger(L, 3);
+  lua_Integer w = luaL_checkinteger(L, 4);
+  lua_Integer h = luaL_checkinteger(L, 5);
+  luaL_argcheck(L, w > 0, 4, "must be a positive non-zero integer");
+  luaL_argcheck(L, h > 0, 5, "must be a positive non-zero integer");
+
+  RenWindow *window = ren_get_target_window();
+  if (!window) {
+    return luaL_error(L, "no target window found");
+  }
+
+  RenRect rect = { .x = x, .y = y, .width = w, .height = h };
+  rencache_draw_pixels(&window->cache, rect, bytes, len);
+  return 0;
+}
+
 
 static int f_draw_poly(lua_State *L) {
   static const char normal_tag[] = { POLY_NORMAL };
@@ -508,10 +528,12 @@ static int f_draw_canvas(lua_State *L) {
   lua_pop(L, 1);
 #endif
 
+  int canvas_w, canvas_h;
+  canvas->backend->get_canvas_size(canvas, &canvas_w, &canvas_h);
   RenRect rect = {
     .x = x, .y = y,
-    .width = canvas->rensurface.surface->w,
-    .height = canvas->rensurface.surface->h
+    .width = canvas_w,
+    .height = canvas_h
   };
   RenWindow *window = ren_get_target_window();
   if (!window) {
@@ -523,28 +545,47 @@ static int f_draw_canvas(lua_State *L) {
 }
 
 static int f_to_canvas(lua_State *L) {
-  lua_Number x = luaL_checknumber(L, 1);
-  lua_Number y = luaL_checknumber(L, 2);
-  lua_Number w = luaL_checknumber(L, 3);
-  lua_Number h = luaL_checknumber(L, 4);
+  int arg = 1;
+  RenWindow *window = NULL;
+  RenWindow **window_arg = luaL_testudata(L, arg, API_TYPE_RENWINDOW);
+  bool explicit_window = window_arg != NULL;
+  if (window_arg) {
+    window = *window_arg;
+    arg++;
+  }
+
+  lua_Number x = luaL_checknumber(L, arg++);
+  lua_Number y = luaL_checknumber(L, arg++);
+  lua_Number w = luaL_checknumber(L, arg++);
+  lua_Number h = luaL_checknumber(L, arg++);
 
   // TODO: this is duplicated code from canvas.f_new, maybe add this to the utils?
   SDL_Surface *dst = SDL_CreateSurface(w, h, SDL_PIXELFORMAT_RGBA32);
   RenSurface rs;
-  RenWindow *window = ren_get_target_window();
+  if (!window)
+    window = ren_get_target_window();
   if (!window) {
     return luaL_error(L, "no target window found");
   } else {
     rs = rencache_get_surface(&window->cache);
   }
-  SDL_Rect rect = { .x = x, .y = y, .w = w, .h = h };
-  SDL_BlitSurface(rs.surface, &rect, dst, NULL);
+  RenRect capture_rect = { .x = x, .y = y, .width = w, .height = h };
+  if (explicit_window && window->cache.backend->capture_window) {
+    SDL_DestroySurface(dst);
+    dst = window->cache.backend->capture_window(&window->cache, capture_rect);
+    if (!dst)
+      return luaL_error(L, "error capturing renderer target: %s", SDL_GetError());
+  } else {
+    SDL_Rect rect = { .x = x, .y = y, .w = w, .h = h };
+    SDL_BlitSurface(rs.surface, &rect, dst, NULL);
+  }
 
   RenCache *canvas = lua_newuserdata(L, sizeof(RenCache));
   luaL_setmetatable(L, API_TYPE_CANVAS);
   rencache_init(canvas);
-  canvas->rensurface = rs;
-  canvas->rensurface.surface = dst;
+  canvas->backend->init_canvas(canvas, dst);
+  canvas->rensurface.scale_x = rs.scale_x;
+  canvas->rensurface.scale_y = rs.scale_y;
   rencache_begin_frame(canvas);
 
   return 1;
@@ -557,6 +598,7 @@ static const luaL_Reg lib[] = {
   { "end_frame",          f_end_frame          },
   { "set_clip_rect",      f_set_clip_rect      },
   { "draw_rect",          f_draw_rect          },
+  { "draw_pixels",        f_draw_pixels        },
   { "draw_text",          f_draw_text          },
   { "draw_poly",          f_draw_poly          },
   { "draw_canvas",        f_draw_canvas        },

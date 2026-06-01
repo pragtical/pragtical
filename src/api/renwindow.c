@@ -99,7 +99,7 @@ static int f_renwin_restore(lua_State *L) {
 static int f_get_refresh_rate(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
 
-  SDL_DisplayID display = SDL_GetDisplayForWindow(window_renderer->cache.window);
+  SDL_DisplayID display = SDL_GetDisplayForWindow(renwin_get_sdl_window(window_renderer));
   if (!display) return 0;
 
   const SDL_DisplayMode *mode;
@@ -121,7 +121,7 @@ static int f_get_color(lua_State *L) {
   SDL_Surface *surface = rencache_get_surface(&window_renderer->cache).surface;
   SDL_Color color = {0, 0, 0, 255};
 
-  if (surface && x >= 0 && y >= 0 && x <= surface->w && y <= surface->h) {
+  if (surface && x >= 0 && y >= 0 && x < surface->w && y < surface->h) {
     Uint8 *pixels = (Uint8*)surface->pixels;
     int bpp = SDL_BYTESPERPIXEL(surface->format);
 

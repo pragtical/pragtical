@@ -20,6 +20,7 @@
 #endif
 
 #include <lauxlib.h>
+#include "renbackend.h"
 #include "rencache.h"
 #include "renwindow.h"
 
@@ -74,6 +75,7 @@ typedef struct {
 typedef struct {
   RenRect rect;
   RenCache *canvas;
+  uint64_t canvas_revision;
 } DrawCanvasCommand;
 
 typedef struct {
@@ -86,7 +88,6 @@ static bool show_debug = false;
 
 static inline int rencache_min(int a, int b) { return a < b ? a : b; }
 static inline int rencache_max(int a, int b) { return a > b ? a : b; }
-
 
 /* 32bit fnv-1a hash */
 #define HASH_INITIAL 2166136261
@@ -130,7 +131,7 @@ static RenRect merge_rects(RenRect a, RenRect b) {
 static bool expand_command_buffer(RenCache *ren_cache) {
   size_t new_size = ren_cache->command_buf_size * CMD_BUF_RESIZE_RATE;
   if (new_size == 0) {
-    new_size = ren_cache->window ? CMD_BUF_INIT_SIZE : CMD_BUF_CANVAS_INIT_SIZE;
+    new_size = ren_cache->window_target ? CMD_BUF_INIT_SIZE : CMD_BUF_CANVAS_INIT_SIZE;
   }
   uint8_t *new_command_buf = SDL_realloc(ren_cache->command_buf, new_size);
   if (!new_command_buf) {
@@ -181,12 +182,13 @@ static bool next_command(RenCache *ren_cache, Command **prev) {
 
 void rencache_init(RenCache *rc) {
   memset(rc, 0, sizeof(RenCache));
-  rc->window = NULL;
+  rc->target = NULL;
+  rc->backend_data = NULL;
+  rc->window_target = false;
+  rc->get_surface = NULL;
+  rc->present_rects = NULL;
+  rc->backend = renbackend_current();
   rc->rensurface.surface = NULL;
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-  rc->texture = NULL;
-  rc->renderer = NULL;
-#endif
   rc->command_buf = NULL;
   rc->command_buf_idx = 0;
   rc->command_buf_size = 0;
@@ -278,6 +280,7 @@ void rencache_draw_canvas(RenCache *ren_cache, RenRect rect, RenCache *canvas) {
   if (cmd) {
     cmd->rect = rect;
     cmd->canvas = canvas;
+    cmd->canvas_revision = canvas->revision;
     rencache_begin_frame(canvas);
   }
 }
@@ -342,97 +345,222 @@ static void push_rect(RenCache *ren_cache, RenRect r, int *count) {
   ren_cache->rect_buf[(*count)++] = r;
 }
 
+static bool command_intersects_region(Command *cmd, RenRect clip, RenRect region) {
+  RenRect r = intersect_rects(cmd->command[0], clip);
+  r = intersect_rects(r, region);
+  return r.width > 0 && r.height > 0;
+}
 
-void rencache_end_frame(RenCache *ren_cache) {
-  /* update cells from commands */
+static bool backend_can_replay_region_natively(RenCache *ren_cache, RenSurface *surface, RenRect region) {
+  if (!ren_cache->window_target || show_debug)
+    return false;
+  if (ren_cache->backend->can_native_region &&
+      ren_cache->backend->can_native_region(ren_cache, surface, region)) {
+    Command *cmd = NULL;
+    RenRect cr = ren_cache->screen_rect;
+    while (next_command(ren_cache, &cmd)) {
+      SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
+      DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
+
+      if (cmd->type == SET_CLIP) {
+        cr = ccmd->rect;
+        continue;
+      }
+
+      if (cmd->type != DRAW_TEXT || !command_intersects_region(cmd, cr, region))
+        continue;
+
+      if (!ren_cache->backend->can_native_text)
+        return false;
+      ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
+      if (!ren_cache->backend->can_native_text(
+            ren_cache, surface, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y,
+            tcmd->color, tcmd->tab
+          ))
+        return false;
+    }
+    return true;
+  }
+
   Command *cmd = NULL;
   RenRect cr = ren_cache->screen_rect;
   while (next_command(ren_cache, &cmd)) {
-    /* cmd->command[0] should always be the Command rect */
+    SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
+    DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
+    DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
+    DrawBezierCommand *bcmd = (DrawBezierCommand*)&cmd->command;
+    DrawCanvasCommand *cvcmd = (DrawCanvasCommand*)&cmd->command;
+    DrawPixelsCommand *pcmd = (DrawPixelsCommand*)&cmd->command;
+
     if (cmd->type == SET_CLIP) {
-      SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
       cr = ccmd->rect;
+      continue;
     }
-    RenRect r = intersect_rects(cmd->command[0], cr);
-    if (r.width == 0 || r.height == 0) { continue; }
-    unsigned h = HASH_INITIAL;
-    hash(&h, cmd, cmd->size);
-    update_overlapping_cells(ren_cache, r, h);
+
+    if (!command_intersects_region(cmd, cr, region))
+      continue;
+
+    switch (cmd->type) {
+      case SET_CLIP:
+        break;
+      case DRAW_RECT:
+        if (!ren_cache->backend->can_native_rect ||
+            !ren_cache->backend->can_native_rect(ren_cache, surface, rcmd->rect, rcmd->color, rcmd->replace))
+          return false;
+        break;
+      case DRAW_TEXT:
+        if (!ren_cache->backend->can_native_text)
+          return false;
+        ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
+        if (!ren_cache->backend->can_native_text(
+              ren_cache, surface, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y,
+              tcmd->color, tcmd->tab
+            ))
+          return false;
+        break;
+      case DRAW_POLY:
+        if (!ren_cache->backend->can_native_poly ||
+            !ren_cache->backend->can_native_poly(ren_cache, surface, bcmd->points, bcmd->npoints, bcmd->color))
+          return false;
+        break;
+      case DRAW_CANVAS:
+        if (!ren_cache->backend->can_native_canvas ||
+            !ren_cache->backend->can_native_canvas(ren_cache, surface, cvcmd->canvas, cvcmd->rect.x, cvcmd->rect.y))
+          return false;
+        break;
+      case DRAW_PIXELS:
+        if (!ren_cache->backend->can_native_pixels ||
+            !ren_cache->backend->can_native_pixels(ren_cache, surface, pcmd->rect, pcmd->bytes, pcmd->len))
+          return false;
+        break;
+    }
   }
 
-  /* push rects for all cells changed from last frame, reset cells */
+  return true;
+}
+
+
+void rencache_end_frame(RenCache *ren_cache) {
+  if (!ren_cache->window_target && ren_cache->command_buf_idx == 0)
+    return;
+
+  Command *cmd = NULL;
   int rect_count = 0;
-  int max_x = ren_cache->screen_rect.width / RENCACHE_CELL_SIZE + 1;
-  int max_y = ren_cache->screen_rect.height / RENCACHE_CELL_SIZE + 1;
-  for (int y = 0; y < max_y; y++) {
-    for (int x = 0; x < max_x; x++) {
-      /* compare previous and current cell for change */
-      int idx = cell_idx(x, y);
-      if (ren_cache->cells[idx] != ren_cache->cells_prev[idx]) {
-        push_rect(ren_cache, (RenRect) { x, y, 1, 1 }, &rect_count);
-      }
-      ren_cache->cells_prev[idx] = HASH_INITIAL;
-    }
-  }
+  bool full_frame_regions = ren_cache->window_target &&
+    ren_cache->backend->use_full_frame_regions &&
+    ren_cache->backend->use_full_frame_regions(ren_cache);
 
-  /* expand rects from cells to pixels */
-  for (int i = 0; i < rect_count; i++) {
-    RenRect *r = &ren_cache->rect_buf[i];
-    r->x *= RENCACHE_CELL_SIZE;
-    r->y *= RENCACHE_CELL_SIZE;
-    r->width *= RENCACHE_CELL_SIZE;
-    r->height *= RENCACHE_CELL_SIZE;
-    *r = intersect_rects(*r, ren_cache->screen_rect);
-  }
-
-  RenSurface rs = rencache_get_surface(ren_cache);
-  /* redraw updated regions */
-  for (int i = 0; i < rect_count; i++) {
-    /* draw */
-    RenRect r = ren_cache->rect_buf[i];
-    ren_set_clip_rect(&rs, r);
-
-    cmd = NULL;
+  if (full_frame_regions) {
+    ren_cache->rect_buf[rect_count++] = ren_cache->screen_rect;
+    rencache_invalidate(ren_cache);
+  } else {
+    /* update cells from commands */
+    RenRect cr = ren_cache->screen_rect;
     while (next_command(ren_cache, &cmd)) {
-      SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
-      DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
-      DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
-      DrawBezierCommand *bcmd = (DrawBezierCommand*)&cmd->command;
-      DrawCanvasCommand *cvcmd = (DrawCanvasCommand*)&cmd->command;
-      DrawPixelsCommand *pcmd = (DrawPixelsCommand*)&cmd->command;
-      switch (cmd->type) {
-        case SET_CLIP:
-          ren_set_clip_rect(&rs, intersect_rects(ccmd->rect, r));
-          break;
-        case DRAW_RECT:
-          ren_draw_rect(&rs, rcmd->rect, rcmd->color, rcmd->replace);
-          break;
-        case DRAW_TEXT:
-          ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
-          ren_draw_text(&rs, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y, tcmd->color, tcmd->tab);
-          break;
-        case DRAW_POLY:
-          ren_draw_poly(&rs, bcmd->points, bcmd->npoints, bcmd->color);
-          break;
-        case DRAW_CANVAS:
-          rencache_end_frame(cvcmd->canvas);
-          ren_draw_canvas(&rs, cvcmd->canvas->rensurface.surface, cvcmd->rect.x, cvcmd->rect.y);
-          break;
-        case DRAW_PIXELS:
-          ren_draw_pixels(&rs, pcmd->rect, pcmd->bytes, pcmd->len);
-          break;
+      /* cmd->command[0] should always be the Command rect */
+      if (cmd->type == SET_CLIP) {
+        SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
+        cr = ccmd->rect;
+      }
+      RenRect r = intersect_rects(cmd->command[0], cr);
+      if (r.width == 0 || r.height == 0) { continue; }
+      unsigned h = HASH_INITIAL;
+      hash(&h, cmd, cmd->size);
+      update_overlapping_cells(ren_cache, r, h);
+    }
+
+    /* push rects for all cells changed from last frame, reset cells */
+    int max_x = ren_cache->screen_rect.width / RENCACHE_CELL_SIZE + 1;
+    int max_y = ren_cache->screen_rect.height / RENCACHE_CELL_SIZE + 1;
+    for (int y = 0; y < max_y; y++) {
+      for (int x = 0; x < max_x; x++) {
+        /* compare previous and current cell for change */
+        int idx = cell_idx(x, y);
+        if (ren_cache->cells[idx] != ren_cache->cells_prev[idx]) {
+          push_rect(ren_cache, (RenRect) { x, y, 1, 1 }, &rect_count);
+        }
+        ren_cache->cells_prev[idx] = HASH_INITIAL;
       }
     }
 
-    if (show_debug) {
-      RenColor color = { rand(), rand(), rand(), 50 };
-      ren_draw_rect(&rs, r, color, false);
+    /* expand rects from cells to pixels */
+    for (int i = 0; i < rect_count; i++) {
+      RenRect *r = &ren_cache->rect_buf[i];
+      r->x *= RENCACHE_CELL_SIZE;
+      r->y *= RENCACHE_CELL_SIZE;
+      r->width *= RENCACHE_CELL_SIZE;
+      r->height *= RENCACHE_CELL_SIZE;
+      *r = intersect_rects(*r, ren_cache->screen_rect);
     }
   }
 
-  /* update dirty rects */
-  if (rect_count > 0 && ren_cache->window) {
-    rencache_update_rects(ren_cache, ren_cache->rect_buf, rect_count);
+  if (rect_count > 0) {
+    if (ren_cache->backend->begin_frame)
+      ren_cache->backend->begin_frame(ren_cache, ren_cache->rect_buf, rect_count);
+
+    RenSurface rs = rencache_get_surface(ren_cache);
+    const RenCacheDrawOps *draw_ops = ren_cache->backend->draw_ops;
+    /* redraw updated regions */
+    for (int i = 0; i < rect_count; i++) {
+      /* draw */
+      RenRect r = ren_cache->rect_buf[i];
+      draw_ops->set_clip_rect(ren_cache, &rs, r);
+      bool native_only = backend_can_replay_region_natively(ren_cache, &rs, r);
+      if (ren_cache->backend->begin_region)
+        ren_cache->backend->begin_region(ren_cache, r, native_only);
+      draw_ops->set_clip_rect(ren_cache, &rs, r);
+
+      cmd = NULL;
+      while (next_command(ren_cache, &cmd)) {
+        SetClipCommand *ccmd = (SetClipCommand*)&cmd->command;
+        DrawRectCommand *rcmd = (DrawRectCommand*)&cmd->command;
+        DrawTextCommand *tcmd = (DrawTextCommand*)&cmd->command;
+        DrawBezierCommand *bcmd = (DrawBezierCommand*)&cmd->command;
+        DrawCanvasCommand *cvcmd = (DrawCanvasCommand*)&cmd->command;
+        DrawPixelsCommand *pcmd = (DrawPixelsCommand*)&cmd->command;
+        switch (cmd->type) {
+          case SET_CLIP:
+            draw_ops->set_clip_rect(ren_cache, &rs, intersect_rects(ccmd->rect, r));
+            break;
+          case DRAW_RECT:
+            draw_ops->draw_rect(ren_cache, &rs, rcmd->rect, rcmd->color, rcmd->replace);
+            break;
+          case DRAW_TEXT:
+            ren_font_group_set_tab_size(tcmd->fonts, tcmd->tab_size);
+            draw_ops->draw_text(ren_cache, &rs, tcmd->fonts, tcmd->text, tcmd->len, tcmd->text_x, tcmd->rect.y, tcmd->color, tcmd->tab);
+            break;
+          case DRAW_POLY:
+            draw_ops->draw_poly(ren_cache, &rs, bcmd->points, bcmd->npoints, bcmd->color);
+            break;
+          case DRAW_CANVAS:
+            rencache_end_frame(cvcmd->canvas);
+            draw_ops->draw_canvas(ren_cache, &rs, cvcmd->canvas, cvcmd->rect.x, cvcmd->rect.y);
+            break;
+          case DRAW_PIXELS:
+            draw_ops->draw_pixels(ren_cache, &rs, pcmd->rect, pcmd->bytes, pcmd->len);
+            break;
+        }
+      }
+
+      if (show_debug) {
+        RenColor color = { rand(), rand(), rand(), 50 };
+        draw_ops->draw_rect(ren_cache, &rs, r, color, false);
+      }
+      if (ren_cache->backend->end_region)
+        ren_cache->backend->end_region(ren_cache, r, native_only);
+    }
+
+    if (ren_cache->backend->end_frame)
+      ren_cache->backend->end_frame(ren_cache, ren_cache->rect_buf, rect_count);
+
+    if (ren_cache->backend->target_updated)
+      ren_cache->backend->target_updated(ren_cache, ren_cache->rect_buf, rect_count);
+    if (!ren_cache->window_target)
+      ren_cache->revision++;
+
+    /* update dirty rects */
+    if (ren_cache->present_rects)
+      rencache_update_rects(ren_cache, ren_cache->rect_buf, rect_count);
   }
 
   /* swap cell buffer and reset */
@@ -443,48 +571,18 @@ void rencache_end_frame(RenCache *ren_cache) {
 }
 
 RenSurface rencache_get_surface(RenCache *ren_cache) {
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-  return ren_cache->rensurface;
-#else
-  if (ren_cache->window) {
-    SDL_Surface *surface = SDL_GetWindowSurface(ren_cache->window);
-    if (!surface) {
-      fprintf(stderr, "Error getting window surface: %s", SDL_GetError());
-      exit(1);
-    }
-    return (RenSurface){.surface = surface, .scale_x = 1, .scale_y = 1};
+  if (ren_cache->get_surface) {
+    return ren_cache->get_surface(ren_cache);
   } else if (!ren_cache->rensurface.surface) {
     fprintf(stderr, "RenCache surface not initialized");
     exit(1);
   }
   return ren_cache->rensurface;
-#endif
 }
 
 
 void rencache_update_rects(RenCache *rc, RenRect *rects, int count) {
-  // TODO: Does not work nicely with multiple windows
-  static bool initial_window = true;
-  if (rc->window){
-#ifdef PRAGTICAL_USE_SDL_RENDERER
-    const float scale_x = rc->rensurface.scale_x;
-    const float scale_y = rc->rensurface.scale_y;
-    for (int i = 0; i < count; i++) {
-      const RenRect *r = &rects[i];
-      const int x = scale_x * r->x, y = scale_y * r->y;
-      const int w = scale_x * r->width, h = scale_y * r->height;
-      const SDL_Rect sr = {.x = x, .y = y, .w = w, .h = h};
-      uint8_t *pixels = ((uint8_t *) rc->rensurface.surface->pixels) + y * rc->rensurface.surface->pitch + x * SDL_BYTESPERPIXEL(rc->rensurface.surface->format);
-      SDL_UpdateTexture(rc->texture, &sr, pixels, rc->rensurface.surface->pitch);
-    }
-    SDL_RenderTexture(rc->renderer, rc->texture, NULL, NULL);
-    SDL_RenderPresent(rc->renderer);
-#else
-    SDL_UpdateWindowSurfaceRects(rc->window, (SDL_Rect*) rects, count);
-#endif
-    if (initial_window) {
-      SDL_ShowWindow(rc->window);
-      initial_window = false;
-    }
+  if (rc->present_rects) {
+    rc->present_rects(rc, rects, count);
   }
 }
