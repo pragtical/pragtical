@@ -26,6 +26,7 @@ show_help(){
   echo "-L --lto                 Enables Link-Time Optimization (LTO)."
   echo "-r --release             Compile in release mode."
   echo "--cross-arch ARCH        The architecture to package for."
+  echo "--update-channel CHANNEL Embed update metadata. One of: stable, rolling."
   echo
 }
 
@@ -113,6 +114,8 @@ main() {
   local lto
   local cross
   local cross_arch
+  local update_channel
+  local update_information=()
 
   initial_arg_count=$#
 
@@ -166,6 +169,11 @@ main() {
         shift
         shift
         ;;
+      --update-channel)
+        update_channel="$2"
+        shift
+        shift
+        ;;
       *)
         # unknown option
         ;;
@@ -197,6 +205,32 @@ main() {
     ppm_file="ppm.${arch}-linux"
     # reload build_dir because platform and arch might change
     build_dir="$(get_default_build_dir "linux" "$arch")"
+  fi
+
+  case "$update_channel" in
+    "")
+      ;;
+    stable)
+      update_information=(
+        --updateinformation
+        "gh-releases-zsync|pragtical|pragtical|latest|Pragtical-*-${arch}.AppImage.zsync"
+      )
+      ;;
+    rolling)
+      update_information=(
+        --updateinformation
+        "gh-releases-zsync|pragtical|pragtical|latest-pre|Pragtical-*-${arch}.AppImage.zsync"
+      )
+      ;;
+    *)
+      echo "Unsupported update channel '${update_channel}'. Expected 'stable' or 'rolling'."
+      exit 1
+      ;;
+  esac
+
+  if [[ -n "$update_channel" ]] && ! command -v zsyncmake > /dev/null; then
+    echo "zsyncmake is required to generate update metadata."
+    exit 1
   fi
 
   # Setup appimage tools
@@ -321,6 +355,7 @@ main() {
   echo "Generating AppImage..."
 
   $appimagebin --appimage-extract-and-run --runtime-file "runtime-${arch}" \
+    "${update_information[@]}" \
     Pragtical.AppDir \
     "Pragtical${version}-${arch}.AppImage"
 }
