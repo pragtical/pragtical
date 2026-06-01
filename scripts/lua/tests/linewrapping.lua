@@ -7,9 +7,9 @@ local style = require "core.style"
 require "plugins.codefold"
 dofile("subprojects/plugins/plugins/indentguide.lua")
 
-local function make_view(text)
+local function make_view_lines(lines)
   local doc = Doc(nil, nil, true)
-  doc.lines = { text }
+  doc.lines = lines
   doc.cache.col_x = {}
   doc.cache.ulen = {}
   doc.highlighter:reset()
@@ -22,6 +22,15 @@ local function make_view(text)
   view.indentguide_indents = {}
   view.indentguide_indent_active = {}
   return view
+end
+
+local function make_view(text)
+  return make_view_lines({ text })
+end
+
+local function wrapped_rows_for_line(view, line)
+  local starts = view:get_line_wraps(line)
+  return starts and #starts or 0
 end
 
 local function with_draw_text(fn)
@@ -295,6 +304,111 @@ test.describe("linewrapping", function()
         test.ok(found_text)
       end)
     end)
+  end)
+
+  test.test("partial rebuild updates only the edited line span", function()
+    local view = make_view_lines({
+      "aaaaaa\n",
+      "bbbbbb\n",
+      "cccccc\n",
+    })
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("bb"))
+
+    local line1_rows = wrapped_rows_for_line(view, 1)
+    local line3_rows = wrapped_rows_for_line(view, 3)
+    local line3_start = view.wrapped_line_to_idx[3]
+
+    view.doc.lines[2] = "bbbbbbbbbb\n"
+    LineWrapping.update_breaks(view, 2, 2, 0)
+
+    test.equal(wrapped_rows_for_line(view, 1), line1_rows)
+    test.ok(wrapped_rows_for_line(view, 2) > line1_rows)
+    test.equal(wrapped_rows_for_line(view, 3), line3_rows)
+    test.ok(view.wrapped_line_to_idx[3] > line3_start)
+
+    local rows = {}
+    for i = 1, #view.wrapped_lines, 2 do
+      rows[#rows + 1] = view.wrapped_lines[i]
+    end
+    test.equal(rows[1], 1)
+    test.equal(rows[#rows], 3)
+  end)
+
+  test.test("partial rebuild handles inserted document lines", function()
+    local view = make_view_lines({
+      "aaaaaa\n",
+      "bbbbbb\n",
+      "cccccc\n",
+    })
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("bb"))
+
+    view.doc.lines = {
+      "aaaaaa\n",
+      "bbbbbb\n",
+      "dddddddd\n",
+      "cccccc\n",
+    }
+    LineWrapping.update_breaks(view, 2, 2, 1)
+
+    for line = 1, 4 do
+      test.type(view.wrapped_line_to_idx[line], "number")
+      test.ok(wrapped_rows_for_line(view, line) > 0)
+    end
+    test.equal(view.wrapped_lines[#view.wrapped_lines - 1], 4)
+  end)
+
+  test.test("partial rebuild handles removed document lines", function()
+    local view = make_view_lines({
+      "aaaaaa\n",
+      "bbbbbb\n",
+      "dddddddd\n",
+      "cccccc\n",
+    })
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("bb"))
+
+    view.doc.lines = {
+      "aaaaaa\n",
+      "bbbbbb\n",
+      "cccccc\n",
+    }
+    LineWrapping.update_breaks(view, 2, 3, -1)
+
+    for line = 1, 3 do
+      test.type(view.wrapped_line_to_idx[line], "number")
+      test.ok(wrapped_rows_for_line(view, line) > 0)
+    end
+    test.equal(view.wrapped_lines[#view.wrapped_lines - 1], 3)
+  end)
+
+  test.test("resize rebuild is delayed until debounce expires", function()
+    local previous_width_override = config.plugins.linewrapping.width_override
+    local view = make_view_lines({
+      "aaaaaaaaaa\n",
+      "bbbbbbbbbb\n",
+    })
+    local font = view:get_font()
+    local width1 = font:get_width("aa")
+    local width2 = font:get_width("aaaa")
+    config.plugins.linewrapping.width_override = width1
+    LineWrapping.reconstruct_breaks(view, font, width1)
+    view.wrapping_enabled = true
+
+    config.plugins.linewrapping.width_override = width2
+    LineWrapping.update_docview_breaks(view)
+
+    test.equal(view.wrapped_settings.width, width1)
+    test.equal(view.wrapped_pending_width, width2)
+
+    view.wrapped_rebuild_at = system.get_time() - 1
+    LineWrapping.update_docview_breaks(view)
+
+    test.equal(view.wrapped_settings.width, width2)
+    test.equal(view.wrapped_pending_width, nil)
+
+    config.plugins.linewrapping.width_override = previous_width_override
   end)
 
   test.test("folded hidden lines do not contribute wrapped rows", function()
