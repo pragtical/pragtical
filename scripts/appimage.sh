@@ -79,6 +79,25 @@ download_plugin_manager() {
   fi
 }
 
+prune_appdir_development_files() {
+  local static_build=$1
+
+  if [[ $static_build == true ]]; then
+    pushd Pragtical.AppDir > /dev/null
+    find . -type d -name 'include' -prune -exec rm -rf {} \;
+    find . -type d -name 'lib' -prune -exec rm -rf {} \;
+    find . -type d -empty -delete
+    popd > /dev/null
+  else
+    find Pragtical.AppDir/usr -type d -name 'include' -prune -exec rm -rf {} \;
+    if [[ -d Pragtical.AppDir/usr/lib ]]; then
+      find Pragtical.AppDir/usr/lib -type f \( -name '*.a' -o -name '*.la' \) -delete
+      find Pragtical.AppDir/usr/lib -type d -name 'pkgconfig' -prune -exec rm -rf {} \;
+    fi
+    find Pragtical.AppDir -type d -empty -delete
+  fi
+}
+
 main() {
   local arch="$(uname -m)"
   local native_arch=$arch
@@ -252,6 +271,8 @@ main() {
       rm -rf "Pragtical.AppDir/usr/data"
     fi
   fi
+
+  prune_appdir_development_files "$static_build"
 
   if [[ -z "$cross" ]]; then
     polyfill_glibc Pragtical.AppDir/usr/bin/pragtical
