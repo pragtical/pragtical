@@ -9,6 +9,8 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local translate = require "core.doc.translate"
 
+local RESIZE_REBUILD_DEBOUNCE_SECONDS = 0.15
+
 local function get_font(default_font, type, indent_size)
   local font = style.syntax_fonts[type] or default_font
   if font ~= default_font then font:set_tab_size(indent_size) end
@@ -149,10 +151,45 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
   return splits, begin_width
 end
 
--- breaks are held in a single table that contains n*2 elements, where n is the amount of line breaks.
--- each element represents line and column of the break. line_offset will check from the specified line
--- if the first line has not changed breaks, it will stop there.
-function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offset)
+local function rebuild_line_to_idx(docview)
+  local line_to_idx = {}
+  local last_line = nil
+  for i = 1, #docview.wrapped_lines, 2 do
+    local line = docview.wrapped_lines[i]
+    if line ~= last_line then
+      line_to_idx[line] = (i + 1) / 2
+      last_line = line
+    end
+  end
+  docview.wrapped_line_to_idx = line_to_idx
+end
+
+local function compute_line_rows(docview, line, width)
+  local breaks, begin_width = LineWrapping.compute_line_breaks(
+    docview.doc,
+    docview.wrapped_settings.font,
+    line,
+    width,
+    config.plugins.linewrapping.mode
+  )
+  local rows = {}
+  for i = 1, #breaks do
+    rows[#rows + 1] = line
+    rows[#rows + 1] = breaks[i]
+  end
+  return rows, begin_width
+end
+
+local function clear_pending_resize(docview)
+  docview.wrapped_pending_width = nil
+  docview.wrapped_pending_font = nil
+  docview.wrapped_rebuild_at = nil
+end
+
+-- breaks are held in a single table that contains n*2 elements, where n is the
+-- amount of line breaks. Each element represents line and column of the break.
+function LineWrapping.reconstruct_breaks(docview, default_font, width)
+  clear_pending_resize(docview)
   if width ~= math.huge then
     local doc = docview.doc
     -- two elements per wrapped line; first maps to original line number, second to column number.
@@ -162,30 +199,22 @@ function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offs
     -- one element per actual line; gives the indent width for the acutal line
     docview.wrapped_line_offsets = { }
     docview.wrapped_settings = { ["width"] = width, ["font"] = default_font }
-    for i = line_offset or 1, #doc.lines do
+    for i = 1, #doc.lines do
       local breaks, offset = LineWrapping.compute_line_breaks(doc, default_font, i, width, config.plugins.linewrapping.mode)
-      table.insert(docview.wrapped_line_offsets, offset)
+      docview.wrapped_line_offsets[#docview.wrapped_line_offsets + 1] = offset
       for k, col in ipairs(breaks) do
-        table.insert(docview.wrapped_lines, i)
-        table.insert(docview.wrapped_lines, col)
+        docview.wrapped_lines[#docview.wrapped_lines + 1] = i
+        docview.wrapped_lines[#docview.wrapped_lines + 1] = col
       end
     end
-    -- list of indices for wrapped_lines, that are based on original line number
-    -- holds the index to the first in the wrapped_lines list.
-    local last_wrap = nil
-    for i = 1, #docview.wrapped_lines, 2 do
-      if not last_wrap or last_wrap ~= docview.wrapped_lines[i] then
-        table.insert(docview.wrapped_line_to_idx, (i + 1) / 2)
-        last_wrap = docview.wrapped_lines[i]
-      end
-    end
+    rebuild_line_to_idx(docview)
   else
     docview.wrapped_lines = nil
     docview.wrapped_line_to_idx = nil
     docview.wrapped_line_offsets = nil
     docview.wrapped_settings = nil
   end
-  docview:invalidate_visual_lines(line_offset)
+  docview:invalidate_visual_lines()
 end
 
 -- When we have an insertion or deletion, we have four sections of text.
@@ -194,51 +223,118 @@ end
 -- 3. The removed/pasted lines.
 -- 4. Every line after the modification, begins one line after the selection in the initial document.
 function LineWrapping.update_breaks(docview, old_line1, old_line2, net_lines)
-  -- Step 1: Determine the index for the line for #2.
-  local old_idx1 = docview.wrapped_line_to_idx[old_line1] or 1
-  -- Step 2: Determine the index of the line for #4.
-  local old_idx2 = (docview.wrapped_line_to_idx[old_line2 + 1] or ((#docview.wrapped_lines / 2) + 1)) - 1
-  -- Step 3: Remove all old breaks for the old lines from the table, and all old widths from wrapped_line_offsets.
-  local offset = (old_idx1  - 1) * 2 + 1
-  for i = old_idx1, old_idx2 do
-    table.remove(docview.wrapped_lines, offset)
-    table.remove(docview.wrapped_lines, offset)
+  if not docview.wrapped_settings
+  or not docview.wrapped_lines
+  or not docview.wrapped_line_to_idx
+  or not docview.wrapped_line_offsets then
+    LineWrapping.update_docview_breaks(docview)
+    return
   end
-  for i = old_line1, old_line2 do
-    table.remove(docview.wrapped_line_offsets, old_line1)
-  end
-  -- Step 4: Shift the line number of wrapped_lines past #4 by the amount of inserted/deleted lines.
-  if net_lines ~= 0 then
-    for i = offset, #docview.wrapped_lines, 2 do
-      docview.wrapped_lines[i] = docview.wrapped_lines[i] + net_lines
-    end
-  end
-  -- Step 5: Compute the breaks and offsets for the lines for #2 and #3. Insert them into the table.
+
+  clear_pending_resize(docview)
+
+  local old_rows = docview.wrapped_lines
+  local old_offsets = docview.wrapped_line_offsets
+  local total_rows = #old_rows / 2
+  local old_idx1 = docview.wrapped_line_to_idx[old_line1] or (total_rows + 1)
+  local old_idx2 = (docview.wrapped_line_to_idx[old_line2 + 1] or (total_rows + 1)) - 1
+  local old_row_start = (old_idx1 - 1) * 2 + 1
+  local old_row_stop = old_idx2 * 2
+
   local new_line1 = old_line1
-  local new_line2 = old_line2 + net_lines
-  for line = new_line1, new_line2 do
-    local breaks, begin_width = LineWrapping.compute_line_breaks(docview.doc, docview.wrapped_settings.font, line, docview.wrapped_settings.width, config.plugins.linewrapping.mode)
-    table.insert(docview.wrapped_line_offsets, line, begin_width)
-    for i,b in ipairs(breaks) do
-      table.insert(docview.wrapped_lines, offset, b)
-      table.insert(docview.wrapped_lines, offset, line)
-      offset = offset + 2
+  local new_line2 = math.min(old_line2 + net_lines, #docview.doc.lines)
+  local inserted_rows = {}
+  local inserted_offsets = {}
+  if new_line1 <= new_line2 then
+    for line = new_line1, new_line2 do
+      local rows, begin_width = compute_line_rows(docview, line, docview.wrapped_settings.width)
+      inserted_offsets[#inserted_offsets + 1] = begin_width
+      for i = 1, #rows do
+        inserted_rows[#inserted_rows + 1] = rows[i]
+      end
     end
   end
-  -- Step 6: Recompute the wrapped_line_to_idx cache from #2.
-  local line = old_line1
-  offset = (old_idx1  - 1) * 2 + 1
-  while offset < #docview.wrapped_lines do
-    if docview.wrapped_lines[offset + 1] == 1 then
-      docview.wrapped_line_to_idx[line] = ((offset - 1) / 2) + 1
-      line = line + 1
-    end
-    offset = offset + 2
+
+  local wrapped_lines = {}
+  for i = 1, old_row_start - 1 do
+    wrapped_lines[#wrapped_lines + 1] = old_rows[i]
   end
-  while line <= #docview.wrapped_line_to_idx do
-    table.remove(docview.wrapped_line_to_idx)
+  for i = 1, #inserted_rows do
+    wrapped_lines[#wrapped_lines + 1] = inserted_rows[i]
   end
+  for i = old_row_stop + 1, #old_rows, 2 do
+    wrapped_lines[#wrapped_lines + 1] = old_rows[i] + net_lines
+    wrapped_lines[#wrapped_lines + 1] = old_rows[i + 1]
+  end
+
+  local wrapped_line_offsets = {}
+  for line = 1, old_line1 - 1 do
+    wrapped_line_offsets[#wrapped_line_offsets + 1] = old_offsets[line]
+  end
+  for i = 1, #inserted_offsets do
+    wrapped_line_offsets[#wrapped_line_offsets + 1] = inserted_offsets[i]
+  end
+  for line = old_line2 + 1, #old_offsets do
+    wrapped_line_offsets[#wrapped_line_offsets + 1] = old_offsets[line]
+  end
+
+  docview.wrapped_lines = wrapped_lines
+  docview.wrapped_line_offsets = wrapped_line_offsets
+  rebuild_line_to_idx(docview)
   docview:invalidate_visual_lines(old_line1)
+end
+
+local function get_wrap_width(docview)
+  local scrollbar_width = docview.v_scrollbar.expanded_size or style.expanded_scrollbar_size
+  local width_override = config.plugins.linewrapping.width_override
+  return (type(width_override) == "function" and width_override(docview))
+    or width_override
+    or (docview.size.x - docview:get_gutter_width() - scrollbar_width)
+end
+
+local function schedule_resize_rebuild(docview, width)
+  local now = system.get_time()
+  if docview.wrapped_pending_width ~= width then
+    docview.wrapped_pending_width = width
+    docview.wrapped_pending_font = docview:get_font()
+    docview.wrapped_rebuild_at = now + RESIZE_REBUILD_DEBOUNCE_SECONDS
+  end
+  core.redraw = true
+  return docview.wrapped_rebuild_at and now >= docview.wrapped_rebuild_at
+end
+
+function LineWrapping.update_docview_breaks(docview)
+  local width = get_wrap_width(docview)
+  if width == math.huge then
+    if docview.wrapped_settings then
+      LineWrapping.reconstruct_breaks(docview, docview:get_font(), width)
+    end
+    return
+  end
+
+  if not docview.wrapped_settings or docview.wrapped_settings.width == nil then
+    docview.scroll.to.x = 0
+    LineWrapping.reconstruct_breaks(docview, docview:get_font(), width)
+    return
+  end
+
+  if width ~= docview.wrapped_settings.width then
+    docview.scroll.to.x = 0
+    if not docview.wrapped_lines then
+      LineWrapping.reconstruct_breaks(docview, docview:get_font(), width)
+    elseif schedule_resize_rebuild(docview, width) then
+      LineWrapping.reconstruct_breaks(
+        docview,
+        docview.wrapped_pending_font or docview:get_font(),
+        width
+      )
+    end
+    return
+  end
+
+  if docview.wrapped_pending_width then
+    clear_pending_resize(docview)
+  end
 end
 
 -- Draws a guide if applicable to show where wrapping is occurring.
@@ -246,17 +342,8 @@ function LineWrapping.draw_guide(docview)
   if config.plugins.linewrapping.guide and docview.wrapped_settings.width ~= math.huge then
     local x, y = docview:get_content_offset()
     local gw = docview:get_gutter_width()
-    renderer.draw_rect(x + gw + docview.wrapped_settings.width, y, 1, core.root_view.size.y, style.selection)
-  end
-end
-
-function LineWrapping.update_docview_breaks(docview)
-  local scrollbar_width = docview.v_scrollbar.expanded_size or style.expanded_scrollbar_size
-  local width = (type(config.plugins.linewrapping.width_override) == "function" and config.plugins.linewrapping.width_override(docview))
-    or config.plugins.linewrapping.width_override or (docview.size.x - docview:get_gutter_width() - scrollbar_width)
-  if (not docview.wrapped_settings or docview.wrapped_settings.width == nil or width ~= docview.wrapped_settings.width) then
-    docview.scroll.to.x = 0
-    LineWrapping.reconstruct_breaks(docview, docview:get_font(), width)
+    local width = docview.wrapped_pending_width or docview.wrapped_settings.width
+    renderer.draw_rect(x + gw + width, y, 1, core.root_view.size.y, style.selection)
   end
 end
 
@@ -696,20 +783,6 @@ function translate.start_of_line(doc, line, col)
   local nline, ncol2 = get_idx_line_col(core.active_view, idx - 1)
   if nline ~= line then return line, 1 end
   return line, ncol2 + 1
-end
-
-local old_previous_line = DocView.translate.previous_line
-function DocView.translate.previous_line(doc, line, col, dv)
-  if not dv.wrapped_settings then return old_previous_line(doc, line, col, dv) end
-  local idx, ncol = get_line_idx_col_count(dv, line, col)
-  return get_line_col_from_index_and_x(dv, idx - 1, dv:get_col_x_offset(line, col))
-end
-
-local old_next_line = DocView.translate.next_line
-function DocView.translate.next_line(doc, line, col, dv)
-  if not dv.wrapped_settings then return old_next_line(doc, line, col, dv) end
-  local idx, ncol = get_line_idx_col_count(dv, line, col)
-  return get_line_col_from_index_and_x(dv, idx + 1, dv:get_col_x_offset(line, col))
 end
 
 command.add(nil, {

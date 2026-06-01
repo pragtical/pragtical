@@ -1437,53 +1437,54 @@ test.describe("codefold - persistent state", function()
 end)
 
 test.describe("codefold - translate functions", function()
-  local function make_mock_dv(doc_lines, regions, folded_indices)
-    local fold_map, unfold_map = build_maps(doc_lines, regions, folded_indices)
-    return {
-      cf_unfold_map = unfold_map,
-      cf_fold_map = fold_map,
-      cf_regions = regions,
-      cf_folded_regions = folded_indices,
-    }
+  local function make_translate_view(lines, regions, folded_indices)
+    local doc = Doc(nil, nil, true)
+    doc.lines = lines
+    doc.cache.col_x = {}
+    doc.cache.ulen = {}
+    doc.highlighter:reset()
+
+    local view = DocView(doc)
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 320
+    view.size.y = 200
+    view.cf_regions = regions or {}
+    view.cf_folded_regions = folded_indices or {}
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+    view.cf_hidden_lines = {}
+    for line = 1, #lines do
+      if not view.cf_unfold_map[line] then
+        view.cf_hidden_lines[line] = true
+      end
+    end
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    view.last_x_offset = { line = 1, col = 1, offset = 0 }
+    view:invalidate_visual_lines()
+    return view, doc
   end
 
-  -- Load the plugin to get access to translate overrides
-  local codefold = require "plugins.codefold"
-
   test.test("next_line falls back when no regions are folded", function()
-    local doc = Doc(nil, nil, true)
-    doc.lines = { "line1\n", "line2\n", "line3\n" }
-    doc:reset_syntax()
-
-    local dv = DocView(doc)
-    dv.cf_fold_map = {}
-    dv.cf_unfold_map = {}
-    dv.cf_folded_regions = {}
-    dv.last_x_offset = { line = 1, col = 1, offset = 0 }
-
+    local dv, doc = make_translate_view({ "line1\n", "line2\n", "line3\n" })
     local translate = require "core.docview".translate
     local nl = translate.next_line(doc, 1, 1, dv)
     test.equal(nl, 2)
   end)
 
   test.test("previous_line falls back when no regions are folded", function()
-    local doc = Doc(nil, nil, true)
-    doc.lines = { "line1\n", "line2\n", "line3\n" }
-    doc:reset_syntax()
-
-    local dv = DocView(doc)
-    dv.cf_fold_map = {}
-    dv.cf_unfold_map = {}
-    dv.cf_folded_regions = {}
-    dv.last_x_offset = { line = 2, col = 1, offset = 0 }
-
+    local dv, doc = make_translate_view({ "line1\n", "line2\n", "line3\n" })
     local translate = require "core.docview".translate
     local nl = translate.previous_line(doc, 2, 1, dv)
     test.equal(nl, 1)
   end)
 
   test.test("next_line skips hidden lines", function()
-    local dv = make_mock_dv(
+    local dv, doc = make_translate_view(
       { "line1\n", "line2\n", "line3\n", "line4\n", "line5\n" },
       { { start = 2, stop = 4 } },
       { 1 } -- fold region 1
@@ -1491,7 +1492,6 @@ test.describe("codefold - translate functions", function()
 
     -- Starting at line 2 (visible, fold header)
     -- next visible line should be 5
-    local doc = { lines = { "line1\n", "line2\n", "line3\n", "line4\n", "line5\n" } }
     local translate = require "core.docview".translate
     local nl, nc = translate.next_line(doc, 2, 1, dv)
     test.equal(nl, 5)
@@ -1499,26 +1499,24 @@ test.describe("codefold - translate functions", function()
   end)
 
   test.test("previous_line skips hidden lines", function()
-    local dv = make_mock_dv(
+    local dv, doc = make_translate_view(
       { "line1\n", "line2\n", "line3\n", "line4\n", "line5\n" },
       { { start = 2, stop = 4 } },
       { 1 }
     )
 
-    local doc = { lines = { "line1\n", "line2\n", "line3\n", "line4\n", "line5\n" } }
     local translate = require "core.docview".translate
     local nl, nc = translate.previous_line(doc, 5, 1, dv)
     test.equal(nl, 2)
   end)
 
   test.test("next_line at last visible line", function()
-    local dv = make_mock_dv(
+    local dv, doc = make_translate_view(
       { "line1\n", "line2\n", "line3\n" },
       { { start = 2, stop = 3 } },
       { 1 }
     )
 
-    local doc = { lines = { "line1\n", "line2\n", "line3\n" } }
     local translate = require "core.docview".translate
     local nl, nc = translate.next_line(doc, 2, 1, dv)
     -- line 1 is before, line 2 is header, 3 is hidden. End of doc.
@@ -1530,7 +1528,7 @@ test.describe("codefold - translate functions", function()
     for i = 1, 10 do
       lines[i] = "line" .. i .. "\n"
     end
-    local dv = make_mock_dv(
+    local dv, doc = make_translate_view(
       lines,
       { { start = 5, stop = 8 } },
       { 1 } -- fold region 5-8
@@ -1544,11 +1542,11 @@ test.describe("codefold - translate functions", function()
     dv.size = { y = 200 }
 
     local translate = require "core.docview".translate
-    local nl = translate.next_page(nil, 2, 1, dv)
+    local nl = translate.next_page(doc, 2, 1, dv)
     -- virtual line 2 + (7-1) = 8, but max virtual is 7
     test.equal(nl, 10, "page down from line 2 lands on last line")
 
-    nl = translate.previous_page(nil, 10, 1, dv)
+    nl = translate.previous_page(doc, 10, 1, dv)
     test.equal(nl, 1, "page up from last line lands on first")
   end)
 end)

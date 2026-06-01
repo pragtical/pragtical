@@ -74,11 +74,24 @@ local function trim_token_to_col(text, col, max_col)
   return text:sub(1, length)
 end
 
+---Resolve a visual row and horizontal target to a document position.
+---@param dv core.docview
+---@param row integer Visual row
+---@param x number Horizontal offset from text origin
+---@return integer line New line number
+---@return integer col New column number
+local function position_from_visual_row_x(dv, row, x)
+  row = common.clamp(row, 1, dv:visual_line_count())
+  local line = dv:visual_position_from_row(row)
+  local col = dv:get_visual_line_col_from_x(row, x)
+  return line, col
+end
+
 ---Helper to move cursor vertically while preserving horizontal offset.
 ---@param dv core.docview
 ---@param line integer Current line
 ---@param col integer Current column
----@param offset integer Line offset (-1 for up, 1 for down)
+---@param offset integer Visual row offset (-1 for up, 1 for down)
 ---@return integer line New line number
 ---@return integer col New column number
 local function move_to_line_offset(dv, line, col, offset)
@@ -86,8 +99,8 @@ local function move_to_line_offset(dv, line, col, offset)
   if xo.line ~= line or xo.col ~= col then
     xo.offset = dv:get_col_x_offset(line, col)
   end
-  xo.line = line + offset
-  xo.col = dv:get_x_offset_col(line + offset, xo.offset)
+  local row = dv:visual_row_from_position(line, col)
+  xo.line, xo.col = position_from_visual_row_x(dv, row + offset, xo.offset)
   return xo.line, xo.col
 end
 
@@ -95,27 +108,32 @@ end
 DocView.translate = {
   ["previous_page"] = function(doc, line, col, dv)
     local min, max = dv:get_visible_line_range()
-    return line - (max - min), 1
+    local row = dv:visual_row_from_position(line, col)
+    local target_row = math.max(1, row - (max - min))
+    return dv:visual_position_from_row(target_row), 1
   end,
 
   ["next_page"] = function(doc, line, col, dv)
-    if line == #doc.lines then
-      return #doc.lines, #doc.lines[line]
-    end
     local min, max = dv:get_visible_line_range()
-    return line + (max - min), 1
+    local row = dv:visual_row_from_position(line, col)
+    local target_row = math.min(dv:visual_line_count(), row + (max - min))
+    local target_line = dv:visual_position_from_row(target_row)
+    if target_line == #doc.lines then
+      return #doc.lines, #doc.lines[target_line]
+    end
+    return target_line, 1
   end,
 
   ["previous_line"] = function(doc, line, col, dv)
-    if line == 1 then
-      return 1, 1
+    if dv:visual_row_from_position(line, col) == 1 then
+      return line, 1
     end
     return move_to_line_offset(dv, line, col, -1)
   end,
 
   ["next_line"] = function(doc, line, col, dv)
-    if line == #doc.lines then
-      return #doc.lines, math.huge
+    if dv:visual_row_from_position(line, col) == dv:visual_line_count() then
+      return line, math.huge
     end
     return move_to_line_offset(dv, line, col, 1)
   end,
@@ -545,25 +563,21 @@ function DocView:is_line_visible(line)
 end
 
 
----Convert a virtual line offset (from get_visible_line_range) to a real
----document position. This is an identity function by default; plugins like
----codefolding or linewrapping override it to map visible rows to real lines.
----Plugins that iterate visible lines should call this to get the real line
----and column.
----@param offset integer Virtual line index (1-based)
+---Convert a visual line offset (from get_visible_line_range) to a real
+---document position. Plugins that iterate visible rows should call this to get
+---the real line and column represented by each composed visual row.
+---@param offset integer Visual line index (1-based)
 ---@return integer line Real document line
----@return integer col  Column (always 1 for the identity case)
+---@return integer col  Column where the visual row starts
 function DocView:position_from_offset(offset)
   return self:visual_position_from_row(offset)
 end
 
 
----Convert a real document position to its virtual line offset. This is an
----identity function by default; plugins that collapse, wrap or otherwise
----virtualize visible rows should override it with their own mapping.
+---Convert a real document position to its composed visual line offset.
 ---@param line integer Real document line
 ---@param col? integer Optional column
----@return integer offset Virtual line index (1-based)
+---@return integer offset Visual line index (1-based)
 function DocView:offset_from_position(line, col)
   return self:visual_row_from_position(line, col)
 end

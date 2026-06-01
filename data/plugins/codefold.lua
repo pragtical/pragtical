@@ -61,6 +61,8 @@ local TOGGLE_CLOSE = "\226\150\184"  -- ▸  (U+25B8)
 local RECALC_DEBOUNCE_SECONDS = 0.12
 ---@type renderer.font?
 local CODEFOLD_FONT = nil
+---@type renderer.font?
+local CODEFOLD_SOURCE_FONT = nil
 
 local codefold = {}
 
@@ -73,8 +75,11 @@ end
 local function get_toggle_font(self)
   local font = self:get_font()
   local size = common.round(font:get_size() * 1.5)
-  if not CODEFOLD_FONT or CODEFOLD_FONT ~= font or self.cf_toggle_font_size ~= size then
+  if not CODEFOLD_FONT or CODEFOLD_SOURCE_FONT ~= font
+    or self.cf_toggle_font_size ~= size
+  then
     CODEFOLD_FONT = font:copy(size)
+    CODEFOLD_SOURCE_FONT = font
     self.cf_toggle_font_size = size
   end
   return CODEFOLD_FONT
@@ -900,7 +905,7 @@ local function schedule_recalculation(self, from_line)
 end
 
 ---Recalculate everything after fold state or document change.
----Runs in a background thread to avoid UI stalls on large documents.
+---Runs in a yielding core coroutine to avoid long uninterrupted UI stalls.
 ---@param self core.docview
 local function recalculate(self)
   replace_recalculation_thread(self)
@@ -1287,105 +1292,6 @@ keymap.add {
   ["alt+shift+up"] = "code-folding:fold-all",
   ["alt+shift+down"] = "code-folding:unfold-all"
 }
-
----------------------------------------------------------------------
--- Translate overrides: skip hidden lines during cursor movement
----------------------------------------------------------------------
-
-local original_next_line = DocView.translate.next_line
-local original_previous_line = DocView.translate.previous_line
-local original_next_page = DocView.translate.next_page
-local original_previous_page = DocView.translate.previous_page
-
----@param dv core.docview
----@return boolean
-local function has_folded_line_maps(dv)
-  return config.plugins.codefold.enabled
-    and dv
-    and dv.cf_folded_regions
-    and #dv.cf_folded_regions > 0
-    and dv.cf_unfold_map
-    and dv.cf_fold_map
-    and #dv.cf_fold_map > 0
-end
-
----Skip hidden (folded) lines when moving the cursor down.
----@param doc core.doc
----@param line integer
----@param col integer
----@param dv core.docview
----@return integer line
----@return integer col
-DocView.translate.next_line = function(doc, line, col, dv)
-  if not has_folded_line_maps(dv) then
-    return original_next_line(doc, line, col, dv)
-  end
-  local function skip_hidden(l)
-    while l <= #doc.lines and not dv.cf_unfold_map[l] do
-      l = l + 1
-    end
-    if l > #doc.lines then
-      -- Walk backwards to find the last visible line
-      l = #doc.lines
-      while l >= 1 and not dv.cf_unfold_map[l] do
-        l = l - 1
-      end
-    end
-    return l
-  end
-  local nl = skip_hidden(line + 1)
-  if nl == line then return line, math.huge end
-  return nl, 1
-end
-
----Skip hidden (folded) lines when moving the cursor up.
-DocView.translate.previous_line = function(doc, line, col, dv)
-  if not has_folded_line_maps(dv) then
-    return original_previous_line(doc, line, col, dv)
-  end
-  local function skip_hidden(l)
-    while l >= 1 and not dv.cf_unfold_map[l] do
-      l = l - 1
-    end
-    if l < 1 then
-      -- Walk forwards to find the first visible line
-      l = 1
-      while l <= #doc.lines and not dv.cf_unfold_map[l] do
-        l = l + 1
-      end
-    end
-    return l
-  end
-  local nl = skip_hidden(line - 1)
-  if nl == line then return line, 1 end
-  return nl, math.huge
-end
-
----Page down, skipping folded regions.
-DocView.translate.next_page = function(doc, line, col, dv)
-  if not dv.cf_fold_map or #dv.cf_fold_map == 0 then
-    return original_next_page(doc, line, col, dv)
-  end
-  local virtual = dv.cf_unfold_map[line]
-  if not virtual then return dv.cf_fold_map[#dv.cf_fold_map], math.huge end
-  local min, max = dv:get_visible_line_range()
-  local new_virtual = math.min(#dv.cf_fold_map, virtual + (max - min))
-  local new_real = dv.cf_fold_map[new_virtual] or #doc.lines
-  return new_real, 1
-end
-
----Page up, skipping folded regions.
-DocView.translate.previous_page = function(doc, line, col, dv)
-  if not dv.cf_fold_map or #dv.cf_fold_map == 0 then
-    return original_previous_page(doc, line, col, dv)
-  end
-  local virtual = dv.cf_unfold_map[line]
-  if not virtual then return 1, 1 end
-  local min, max = dv:get_visible_line_range()
-  local new_virtual = math.max(1, virtual - (max - min))
-  local new_real = dv.cf_fold_map[new_virtual] or 1
-  return new_real, 1
-end
 
 codefold._test = {
   apply_detected_regions = apply_detected_regions,
