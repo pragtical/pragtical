@@ -563,25 +563,21 @@ function DocView:is_line_visible(line)
 end
 
 
----Convert a virtual line offset (from get_visible_line_range) to a real
----document position. This is an identity function by default; plugins like
----codefolding or linewrapping override it to map visible rows to real lines.
----Plugins that iterate visible lines should call this to get the real line
----and column.
----@param offset integer Virtual line index (1-based)
+---Convert a visual line offset (from get_visible_line_range) to a real
+---document position. Plugins that iterate visible rows should call this to get
+---the real line and column represented by each composed visual row.
+---@param offset integer Visual line index (1-based)
 ---@return integer line Real document line
----@return integer col  Column (always 1 for the identity case)
+---@return integer col  Column where the visual row starts
 function DocView:position_from_offset(offset)
   return self:visual_position_from_row(offset)
 end
 
 
----Convert a real document position to its virtual line offset. This is an
----identity function by default; plugins that collapse, wrap or otherwise
----virtualize visible rows should override it with their own mapping.
+---Convert a real document position to its composed visual line offset.
 ---@param line integer Real document line
 ---@param col? integer Optional column
----@return integer offset Virtual line index (1-based)
+---@return integer offset Visual line index (1-based)
 function DocView:offset_from_position(line, col)
   return self:visual_row_from_position(line, col)
 end

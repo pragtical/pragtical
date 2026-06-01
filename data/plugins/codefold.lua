@@ -61,6 +61,8 @@ local TOGGLE_CLOSE = "\226\150\184"  -- ▸  (U+25B8)
 local RECALC_DEBOUNCE_SECONDS = 0.12
 ---@type renderer.font?
 local CODEFOLD_FONT = nil
+---@type renderer.font?
+local CODEFOLD_SOURCE_FONT = nil
 
 local codefold = {}
 
@@ -73,8 +75,11 @@ end
 local function get_toggle_font(self)
   local font = self:get_font()
   local size = common.round(font:get_size() * 1.5)
-  if not CODEFOLD_FONT or CODEFOLD_FONT ~= font or self.cf_toggle_font_size ~= size then
+  if not CODEFOLD_FONT or CODEFOLD_SOURCE_FONT ~= font
+    or self.cf_toggle_font_size ~= size
+  then
     CODEFOLD_FONT = font:copy(size)
+    CODEFOLD_SOURCE_FONT = font
     self.cf_toggle_font_size = size
   end
   return CODEFOLD_FONT
@@ -900,7 +905,7 @@ local function schedule_recalculation(self, from_line)
 end
 
 ---Recalculate everything after fold state or document change.
----Runs in a background thread to avoid UI stalls on large documents.
+---Runs in a yielding core coroutine to avoid long uninterrupted UI stalls.
 ---@param self core.docview
 local function recalculate(self)
   replace_recalculation_thread(self)

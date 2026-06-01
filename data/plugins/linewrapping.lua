@@ -188,7 +188,7 @@ end
 
 -- breaks are held in a single table that contains n*2 elements, where n is the
 -- amount of line breaks. Each element represents line and column of the break.
-function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offset)
+function LineWrapping.reconstruct_breaks(docview, default_font, width)
   clear_pending_resize(docview)
   if width ~= math.huge then
     local doc = docview.doc
@@ -301,18 +301,6 @@ local function schedule_resize_rebuild(docview, width)
   end
   core.redraw = true
   return docview.wrapped_rebuild_at and now >= docview.wrapped_rebuild_at
-end
-
-function LineWrapping.update_pending_resize(docview)
-  if docview.wrapped_pending_width and schedule_resize_rebuild(docview, docview.wrapped_pending_width) then
-    LineWrapping.reconstruct_breaks(
-      docview,
-      docview.wrapped_pending_font or docview:get_font(),
-      docview.wrapped_pending_width
-    )
-    return true
-  end
-  return false
 end
 
 function LineWrapping.update_docview_breaks(docview)
