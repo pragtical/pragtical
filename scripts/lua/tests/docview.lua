@@ -142,6 +142,53 @@ test.describe("docview", function()
     test.ok(queried[4])
   end)
 
+  test.test("vertical movement follows visual rows", function()
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "one\n",
+      "two wrapped\n",
+      "hidden\n",
+      "four\n"
+    }
+    doc.cache.col_x = {}
+    doc.cache.ulen = {}
+    doc.highlighter:reset()
+
+    local view = DocView(doc)
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 320
+    view.size.y = 200
+    view.last_x_offset = { line = 1, col = 1, offset = 0 }
+    view.get_hidden_lines = function()
+      return { [3] = true }
+    end
+    view.get_line_wraps = function(_, line)
+      return line == 2 and { 1, 5 } or nil
+    end
+    view.get_visual_line_col_from_x = function(_, row)
+      local _, col = view:visual_position_from_row(row)
+      return col
+    end
+    view:invalidate_visual_lines()
+
+    local line, col = DocView.translate.next_line(doc, 1, 1, view)
+    test.equal(line, 2)
+    test.equal(col, 1)
+
+    line, col = DocView.translate.next_line(doc, line, col, view)
+    test.equal(line, 2)
+    test.equal(col, 5)
+
+    line, col = DocView.translate.next_line(doc, line, col, view)
+    test.equal(line, 4)
+    test.equal(col, 1)
+
+    line, col = DocView.translate.previous_line(doc, line, col, view)
+    test.equal(line, 2)
+    test.equal(col, 5)
+  end)
+
   test.test("draw_line_body uses search colors for search selections", function()
     local view = make_view("aaaa search\n")
     local col1 = view.doc.lines[1]:find("search", 1, true)

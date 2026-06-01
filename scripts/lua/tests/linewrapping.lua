@@ -348,4 +348,60 @@ test.describe("linewrapping", function()
     config.plugins.codefold.enabled = previous_codefold
     config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
   end)
+
+  test.test("vertical movement uses wrapped rows and skips folded lines", function()
+    local previous_codefold = config.plugins.codefold.enabled
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
+    config.plugins.codefold.enabled = true
+    config.plugins.codefold.hide_tail_on_fold = false
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "f\n",
+      "hidden hidden hidden hidden\n",
+      "hidden hidden hidden hidden\n",
+      "abcdef\n",
+      "ghijkl\n",
+    }
+    doc.cache.col_x = {}
+    doc.cache.ulen = {}
+    doc.highlighter:reset()
+
+    local view = DocView(doc)
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 320
+    view.size.y = 200
+    view.cf_regions = { { start = 1, stop = 3 } }
+    view.cf_folded_regions = { 1 }
+    view.cf_fold_map = { 1, 4, 5 }
+    view.cf_unfold_map = { 1, nil, nil, 2, 3 }
+    view.cf_hidden_lines = { [2] = true, [3] = true }
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    view.last_x_offset = { line = 1, col = 1, offset = 0 }
+
+    local font = view:get_font()
+    LineWrapping.reconstruct_breaks(view, font, font:get_width("abcd"))
+
+    local translate = require "core.docview".translate
+    local line, col = translate.next_line(doc, 1, 1, view)
+    test.equal(line, 4)
+    test.equal(col, 1)
+
+    line, col = translate.next_line(doc, line, col, view)
+    test.equal(line, 4)
+    test.ok(col > 1)
+
+    line, col = translate.previous_line(doc, line, col, view)
+    test.equal(line, 4)
+    test.equal(col, 1)
+
+    line, col = translate.previous_line(doc, line, col, view)
+    test.equal(line, 1)
+    test.equal(col, 1)
+
+    config.plugins.codefold.enabled = previous_codefold
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
+  end)
 end)

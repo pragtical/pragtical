@@ -149,9 +149,8 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
   return splits, begin_width
 end
 
--- breaks are held in a single table that contains n*2 elements, where n is the amount of line breaks.
--- each element represents line and column of the break. line_offset will check from the specified line
--- if the first line has not changed breaks, it will stop there.
+-- breaks are held in a single table that contains n*2 elements, where n is the
+-- amount of line breaks. Each element represents line and column of the break.
 function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offset)
   if width ~= math.huge then
     local doc = docview.doc
@@ -162,7 +161,7 @@ function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offs
     -- one element per actual line; gives the indent width for the acutal line
     docview.wrapped_line_offsets = { }
     docview.wrapped_settings = { ["width"] = width, ["font"] = default_font }
-    for i = line_offset or 1, #doc.lines do
+    for i = 1, #doc.lines do
       local breaks, offset = LineWrapping.compute_line_breaks(doc, default_font, i, width, config.plugins.linewrapping.mode)
       table.insert(docview.wrapped_line_offsets, offset)
       for k, col in ipairs(breaks) do
@@ -185,7 +184,7 @@ function LineWrapping.reconstruct_breaks(docview, default_font, width, line_offs
     docview.wrapped_line_offsets = nil
     docview.wrapped_settings = nil
   end
-  docview:invalidate_visual_lines(line_offset)
+  docview:invalidate_visual_lines()
 end
 
 -- When we have an insertion or deletion, we have four sections of text.
@@ -696,20 +695,6 @@ function translate.start_of_line(doc, line, col)
   local nline, ncol2 = get_idx_line_col(core.active_view, idx - 1)
   if nline ~= line then return line, 1 end
   return line, ncol2 + 1
-end
-
-local old_previous_line = DocView.translate.previous_line
-function DocView.translate.previous_line(doc, line, col, dv)
-  if not dv.wrapped_settings then return old_previous_line(doc, line, col, dv) end
-  local idx, ncol = get_line_idx_col_count(dv, line, col)
-  return get_line_col_from_index_and_x(dv, idx - 1, dv:get_col_x_offset(line, col))
-end
-
-local old_next_line = DocView.translate.next_line
-function DocView.translate.next_line(doc, line, col, dv)
-  if not dv.wrapped_settings then return old_next_line(doc, line, col, dv) end
-  local idx, ncol = get_line_idx_col_count(dv, line, col)
-  return get_line_col_from_index_and_x(dv, idx + 1, dv:get_col_x_offset(line, col))
 end
 
 command.add(nil, {
