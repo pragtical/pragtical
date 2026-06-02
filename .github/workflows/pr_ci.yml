@@ -10,13 +10,13 @@ on:
 jobs:
   build_linux:
     name: Linux
-    runs-on: ubuntu-22.04
     strategy:
       matrix:
         config:
-        - { name: "GCC", cc: gcc, cxx: g++, package: false, test: true }
-        - { name: "Zig x86_64", cc: gcc, cxx: g++, zig: true, arch: x86_64, package: true, test: true }
-        - { name: "Zig aarch64", cc: gcc, cxx: g++, zig: true, arch: aarch64, package: false, test: false }
+        - { name: "GCC", distro: ubuntu-22.04, cc: gcc, cxx: g++, package: false, test: true }
+        - { name: "Zig x86_64", distro: ubuntu-22.04, cc: gcc, cxx: g++, zig: true, arch: x86_64, package: true, test: true }
+        - { name: "Zig aarch64", distro: ubuntu-22.04-arm, cc: gcc, cxx: g++, zig: true, arch: aarch64, package: false, test: false }
+    runs-on: ${{ matrix.config.distro }}
     env:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
