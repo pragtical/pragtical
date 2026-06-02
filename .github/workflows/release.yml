@@ -108,7 +108,10 @@ jobs:
       - name: Package Portables
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
       - name: Build AppImages
-        run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --nobuild --release
+        run: >
+          bash scripts/appimage.sh --debug --static --addons
+          --version ${INSTALL_REF} --nobuild --release
+          --update-channel stable
       - name: Upload Files
         uses: softprops/action-gh-release@v3
         with:
@@ -117,6 +120,7 @@ jobs:
           files: |
             pragtical-${{ env.INSTALL_REF }}-linux-${{ matrix.config.arch }}-portable.tar.gz
             Pragtical-${{ env.INSTALL_REF }}-${{ matrix.config.arch }}.AppImage
+            Pragtical-${{ env.INSTALL_REF }}-${{ matrix.config.arch }}.AppImage.zsync
 
   build_macos:
     name: macOS
