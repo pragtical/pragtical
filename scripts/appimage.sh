@@ -151,7 +151,7 @@ main() {
         shift
         ;;
       -v|--version)
-        version="-$2"
+        version="$2"
         shift
         shift
         ;;
@@ -354,10 +354,12 @@ main() {
 
   echo "Generating AppImage..."
 
-  $appimagebin --appimage-extract-and-run --runtime-file "runtime-${arch}" \
+  # appimagetool embeds VERSION as X-AppImage-Version in the desktop file.
+  VERSION="$version" \
+    $appimagebin --appimage-extract-and-run --runtime-file "runtime-${arch}" \
     "${update_information[@]}" \
     Pragtical.AppDir \
-    "Pragtical${version}-${arch}.AppImage"
+    "Pragtical${version:+-$version}-${arch}.AppImage"
 }
 
 main "$@"
