@@ -84,6 +84,10 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: 3.9
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - name: Setup cmake
         run: |
           wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc \
@@ -102,13 +106,20 @@ jobs:
       - name: Install Dependencies
         run: |
           bash scripts/install-dependencies.sh --debug
+          sudo apt-get install -y zsync
       - name: Build Portable
         run: |
-          bash scripts/build.sh --debug --forcefallback --portable --release --lto --pgo
+          bash scripts/build.sh --debug --forcefallback --portable --release --lto --pgo \
+            --cross-platform linux \
+            --cross-arch ${{ matrix.config.arch }} \
+            --cross-file resources/cross/linux-zig-${{ matrix.config.arch }}.ini
       - name: Package Portables
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
       - name: Build AppImages
-        run: bash scripts/appimage.sh --debug --static --addons --version ${INSTALL_REF} --nobuild --release
+        run: >
+          bash scripts/appimage.sh --debug --static --addons
+          --version ${INSTALL_REF} --nobuild --release
+          --update-channel stable
       - name: Upload Files
         uses: softprops/action-gh-release@v3
         with:
@@ -117,6 +128,7 @@ jobs:
           files: |
             pragtical-${{ env.INSTALL_REF }}-linux-${{ matrix.config.arch }}-portable.tar.gz
             Pragtical-${{ env.INSTALL_REF }}-${{ matrix.config.arch }}.AppImage
+            Pragtical-${{ env.INSTALL_REF }}-${{ matrix.config.arch }}.AppImage.zsync
 
   build_macos:
     name: macOS

@@ -10,12 +10,13 @@ on:
 jobs:
   build_linux:
     name: Linux
-    runs-on: ubuntu-22.04
     strategy:
       matrix:
         config:
-        - { name: "GCC", cc: gcc, cxx: g++ }
-        - { name: "clang", cc: clang, cxx: clang++ }
+        - { name: "GCC", distro: ubuntu-22.04, cc: gcc, cxx: g++, package: false, test: true }
+        - { name: "Zig x86_64", distro: ubuntu-22.04, cc: gcc, cxx: g++, zig: true, arch: x86_64, package: true, test: true }
+        # - { name: "Zig aarch64", distro: ubuntu-22.04-arm, cc: gcc, cxx: g++, zig: true, arch: aarch64, package: false, test: false }
+    runs-on: ${{ matrix.config.distro }}
     env:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
@@ -24,7 +25,7 @@ jobs:
         uses: actions/checkout@v6
         with: { fetch-depth: 0 }
       - name: Set Environment Variables
-        if: ${{ matrix.config.cc == 'gcc' }}
+        if: ${{ matrix.config.package }}
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
@@ -35,24 +36,39 @@ jobs:
           python-version: 3.9
       - name: Setup cmake
         uses: jwlawson/actions-setup-cmake@v2
+      - name: Setup Zig
+        if: ${{ matrix.config.zig }}
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
       - name: Update Packages
         run: sudo apt-get update
       - name: Install Dependencies
         run: bash scripts/install-dependencies.sh --debug
       - name: Build
+        if: ${{ !matrix.config.zig }}
         run: |
           bash --version
           bash scripts/build.sh --debug --forcefallback --portable
+      - name: Build with Zig
+        if: ${{ matrix.config.zig }}
+        run: |
+          bash --version
+          bash scripts/build.sh --debug --forcefallback --portable \
+            --cross-platform linux \
+            --cross-arch ${{ matrix.config.arch }} \
+            --cross-file resources/cross/linux-zig-${{ matrix.config.arch }}.ini
       - name: Run Tests
+        if: ${{ matrix.config.test }}
         run: |
           source scripts/common.sh
           SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Package
-        if: ${{ matrix.config.cc == 'gcc' }}
+        if: ${{ matrix.config.package }}
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
-        if: ${{ matrix.config.cc == 'gcc' }}
+        if: ${{ matrix.config.package }}
         with:
           name: Linux x86_64
           path: ${{ env.INSTALL_NAME }}.tar.gz
