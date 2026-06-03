@@ -163,6 +163,43 @@ local function compare_tokens(context, actual, expected)
   end
 end
 
+local function token_ranges(tokens)
+  local ranges = {}
+  local col = 1
+  for i = 1, #tokens, 2 do
+    local text = tokens[i + 1]
+    ranges[#ranges + 1] = {
+      type = tokens[i],
+      first = col,
+      last = col + #text - 1,
+      text = text
+    }
+    col = col + #text
+  end
+  return ranges
+end
+
+local function assert_range_type(context, tokens, first, last, expected_type)
+  local covered_until = first - 1
+  for _, range in ipairs(token_ranges(tokens)) do
+    if range.last >= first and range.first <= last then
+      test.equal(
+        range.type,
+        expected_type,
+        string.format(
+          "%s token %q at columns %d-%d",
+          context,
+          range.text,
+          range.first,
+          range.last
+        )
+      )
+      covered_until = math.max(covered_until, range.last)
+    end
+  end
+  test.ok(covered_until >= last, context .. " token coverage")
+end
+
 test.describe("language tokenizer fixtures", function()
   test.test("native tokenizer matches lua tokenizer", function()
     load_language_plugins("data/plugins")
@@ -232,5 +269,39 @@ test.describe("language tokenizer fixtures", function()
         test.ok(covered[key], "missing language fixture for " .. files_key(syn.files))
       end
     end
+  end)
+
+  test.test("javascript regex literals can precede ternary colons", function()
+    loadfile("data/plugins/language_js.lua")()
+
+    local line = 'var c = "<" === a || ">" === a ? /[(){}[\\]<>]/ : /[(){}[\\]]/;'
+    local first_regex_start, first_regex_end = line:find("/[(){}[\\]<>]/", 1, true)
+    local second_regex_start, second_regex_end = line:find("/[(){}[\\]]/", 1, true)
+    local using_native = tokenizer.is_using_native()
+
+    tokenizer.set_use_native(true)
+    local tokens, state = tokenize_line(
+      tokenizer,
+      syntax.get("fixture.js"),
+      string.char(0),
+      line
+    )
+    tokenizer.set_use_native(using_native)
+
+    test.equal(state, string.char(0))
+    assert_range_type(
+      "first regex literal before ternary colon",
+      tokens,
+      first_regex_start,
+      first_regex_end,
+      "string"
+    )
+    assert_range_type(
+      "second regex literal before semicolon",
+      tokens,
+      second_regex_start,
+      second_regex_end,
+      "string"
+    )
   end)
 end)
