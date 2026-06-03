@@ -1432,7 +1432,7 @@ function DocView:draw()
   local drawn_gutters = {}
   for row = minline, maxline do
     local line = self:visual_position_from_row(row)
-    if line and not drawn_gutters[line] then
+    if line and self.doc.lines[line] and not drawn_gutters[line] then
       local first_row = self:visual_row_from_position(line, 1)
       local line_y = y - (row - first_row) * lh
       self:draw_line_gutter(line, self.position.x, line_y, gpad and gw - gpad or gw)
@@ -1452,7 +1452,7 @@ function DocView:draw()
   local drawn_lines = {}
   for row = minline, maxline do
     local line = self:visual_position_from_row(row)
-    if line and not drawn_lines[line] then
+    if line and self.doc.lines[line] and not drawn_lines[line] then
       local first_row = self:visual_row_from_position(line, 1)
       local line_y = y - (row - first_row) * lh
       self:draw_line_body(line, x, line_y)
