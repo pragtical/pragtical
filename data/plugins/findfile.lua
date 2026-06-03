@@ -385,7 +385,7 @@ local function submit_project_file(text, selection_callback, selected_line)
     end
   end
 
-  local project = multiple_projects and core.projects[1] or core.current_project()
+  local project = core.projects[1]
   if selection_callback then
     local filename = file_in_project(project, text)
     if filename then selection_callback(filename, selected_line) end
