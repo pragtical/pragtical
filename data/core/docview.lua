@@ -1180,12 +1180,6 @@ end
 function DocView:draw_line_text(line, x, y)
   local default_font = self:get_font()
   local tx, ty = x, y + self:get_line_text_y_offset()
-  local last_token = nil
-  local tokens = self.doc.highlighter:get_line(line).tokens
-  local tokens_count = #tokens
-  if tokens_count > 0 and string.sub(tokens[tokens_count], -1) == "\n" then
-    last_token = tokens_count - 1
-  end
   local _, indent_size = self.doc:get_indent_info()
 
   local search_selections = {}
@@ -1201,6 +1195,7 @@ function DocView:draw_line_text(line, x, y)
   local start_tx = tx
   local line_text = self.doc:get_utf8_line(line)
   local line_len = #line_text
+  local line_ends_with_newline = line_text:byte(line_len) == 10
   local visible_col1, visible_col2
   if line_len > CACHE_LINE_LEN and #search_selections == 0 then
     local gw = self:get_gutter_width()
@@ -1213,8 +1208,7 @@ function DocView:draw_line_text(line, x, y)
     col = visible_col1
   end
   local token_start_col = 1
-  for tidx = 1, tokens_count, 2 do
-    local type, text = tokens[tidx], tokens[tidx + 1]
+  for _, type, text in self.doc.highlighter:each_token(line) do
     local token_col = token_start_col
     token_start_col = token_start_col + #text
     if visible_col1 then
@@ -1231,7 +1225,7 @@ function DocView:draw_line_text(line, x, y)
       local font = style.syntax_fonts[type] or default_font
       if font ~= default_font then font:set_tab_size(indent_size) end
       -- do not render newline, fixes issue #1164
-      if tidx == last_token then text = text:sub(1, -2) end
+      if line_ends_with_newline and token_start_col > line_len then text = text:sub(1, -2) end
       if visible_col2 then
         if col > visible_col2 then break end
         text = trim_token_to_col(text, col, visible_col2)
@@ -1242,7 +1236,7 @@ function DocView:draw_line_text(line, x, y)
     else
       local font = style.syntax_fonts[type] or default_font
       if font ~= default_font then font:set_tab_size(indent_size) end
-      if tidx == last_token then text = text:sub(1, -2) end
+      if line_ends_with_newline and token_start_col > line_len then text = text:sub(1, -2) end
       local i = 1
       local len = #text
 
