@@ -1,5 +1,42 @@
 # Changes Log
 
+## [3.11.1] - 2026-06-02
+
+### New Features
+
+* Add welcome recent project menu
+  ([#519](https://github.com/pragtical/pragtical/pull/519))
+
+### Enhancements
+
+* Polish codefold marker behavior
+  ([#518](https://github.com/pragtical/pragtical/pull/518))
+
+* Optimize linewrapping rebuilds for long lines
+  ([#520](https://github.com/pragtical/pragtical/pull/520))
+
+* Use highlighter:each_token in draw_line_text
+  ([#523](https://github.com/pragtical/pragtical/pull/523))
+
+### Fixes
+
+* Avoid hidden status item rebuilds
+  ([#516](https://github.com/pragtical/pragtical/pull/516))
+
+* Return partial process writes
+  ([#517](https://github.com/pragtical/pragtical/pull/517))
+
+* Avoid HTTP test port file race
+  ([08ed2c34](https://github.com/pragtical/pragtical/commit/08ed2c34))
+
+### Build System
+
+* Improve AppImage packaging
+  ([#522](https://github.com/pragtical/pragtical/pull/522))
+
+* Embed AppImage version metadata
+  ([21ef76c0](https://github.com/pragtical/pragtical/commit/21ef76c0))
+
 ## [3.11.0] - 2026-05-29
 
 ### New Features
@@ -3429,6 +3466,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.11.1]: https://github.com/pragtical/pragtical/releases/tag/v3.11.1
 [3.11.0]: https://github.com/pragtical/pragtical/releases/tag/v3.11.0
 [3.10.1]: https://github.com/pragtical/pragtical/releases/tag/v3.10.1
 [3.10.0]: https://github.com/pragtical/pragtical/releases/tag/v3.10.0

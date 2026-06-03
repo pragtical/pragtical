@@ -1,7 +1,8 @@
-[wrap-git]
-url = https://github.com/libsdl-org/SDL_net.git
-revision = 8fd5743ad60fa7552a929ed4121eab039e2453dd
-depth = 1
+[wrap-file]
+directory = SDL3_net-3.2.0
+source_url = https://github.com/libsdl-org/SDL_net/releases/download/release-3.2.0/SDL3_net-3.2.0.tar.gz
+source_filename = SDL3_net-3.2.0.tar.gz
+source_hash = 098522fc26d4e302ef9348aee6e76e67fe504dfefd7f596236568f8330570c41
 patch_directory = sdl3_net
 
 [provide]

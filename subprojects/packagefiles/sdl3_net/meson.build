@@ -1,4 +1,4 @@
-project('sdl3_net', 'c', version: '3.1.0')
+project('sdl3_net', 'c', version: '3.2.0')
 
 cc = meson.get_compiler('c')
 
