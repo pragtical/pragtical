@@ -1,4 +1,5 @@
 local test = require "core.test"
+local core = require "core"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local style = require "core.style"
@@ -223,6 +224,42 @@ test.describe("docview", function()
         test.ok(found_text)
       end)
     end)
+  end)
+
+  test.test("draw skips stale visual rows without backing document lines", function()
+    local view = make_view("one\n")
+    view.size.y = view:get_line_height() * 2
+    view.visual_line_count = function() return 2 end
+    view.visual_position_from_row = function(_, row)
+      return row
+    end
+
+    local invalid_gutter = false
+    local invalid_body = false
+    view.draw_line_gutter = function(_, line)
+      if line == 2 then invalid_gutter = true end
+    end
+    view.draw_line_body = function(_, line)
+      if line == 2 then invalid_body = true end
+      return view:get_line_height()
+    end
+
+    local push_clip_rect = core.push_clip_rect
+    local pop_clip_rect = core.pop_clip_rect
+    core.push_clip_rect = function() end
+    core.pop_clip_rect = function() end
+
+    local ok, err = pcall(function()
+      with_draw_rect(function()
+        view:draw()
+      end)
+    end)
+    core.push_clip_rect = push_clip_rect
+    core.pop_clip_rect = pop_clip_rect
+    if not ok then error(err, 0) end
+
+    test.equal(invalid_gutter, false)
+    test.equal(invalid_body, false)
   end)
 
   test.test("draw_line_text slices long lines to the visible range", function()
