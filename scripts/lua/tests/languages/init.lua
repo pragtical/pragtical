@@ -1,9 +1,19 @@
 local test = require "core.test"
+local common = require "core.common"
 local syntax = require "core.syntax"
 local tokenizer = require "core.tokenizer"
 
-local fixtures = dofile("scripts/lua/tests/languages/samples/manifest")
-local sample_dir = "scripts/lua/tests/languages/samples/"
+local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
+local source_root = common.dirname(
+  common.dirname(common.dirname(common.dirname(common.dirname(source_path))))
+)
+
+local function source_file(relative_path)
+  return source_root .. PATHSEP .. relative_path
+end
+
+local fixtures = dofile(source_file("scripts/lua/tests/languages/samples/manifest"))
+local sample_dir = source_file("scripts/lua/tests/languages/samples") .. PATHSEP
 
 local function copy_table(source)
   local copy = {}
@@ -32,7 +42,7 @@ local function deep_copy(value, seen)
 end
 
 local function load_lua_tokenizer()
-  local chunk = assert(loadfile("data/core/tokenizer.lua"))
+  local chunk = assert(loadfile(source_file("data/core/tokenizer.lua")))
   local env = setmetatable({}, { __index = _G })
   env.require = function(name)
     if name == "tokenizer" then
@@ -202,8 +212,8 @@ end
 
 test.describe("language tokenizer fixtures", function()
   test.test("native tokenizer matches lua tokenizer", function()
-    load_language_plugins("data/plugins")
-    load_language_plugins("subprojects/plugins/plugins")
+    load_language_plugins(source_file("data/plugins"))
+    load_language_plugins(source_file("subprojects/plugins/plugins"))
 
     local syntaxes = {}
     for _, syn in ipairs(syntax.items) do
@@ -272,7 +282,7 @@ test.describe("language tokenizer fixtures", function()
   end)
 
   test.test("javascript regex literals can precede ternary colons", function()
-    loadfile("data/plugins/language_js.lua")()
+    loadfile(source_file("data/plugins/language_js.lua"))()
 
     local line = 'var c = "<" === a || ">" === a ? /[(){}[\\]<>]/ : /[(){}[\\]]/;'
     local first_regex_start, first_regex_end = line:find("/[(){}[\\]<>]/", 1, true)
