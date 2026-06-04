@@ -1491,7 +1491,7 @@ static GpuAtlasTexture *gpu_atlas_lookup_texture(RenAtlas *atlas, GlyphMetric *m
     if (!tight_texture &&
         texture->x1 >= metric->x1 &&
         texture->y0 == 0 &&
-        texture->y1 > metric->y1)
+        texture->y1 >= metric->y1)
       return texture;
   }
   return NULL;
@@ -3711,8 +3711,19 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   ctx->batch_pipeline_ready = true;
 
   GpuAtlasTexture *texture = gpu_ensure_native_glyph_texture(data, glyph->atlas, glyph->metric);
-  if (!texture)
-    gpu_abort("SDLGPU native glyph texture unavailable");
+  if (!texture) {
+    GlyphMetric *m = glyph->metric;
+    char detail[256];
+    SDL_Surface *gsurface = glyph->atlas ? ren_atlas_get_glyph_surface(glyph->atlas, m) : NULL;
+    SDL_snprintf(
+      detail, sizeof(detail),
+      "SDLGPU native glyph texture unavailable (format=%u atlas=%u surface=%u "
+      "x1=%u y0=%u y1=%u surface=%dx%d)",
+      m->format, m->atlas_idx, m->surface_idx, m->x1, m->y0, m->y1,
+      gsurface ? gsurface->w : -1, gsurface ? gsurface->h : -1
+    );
+    gpu_abort(detail);
+  }
   if (!ctx->have_clip) {
     if (!frame->surface || !SDL_GetSurfaceClipRect(frame->surface, &ctx->clip))
       gpu_abort("SDLGPU native text clip unavailable");
@@ -5440,8 +5451,17 @@ static bool gpu_can_native_region(RenCache *rc, UNUSED RenSurface *surface, UNUS
   return data && data->command_buffer && data->frame.texture;
 }
 
+static bool gpu_full_frame_regions_enabled(void) {
+  return gpu_env_flag("PRAGTICAL_SDLGPU_FULL_FRAME", false);
+}
+
 static bool gpu_use_full_frame_regions(RenCache *rc) {
-  return rc && rc->window_target && gpu_direct_replay_enabled();
+  /* Default to dirty-region native replay so static frames only redraw changed
+     cells into the retained frame texture, matching the surface backend's
+     frame-to-frame coherence. PRAGTICAL_SDLGPU_FULL_FRAME=1 restores the old
+     whole-frame re-emit path for A/B comparison. */
+  return rc && rc->window_target && gpu_direct_replay_enabled()
+      && gpu_full_frame_regions_enabled();
 }
 
 static bool gpu_can_native_text(
