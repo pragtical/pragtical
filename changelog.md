@@ -1,5 +1,18 @@
 # Changes Log
 
+## [3.11.2] - 2026-06-03
+
+### Fixes
+
+* Always resolve findfile paths against the open project root
+  ([#525](https://github.com/pragtical/pragtical/pull/525))
+
+* Fix JavaScript regex literals after ternary colons
+  ([#526](https://github.com/pragtical/pragtical/pull/526))
+
+* Skip stale visual rows while drawing DocView
+  ([#527](https://github.com/pragtical/pragtical/pull/527))
+
 ## [3.11.1] - 2026-06-02
 
 ### New Features
@@ -3466,6 +3479,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.11.2]: https://github.com/pragtical/pragtical/releases/tag/v3.11.2
 [3.11.1]: https://github.com/pragtical/pragtical/releases/tag/v3.11.1
 [3.11.0]: https://github.com/pragtical/pragtical/releases/tag/v3.11.0
 [3.10.1]: https://github.com/pragtical/pragtical/releases/tag/v3.10.1
