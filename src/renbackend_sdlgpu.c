@@ -247,6 +247,9 @@ typedef struct {
   SDL_GPUDevice *prev_active_frame_device;
   SDL_GPUCommandBuffer *prev_active_frame_command_buffer;
   GpuWindowData *prev_active_frame_window_data;
+  GpuQueuedGlyph *pending_text_glyphs;
+  int pending_text_glyph_count;
+  int pending_text_glyph_capacity;
   bool surface_valid;
   bool texture_valid;
   bool region_active;
@@ -319,6 +322,7 @@ static bool gpu_flush_queued_canvases(GpuWindowData *data, SDL_GPUCommandBuffer 
 static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
 static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *cmd);
 static GpuQueuedGlyph *gpu_append_pending_text_glyph(GpuWindowData *data);
+static bool gpu_flush_canvas_pending_text(GpuCanvasData *data);
 static bool gpu_draw_solid_rect_to_bridge(
   SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd, GpuFrameBridge *frame,
   SDL_Surface *surface, RenRect rect, RenColor color, bool replace
@@ -4731,12 +4735,56 @@ static void gpu_begin_frame(RenCache *cache, UNUSED RenRect *rects, UNUSED int c
 static void gpu_end_frame(UNUSED RenCache *cache, UNUSED RenRect *rects, UNUSED int count) {
 }
 
+// Accumulate a command's collected glyphs into the canvas-wide pending queue so
+// consecutive offscreen text commands render in one batch instead of one render
+// pass per command.
+static bool gpu_append_canvas_text_glyphs(GpuCanvasData *data, GpuQueuedGlyph *glyphs, int count) {
+  if (count <= 0)
+    return true;
+  if (data->pending_text_glyph_count + count > data->pending_text_glyph_capacity) {
+    int capacity = data->pending_text_glyph_capacity ? data->pending_text_glyph_capacity * 2 : 512;
+    while (capacity < data->pending_text_glyph_count + count)
+      capacity *= 2;
+    GpuQueuedGlyph *grown = SDL_realloc(data->pending_text_glyphs, capacity * sizeof(GpuQueuedGlyph));
+    if (!grown)
+      return false;
+    data->pending_text_glyphs = grown;
+    data->pending_text_glyph_capacity = capacity;
+  }
+  SDL_memcpy(
+    data->pending_text_glyphs + data->pending_text_glyph_count,
+    glyphs, count * sizeof(GpuQueuedGlyph)
+  );
+  data->pending_text_glyph_count += count;
+  return true;
+}
+
+// Render and clear the canvas pending text batch into the canvas frame texture.
+// Used as an ordering barrier before non-text canvas draws and at region submit.
+static bool gpu_flush_canvas_pending_text(GpuCanvasData *data) {
+  if (!data || data->pending_text_glyph_count == 0)
+    return true;
+  if (!data->command_buffer || !data->frame.surface || !data->frame.texture)
+    return false;
+  bool drawn = gpu_draw_text_batches_to_bridge(
+    data->device, data->command_buffer, &data->frame, data->frame.surface,
+    data->pending_text_glyphs, data->pending_text_glyph_count, NULL, NULL
+  );
+  data->pending_text_glyph_count = 0;
+  if (drawn)
+    data->region_modified = true;
+  return drawn;
+}
+
 static void gpu_submit_canvas_region_command(GpuCanvasData *data) {
   if (!data || !data->command_buffer) {
     if (data)
       data->region_modified = false;
     return;
   }
+
+  if (!gpu_flush_canvas_pending_text(data))
+    gpu_abort("SDLGPU canvas pending text flush failed");
 
   SDL_GPUCommandBuffer *cmd = data->command_buffer;
   data->command_buffer = NULL;
@@ -4788,6 +4836,7 @@ static void gpu_begin_region(RenCache *cache, UNUSED RenRect rect, UNUSED bool n
     if (data) {
       data->region_active = true;
       data->region_modified = false;
+      data->pending_text_glyph_count = 0;
     }
     return;
   }
@@ -4959,6 +5008,8 @@ static void gpu_destroy_canvas(RenCache *canvas) {
       data->device = NULL;
     }
     gpu_destroy_bridge_surface(&data->frame);
+    SDL_free(data->pending_text_glyphs);
+    data->pending_text_glyphs = NULL;
   }
   SDL_free(data);
   canvas->backend_data = NULL;
@@ -5260,6 +5311,8 @@ static bool gpu_draw_canvas_rect_native(
   SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
+  if (!gpu_flush_canvas_pending_text(data))
+    gpu_abort("SDLGPU canvas pending text flush failed");
   bool drawn = gpu_draw_solid_rect_to_bridge(
     data->device, cmd, &data->frame, surface->surface, rect, color, replace
   );
@@ -5288,6 +5341,8 @@ static bool gpu_draw_canvas_pixels_native(
   SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
+  if (!gpu_flush_canvas_pending_text(data))
+    gpu_abort("SDLGPU canvas pending text flush failed");
   bool uploaded = gpu_upload_pixels_to_bridge(
     data->device, cmd, &data->frame, surface->surface, rect, bytes, len
   );
@@ -5347,12 +5402,40 @@ static bool gpu_draw_canvas_text_native(
   gpu_active_frame_command_buffer = prev_cmd;
   gpu_active_frame_window_data = prev_window_data;
 
+  int style = ren_font_group_get_style(fonts);
+  int glyph_count = text_context.glyph_count;
+  bool decorated = (style & (FONT_STYLE_UNDERLINE | FONT_STYLE_STRIKETHROUGH)) != 0;
+
+  // Region path without decorations: defer the draw and accumulate glyphs so the
+  // whole region's text renders in one batch instead of a render pass per
+  // command. The texture becomes authoritative immediately; the batch is flushed
+  // at the next non-text barrier or at region submit.
+  if (!owned && !decorated) {
+    bool appended = gpu_append_canvas_text_glyphs(data, text_context.glyphs, glyph_count);
+    SDL_free(text_context.glyphs);
+    if (!appended)
+      gpu_abort("SDLGPU canvas text glyph append failed");
+    if (glyph_count > 0) {
+      data->texture_valid = true;
+      data->surface_valid = false;
+      data->frame.needs_full_upload = false;
+      data->frame.dirty_count = 0;
+      data->region_modified = true;
+    }
+    return true;
+  }
+
+  // Immediate path (no region, or a decorated run that must keep text and
+  // decoration ordered on this command buffer). Flush any deferred batch first
+  // so it stays beneath this run.
+  if (!owned && !gpu_flush_canvas_pending_text(data))
+    gpu_abort("SDLGPU canvas pending text flush failed");
+
   bool drawn = gpu_draw_text_glyphs_to_bridge(
     data->device, cmd, &data->frame, surface->surface, text_context.glyphs, text_context.glyph_count
   );
 
-  int style = ren_font_group_get_style(fonts);
-  if (drawn && (style & (FONT_STYLE_UNDERLINE | FONT_STYLE_STRIKETHROUGH))) {
+  if (drawn && decorated) {
     int height = ren_font_group_get_height(fonts);
     int thickness = ren_font_group_get_underline_thickness(fonts);
     RenRect decoration = {
@@ -5375,7 +5458,6 @@ static bool gpu_draw_canvas_text_native(
     }
   }
 
-  int glyph_count = text_context.glyph_count;
   SDL_free(text_context.glyphs);
   if (!drawn) {
     gpu_cancel_canvas_draw(cmd, owned);
@@ -5421,6 +5503,8 @@ static bool gpu_draw_canvas_poly_native(
   SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
 
   gpu_sync_canvas_texture(data, cmd);
+  if (!gpu_flush_canvas_pending_text(data))
+    gpu_abort("SDLGPU canvas pending text flush failed");
   bool drawn = gpu_draw_poly_vertices_to_bridge(
     data->device, cmd, &data->frame, surface->surface, data->frame.poly_vertices, vertex_count, bounds, color
   );
