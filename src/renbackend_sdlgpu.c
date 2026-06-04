@@ -393,6 +393,12 @@ static bool gpu_direct_replay_enabled(void) {
   return gpu_env_flag("PRAGTICAL_SDLGPU_DIRECT_REPLAY", true);
 }
 
+static bool gpu_present_sync_forced(void) {
+  /* Debug/rollback override: force a CPU<->GPU fence wait every present, like
+     the original always-synchronous behavior. */
+  return gpu_env_flag("PRAGTICAL_SDLGPU_PRESENT_SYNC", false);
+}
+
 static bool gpu_native_text_supported(SDL_GPUDevice *device) {
   SDL_GPUShaderFormat formats = device ? SDL_GetGPUShaderFormats(device) : 0;
   return gpu_native_text_enabled()
@@ -4875,7 +4881,18 @@ static void gpu_present_window_rects(RenCache *cache, UNUSED RenRect *rects, UNU
     data->frame.texture_h,
     &validation_row_stride
   );
-  if (validate_text || data->native_text_used || data->sampled_canvas_this_frame || !swapchain_texture) {
+  /* Only block on the GPU when the completed frame is actually needed on the
+     CPU this frame: native-text validation readback, or a missing swapchain
+     texture (hidden/temporary window that renderer.to_canvas may capture).
+     A debug override can also force it. Steady-state frames submit without
+     waiting so the CPU can build the next frame while the GPU renders this one.
+     This is safe because per-frame vertex/transfer buffers are mapped and
+     uploaded with cycle=true (SDL recycles them across in-flight frames) and
+     command buffers execute in submission order, so the persistent frame
+     texture and any sampled canvas textures stay correct without a fence.
+     gpu_capture_window() submits and waits on its own command buffer. */
+  bool wait_for_gpu = validate_text || !swapchain_texture || gpu_present_sync_forced();
+  if (wait_for_gpu) {
     SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
     if (!fence)
       gpu_abort("SDL_SubmitGPUCommandBufferAndAcquireFence failed");
