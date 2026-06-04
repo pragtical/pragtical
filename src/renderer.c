@@ -84,6 +84,11 @@ typedef struct {
 // maximum shaped run byte length to copy into the width cache
 #define SHAPED_WIDTH_CACHE_MAX_TEXT 256
 
+// number of shaped glyph runs cached per font
+#define SHAPED_RUN_CACHE_MAX 512
+// maximum shaped run byte length to copy into the run cache
+#define SHAPED_RUN_CACHE_MAX_TEXT 256
+
 // maps codepoints -> glyph IDs
 typedef struct {
   unsigned int *rows[CHARMAP_ROW];
@@ -108,6 +113,22 @@ typedef struct {
   uint64_t age;
 } ShapedWidthCacheEntry;
 
+// one shaped glyph from HarfBuzz: glyph id plus raw (font-unit) positions
+typedef struct {
+  unsigned int codepoint;
+  hb_position_t x_offset, y_offset, x_advance;
+} ShapedGlyph;
+
+typedef struct {
+  char *text;
+  size_t len;
+  uint32_t hash;
+  uint32_t generation;
+  ShapedGlyph *glyphs;
+  unsigned int glyph_count;
+  uint64_t age;
+} ShapedRunCacheEntry;
+
 typedef struct RenFont {
   FT_Face face;
   hb_font_t *hb_font;
@@ -127,6 +148,9 @@ typedef struct RenFont {
   uint64_t shaped_width_age;
   size_t shaped_width_count;
   ShapedWidthCacheEntry shaped_width_cache[SHAPED_WIDTH_CACHE_MAX];
+  uint64_t shaped_run_age;
+  size_t shaped_run_count;
+  ShapedRunCacheEntry shaped_run_cache[SHAPED_RUN_CACHE_MAX];
   char path[];
 } RenFont;
 
@@ -1059,8 +1083,69 @@ static void font_store_shaped_width_cache(RenFont *font, const char *text, size_
   entry->age = ++font->shaped_width_age;
 }
 
+static void font_clear_shaped_run_cache(RenFont *font) {
+  for (size_t i = 0; i < font->shaped_run_count; i++) {
+    SDL_free(font->shaped_run_cache[i].text);
+    font->shaped_run_cache[i].text = NULL;
+    SDL_free(font->shaped_run_cache[i].glyphs);
+    font->shaped_run_cache[i].glyphs = NULL;
+  }
+  font->shaped_run_count = 0;
+  font->shaped_run_age = 0;
+}
+
+static ShapedRunCacheEntry *font_lookup_shaped_run_cache(RenFont *font, const char *text, size_t len, uint32_t hash_value) {
+  for (size_t i = 0; i < font->shaped_run_count; i++) {
+    ShapedRunCacheEntry *entry = &font->shaped_run_cache[i];
+    if (entry->generation == font->generation
+        && entry->hash == hash_value
+        && entry->len == len
+        && memcmp(entry->text, text, len) == 0) {
+      entry->age = ++font->shaped_run_age;
+      return entry;
+    }
+  }
+  return NULL;
+}
+
+static ShapedRunCacheEntry *font_store_shaped_run_cache(RenFont *font, const char *text, size_t len, uint32_t hash_value, hb_glyph_info_t *infos, hb_glyph_position_t *positions, unsigned int glyph_count) {
+  size_t idx = font->shaped_run_count;
+  if (idx < SHAPED_RUN_CACHE_MAX) {
+    font->shaped_run_count++;
+  } else {
+    idx = 0;
+    uint64_t oldest = font->shaped_run_cache[0].age;
+    for (size_t i = 1; i < SHAPED_RUN_CACHE_MAX; i++) {
+      if (font->shaped_run_cache[i].age < oldest) {
+        oldest = font->shaped_run_cache[i].age;
+        idx = i;
+      }
+    }
+    SDL_free(font->shaped_run_cache[idx].text);
+    SDL_free(font->shaped_run_cache[idx].glyphs);
+  }
+
+  ShapedRunCacheEntry *entry = &font->shaped_run_cache[idx];
+  entry->text = check_alloc(SDL_malloc(len));
+  memcpy(entry->text, text, len);
+  entry->len = len;
+  entry->hash = hash_value;
+  entry->generation = font->generation;
+  entry->glyph_count = glyph_count;
+  entry->glyphs = glyph_count ? check_alloc(SDL_malloc(glyph_count * sizeof(ShapedGlyph))) : NULL;
+  for (unsigned int i = 0; i < glyph_count; i++) {
+    entry->glyphs[i].codepoint = infos[i].codepoint;
+    entry->glyphs[i].x_offset = positions[i].x_offset;
+    entry->glyphs[i].y_offset = positions[i].y_offset;
+    entry->glyphs[i].x_advance = positions[i].x_advance;
+  }
+  entry->age = ++font->shaped_run_age;
+  return entry;
+}
+
 static void font_clear_glyph_cache(RenFont* font) {
   font_clear_shaped_width_cache(font);
+  font_clear_shaped_run_cache(font);
   font->generation++;
   ren_atlas_clear(&font->glyphs.atlas);
   // clear glyph metric
@@ -1778,7 +1863,31 @@ static void draw_glyph_bitmap(DrawGlyphContext *ctx, RenFont **fonts, RenFont *f
   }
 }
 
+static double draw_shaped_glyphs(DrawGlyphContext *ctx, RenFont **fonts, RenFont *font, const ShapedGlyph *glyphs, unsigned int glyph_count, double pen_x, double y) {
+  for (unsigned int i = 0; i < glyph_count; i++) {
+    double x_offset = hb_position_to_font_pixels(font, glyphs[i].x_offset);
+    double y_offset = hb_position_to_font_pixels(font, glyphs[i].y_offset);
+    double glyph_x = pen_x + x_offset;
+    SDL_Surface *font_surface = NULL;
+    GlyphMetric *metric = NULL;
+    font_get_glyph_by_id(font, glyphs[i].codepoint, (int)(fmod(glyph_x, 1.0) * SUBPIXEL_BITMAPS_CACHED), &font_surface, &metric);
+    if (metric)
+      draw_glyph_bitmap(ctx, fonts, font, font_surface, metric, glyph_x, y, y_offset, glyphs[i].codepoint == 0);
+    pen_x += hb_position_to_font_pixels(font, glyphs[i].x_advance);
+  }
+  return pen_x;
+}
+
 static double draw_shaped_run(hb_buffer_t *buffer, DrawGlyphContext *ctx, RenFont **fonts, RenFont *font, const char *text, size_t len, double pen_x, double y) {
+  uint32_t hash_value = 0;
+  bool cacheable = len <= SHAPED_RUN_CACHE_MAX_TEXT;
+  if (cacheable) {
+    hash_value = hash_bytes(text, len);
+    ShapedRunCacheEntry *cached = font_lookup_shaped_run_cache(font, text, len, hash_value);
+    if (cached)
+      return draw_shaped_glyphs(ctx, fonts, font, cached->glyphs, cached->glyph_count, pen_x, y);
+  }
+
   hb_buffer_clear_contents(buffer);
   hb_buffer_add_utf8(buffer, text, len, 0, len);
   hb_buffer_guess_segment_properties(buffer);
@@ -1788,6 +1897,13 @@ static double draw_shaped_run(hb_buffer_t *buffer, DrawGlyphContext *ctx, RenFon
   hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &glyph_count);
   hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(buffer, NULL);
 
+  if (cacheable) {
+    ShapedRunCacheEntry *entry =
+      font_store_shaped_run_cache(font, text, len, hash_value, infos, positions, glyph_count);
+    return draw_shaped_glyphs(ctx, fonts, font, entry->glyphs, entry->glyph_count, pen_x, y);
+  }
+
+  /* Runs too long to cache are shaped and drawn directly. */
   for (unsigned int i = 0; i < glyph_count; i++) {
     double x_offset = hb_position_to_font_pixels(font, positions[i].x_offset);
     double y_offset = hb_position_to_font_pixels(font, positions[i].y_offset);
