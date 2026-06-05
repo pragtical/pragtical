@@ -295,6 +295,12 @@ static const RenCacheDrawOps sdlrenderer_draw_ops = {
   .draw_pixels = sdlrenderer_draw_pixels,
 };
 
+static void sdlrenderer_set_vsync(RenWindow *ren, bool enabled) {
+  SdlRendererWindowData *data = ren ? ren->backend_data : NULL;
+  if (data && data->renderer)
+    SDL_SetRenderVSync(data->renderer, enabled ? 1 : SDL_RENDERER_VSYNC_DISABLED);
+}
+
 static const RenBackend sdlrenderer_backend = {
   .name = "sdlrenderer",
   .draw_ops = &sdlrenderer_draw_ops,
@@ -303,6 +309,7 @@ static const RenBackend sdlrenderer_backend = {
   .capture_window = sdlrenderer_capture_window,
   .init_window = sdlrenderer_init_window,
   .resize_window = sdlrenderer_resize_window,
+  .set_vsync = sdlrenderer_set_vsync,
   .destroy_window = sdlrenderer_destroy_window,
   .init_canvas = sdlrenderer_init_canvas,
   .destroy_canvas = sdlrenderer_destroy_canvas,

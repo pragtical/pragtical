@@ -25,6 +25,7 @@ struct RenBackend {
   SDL_Surface *(*capture_window)(RenCache *cache, RenRect rect);
   void (*init_window)(RenWindow *window);
   void (*resize_window)(RenWindow *window);
+  void (*set_vsync)(RenWindow *window, bool enabled); /* NULL = unsupported */
   void (*destroy_window)(RenWindow *window);
   void (*init_canvas)(RenCache *canvas, SDL_Surface *surface);
   void (*destroy_canvas)(RenCache *canvas);

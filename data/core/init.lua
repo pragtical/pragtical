@@ -1954,6 +1954,7 @@ function core.run()
   run_burst_events    = 0
   run_has_focus       = true
   run_next_frame_time = system.get_time() + 1 / config.fps
+  core.window:set_vsync(config.auto_fps)
 end
 
 ---Execute one frame of the main loop.

@@ -3,6 +3,7 @@
 #include "api.h"
 #include "../renwindow.h"
 #include "../rencache.h"
+#include "../renbackend.h"
 
 static RenWindow *persistant_window = NULL;
 
@@ -73,6 +74,15 @@ static int f_renwin_get_size(lua_State *L) {
   lua_pushnumber(L, w);
   lua_pushnumber(L, h);
   return 2;
+}
+
+static int f_renwin_set_vsync(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  bool enabled = lua_toboolean(L, 2);
+  const RenBackend *backend = window_renderer->cache.backend;
+  if (backend && backend->set_vsync)
+    backend->set_vsync(window_renderer, enabled);
+  return 0;
 }
 
 static int f_renwin_persist(lua_State *L) {
@@ -167,6 +177,7 @@ static const luaL_Reg renwindow_lib[] = {
   { "__gc",             f_renwin_gc         },
   { "get_size",         f_renwin_get_size   },
   { "get_refresh_rate", f_get_refresh_rate  },
+  { "set_vsync",        f_renwin_set_vsync  },
   { "get_color",        f_get_color         },
   { "_persist",         f_renwin_persist    },
   { "_restore",         f_renwin_restore    },

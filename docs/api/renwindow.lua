@@ -34,6 +34,16 @@ function renwindow.get_size(window) end
 function renwindow.get_refresh_rate(window) end
 
 ---
+---Enable or disable vertical synchronization for the window swapchain.
+---When enabled the backend presents tear-free (synced to the display refresh);
+---when disabled it presents every rendered frame for the lowest latency, which
+---may tear. No-op on backends without a controllable present mode (software).
+---
+---@param window renwindow
+---@param enabled boolean
+function renwindow.set_vsync(window, enabled) end
+
+---
 ---Gets the window pixel color of the specified position.
 ---
 ---@param window renwindow

@@ -4553,21 +4553,39 @@ static void gpu_release_device(void) {
   }
 }
 
+/* Pick the swapchain present mode. With vsync on, prefer MAILBOX (tear-free and
+   low-latency/non-blocking) then fall back to VSYNC (always supported, tear-free).
+   With vsync off, prefer IMMEDIATE (no vsync, "draw as much as possible to
+   screen"; tears) and fall back to MAILBOX then VSYNC if a driver lacks it.
+   IMMEDIATE forced unconditionally is what tore on D3D12/Windows. */
+static void gpu_apply_present_mode(GpuWindowData *data, RenWindow *ren, bool vsync) {
+  SDL_GPUPresentMode present_mode = SDL_GPU_PRESENTMODE_VSYNC;
+  if (!vsync &&
+      SDL_WindowSupportsGPUPresentMode(data->device, ren->window, SDL_GPU_PRESENTMODE_IMMEDIATE)) {
+    present_mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+  } else if (SDL_WindowSupportsGPUPresentMode(data->device, ren->window, SDL_GPU_PRESENTMODE_MAILBOX)) {
+    present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
+  }
+  SDL_SetGPUSwapchainParameters(
+    data->device, ren->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, present_mode
+  );
+}
+
 static void gpu_init_window(RenWindow *ren) {
   GpuWindowData *data = gpu_window_data(ren);
   data->device = gpu_retain_device();
   if (!SDL_ClaimWindowForGPUDevice(data->device, ren->window))
     gpu_abort("SDL_ClaimWindowForGPUDevice failed");
-  if (SDL_WindowSupportsGPUPresentMode(data->device, ren->window, SDL_GPU_PRESENTMODE_IMMEDIATE)) {
-    SDL_SetGPUSwapchainParameters(
-      data->device, ren->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_IMMEDIATE
-    );
-  } else if (SDL_WindowSupportsGPUPresentMode(data->device, ren->window, SDL_GPU_PRESENTMODE_MAILBOX)) {
-    SDL_SetGPUSwapchainParameters(
-      data->device, ren->window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_MAILBOX
-    );
-  }
+  /* Default to vsync (tear-free); the Lua side calls set_vsync() to match
+     config.auto_fps (off => IMMEDIATE for max frames to screen). */
+  gpu_apply_present_mode(data, ren, true);
   gpu_create_surface(ren);
+}
+
+static void gpu_set_vsync(RenWindow *ren, bool enabled) {
+  GpuWindowData *data = ren ? ren->backend_data : NULL;
+  if (data && data->device)
+    gpu_apply_present_mode(data, ren, enabled);
 }
 
 static void gpu_resize_window(RenWindow *ren) {
@@ -5844,6 +5862,7 @@ static const RenBackend sdlgpu_backend = {
   .present_window_rects = gpu_present_window_rects,
   .capture_window = gpu_capture_window,
   .init_window = gpu_init_window,
+  .set_vsync = gpu_set_vsync,
   .resize_window = gpu_resize_window,
   .destroy_window = gpu_destroy_window,
   .init_canvas = gpu_init_canvas,
