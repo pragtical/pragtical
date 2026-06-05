@@ -140,9 +140,9 @@ run_pragtical () {
   else
     echo "running \"pragtical ${pargs[@]:1}\" with local HOME"
     if [[ $run_windows == true ]]; then
-      USERPROFILE="$userdir" ./$bindir/pragtical "${pargs[@]:1}"
+      PRAGTICAL_SCALE=1 USERPROFILE="$userdir" ./$bindir/pragtical "${pargs[@]:1}"
     else
-      PRAGTICAL_USERDIR="$userdir" ./$bindir/pragtical "${pargs[@]:1}"
+      PRAGTICAL_SCALE=1 PRAGTICAL_USERDIR="$userdir" ./$bindir/pragtical "${pargs[@]:1}"
     fi
   fi
 }
