@@ -4527,13 +4527,32 @@ static bool gpu_download_bridge_texture_to_surface(SDL_GPUDevice *device, GpuFra
   return true;
 }
 
-static SDL_GPUDevice *gpu_get_device(void) {
-  if (!gpu_device) {
+/* Create (or return the cached) GPU device. Returns NULL on failure without
+** aborting, so callers can fall back to another backend. */
+static SDL_GPUDevice *gpu_try_get_device(void) {
+  if (!gpu_device)
     gpu_device = SDL_CreateGPUDevice(GPU_SUPPORTED_SHADER_FORMATS, false, NULL);
-    if (!gpu_device)
-      gpu_abort("SDL_CreateGPUDevice failed");
-  }
   return gpu_device;
+}
+
+static SDL_GPUDevice *gpu_get_device(void) {
+  if (!gpu_try_get_device())
+    gpu_abort("SDL_CreateGPUDevice failed");
+  return gpu_device;
+}
+
+/* Backend availability probe: succeeds only if a GPU device can be created.
+** The device is cached and reused by gpu_retain_device(), so no work is wasted. */
+static bool gpu_backend_available(void) {
+  /* GPU support can only be queried once the video subsystem is up. The backend
+  ** may be resolved before the first window is created (e.g. during font atlas
+  ** setup at startup), so ensure the video subsystem here. The video driver hint
+  ** is already set by main() before any backend resolution, so this picks the
+  ** same driver video_init() would. SDL_InitSubSystem is idempotent/ref-counted.
+  ** The created device is cached and reused by gpu_retain_device(). */
+  if (!SDL_WasInit(SDL_INIT_VIDEO) && !SDL_InitSubSystem(SDL_INIT_VIDEO))
+    return false;
+  return gpu_try_get_device() != NULL;
 }
 
 static SDL_GPUDevice *gpu_retain_device(void) {
@@ -5836,6 +5855,7 @@ static const RenCacheDrawOps gpu_draw_ops = {
 
 static const RenBackend sdlgpu_backend = {
   .name = "sdlgpu",
+  .available = gpu_backend_available,
   .draw_ops = &gpu_draw_ops,
   .use_full_frame_regions = gpu_use_full_frame_regions,
   .begin_frame = gpu_begin_frame,

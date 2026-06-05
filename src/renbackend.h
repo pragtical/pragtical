@@ -7,6 +7,7 @@
 
 struct RenBackend {
   const char *name;
+  bool (*available)(void); /* NULL = always available */
   const RenCacheDrawOps *draw_ops;
   bool (*use_full_frame_regions)(RenCache *cache);
   void (*begin_frame)(RenCache *cache, RenRect *rects, int count);

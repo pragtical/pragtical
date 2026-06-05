@@ -50,6 +50,16 @@ const RenBackend *renbackend_current(void) {
       );
       current_backend = renbackend_from_name(renbackend_default_name());
     }
+    /* If the selected backend can't initialize (e.g. no usable GPU device),
+    ** fall back to the always-available surface backend instead of aborting
+    ** the process. */
+    if (current_backend && current_backend->available && !current_backend->available()) {
+      fprintf(stderr,
+        "Renderer backend '%s' is unavailable; falling back to 'surface'\n",
+        current_backend->name
+      );
+      current_backend = renbackend_surface();
+    }
     if (!current_backend)
       current_backend = renbackend_surface();
   }
