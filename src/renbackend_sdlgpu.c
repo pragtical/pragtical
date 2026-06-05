@@ -914,68 +914,50 @@ static GpuBatchRun *gpu_batch_append_new_run(
   return &runs[*run_count - 1];
 }
 
+/* Grow *array so it can hold at least `count` elements of `elem_size`, doubling
+** capacity from `initial`. On success updates *array and *capacity and returns
+** true; on allocation failure leaves both untouched and returns false.
+** Centralizes the realloc/double/NULL-check idiom used by the scratch and
+** pending-command buffers below. */
+static bool gpu_grow_buffer(void **array, int *capacity, int count,
+                            size_t elem_size, int initial) {
+  if (count <= *capacity)
+    return true;
+  int cap = *capacity ? *capacity : initial;
+  while (cap < count)
+    cap *= 2;
+  void *grown = SDL_realloc(*array, (size_t) cap * elem_size);
+  if (!grown)
+    return false;
+  *array = grown;
+  *capacity = cap;
+  return true;
+}
+
 static GpuBatchRun *gpu_ensure_batch_runs(GpuFrameBridge *frame, int count) {
   if (count <= 0)
     return NULL;
-  if (frame->batch_runs && frame->batch_run_capacity >= count)
-    return frame->batch_runs;
-
-  int capacity = frame->batch_run_capacity ? frame->batch_run_capacity * 2 : 64;
-  while (capacity < count)
-    capacity *= 2;
-  GpuBatchRun *runs = SDL_realloc(frame->batch_runs, (size_t) capacity * sizeof(GpuBatchRun));
-  if (!runs) {
+  if (!gpu_grow_buffer((void **) &frame->batch_runs, &frame->batch_run_capacity,
+                       count, sizeof(GpuBatchRun), 64)) {
     fprintf(stderr, "Error allocating SDL GPU batch runs\n");
     exit(1);
   }
-  frame->batch_runs = runs;
-  frame->batch_run_capacity = capacity;
-  return runs;
+  return frame->batch_runs;
 }
 
 static bool gpu_ensure_poly_point_scratch(GpuFrameBridge *frame, int count) {
-  if (count <= frame->poly_point_capacity)
-    return true;
-
-  int capacity = frame->poly_point_capacity ? frame->poly_point_capacity * 2 : 32;
-  while (capacity < count)
-    capacity *= 2;
-  RenPoint *points = SDL_realloc(frame->poly_points, (size_t) capacity * sizeof(RenPoint));
-  if (!points)
-    return false;
-  frame->poly_points = points;
-  frame->poly_point_capacity = capacity;
-  return true;
+  return gpu_grow_buffer((void **) &frame->poly_points, &frame->poly_point_capacity,
+                         count, sizeof(RenPoint), 32);
 }
 
 static bool gpu_ensure_poly_vertex_scratch(GpuFrameBridge *frame, int count) {
-  if (count <= frame->poly_vertex_capacity)
-    return true;
-
-  int capacity = frame->poly_vertex_capacity ? frame->poly_vertex_capacity * 2 : 32;
-  while (capacity < count)
-    capacity *= 2;
-  GpuPolyVertex *vertices = SDL_realloc(frame->poly_vertices, (size_t) capacity * sizeof(GpuPolyVertex));
-  if (!vertices)
-    return false;
-  frame->poly_vertices = vertices;
-  frame->poly_vertex_capacity = capacity;
-  return true;
+  return gpu_grow_buffer((void **) &frame->poly_vertices, &frame->poly_vertex_capacity,
+                         count, sizeof(GpuPolyVertex), 32);
 }
 
 static bool gpu_ensure_poly_index_scratch(GpuFrameBridge *frame, int count) {
-  if (count <= frame->poly_index_capacity)
-    return true;
-
-  int capacity = frame->poly_index_capacity ? frame->poly_index_capacity * 2 : 32;
-  while (capacity < count)
-    capacity *= 2;
-  int *indices = SDL_realloc(frame->poly_indices, (size_t) capacity * sizeof(int));
-  if (!indices)
-    return false;
-  frame->poly_indices = indices;
-  frame->poly_index_capacity = capacity;
-  return true;
+  return gpu_grow_buffer((void **) &frame->poly_indices, &frame->poly_index_capacity,
+                         count, sizeof(int), 32);
 }
 
 static SDL_GPURenderPass *gpu_begin_configured_render_pass(
@@ -2073,15 +2055,10 @@ static bool gpu_queue_window_pixels(
   }
   data->pending_pixel_bytes_size = required_size;
 
-  if (data->pending_pixel_count >= data->pending_pixel_capacity) {
-    int capacity = data->pending_pixel_capacity ? data->pending_pixel_capacity * 2 : 32;
-    GpuQueuedPixels *pixels = SDL_realloc(data->pending_pixels, capacity * sizeof(GpuQueuedPixels));
-    if (!pixels) {
-      fprintf(stderr, "Error allocating SDL GPU pending pixel commands\n");
-      exit(1);
-    }
-    data->pending_pixels = pixels;
-    data->pending_pixel_capacity = capacity;
+  if (!gpu_grow_buffer((void **) &data->pending_pixels, &data->pending_pixel_capacity,
+                       data->pending_pixel_count + 1, sizeof(GpuQueuedPixels), 32)) {
+    fprintf(stderr, "Error allocating SDL GPU pending pixel commands\n");
+    exit(1);
   }
 
   data->pending_pixels[data->pending_pixel_count++] = (GpuQueuedPixels) {
@@ -2458,17 +2435,10 @@ static bool gpu_queue_window_native_poly(
   if (!data || !vertices || vertex_count <= 0 || clip.w <= 0 || clip.h <= 0)
     return false;
 
-  if (data->pending_poly_vertex_count + vertex_count > data->pending_poly_vertex_capacity) {
-    int capacity = data->pending_poly_vertex_capacity ? data->pending_poly_vertex_capacity * 2 : 256;
-    while (capacity < data->pending_poly_vertex_count + vertex_count)
-      capacity *= 2;
-    GpuPolyVertex *pending_vertices = SDL_realloc(data->pending_poly_vertices, capacity * sizeof(GpuPolyVertex));
-    if (!pending_vertices) {
-      fprintf(stderr, "Error allocating SDL GPU pending polygon vertices\n");
-      exit(1);
-    }
-    data->pending_poly_vertices = pending_vertices;
-    data->pending_poly_vertex_capacity = capacity;
+  if (!gpu_grow_buffer((void **) &data->pending_poly_vertices, &data->pending_poly_vertex_capacity,
+                       data->pending_poly_vertex_count + vertex_count, sizeof(GpuPolyVertex), 256)) {
+    fprintf(stderr, "Error allocating SDL GPU pending polygon vertices\n");
+    exit(1);
   }
 
   Uint32 first_vertex = (Uint32) data->pending_poly_vertex_count;
@@ -2489,15 +2459,10 @@ static bool gpu_queue_window_native_poly(
     }
   }
 
-  if (data->pending_poly_count >= data->pending_poly_capacity) {
-    int capacity = data->pending_poly_capacity ? data->pending_poly_capacity * 2 : 64;
-    GpuQueuedPoly *polys = SDL_realloc(data->pending_polys, capacity * sizeof(GpuQueuedPoly));
-    if (!polys) {
-      fprintf(stderr, "Error allocating SDL GPU pending polygons\n");
-      exit(1);
-    }
-    data->pending_polys = polys;
-    data->pending_poly_capacity = capacity;
+  if (!gpu_grow_buffer((void **) &data->pending_polys, &data->pending_poly_capacity,
+                       data->pending_poly_count + 1, sizeof(GpuQueuedPoly), 64)) {
+    fprintf(stderr, "Error allocating SDL GPU pending polygons\n");
+    exit(1);
   }
 
   data->pending_polys[data->pending_poly_count++] = (GpuQueuedPoly) {
@@ -3743,15 +3708,10 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
   GpuQueuedGlyph *queued = NULL;
   if (data) {
     queued = gpu_append_pending_text_glyph(data);
-  } else if (ctx->glyph_count >= ctx->glyph_capacity) {
-    int capacity = ctx->glyph_capacity ? ctx->glyph_capacity * 2 : 128;
-    GpuQueuedGlyph *glyphs = SDL_realloc(ctx->glyphs, capacity * sizeof(GpuQueuedGlyph));
-    if (!glyphs) {
-      fprintf(stderr, "Error allocating SDL GPU text glyph batch\n");
-      exit(1);
-    }
-    ctx->glyphs = glyphs;
-    ctx->glyph_capacity = capacity;
+  } else if (!gpu_grow_buffer((void **) &ctx->glyphs, &ctx->glyph_capacity,
+                              ctx->glyph_count + 1, sizeof(GpuQueuedGlyph), 128)) {
+    fprintf(stderr, "Error allocating SDL GPU text glyph batch\n");
+    exit(1);
   }
   if (!queued)
     queued = &ctx->glyphs[ctx->glyph_count];
@@ -3778,15 +3738,10 @@ static bool gpu_collect_text_glyph(void *userdata, const RenGlyphDraw *glyph) {
 }
 
 static GpuQueuedGlyph *gpu_append_pending_text_glyph(GpuWindowData *data) {
-  if (data->pending_text_glyph_count >= data->pending_text_glyph_capacity) {
-    int capacity = data->pending_text_glyph_capacity ? data->pending_text_glyph_capacity * 2 : 512;
-    GpuQueuedGlyph *glyphs = SDL_realloc(data->pending_text_glyphs, capacity * sizeof(GpuQueuedGlyph));
-    if (!glyphs) {
-      fprintf(stderr, "Error allocating SDL GPU pending text glyphs\n");
-      exit(1);
-    }
-    data->pending_text_glyphs = glyphs;
-    data->pending_text_glyph_capacity = capacity;
+  if (!gpu_grow_buffer((void **) &data->pending_text_glyphs, &data->pending_text_glyph_capacity,
+                       data->pending_text_glyph_count + 1, sizeof(GpuQueuedGlyph), 512)) {
+    fprintf(stderr, "Error allocating SDL GPU pending text glyphs\n");
+    exit(1);
   }
   return &data->pending_text_glyphs[data->pending_text_glyph_count++];
 }
@@ -3803,17 +3758,10 @@ static bool gpu_queue_text_batch(GpuTextDrawContext *ctx) {
     return true;
   }
 
-  if (data->pending_text_glyph_count + ctx->glyph_count > data->pending_text_glyph_capacity) {
-    int capacity = data->pending_text_glyph_capacity ? data->pending_text_glyph_capacity * 2 : 512;
-    while (capacity < data->pending_text_glyph_count + ctx->glyph_count)
-      capacity *= 2;
-    GpuQueuedGlyph *glyphs = SDL_realloc(data->pending_text_glyphs, capacity * sizeof(GpuQueuedGlyph));
-    if (!glyphs) {
-      fprintf(stderr, "Error allocating SDL GPU pending text glyphs\n");
-      exit(1);
-    }
-    data->pending_text_glyphs = glyphs;
-    data->pending_text_glyph_capacity = capacity;
+  if (!gpu_grow_buffer((void **) &data->pending_text_glyphs, &data->pending_text_glyph_capacity,
+                       data->pending_text_glyph_count + ctx->glyph_count, sizeof(GpuQueuedGlyph), 512)) {
+    fprintf(stderr, "Error allocating SDL GPU pending text glyphs\n");
+    exit(1);
   }
 
   SDL_memcpy(
@@ -4186,15 +4134,10 @@ static bool gpu_queue_canvas_texture_to_frame(
     return true;
   }
 
-  if (window_data->pending_canvas_count >= window_data->pending_canvas_capacity) {
-    int capacity = window_data->pending_canvas_capacity ? window_data->pending_canvas_capacity * 2 : 64;
-    GpuQueuedCanvas *canvases = SDL_realloc(window_data->pending_canvases, capacity * sizeof(GpuQueuedCanvas));
-    if (!canvases) {
-      fprintf(stderr, "Error allocating SDL GPU pending canvases\n");
-      exit(1);
-    }
-    window_data->pending_canvases = canvases;
-    window_data->pending_canvas_capacity = capacity;
+  if (!gpu_grow_buffer((void **) &window_data->pending_canvases, &window_data->pending_canvas_capacity,
+                       window_data->pending_canvas_count + 1, sizeof(GpuQueuedCanvas), 64)) {
+    fprintf(stderr, "Error allocating SDL GPU pending canvases\n");
+    exit(1);
   }
 
   window_data->pending_canvases[window_data->pending_canvas_count++] = (GpuQueuedCanvas) {
@@ -4760,16 +4703,9 @@ static void gpu_end_frame(UNUSED RenCache *cache, UNUSED RenRect *rects, UNUSED 
 static bool gpu_append_canvas_text_glyphs(GpuCanvasData *data, GpuQueuedGlyph *glyphs, int count) {
   if (count <= 0)
     return true;
-  if (data->pending_text_glyph_count + count > data->pending_text_glyph_capacity) {
-    int capacity = data->pending_text_glyph_capacity ? data->pending_text_glyph_capacity * 2 : 512;
-    while (capacity < data->pending_text_glyph_count + count)
-      capacity *= 2;
-    GpuQueuedGlyph *grown = SDL_realloc(data->pending_text_glyphs, capacity * sizeof(GpuQueuedGlyph));
-    if (!grown)
-      return false;
-    data->pending_text_glyphs = grown;
-    data->pending_text_glyph_capacity = capacity;
-  }
+  if (!gpu_grow_buffer((void **) &data->pending_text_glyphs, &data->pending_text_glyph_capacity,
+                       data->pending_text_glyph_count + count, sizeof(GpuQueuedGlyph), 512))
+    return false;
   SDL_memcpy(
     data->pending_text_glyphs + data->pending_text_glyph_count,
     glyphs, count * sizeof(GpuQueuedGlyph)

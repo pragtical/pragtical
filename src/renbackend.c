@@ -3,8 +3,6 @@
 #include "renbackend_sdlrenderer.h"
 #include "renbackend_surface.h"
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 static const RenBackend *current_backend = NULL;
 
@@ -19,11 +17,11 @@ const char *renbackend_default_name(void) {
 static const RenBackend *renbackend_from_name(const char *name) {
   if (!name || name[0] == '\0')
     return NULL;
-  if (strcmp(name, "surface") == 0)
+  if (SDL_strcmp(name, "surface") == 0)
     return renbackend_surface();
-  if (strcmp(name, "sdlrenderer") == 0)
+  if (SDL_strcmp(name, "sdlrenderer") == 0)
     return renbackend_sdlrenderer();
-  if (strcmp(name, "sdlgpu") == 0)
+  if (SDL_strcmp(name, "sdlgpu") == 0)
     return renbackend_sdlgpu();
   return NULL;
 }
@@ -38,7 +36,7 @@ bool renbackend_select(const char *name) {
 
 const RenBackend *renbackend_current(void) {
   if (!current_backend) {
-    const char *name = getenv("PRAGTICAL_RENDERER");
+    const char *name = SDL_getenv("PRAGTICAL_RENDERER");
     if (!name || name[0] == '\0')
       name = renbackend_default_name();
     current_backend = renbackend_from_name(name);
