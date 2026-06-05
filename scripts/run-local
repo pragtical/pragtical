@@ -106,6 +106,13 @@ copy_pragtical_build () {
   if [ -d "subprojects/plugins" ]; then
     cp -a "subprojects/plugins/plugins/"language_* "$datadir/plugins"
   fi
+  if [ -d "$builddir/subprojects/luajit/src" ] && [ -d "subprojects/luajit/src/jit" ]; then
+    mkdir -p "$datadir/jit"
+    cp -a "subprojects/luajit/src/jit/." "$datadir/jit"
+    if [ -f "$builddir/subprojects/luajit/src/vmdef.lua" ]; then
+      cp -a "$builddir/subprojects/luajit/src/vmdef.lua" "$datadir/jit"
+    fi
+  fi
   if [ -d "subprojects/ppm" ]; then
     if [ -d "$builddir/subprojects/ppm" ] && ls "$builddir"/subprojects/ppm/ppm.*; then
       cp -a "subprojects/ppm/plugins/plugin_manager" "$datadir/plugins"
