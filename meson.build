@@ -299,7 +299,6 @@ if not get_option('source-only')
 
         sdl_options = cmake.subproject_options()
 
-        sdl_gpu = 'ON'
         sdl_vulkan = 'OFF'
         sdl_metal = 'OFF'
         if host_machine.system() == 'darwin'
@@ -314,7 +313,7 @@ if not get_option('source-only')
             'CMAKE_OSX_DEPLOYMENT_TARGET': sdl_osx_deploy_target,
             'SDL_DEPS_SHARED': 'ON', 'SDL_SHARED': 'OFF', 'SDL_STATIC': 'ON',
             'SDL_DBUS': 'ON', 'SDL_IBUS': 'ON', 'SDL_AUDIO': 'OFF',
-            'SDL_GPU': sdl_gpu, 'SDL_RPATH': 'OFF', 'SDL_PIPEWIRE': 'OFF',
+            'SDL_GPU': 'ON', 'SDL_RPATH': 'OFF', 'SDL_PIPEWIRE': 'OFF',
             'SDL_CAMERA': 'OFF', 'SDL_JOYSTICK': 'OFF', 'SDL_HAPTIC': 'OFF',
             'SDL_HIDAPI': 'OFF', 'SDL_DIALOG': 'ON', 'SDL_POWER': 'OFF',
             'SDL_SENSOR': 'OFF', 'SDL_VULKAN': sdl_vulkan, 'SDL_METAL': sdl_metal, 'SDL_LIBUDEV': 'ON',
