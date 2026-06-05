@@ -35,6 +35,23 @@ Doc.save = function(self, ...)
   local user = USERDIR .. PATHSEP .. "init.lua"
   local project = core.root_project().path .. PATHSEP .. ".pragtical_project.lua"
   if self.abs_filename == user or self.abs_filename == project then
+    if self.abs_filename == project and not core.is_project_trusted(core.root_project()) then
+      core.add_thread(function()
+        core.prompt_project_trust(
+          core.root_project(),
+          {
+            trust_text = "Trust and Restart",
+            continue_text = "Ignore"
+          },
+          function(trusted)
+            if trusted then
+              command.perform("core:restart")
+            end
+          end
+        )
+      end)
+      return res
+    end
     if config.plugins.autorestart.reload_type == "restart" then
       command.perform("core:restart")
     elseif config.plugins.autorestart.reload_type == "reload" then

@@ -2514,9 +2514,14 @@ function core.run()
   -- reloading these user modules, got an idea time ago and forgot it :(
   if settings.config.reload_user_modules then
     local modules = {
-      USERDIR .. PATHSEP .. "init.lua",
-      core.root_project().path .. PATHSEP .. ".pragtical_project.lua"
+      USERDIR .. PATHSEP .. "init.lua"
     }
+    if core.is_project_trusted(core.root_project()) then
+      table.insert(
+        modules,
+        core.root_project().path .. PATHSEP .. ".pragtical_project.lua"
+      )
+    end
     for _, module in ipairs(modules) do
       core.reload_absolute_module(module)
     end

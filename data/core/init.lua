@@ -49,6 +49,30 @@ local function save_session()
 end
 
 
+local function normalize_project_path(project)
+  local path = type(project) == "table" and project.path or project
+  if type(path) ~= "string" then return nil end
+  return common.normalize_volume(system.absolute_path(path) or path)
+end
+
+
+local function load_trusted_projects()
+  local ok, trusted = pcall(dofile, USERDIR .. PATHSEP .. "trusted_projects.lua")
+  return ok and type(trusted) == "table" and trusted or {}
+end
+
+
+local function save_trusted_projects()
+  local fp = io.open(USERDIR .. PATHSEP .. "trusted_projects.lua", "w")
+  if fp then
+    fp:write("return " .. common.serialize(core.trusted_projects or {}, {pretty = true}))
+    fp:close()
+    return true
+  end
+  return false
+end
+
+
 local function update_recents_project(action, dir_path_abs)
   local dirname = common.normalize_volume(dir_path_abs)
   if not dirname then return end
@@ -110,6 +134,53 @@ function core.set_project(project)
   local project_object = core.add_project(project)
   system.chdir(project_object.path)
   return project_object
+end
+
+
+function core.is_project_trusted(project)
+  local project_path = normalize_project_path(project)
+  return project_path ~= nil and (core.trusted_projects or {})[project_path] == true
+end
+
+
+function core.trust_project(project)
+  local project_path = normalize_project_path(project)
+  if not project_path then return false end
+  core.trusted_projects = core.trusted_projects or {}
+  core.trusted_projects[project_path] = true
+  save_trusted_projects()
+  return project_path
+end
+
+
+function core.prompt_project_trust(project, options, callback)
+  local project_path = normalize_project_path(project)
+  if not project_path then return false end
+
+  options = options or {}
+  local trust_text = options.trust_text or "Trust Project"
+  local continue_text = options.continue_text or "Continue Without Trust"
+  core.nag_view:show(
+    "Trust Project",
+    string.format(
+      "The project \"%s\" contains a .pragtical_project.lua file.\n\n" ..
+      "Trust this project to allow Pragtical to load that file?",
+      common.home_encode(project_path)
+    ),
+    {
+      { text = trust_text, default_yes = true },
+      { text = continue_text, default_no = true }
+    },
+    function(item)
+      if item.text == trust_text then
+        core.trust_project(project_path)
+        if callback then callback(true, project_path) end
+      elseif item.text == continue_text then
+        if callback then callback(false, project_path) end
+      end
+    end
+  )
+  return true
 end
 
 
@@ -420,6 +491,7 @@ function core.init()
   end
   -- Ensure that we have a user directory.
   core.ensure_user_directory()
+  core.trusted_projects = load_trusted_projects()
 
   --Set the maximum fps from display refresh rate.
   config.fps = DEFAULT_FPS
@@ -567,6 +639,29 @@ function core.init()
     core.add_thread(function()
       command.perform("core:open-log")
     end)
+  end
+
+  do
+    local project_path = normalize_project_path(core.root_project())
+    local project_module = project_path
+      and project_path .. PATHSEP .. ".pragtical_project.lua"
+    local info = project_module and system.get_file_info(project_module)
+    if info and info.type ~= "dir" and not core.is_project_trusted(project_path) then
+      core.add_thread(function()
+        core.prompt_project_trust(
+          project_path,
+          {
+            trust_text = "Trust and Restart",
+            continue_text = "Continue Without Trust"
+          },
+          function(trusted)
+            if trusted then
+              command.perform("core:restart")
+            end
+          end
+        )
+      end)
+    end
   end
 
   core.configure_borderless_window()
@@ -773,9 +868,27 @@ function core.load_plugins()
     datadir = {dir = DATADIR, plugins = {}},
   }
   local files, ordered = {}, {
-    { priority = -2, load = load_lua_plugin_if_exists, version_match = true, file = USERDIR .. PATHSEP .. "init.lua", name = "User Module" },
-    { priority = -1, load = load_lua_plugin_if_exists, version_match = true, file = core.root_project().path .. PATHSEP .. ".pragtical_project.lua", name = "Project Module" }
+    { priority = -2, load = load_lua_plugin_if_exists, version_match = true, file = USERDIR .. PATHSEP .. "init.lua", name = "User Module" }
   }
+  do
+    local project_path = normalize_project_path(core.root_project())
+    local project_module = project_path
+      and project_path .. PATHSEP .. ".pragtical_project.lua"
+    local info = project_module and system.get_file_info(project_module)
+    if info and info.type ~= "dir" then
+      if core.is_project_trusted(project_path) then
+        table.insert(ordered, {
+          priority = -1,
+          load = load_lua_plugin_if_exists,
+          version_match = true,
+          file = project_module,
+          name = "Project Module"
+        })
+      else
+        core.log_quiet("Skipped untrusted project module from %s", project_path)
+      end
+    end
+  end
   for _, root_dir in ipairs {DATADIR, USERDIR} do
     local plugin_dir = root_dir .. PATHSEP .. "plugins"
     for _, filename in ipairs(system.list_dir(plugin_dir) or {}) do
