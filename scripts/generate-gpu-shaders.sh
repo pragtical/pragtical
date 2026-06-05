@@ -12,6 +12,16 @@ if ! command -v "$glslc" >/dev/null 2>&1; then
   exit 1
 fi
 
+# DXIL generation goes through libdxcompiler.so. Distro packages (e.g. Arch's
+# directx-shader-compiler) ship assertions-enabled builds that crash
+# ("alloc must have hung off uses") on essentially every real shader. Point
+# DXC_LIB_DIR at the lib/ directory of Microsoft's official release dxc
+# (https://github.com/microsoft/DirectXShaderCompiler/releases) to use a working
+# release build for the DXIL pass.
+if [[ -n "${DXC_LIB_DIR:-}" ]]; then
+  export LD_LIBRARY_PATH="$DXC_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
+
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -27,6 +37,7 @@ emit_header() {
   case "$dest" in
     SPIRV) ext="spv" ;;
     DXBC) ext="dxbc" ;;
+    DXIL) ext="dxil" ;;
     MSL) ext="msl" ;;
     *) echo "unsupported shader destination: $dest" >&2; exit 1 ;;
   esac
@@ -59,10 +70,11 @@ emit_header() {
   } > "$repo_root/$output"
 }
 
-for dest in SPIRV DXBC MSL; do
+for dest in SPIRV DXBC DXIL MSL; do
   case "$dest" in
     SPIRV) suffix="spv" ;;
     DXBC) suffix="dxbc" ;;
+    DXIL) suffix="dxil" ;;
     MSL) suffix="msl" ;;
   esac
 

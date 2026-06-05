@@ -7,39 +7,51 @@
 #include <stdlib.h>
 
 #include "shaders/gpu_canvas.frag.dxbc.h"
+#include "shaders/gpu_canvas.frag.dxil.h"
 #include "shaders/gpu_canvas.frag.msl.h"
 #include "shaders/gpu_canvas.frag.spv.h"
 #include "shaders/gpu_canvas.vert.dxbc.h"
+#include "shaders/gpu_canvas.vert.dxil.h"
 #include "shaders/gpu_canvas.vert.msl.h"
 #include "shaders/gpu_canvas.vert.spv.h"
 #include "shaders/gpu_canvas_batch.frag.dxbc.h"
+#include "shaders/gpu_canvas_batch.frag.dxil.h"
 #include "shaders/gpu_canvas_batch.frag.msl.h"
 #include "shaders/gpu_canvas_batch.frag.spv.h"
 #include "shaders/gpu_canvas_batch.vert.dxbc.h"
+#include "shaders/gpu_canvas_batch.vert.dxil.h"
 #include "shaders/gpu_canvas_batch.vert.msl.h"
 #include "shaders/gpu_canvas_batch.vert.spv.h"
 #include "shaders/gpu_rect.frag.dxbc.h"
+#include "shaders/gpu_rect.frag.dxil.h"
 #include "shaders/gpu_rect.frag.msl.h"
 #include "shaders/gpu_rect.frag.spv.h"
 #include "shaders/gpu_rect.vert.dxbc.h"
+#include "shaders/gpu_rect.vert.dxil.h"
 #include "shaders/gpu_rect.vert.msl.h"
 #include "shaders/gpu_rect.vert.spv.h"
 #include "shaders/gpu_poly.frag.dxbc.h"
+#include "shaders/gpu_poly.frag.dxil.h"
 #include "shaders/gpu_poly.frag.msl.h"
 #include "shaders/gpu_poly.frag.spv.h"
 #include "shaders/gpu_poly.vert.dxbc.h"
+#include "shaders/gpu_poly.vert.dxil.h"
 #include "shaders/gpu_poly.vert.msl.h"
 #include "shaders/gpu_poly.vert.spv.h"
 #include "shaders/gpu_text.frag.dxbc.h"
+#include "shaders/gpu_text.frag.dxil.h"
 #include "shaders/gpu_text.frag.msl.h"
 #include "shaders/gpu_text.frag.spv.h"
 #include "shaders/gpu_text.vert.dxbc.h"
+#include "shaders/gpu_text.vert.dxil.h"
 #include "shaders/gpu_text.vert.msl.h"
 #include "shaders/gpu_text.vert.spv.h"
 #include "shaders/gpu_text_batch.frag.dxbc.h"
+#include "shaders/gpu_text_batch.frag.dxil.h"
 #include "shaders/gpu_text_batch.frag.msl.h"
 #include "shaders/gpu_text_batch.frag.spv.h"
 #include "shaders/gpu_text_batch.vert.dxbc.h"
+#include "shaders/gpu_text_batch.vert.dxil.h"
 #include "shaders/gpu_text_batch.vert.msl.h"
 #include "shaders/gpu_text_batch.vert.spv.h"
 
@@ -407,7 +419,7 @@ static bool gpu_native_text_supported(SDL_GPUDevice *device) {
   SDL_GPUShaderFormat formats = device ? SDL_GetGPUShaderFormats(device) : 0;
   return gpu_native_text_enabled()
       && device
-      && (formats & (SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXBC | SDL_GPU_SHADERFORMAT_MSL));
+      && (formats & (SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXBC | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL));
 }
 
 static bool gpu_validate_text_enabled(void) {
@@ -2586,7 +2598,11 @@ static SDL_GPUShader *gpu_create_canvas_shader(SDL_GPUDevice *device, bool verte
   createinfo.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
 
   SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
-  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+  if (format & SDL_GPU_SHADERFORMAT_DXIL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXIL;
+    createinfo.code = vertex ? gpu_canvas_vert_dxil : gpu_canvas_frag_dxil;
+    createinfo.code_size = vertex ? gpu_canvas_vert_dxil_len : gpu_canvas_frag_dxil_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_DXBC) {
     createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
     createinfo.code = vertex ? gpu_canvas_vert_dxbc : gpu_canvas_frag_dxbc;
     createinfo.code_size = vertex ? gpu_canvas_vert_dxbc_len : gpu_canvas_frag_dxbc_len;
@@ -2613,7 +2629,11 @@ static SDL_GPUShader *gpu_create_canvas_batch_shader(SDL_GPUDevice *device, bool
   createinfo.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
 
   SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
-  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+  if (format & SDL_GPU_SHADERFORMAT_DXIL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXIL;
+    createinfo.code = vertex ? gpu_canvas_batch_vert_dxil : gpu_canvas_batch_frag_dxil;
+    createinfo.code_size = vertex ? gpu_canvas_batch_vert_dxil_len : gpu_canvas_batch_frag_dxil_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_DXBC) {
     createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
     createinfo.code = vertex ? gpu_canvas_batch_vert_dxbc : gpu_canvas_batch_frag_dxbc;
     createinfo.code_size = vertex ? gpu_canvas_batch_vert_dxbc_len : gpu_canvas_batch_frag_dxbc_len;
@@ -2639,7 +2659,11 @@ static SDL_GPUShader *gpu_create_poly_shader(SDL_GPUDevice *device, bool vertex)
   createinfo.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
 
   SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
-  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+  if (format & SDL_GPU_SHADERFORMAT_DXIL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXIL;
+    createinfo.code = vertex ? gpu_poly_vert_dxil : gpu_poly_frag_dxil;
+    createinfo.code_size = vertex ? gpu_poly_vert_dxil_len : gpu_poly_frag_dxil_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_DXBC) {
     createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
     createinfo.code = vertex ? gpu_poly_vert_dxbc : gpu_poly_frag_dxbc;
     createinfo.code_size = vertex ? gpu_poly_vert_dxbc_len : gpu_poly_frag_dxbc_len;
@@ -2742,7 +2766,11 @@ static SDL_GPUShader *gpu_create_rect_shader(SDL_GPUDevice *device, bool vertex)
   createinfo.num_samplers = 0;
   createinfo.num_uniform_buffers = vertex ? 1 : 0;
 
-  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+  if (format & SDL_GPU_SHADERFORMAT_DXIL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXIL;
+    createinfo.code = vertex ? gpu_rect_vert_dxil : gpu_rect_frag_dxil;
+    createinfo.code_size = vertex ? gpu_rect_vert_dxil_len : gpu_rect_frag_dxil_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_DXBC) {
     createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
     createinfo.code = vertex ? gpu_rect_vert_dxbc : gpu_rect_frag_dxbc;
     createinfo.code_size = vertex ? gpu_rect_vert_dxbc_len : gpu_rect_frag_dxbc_len;
@@ -3073,7 +3101,11 @@ static SDL_GPUShader *gpu_create_text_shader(SDL_GPUDevice *device, bool vertex)
   createinfo.num_uniform_buffers = 1;
 
   SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
-  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+  if (format & SDL_GPU_SHADERFORMAT_DXIL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXIL;
+    createinfo.code = vertex ? gpu_text_vert_dxil : gpu_text_frag_dxil;
+    createinfo.code_size = vertex ? gpu_text_vert_dxil_len : gpu_text_frag_dxil_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_DXBC) {
     createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
     createinfo.code = vertex ? gpu_text_vert_dxbc : gpu_text_frag_dxbc;
     createinfo.code_size = vertex ? gpu_text_vert_dxbc_len : gpu_text_frag_dxbc_len;
@@ -3100,7 +3132,11 @@ static SDL_GPUShader *gpu_create_text_batch_shader(SDL_GPUDevice *device, bool v
   createinfo.num_uniform_buffers = 1;
 
   SDL_GPUShaderFormat format = SDL_GetGPUShaderFormats(device);
-  if (format & SDL_GPU_SHADERFORMAT_DXBC) {
+  if (format & SDL_GPU_SHADERFORMAT_DXIL) {
+    createinfo.format = SDL_GPU_SHADERFORMAT_DXIL;
+    createinfo.code = vertex ? gpu_text_batch_vert_dxil : gpu_text_batch_frag_dxil;
+    createinfo.code_size = vertex ? gpu_text_batch_vert_dxil_len : gpu_text_batch_frag_dxil_len;
+  } else if (format & SDL_GPU_SHADERFORMAT_DXBC) {
     createinfo.format = SDL_GPU_SHADERFORMAT_DXBC;
     createinfo.code = vertex ? gpu_text_batch_vert_dxbc : gpu_text_batch_frag_dxbc;
     createinfo.code_size = vertex ? gpu_text_batch_vert_dxbc_len : gpu_text_batch_frag_dxbc_len;
