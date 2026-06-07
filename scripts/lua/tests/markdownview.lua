@@ -2,7 +2,6 @@ local common = require "core.common"
 local core = require "core"
 local command = require "core.command"
 local config = require "core.config"
-local http = require "core.http"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local test = require "core.test"
@@ -2063,6 +2062,7 @@ Text with a footnote.[^note]
   end)
 
   test.test("downloads remote markdown images to the cache", function()
+    local http = require "core.http"
     local original_download = http.download
     local original_load_image = canvas.load_image
     local download_opts
@@ -2124,7 +2124,45 @@ Text with a footnote.[^note]
     end
   end)
 
+  test.test("does not load remote markdown images without net", function()
+    local original_net = rawget(_G, "net")
+    local original_require = rawget(_G, "require")
+    local original_load_image = canvas.load_image
+    local required_http = false
+    local loaded_path
+
+    rawset(_G, "net", nil)
+    rawset(_G, "require", function(module)
+      if module == "core.http" then
+        required_http = true
+      end
+      return original_require(module)
+    end)
+    canvas.load_image = function(path)
+      loaded_path = path
+      return original_load_image(path)
+    end
+
+    local view = MarkdownView("![Remote](https://example.com/assets/diagram.png)")
+    view.size.x = 420
+    view.size.y = 240
+    local layout
+    local ok, err = pcall(function()
+      layout = view:ensure_layout()
+    end)
+
+    rawset(_G, "net", original_net)
+    rawset(_G, "require", original_require)
+    canvas.load_image = original_load_image
+
+    test.ok(ok, err)
+    test.equal(required_http, false)
+    test.equal(loaded_path, nil)
+    test.not_equal(layout.commands[1].type, "image")
+  end)
+
   test.test("renders linked image reference rows and opens their target link", function()
+    local http = require "core.http"
     local original_download = http.download
     local original_load_image = canvas.load_image
     local download_opts = {}
