@@ -388,8 +388,20 @@ endif
 
 install_data('licenses/licenses.md', install_dir : pragtical_docdir)
 
-install_subdir('docs/api' , install_dir : pragtical_datadir, strip_directory: true)
-install_subdir('data/core' , install_dir : pragtical_datadir, exclude_files : 'start.lua')
+install_subdir(
+    'docs/api',
+    install_dir : pragtical_datadir,
+    strip_directory : true,
+    exclude_files : get_option('net') ? [] : ['net.lua']
+)
+
+install_subdir(
+    'data/core',
+    install_dir : pragtical_datadir,
+    exclude_files : get_option('net') ? ['start.lua'] : [
+        'start.lua', 'http.lua', 'websocket.lua'
+    ]
+)
 
 fs = import('fs')
 
