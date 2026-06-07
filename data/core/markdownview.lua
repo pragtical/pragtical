@@ -4067,6 +4067,12 @@ end
 ---Starts downloading a remote image used by the markdown document.
 ---@param entry table
 function MarkdownView:start_remote_image_download(entry)
+  if not rawget(_G, "net") then
+    entry.status = "error"
+    entry.errmsg = "network support is unavailable"
+    return
+  end
+
   http = http or require "core.http"
   local cache_path = get_image_cache_path(entry.url)
   entry.status = "loading"
@@ -4110,6 +4116,12 @@ function MarkdownView:ensure_image_entry(block)
   end
 
   if block.url:match("^https?://") then
+    if not rawget(_G, "net") then
+      entry.status = "error"
+      entry.errmsg = "network support is unavailable"
+      return entry
+    end
+
     local cache_path = get_image_cache_path(block.url)
     if system.get_file_info(cache_path) then
       self:load_image_from_path(entry, cache_path)
