@@ -161,12 +161,18 @@ local status = Label(ui, "")
 ---@field doc core.doc?
 ---@field change_id integer
 ---@field prev_search_id integer
+---@field search_id integer
+---@field complete boolean
+---@field scanned_lines integer
 local Results = {
   text = "",
   matches = {},
   doc = nil,
   change_id = 0,
-  prev_search_id = 0
+  prev_search_id = 0,
+  search_id = 0,
+  complete = true,
+  scanned_lines = 0
 }
 
 local function is_whole_match(line_text, col1, col2)
@@ -202,6 +208,13 @@ function Results:find(text, doc, force)
   self.text = text
   self.doc = doc
   self.change_id = doc:get_change_id()
+  self.search_id = self.search_id + 1
+  self.complete = false
+  self.scanned_lines = 0
+  self.matches = {}
+  local search_id = self.search_id
+  self:set_status()
+  ui:schedule_update()
 
   local search_func
   local whole = wholeword:is_toggled()
@@ -212,7 +225,12 @@ function Results:find(text, doc, force)
       findtext:get_text(),
       not sensitive:is_toggled() and "i" or ""
     )
-    if not pattern then return end
+    if not pattern then
+      self.complete = true
+      self:set_status()
+      ui:schedule_update()
+      return
+    end
     search_func = function(line_text)
       ---@cast line_text string
       local results = nil
@@ -266,22 +284,33 @@ function Results:find(text, doc, force)
   end
 
   self.prev_search_id = core.add_thread(function()
-    self.matches = {}
+    local matches = {}
     local lines_count = #doc.lines
     for i=1, lines_count do
+      if search_id ~= self.search_id then return end
       local line_text = doc.lines[i]
       if #line_text > 1 then -- skip empty lines
         local offsets = search_func(line_text)
         if offsets then
           for _, col in ipairs(offsets) do
-            table.insert(self.matches, {line = i, col = col})
+            matches[#matches + 1] = {line = i, col = col}
           end
         end
       end
       if i % 100 == 0 then
+        if i % 500 == 0 then
+          self.matches = matches
+          self.scanned_lines = i
+          self:set_status()
+          ui:schedule_update()
+        end
         coroutine.yield()
       end
     end
+    if search_id ~= self.search_id then return end
+    self.matches = matches
+    self.scanned_lines = lines_count
+    self.complete = true
     self:set_status()
     ui:schedule_update()
   end)
@@ -311,9 +340,12 @@ function Results:current()
 end
 
 function Results:clear()
+  self.search_id = self.search_id + 1
   self.text = ""
   self.matches = {}
   self.doc = nil
+  self.complete = true
+  self.scanned_lines = 0
   status:set_label("")
 end
 
@@ -321,11 +353,12 @@ function Results:set_status()
   local current = self:current()
   local total = self.matches and #self.matches or 0
   if total > 0 then
+    local suffix = self.complete and "" or "..."
     status:set_label(
-      "Result: " .. tostring(current .. " of " .. tostring(total))
+      "Result: " .. tostring(current .. " of " .. tostring(total) .. suffix)
     )
   elseif not status.label:match("Total") then
-    status:set_label("")
+    status:set_label(self.complete and "" or "Searching...")
   end
 end
 
