@@ -839,11 +839,13 @@ local priority_regex = regex.compile([[\-\-.*priority\s*:\s*(\-?[\d\.]+)]])
 function core.get_plugin_details(path)
   local info = system.get_file_info(path)
   local file = path
+  local is_dir = false
   if info ~= nil and info.type == "dir" then
+    is_dir = true
     file = path .. PATHSEP .. "init.lua"
     info = system.get_file_info(file)
   end
-  local name = path:match("%.lua$") and path:gsub("%.lua$", "")
+  local name = (path:match("%.lua$") or is_dir) and path:gsub("%.lua$", "")
   local details = (info and name) and core.parse_plugin_details(
     name, file, mod_version_regex, priority_regex
   )
