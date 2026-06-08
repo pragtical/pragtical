@@ -830,9 +830,12 @@ function core.parse_plugin_details(path, file, mod_version_regex, priority_regex
 end
 
 
-local mod_version_regex =
-  regex.compile([[--.*mod-version:\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:$|\s)]])
+local mod_version_regex = regex.compile(
+  [[--.*mod-version:\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:$|\s)]]
+)
 local priority_regex = regex.compile([[\-\-.*priority\s*:\s*(\-?[\d\.]+)]])
+
+---@param path string
 function core.get_plugin_details(path)
   local info = system.get_file_info(path)
   local file = path
@@ -840,7 +843,10 @@ function core.get_plugin_details(path)
     file = path .. PATHSEP .. "init.lua"
     info = system.get_file_info(file)
   end
-  local details = info and core.parse_plugin_details(path:gsub("%.lua$", ""), file, mod_version_regex, priority_regex)
+  local name = path:match("%.lua$") and path:gsub("%.lua$", "")
+  local details = (info and name) and core.parse_plugin_details(
+    name, file, mod_version_regex, priority_regex
+  )
   if details then details.load = require_lua_plugin end
   return details
 end
