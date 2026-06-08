@@ -1214,6 +1214,15 @@ function DocView:on_mouse_moved(x, y, ...)
   end
 end
 
+local docview_on_mouse_left = DocView.on_mouse_left
+function DocView:on_mouse_left()
+  docview_on_mouse_left(self)
+  if self.cf_hovering_toggle then
+    self.cf_hovering_toggle = nil
+    core.redraw = true
+  end
+end
+
 ---------------------------------------------------------------------
 -- Method overrides: Doc (incremental invalidation)
 ---------------------------------------------------------------------

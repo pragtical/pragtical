@@ -849,6 +849,15 @@ test.describe("codefold - virtual line mapping", function()
       view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
       test.equal(calls[#calls].color, style.dim or style.line_number)
 
+      view.cf_hovering_toggle = 1
+      view:on_mouse_left()
+      test.equal(view.hovering_gutter, false)
+      test.is_nil(view.cf_hovering_toggle)
+
+      local count = #calls
+      view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
+      test.equal(#calls, count + 1)
+
       view.hovering_gutter = false
       config.plugins.codefold.always_show_fold_markers = true
       view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
@@ -864,6 +873,11 @@ test.describe("codefold - virtual line mapping", function()
       view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
       test.equal(calls[#calls].color, style.accent)
       test.equal(view.cf_toggle_font, toggle_font)
+
+      view:on_mouse_left()
+      test.is_nil(view.cf_hovering_toggle)
+      view:draw_line_gutter(1, view.position.x, y, view:get_gutter_width())
+      test.equal(calls[#calls].color, style.caret)
     end)
 
     config.plugins.codefold.enabled = previous_enabled

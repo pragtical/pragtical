@@ -968,6 +968,18 @@ function DocView:on_mouse_moved(x, y, ...)
 end
 
 
+---Handle mouse leaving the view area.
+---Clears hover state that would otherwise remain until the next mouse move
+---inside the DocView.
+function DocView:on_mouse_left()
+  DocView.super.on_mouse_left(self)
+  if self.hovering_gutter then
+    self.hovering_gutter = false
+    core.redraw = true
+  end
+end
+
+
 ---Adjust selection based on snap type (word, line).
 ---@param doc core.doc Document
 ---@param snap_type string Snap type: "word" or "lines"
