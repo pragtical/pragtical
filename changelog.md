@@ -1,5 +1,60 @@
 # Changes Log
 
+## [3.12.0] - 2026-06-09
+
+### New Features
+
+* Modularize renderer backends and add SDL GPU rendering
+  ([#481](https://github.com/pragtical/pragtical/pull/481))
+
+* Gate project modules behind trust prompts
+  ([#530](https://github.com/pragtical/pragtical/pull/530))
+
+### Enhancements
+
+* Use startup scale environment when restarting
+  ([#528](https://github.com/pragtical/pragtical/pull/528))
+
+* Copy LuaJIT modules for local runs
+  ([#529](https://github.com/pragtical/pragtical/pull/529))
+
+* Skip network Lua files when networking is disabled
+  ([#532](https://github.com/pragtical/pragtical/pull/532))
+
+* Disable remote markdown images when networking is disabled
+  ([#533](https://github.com/pragtical/pragtical/pull/533))
+
+* Show search totals incrementally
+  ([#536](https://github.com/pragtical/pragtical/pull/536))
+
+* Use native ppm Meson build
+  ([#540](https://github.com/pragtical/pragtical/pull/540))
+
+### Fixes
+
+* Skip loading non-Lua files as plugins
+  ([#535](https://github.com/pragtical/pragtical/pull/535))
+
+* Handle directory plugin details
+  ([2d6b3aa3](https://github.com/pragtical/pragtical/commit/2d6b3aa3))
+
+* Clear fold hover state on mouse leave
+  ([#537](https://github.com/pragtical/pragtical/pull/537))
+
+* Fix DiffView scrollbar markers and disable folding in diffs
+  ([#538](https://github.com/pragtical/pragtical/pull/538))
+
+* Fix regex negative offsets
+  ([#539](https://github.com/pragtical/pragtical/pull/539))
+
+* Fix EmptyView plugin button detection
+  ([#542](https://github.com/pragtical/pragtical/pull/542))
+
+### Build System
+
+* Strip rolling release artifacts
+  ([#543](https://github.com/pragtical/pragtical/pull/543))
+
 ## [3.11.2] - 2026-06-03
 
 ### Fixes
@@ -3479,6 +3534,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.12.0]: https://github.com/pragtical/pragtical/releases/tag/v3.12.0
 [3.11.2]: https://github.com/pragtical/pragtical/releases/tag/v3.11.2
 [3.11.1]: https://github.com/pragtical/pragtical/releases/tag/v3.11.1
 [3.11.0]: https://github.com/pragtical/pragtical/releases/tag/v3.11.0
