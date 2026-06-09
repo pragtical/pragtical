@@ -2,10 +2,21 @@ local test = require "core.test"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local LineWrapping = require "plugins.linewrapping"
+local common = require "core.common"
 local config = require "core.config"
 local style = require "core.style"
 require "plugins.codefold"
-dofile("subprojects/plugins/plugins/indentguide.lua")
+
+local source_path = debug.getinfo(1, "S").source:gsub("^@", "")
+local source_root = common.dirname(
+  common.dirname(common.dirname(common.dirname(source_path)))
+)
+
+local function dofile_from_source(relative_path)
+  return dofile(source_root .. PATHSEP .. relative_path)
+end
+
+dofile_from_source("subprojects/plugins/plugins/indentguide.lua")
 
 local function make_view_lines(lines)
   local doc = Doc(nil, nil, true)
@@ -164,7 +175,7 @@ test.describe("linewrapping", function()
   end)
 
   test.test("color previews use wrapped row coordinates", function()
-    dofile("subprojects/plugins/plugins/colorpreview.lua")
+    dofile_from_source("subprojects/plugins/plugins/colorpreview.lua")
     local previous = config.plugins.colorpreview.enabled
     local previous_mode = config.plugins.colorpreview.mode
     config.plugins.colorpreview.enabled = true
@@ -200,7 +211,7 @@ test.describe("linewrapping", function()
   end)
 
   test.test("selection highlights use wrapped row coordinates", function()
-    dofile("subprojects/plugins/plugins/selectionhighlight.lua")
+    dofile_from_source("subprojects/plugins/plugins/selectionhighlight.lua")
     if config.plugins.colorpreview then
       config.plugins.colorpreview.enabled = false
     end

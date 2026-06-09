@@ -3,6 +3,7 @@
 #include "api.h"
 #include "../renwindow.h"
 #include "../rencache.h"
+#include "../renbackend.h"
 
 static RenWindow *persistant_window = NULL;
 
@@ -75,6 +76,15 @@ static int f_renwin_get_size(lua_State *L) {
   return 2;
 }
 
+static int f_renwin_set_vsync(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  bool enabled = lua_toboolean(L, 2);
+  const RenBackend *backend = window_renderer->cache.backend;
+  if (backend && backend->set_vsync)
+    backend->set_vsync(window_renderer, enabled);
+  return 0;
+}
+
 static int f_renwin_persist(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
 
@@ -99,7 +109,7 @@ static int f_renwin_restore(lua_State *L) {
 static int f_get_refresh_rate(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
 
-  SDL_DisplayID display = SDL_GetDisplayForWindow(window_renderer->cache.window);
+  SDL_DisplayID display = SDL_GetDisplayForWindow(renwin_get_sdl_window(window_renderer));
   if (!display) return 0;
 
   const SDL_DisplayMode *mode;
@@ -121,7 +131,7 @@ static int f_get_color(lua_State *L) {
   SDL_Surface *surface = rencache_get_surface(&window_renderer->cache).surface;
   SDL_Color color = {0, 0, 0, 255};
 
-  if (surface && x >= 0 && y >= 0 && x <= surface->w && y <= surface->h) {
+  if (surface && x >= 0 && y >= 0 && x < surface->w && y < surface->h) {
     Uint8 *pixels = (Uint8*)surface->pixels;
     int bpp = SDL_BYTESPERPIXEL(surface->format);
 
@@ -167,6 +177,7 @@ static const luaL_Reg renwindow_lib[] = {
   { "__gc",             f_renwin_gc         },
   { "get_size",         f_renwin_get_size   },
   { "get_refresh_rate", f_get_refresh_rate  },
+  { "set_vsync",        f_renwin_set_vsync  },
   { "get_color",        f_get_color         },
   { "_persist",         f_renwin_persist    },
   { "_restore",         f_renwin_restore    },

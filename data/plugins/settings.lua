@@ -290,7 +290,7 @@ settings.add("Graphics",
   {
     {
       label = "Auto FPS",
-      description = "Automatically set frames per second from current display refresh rate.",
+      description = "Automatically set frames per second from current display refresh rate. If supported also toggles the current renderer v-sync.",
       path = "auto_fps",
       type = settings.type.TOGGLE,
       default = true,
@@ -300,6 +300,7 @@ settings.add("Graphics",
         else
           config.fps = settings.config.fps or DEFAULT_FPS
         end
+        core.window:set_vsync(enabled)
       end
     },
     {
