@@ -127,9 +127,9 @@ static size_t regex_offset_relative(lua_Integer pos, size_t len) {
     return (size_t)pos;
   else if (pos == 0)
     return 1;
-  else if (pos < -(lua_Integer)len)  /* inverted comparison */
+  else if (pos < -(lua_Integer)len)
     return 1;  /* clip to 1 */
-  else return len + (size_t)pos + 1;
+  else return (size_t)((lua_Integer)len + pos + 1);
 }
 
 static int f_pcre_gc(lua_State* L) {
@@ -270,7 +270,7 @@ static int f_pcre_find(lua_State *L) {
     if (ovector[i] == ovector[i+1])
       lua_pushinteger(L, ovector[i]+offset+1);
     else
-      lua_pushlstring(L, subject+ovector[i], ovector[i+1] - ovector[i]);
+      lua_pushlstring(L, subject+offset+ovector[i], ovector[i+1] - ovector[i]);
 
     total_results++;
   }
@@ -502,14 +502,14 @@ static int f_pcre_match(lua_State *L) {
   }
   int results_count = rc*2;
   if (results_count == 2) {
-    lua_pushlstring(L, subject+ovector[0], ovector[1] - ovector[0]);
+    lua_pushlstring(L, subject+offset+ovector[0], ovector[1] - ovector[0]);
     total_results++;
   } else if(results_count > 0) {
     for (int i = 2; i < results_count; i+=2) {
       if (ovector[i] == ovector[i+1])
-        lua_pushinteger(L, ovector[i]+1);
+        lua_pushinteger(L, ovector[i]+offset+1);
       else
-        lua_pushlstring(L, subject+ovector[i], ovector[i+1] - ovector[i]);
+        lua_pushlstring(L, subject+offset+ovector[i], ovector[i+1] - ovector[i]);
       total_results++;
     }
   }

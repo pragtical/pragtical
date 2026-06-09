@@ -151,15 +151,13 @@ void regex_gsub_uninit(regex_gsub* self) {
 }
 
 static size_t regex_offset_relative(int64_t pos, size_t len) {
-  if (pos < 0)
-    return 1;
-  else if (pos > 0)
+  if (pos > 0)
     return pos;
   else if (pos == 0)
     return 1;
-  else if (pos < -(int64_t)len)  /* inverted comparison */
+  else if (pos < -(int64_t)len)
     return 1;  /* clip to 1 */
-  else return len + pos + 1;
+  else return (size_t)((int64_t)len + pos + 1);
 }
 
 static bool regex_write_offset(

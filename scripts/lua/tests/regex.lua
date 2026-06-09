@@ -58,4 +58,54 @@ test.describe("regex", function()
     test.equal(c2s, 3)
     test.equal(c2e, 5)
   end)
+
+  test.test("handles negative offsets like string.find", function()
+    local subject = "0123456789"
+    local compiled = test.not_nil(regex.compile("(.)"))
+
+    local start_idx, end_idx, capture = regex.find(compiled, subject, -1)
+    test.equal(start_idx, 10)
+    test.equal(end_idx, 10)
+    test.equal(capture, "9")
+
+    start_idx, end_idx, capture = regex.find(compiled, subject, -10)
+    test.equal(start_idx, 1)
+    test.equal(end_idx, 1)
+    test.equal(capture, "0")
+
+    start_idx, end_idx, capture = regex.find(compiled, subject, -100)
+    test.equal(start_idx, 1)
+    test.equal(end_idx, 1)
+    test.equal(capture, "0")
+  end)
+
+  test.test("handles negative offsets for offset-returning regex APIs", function()
+    local subject = "0123456789"
+
+    local start_idx, end_idx, cap_start, cap_end =
+      regex.find_offsets("(.)", subject, -1)
+    test.equal(start_idx, 10)
+    test.equal(end_idx, 11)
+    test.equal(cap_start, 10)
+    test.equal(cap_end, 10)
+
+    local whole_start, whole_end, capture_start, capture_end =
+      regex.cmatch("(.)", subject, -1)
+    test.equal(whole_start, 10)
+    test.equal(whole_end, 11)
+    test.equal(capture_start, 10)
+    test.equal(capture_end, 11)
+  end)
+
+  test.test("handles negative offsets for match and gmatch", function()
+    local subject = "0123456789"
+
+    test.equal(regex.match("(.)", subject, -1), "9")
+
+    local items = {}
+    for item in regex.gmatch("(.)", subject, -2) do
+      items[#items + 1] = item
+    end
+    test.same(items, { "8", "9" })
+  end)
 end)
