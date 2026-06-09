@@ -4571,15 +4571,22 @@ static void gpu_apply_present_mode(GpuWindowData *data, RenWindow *ren, bool vsy
   );
 }
 
-static void gpu_init_window(RenWindow *ren) {
+static bool gpu_init_window(RenWindow *ren) {
   GpuWindowData *data = gpu_window_data(ren);
   data->device = gpu_retain_device();
-  if (!SDL_ClaimWindowForGPUDevice(data->device, ren->window))
-    gpu_abort("SDL_ClaimWindowForGPUDevice failed");
+  if (!SDL_ClaimWindowForGPUDevice(data->device, ren->window)) {
+    fprintf(stderr, "SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
+    gpu_release_device();
+    data->device = NULL;
+    SDL_free(ren->backend_data);
+    ren->backend_data = NULL;
+    return false;
+  }
   /* Default to vsync (tear-free); the Lua side calls set_vsync() to match
      config.auto_fps (off => IMMEDIATE for max frames to screen). */
   gpu_apply_present_mode(data, ren, true);
   gpu_create_surface(ren);
+  return true;
 }
 
 static void gpu_set_vsync(RenWindow *ren, bool enabled) {

@@ -23,7 +23,7 @@ struct RenBackend {
   RenCacheGetSurfaceFn get_window_surface;
   RenCachePresentFn present_window_rects;
   SDL_Surface *(*capture_window)(RenCache *cache, RenRect rect);
-  void (*init_window)(RenWindow *window);
+  bool (*init_window)(RenWindow *window);
   void (*resize_window)(RenWindow *window);
   void (*set_vsync)(RenWindow *window, bool enabled); /* NULL = unsupported */
   void (*destroy_window)(RenWindow *window);

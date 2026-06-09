@@ -87,10 +87,11 @@ static void sdlrenderer_create_surface_and_texture(RenWindow *ren, int w, int h)
   sdlrenderer_setup_texture(ren, w, h);
 }
 
-static void sdlrenderer_init_window(RenWindow *ren) {
+static bool sdlrenderer_init_window(RenWindow *ren) {
   int w, h;
   SDL_GetWindowSizeInPixels(ren->window, &w, &h);
   sdlrenderer_create_surface_and_texture(ren, w, h);
+  return true;
 }
 
 static void sdlrenderer_resize_window(RenWindow *ren) {

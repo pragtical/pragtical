@@ -5,8 +5,9 @@
 
 static RenSurface surface_get_window_surface(RenCache *cache);
 
-static void surface_init_window(RenWindow *ren) {
+static bool surface_init_window(RenWindow *ren) {
   ren->scale_x = ren->scale_y = 1;
+  return true;
 }
 
 static void surface_resize_window(UNUSED RenWindow *ren) {

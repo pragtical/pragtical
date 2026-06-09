@@ -15,7 +15,20 @@ RenWindow* renwin_create(SDL_Window *win) {
   window_renderer->cache.window_target = true;
   window_renderer->cache.get_surface = window_renderer->cache.backend->get_window_surface;
   window_renderer->cache.present_rects = window_renderer->cache.backend->present_window_rects;
-  window_renderer->cache.backend->init_window(window_renderer);
+  if (!window_renderer->cache.backend->init_window(window_renderer)) {
+    fprintf(stderr,
+      "Renderer backend '%s' failed to initialize window; falling back to 'surface'\n",
+      window_renderer->cache.backend->name
+    );
+    renbackend_select("surface");
+    window_renderer->cache.backend = renbackend_current();
+    window_renderer->cache.get_surface = window_renderer->cache.backend->get_window_surface;
+    window_renderer->cache.present_rects = window_renderer->cache.backend->present_window_rects;
+    if (!window_renderer->cache.backend->init_window(window_renderer)) {
+      fprintf(stderr, "Renderer backend 'surface' failed to initialize window\n");
+      exit(1);
+    }
+  }
   renwin_clip_to_surface(window_renderer);
 
   return window_renderer;
