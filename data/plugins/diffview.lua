@@ -977,23 +977,74 @@ local function redraw_thumb(view_scrollbar)
   renderer.draw_rect(x, y, w, h, color)
 end
 
+---Get the scrollbar marker rectangle for a visual row range.
+---@param track_y number
+---@param track_h number
+---@param start_row number
+---@param end_row number
+---@param scrollable_size number
+---@param line_height number
+---@param content_padding number
+---@return number y
+---@return number h
+local function get_scrollbar_marker_rect(
+  track_y, track_h, start_row, end_row, scrollable_size, line_height,
+  content_padding
+)
+  local scrollable = math.max(1, scrollable_size)
+  local start_y = content_padding + start_row * line_height
+  local end_y = content_padding + end_row * line_height
+  local ratio_start = common.clamp(start_y / scrollable, 0, 1)
+  local ratio_end = common.clamp(end_y / scrollable, ratio_start, 1)
+  local y = track_y + ratio_start * track_h
+  local h = math.max(2 * SCALE, (ratio_end - ratio_start) * track_h)
+  return y, h
+end
+
+---Get the marker lane that matches the scrollbar selector width.
+---@param scrollbar core.scrollbar
+---@return number x
+---@return number y
+---@return number w
+---@return number h
+local function get_scrollbar_marker_lane(scrollbar)
+  local track_x, track_y, track_w, track_h = scrollbar:get_track_rect()
+  local thumb_x, _, thumb_w = scrollbar:get_thumb_rect()
+  if thumb_w > 0 then
+    track_x, track_w = thumb_x, thumb_w
+  end
+  return track_x, track_y, track_w, track_h
+end
+
 function DiffView:draw_scrollbar()
   DiffView.super.draw_scrollbar(self)
 
+  local parent_scrollable = self:get_scrollable_size()
+  local parent_lh = self.doc_view_a:get_line_height()
+  local parent_x, parent_y, parent_w, parent_h = get_scrollbar_marker_lane(
+    self.v_scrollbar
+  )
+
   for _, side in ipairs {
-    {view = self.doc_view_a, changes = self.a_changes},
-    {view = self.doc_view_b, changes = self.b_changes},
+    {
+      view = self.doc_view_a,
+      changes = self.a_changes,
+      gaps = self.a_gaps
+    },
+    {
+      view = self.doc_view_b,
+      changes = self.b_changes,
+      gaps = self.b_gaps
+    },
   } do
     local view = side.view
     local changes = side.changes
+    local gaps = side.gaps
     local scrollbar = view.v_scrollbar
-
+    local scrollable = view:get_scrollable_size()
     local lh = view:get_line_height()
-    local full_h = view:get_scrollable_size()
-    local visible_h = view.size.y
-    local x, y, w, h = scrollbar:get_track_rect()
 
-    local scroll_range = math.max(1, full_h - visible_h)
+    local x, y, w, h = get_scrollbar_marker_lane(scrollbar)
 
     -- Step 1: group consecutive lines of same change tag
     local change_lines = {}
@@ -1023,17 +1074,23 @@ function DiffView:draw_scrollbar()
         or tag == "modify" and style.diff_modify
 
       if color then
-        local scroll_y_start = (start_line - 1) * lh
-        local scroll_y_end = (end_line) * lh
-        local ratio_start = scroll_y_start / scroll_range
-        local ratio_end = scroll_y_end / scroll_range
-        local marker_y = y + ratio_start * h
-        local marker_h = math.max(2, (ratio_end - ratio_start) * h) * SCALE
+        local start_gap = gaps[start_line] and gaps[start_line][2] or 0
+        local end_gap = gaps[end_line] and gaps[end_line][2] or start_gap
+        local start_row = start_line - 1 + start_gap
+        local end_row = end_line + end_gap
+        local marker_y, marker_h = get_scrollbar_marker_rect(
+          y, h, start_row, end_row, scrollable, lh, style.padding.y
+        )
 
         renderer.draw_rect(x, marker_y, w, marker_h, color)
 
-        local sx, _, sw = self.v_scrollbar:get_track_rect()
-        renderer.draw_rect(sx, marker_y, sw, marker_h, color)
+        local parent_marker_y, parent_marker_h = get_scrollbar_marker_rect(
+          parent_y, parent_h, start_row, end_row, parent_scrollable, parent_lh,
+          style.padding.y
+        )
+        renderer.draw_rect(
+          parent_x, parent_marker_y, parent_w, parent_marker_h, color
+        )
       end
 
       i = i + 1
