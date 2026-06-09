@@ -108,8 +108,6 @@ function EmptyView:new()
     command.perform "core:view-documentation-help"
   end
 
-  self.first_update = true
-  self.plugin_manager_loaded = false
   self.plugins = Button(self.center_container, "Plugins")
   self.plugins:set_icon("p")
   self.plugins:set_tooltip("Open the plugin manager")
@@ -314,14 +312,10 @@ function EmptyView:update()
   self.background_color = style.background
 
   if self.prev_size.x ~= self.size.x or self.prev_size.y ~= self.size.y then
-    if self.first_update then
-      self.first_update = false
-      local plugin_manager_loaded = package.loaded["plugins.plugin_manager"]
-      if plugin_manager_loaded then
-        self.plugins:show()
-        self.prev_size.x = -1
-        self.center_container.size.x = -1
-      end
+    if not self.plugins:is_visible() and command.is_valid("plugin-manager:show") then
+      self.plugins:show()
+      self.prev_size.x = -1
+      self.center_container.size.x = -1
     end
 
     self.recent_projects:update_position()
