@@ -40,9 +40,9 @@ jobs:
           prerelease: true
           generate_release_notes: true
           body: >
-            Builds that include most recent changes as they happen with optimized
-            debugging symbols enabled. For non rolling builds check the whole
-            list of [releases](https://github.com/pragtical/pragtical/releases).
+            Builds that include most recent changes as they happen, optimized and
+            stripped for regular use. For non rolling builds check the whole list
+            of [releases](https://github.com/pragtical/pragtical/releases).
 
 
 
@@ -108,11 +108,11 @@ jobs:
           source scripts/common.sh
           SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Package Portables
-        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary
+        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --binary --release
       - name: Build AppImages
         run: >
           bash scripts/appimage.sh --debug --static --addons
-          --version ${INSTALL_REF} --nobuild
+          --version ${INSTALL_REF} --nobuild --release
           --update-channel rolling
       - name: Upload Files
         uses: softprops/action-gh-release@v3
@@ -171,7 +171,7 @@ jobs:
           SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Create DMG Image
         run: |
-          bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --dmg
+          bash scripts/package.sh --version ${INSTALL_REF} --debug --addons --dmg --release
       - name: Upload Files
         uses: softprops/action-gh-release@v3
         with:
@@ -234,7 +234,7 @@ jobs:
           source scripts/common.sh
           SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Package
-        run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary
+        run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary --release
       - name: Build Installer
         run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
       - name: Upload Files
