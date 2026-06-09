@@ -100,86 +100,7 @@ jobs:
       - name: Run Tests
         run: |
           source scripts/common.sh
-          builddir="$(get_default_build_dir)"
-
-          if [[ "${{ matrix.config.arch }}" != "x86_64" ]]; then
-            SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$builddir" test scripts/lua/tests
-            exit 0
-          fi
-
-          mkdir -p ci-debug
-          {
-            echo "builddir=$builddir"
-            echo "arch=${{ matrix.config.arch }}"
-            sw_vers || true
-            uname -a || true
-            meson configure "$builddir" | grep -E 'renderer|buildtype|optimization|wrap_mode|b_lto|b_pgo' || true
-            env | sort | grep -E 'SDL|PRAGTICAL|MACOSX|ARCH|CC|CXX|MESON|GITHUB' || true
-            otool -L "$builddir/src/pragtical" || true
-          } | tee ci-debug/environment.txt
-
-          set +e
-          SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$builddir" test scripts/lua/tests \
-            2>&1 | tee ci-debug/run-local.txt
-          run_local_status="${PIPESTATUS[0]}"
-          set -e
-          if [[ "$run_local_status" == "0" ]]; then
-            exit 0
-          fi
-
-          meson compile -C "$builddir"
-
-          rm -rf .run
-          mkdir -p .run/bin .run/share/pragtical
-          cp "$builddir/src/pragtical" .run/bin
-          for module_name in core compat plugins colors fonts; do
-            cp -r "data/$module_name" .run/share/pragtical
-          done
-          if [ -d "subprojects/widget" ]; then
-            cp -a "subprojects/widget" .run/share/pragtical
-          fi
-          if [ -d "subprojects/colors" ]; then
-            cp -a "subprojects/colors/colors" .run/share/pragtical
-          fi
-          if [ -d "subprojects/plugins" ]; then
-            cp -a "subprojects/plugins/plugins/"language_* .run/share/pragtical/plugins
-          fi
-          cp "$builddir/start.lua" .run/share/pragtical/core
-          cp -a .run/share/pragtical/* .run/bin
-
-          export SDL_VIDEO_DRIVER=dummy
-          export PRAGTICAL_USERDIR="$(cd .run && pwd -P)"
-
-          set +e
-          lldb --batch \
-            -o "run test scripts/lua/tests" \
-            -o "bt all" \
-            -o "thread backtrace all" \
-            -o "register read" \
-            -o "image list" \
-            -- .run/bin/pragtical 2>&1 | tee ci-debug/lldb.txt
-          lldb_status="${PIPESTATUS[0]}"
-          set -e
-          if grep -Eq 'stop reason = signal|EXC_BAD_ACCESS|Segmentation fault' ci-debug/lldb.txt; then
-            exit 139
-          fi
-          if grep -Eq 'exited with status = 0' ci-debug/lldb.txt; then
-            exit 0
-          fi
-          exit "$lldb_status"
-      - name: Collect macOS x86_64 Test Diagnostics
-        if: ${{ failure() && matrix.config.arch == 'x86_64' }}
-        run: |
-          mkdir -p ci-debug
-          cp -R .run ci-debug/run-local 2>/dev/null || true
-          cp ~/Library/Logs/DiagnosticReports/*pragtical* ci-debug/ 2>/dev/null || true
-          find ci-debug -maxdepth 4 -type f -print
-      - name: Upload macOS x86_64 Test Diagnostics
-        if: ${{ failure() && matrix.config.arch == 'x86_64' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-x86_64-test-diagnostics
-          path: ci-debug
+          SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Create DMG Image
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
       - name: Upload Artifact
@@ -217,7 +138,6 @@ jobs:
             mingw-w64-${{ matrix.config.arch }}-ninja
             mingw-w64-${{ matrix.config.arch }}-cmake
             mingw-w64-${{ matrix.config.arch }}-ca-certificates
-            mingw-w64-${{ matrix.config.arch }}-gdb
             mingw-w64-${{ matrix.config.arch }}-ntldd
       - name: Setup Meson
         run: |
@@ -241,44 +161,7 @@ jobs:
       - name: Run Tests
         run: |
           source scripts/common.sh
-          builddir="$(get_default_build_dir)"
-          mkdir -p ci-debug
-          {
-            echo "builddir=$builddir"
-            echo "MSYSTEM=$MSYSTEM"
-            echo "OSTYPE=$OSTYPE"
-            echo "PATH=$PATH"
-            meson configure "$builddir" | grep -E 'renderer|buildtype|optimization|wrap_mode|b_lto|b_pgo' || true
-            env | sort | grep -E 'SDL|PRAGTICAL|MSYSTEM|MINGW|OSTYPE|ARCH|CC|CXX|MESON|GITHUB|RUNNER' || true
-            ntldd "$builddir/src/pragtical.exe" || true
-          } | tee ci-debug/environment.txt
-
-          set +e
-          SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$builddir" test scripts/lua/tests \
-            2>&1 | tee ci-debug/run-local.txt
-          run_local_status="${PIPESTATUS[0]}"
-          set -e
-          if [[ "$run_local_status" == "0" ]]; then
-            exit 0
-          fi
-
-          export SDL_VIDEO_DRIVER=dummy
-          export PRAGTICAL_USERDIR="$(cd .run && pwd -P)"
-          gdb -batch \
-            -ex "set pagination off" \
-            -ex "set confirm off" \
-            -ex "run" \
-            -ex "info threads" \
-            -ex "thread apply all bt full" \
-            --args .run/bin/pragtical.exe test scripts/lua/tests \
-            2>&1 | tee ci-debug/gdb.txt
-          exit "$run_local_status"
-      - name: Upload Windows Test Diagnostics
-        if: ${{ failure() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-msys2-test-diagnostics
-          path: ci-debug
+          SDL_VIDEO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
       - name: Package
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
       - name: Upload Artifact
