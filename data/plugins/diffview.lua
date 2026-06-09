@@ -129,6 +129,8 @@ function DiffView:new(a, b, compare_type, names)
 
   self.doc_view_a.diff_view_parent = self
   self.doc_view_b.diff_view_parent = self
+  self.doc_view_a.code_folding_disabled = true
+  self.doc_view_b.code_folding_disabled = true
 
   self.a_gaps = {}
   self.b_gaps = {}

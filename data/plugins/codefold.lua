@@ -66,6 +66,15 @@ local CODEFOLD_SOURCE_FONT = nil
 
 local codefold = {}
 
+---Return whether code folding should run for a given view.
+---@param self core.view
+---@return boolean
+local function codefold_enabled_for_view(self)
+  return config.plugins.codefold.enabled
+    and self:is(DocView)
+    and not self.code_folding_disabled
+end
+
 local function maybe_yield()
   if coroutine.isyieldable() then coroutine.yield() end
 end
@@ -1049,7 +1058,7 @@ end
 
 local docview_get_hidden_lines = DocView.get_hidden_lines
 function DocView:get_hidden_lines()
-  if config.plugins.codefold.enabled and self:is(DocView)
+  if codefold_enabled_for_view(self)
     and self.cf_folded_regions and #self.cf_folded_regions > 0 then
     return self.cf_hidden_lines or build_hidden_set(self)
   end
@@ -1059,7 +1068,7 @@ end
 local docview_ensure_line_visible = DocView.ensure_line_visible
 function DocView:ensure_line_visible(line)
   line = docview_ensure_line_visible(self, line)
-  if not config.plugins.codefold.enabled or not self:is(DocView) then
+  if not codefold_enabled_for_view(self) then
     return line
   end
   if not self.cf_unfold_map or self.cf_unfold_map[line] then
@@ -1101,7 +1110,7 @@ local docview_update = DocView.update
 function DocView:update(...)
   docview_update(self, ...)
 
-  if not config.plugins.codefold.enabled or not self:is(DocView) then
+  if not codefold_enabled_for_view(self) then
     return
   end
 
@@ -1129,7 +1138,7 @@ end
 
 local docview_get_gutter_width = DocView.get_gutter_width
 function DocView:get_gutter_width()
-  if not config.plugins.codefold.enabled or not self:is(DocView) then
+  if not codefold_enabled_for_view(self) then
     return docview_get_gutter_width(self)
   end
   local base_width, padding = docview_get_gutter_width(self)
@@ -1145,7 +1154,7 @@ end
 local docview_draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(line, x, y, width)
   local result = docview_draw_line_gutter(self, line, x, y, width)
-  if config.plugins.codefold.enabled and self:is(DocView) then
+  if codefold_enabled_for_view(self) then
     local region_idx = region_at_line(self, line)
     if region_idx then
       local folded = is_folded(self, region_idx)
@@ -1177,7 +1186,7 @@ end
 local docview_on_mouse_pressed = DocView.on_mouse_pressed
 function DocView:on_mouse_pressed(button, x, y, clicks)
   -- Mirror the original gutter handler: trust the hover flag set in on_mouse_moved.
-  if config.plugins.codefold.enabled and self:is(DocView)
+  if codefold_enabled_for_view(self)
     and button == "left" and self.cf_hovering_toggle then
     local line = self:resolve_screen_position(x, y)
     if line then
@@ -1199,7 +1208,7 @@ function DocView:on_mouse_moved(x, y, ...)
   -- Then decide if we're hovering a fold toggle (leftmost portion of gutter).
   local was_hovering = self.cf_hovering_toggle
   self.cf_hovering_toggle = nil
-  if config.plugins.codefold.enabled and self:is(DocView) then
+  if codefold_enabled_for_view(self) then
     local toggle_x, toggle_w = fold_toggle_rect(self)
     if x >= toggle_x and x < toggle_x + toggle_w then
       local line = self:resolve_screen_position(x, y)
@@ -1232,7 +1241,7 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
   local result = doc_raw_insert(self, line, col, text, undo_stack, time)
   -- Invalidate fold state on all views of this doc
   for _, view in ipairs(core.get_views_referencing_doc(self)) do
-    if view:is(DocView) and view.cf_regions then
+    if codefold_enabled_for_view(view) and view.cf_regions then
       schedule_recalculation(view, line)
     end
   end
@@ -1243,7 +1252,7 @@ local doc_raw_remove = Doc.raw_remove
 function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
   local result = doc_raw_remove(self, line1, col1, line2, col2, undo_stack, time)
   for _, view in ipairs(core.get_views_referencing_doc(self)) do
-    if view:is(DocView) and view.cf_regions then
+    if codefold_enabled_for_view(view) and view.cf_regions then
       schedule_recalculation(view, line1)
     end
   end
@@ -1257,7 +1266,7 @@ end
 command.add(nil, {
   ["code-folding:toggle"] = function()
     local view = core.active_view
-    if not view or not view:is(DocView) or not view.cf_regions then
+    if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
       return
     end
     local line = view.doc:get_selection()
@@ -1274,7 +1283,7 @@ command.add(nil, {
 
   ["code-folding:fold-all"] = function()
     local view = core.active_view
-    if not view or not view:is(DocView) or not view.cf_regions then
+    if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
       return
     end
     fold_all(view)
@@ -1283,7 +1292,7 @@ command.add(nil, {
 
   ["code-folding:unfold-all"] = function()
     local view = core.active_view
-    if not view or not view:is(DocView) or not view.cf_regions then
+    if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
       return
     end
     unfold_all(view)
