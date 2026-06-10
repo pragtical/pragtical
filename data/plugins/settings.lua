@@ -2157,7 +2157,7 @@ function Settings:setup_about()
   )
   ---@type widget.label
   local info = core.window:get_renderer_info()
-  local renderer_info_parts = { "renderer " .. info.backend }
+  local renderer_info_parts = { "Renderer: " .. info.backend }
   if info.power then table.insert(renderer_info_parts, info.power) end
   if info.device then table.insert(renderer_info_parts, info.device) end
   local renderer_info = Label(
