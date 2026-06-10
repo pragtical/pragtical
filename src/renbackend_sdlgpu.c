@@ -79,6 +79,12 @@ typedef enum {
 } GpuBatchPipeline;
 
 typedef enum {
+  GPU_POWER_AUTO,
+  GPU_POWER_LOW,
+  GPU_POWER_HIGH,
+} GpuPowerPreference;
+
+typedef enum {
   GPU_BATCH_QUEUE_RECTS = 1 << 0,
   GPU_BATCH_QUEUE_TEXT = 1 << 1,
   GPU_BATCH_QUEUE_CANVASES = 1 << 2,
@@ -292,6 +298,8 @@ typedef struct {
 
 static SDL_GPUDevice *gpu_device = NULL;
 static int gpu_device_ref_count = 0;
+static bool gpu_backend_disabled = false;
+static bool gpu_window_device_ready = false;
 static SDL_GPUGraphicsPipeline *gpu_canvas_blend_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_canvas_batch_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_canvas_batch_replace_pipeline = NULL;
@@ -380,6 +388,25 @@ static bool gpu_env_flag(const char *name, bool fallback) {
       && SDL_strcasecmp(value, "false") != 0
       && SDL_strcasecmp(value, "no") != 0
       && SDL_strcasecmp(value, "off") != 0;
+}
+
+static GpuPowerPreference gpu_power_preference(void) {
+  const char *value = SDL_getenv("PRAGTICAL_SDLGPU_POWER");
+  if (!value || !*value || SDL_strcasecmp(value, "auto") == 0)
+    return GPU_POWER_AUTO;
+  if (SDL_strcasecmp(value, "low") == 0)
+    return GPU_POWER_LOW;
+  if (SDL_strcasecmp(value, "high") == 0)
+    return GPU_POWER_HIGH;
+  fprintf(stderr,
+    "Unknown PRAGTICAL_SDLGPU_POWER value '%s'; using 'auto'\n",
+    value
+  );
+  return GPU_POWER_AUTO;
+}
+
+static const char *gpu_power_name(bool prefer_low_power) {
+  return prefer_low_power ? "low" : "high";
 }
 
 static bool gpu_native_text_enabled(void) {
@@ -1726,6 +1753,9 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
   if (!surface)
     return;
 
+  if (!data->device && !gpu_window_device_ready)
+    return;
+
   if (!data->device)
     data->device = gpu_retain_device();
 
@@ -1863,6 +1893,10 @@ static const RenAtlasOps gpu_atlas_ops = {
 };
 
 static void gpu_init_atlas(RenAtlas *atlas) {
+  if (gpu_backend_disabled) {
+    renatlas_surface_init(atlas);
+    return;
+  }
   atlas->ops = &gpu_atlas_ops;
 }
 
@@ -4506,40 +4540,6 @@ static bool gpu_download_bridge_texture_to_surface(SDL_GPUDevice *device, GpuFra
   return true;
 }
 
-/* Create (or return the cached) GPU device. Returns NULL on failure without
-** aborting, so callers can fall back to another backend. */
-static SDL_GPUDevice *gpu_try_get_device(void) {
-  if (!gpu_device)
-    gpu_device = SDL_CreateGPUDevice(GPU_SUPPORTED_SHADER_FORMATS, false, NULL);
-  return gpu_device;
-}
-
-static SDL_GPUDevice *gpu_get_device(void) {
-  if (!gpu_try_get_device())
-    gpu_abort("SDL_CreateGPUDevice failed");
-  return gpu_device;
-}
-
-/* Backend availability probe: succeeds only if a GPU device can be created.
-** The device is cached and reused by gpu_retain_device(), so no work is wasted. */
-static bool gpu_backend_available(void) {
-  /* GPU support can only be queried once the video subsystem is up. The backend
-  ** may be resolved before the first window is created (e.g. during font atlas
-  ** setup at startup), so ensure the video subsystem here. The video driver hint
-  ** is already set by main() before any backend resolution, so this picks the
-  ** same driver video_init() would. SDL_InitSubSystem is idempotent/ref-counted.
-  ** The created device is cached and reused by gpu_retain_device(). */
-  if (!SDL_WasInit(SDL_INIT_VIDEO) && !SDL_InitSubSystem(SDL_INIT_VIDEO))
-    return false;
-  return gpu_try_get_device() != NULL;
-}
-
-static SDL_GPUDevice *gpu_retain_device(void) {
-  SDL_GPUDevice *device = gpu_get_device();
-  gpu_device_ref_count++;
-  return device;
-}
-
 static void gpu_release_device(void) {
   if (gpu_device_ref_count > 0)
     gpu_device_ref_count--;
@@ -4550,7 +4550,83 @@ static void gpu_release_device(void) {
     gpu_destroy_text_pipeline(gpu_device);
     SDL_DestroyGPUDevice(gpu_device);
     gpu_device = NULL;
+    gpu_window_device_ready = false;
   }
+}
+
+static bool gpu_set_shader_properties(SDL_PropertiesID props) {
+  return SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_SPIRV_BOOLEAN, true)
+      && SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXBC_BOOLEAN, true)
+      && SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_DXIL_BOOLEAN, true)
+      && SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_SHADERS_MSL_BOOLEAN, true);
+}
+
+static SDL_GPUDevice *gpu_create_device(bool prefer_low_power) {
+  if (gpu_backend_disabled)
+    return NULL;
+
+  SDL_PropertiesID props = SDL_CreateProperties();
+  if (!props)
+    return NULL;
+  if (!gpu_set_shader_properties(props) ||
+      !SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, false) ||
+      !SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_VERBOSE_BOOLEAN, false) ||
+      !SDL_SetBooleanProperty(props, SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN, prefer_low_power)) {
+    SDL_DestroyProperties(props);
+    return NULL;
+  }
+
+  SDL_GPUDevice *device = SDL_CreateGPUDeviceWithProperties(props);
+  SDL_DestroyProperties(props);
+  return device;
+}
+
+static void gpu_log_device(SDL_GPUDevice *device, const char *prefix, bool prefer_low_power) {
+  const char *driver = SDL_GetGPUDeviceDriver(device);
+  const char *name = NULL;
+  SDL_PropertiesID props = SDL_GetGPUDeviceProperties(device);
+  if (props)
+    name = SDL_GetStringProperty(props, SDL_PROP_GPU_DEVICE_NAME_STRING, NULL);
+  fprintf(stderr,
+    "%s SDL GPU device power=%s driver=%s device=%s\n",
+    prefix,
+    gpu_power_name(prefer_low_power),
+    driver ? driver : "unknown",
+    name ? name : "unknown"
+  );
+}
+
+static SDL_GPUDevice *gpu_get_device(void) {
+  if (!gpu_device) {
+    GpuPowerPreference preference = gpu_power_preference();
+    bool prefer_low_power = preference != GPU_POWER_HIGH;
+    gpu_device = gpu_create_device(prefer_low_power);
+  }
+  if (!gpu_device)
+    gpu_abort("SDL_CreateGPUDeviceWithProperties failed");
+  return gpu_device;
+}
+
+/* Backend availability only checks whether SDL GPU can be considered at all.
+** Presentability is window-specific, so gpu_init_window performs the real claim
+** test and disables this backend for the process when no candidate can present. */
+static bool gpu_backend_available(void) {
+  if (gpu_backend_disabled)
+    return false;
+  if (!SDL_WasInit(SDL_INIT_VIDEO) && !SDL_InitSubSystem(SDL_INIT_VIDEO))
+    return false;
+  SDL_PropertiesID props = SDL_CreateProperties();
+  if (!props)
+    return false;
+  bool available = gpu_set_shader_properties(props) && SDL_GPUSupportsProperties(props);
+  SDL_DestroyProperties(props);
+  return available;
+}
+
+static SDL_GPUDevice *gpu_retain_device(void) {
+  SDL_GPUDevice *device = gpu_get_device();
+  gpu_device_ref_count++;
+  return device;
 }
 
 /* Pick the swapchain present mode. With vsync on, prefer MAILBOX (tear-free and
@@ -4573,15 +4649,74 @@ static void gpu_apply_present_mode(GpuWindowData *data, RenWindow *ren, bool vsy
 
 static bool gpu_init_window(RenWindow *ren) {
   GpuWindowData *data = gpu_window_data(ren);
-  data->device = gpu_retain_device();
-  if (!SDL_ClaimWindowForGPUDevice(data->device, ren->window)) {
-    fprintf(stderr, "SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
-    gpu_release_device();
-    data->device = NULL;
+  if (gpu_backend_disabled) {
     SDL_free(ren->backend_data);
     ren->backend_data = NULL;
     return false;
   }
+
+  if (gpu_device) {
+    data->device = gpu_retain_device();
+    if (!SDL_ClaimWindowForGPUDevice(data->device, ren->window)) {
+      fprintf(stderr, "SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
+      gpu_release_device();
+      data->device = NULL;
+      SDL_free(ren->backend_data);
+      ren->backend_data = NULL;
+      return false;
+    }
+  } else {
+    GpuPowerPreference preference = gpu_power_preference();
+    bool attempts[2];
+    int attempt_count = 0;
+    if (preference == GPU_POWER_LOW) {
+      attempts[attempt_count++] = true;
+    } else if (preference == GPU_POWER_HIGH) {
+      attempts[attempt_count++] = false;
+    } else {
+      attempts[attempt_count++] = true;
+      attempts[attempt_count++] = false;
+    }
+
+    for (int i = 0; i < attempt_count; i++) {
+      bool prefer_low_power = attempts[i];
+      SDL_GPUDevice *candidate = gpu_create_device(prefer_low_power);
+      if (!candidate) {
+        fprintf(stderr,
+          "SDL_CreateGPUDeviceWithProperties failed for power=%s: %s\n",
+          gpu_power_name(prefer_low_power),
+          SDL_GetError()
+        );
+        continue;
+      }
+
+      if (SDL_ClaimWindowForGPUDevice(candidate, ren->window)) {
+        gpu_device = candidate;
+        gpu_device_ref_count = 1;
+        gpu_window_device_ready = true;
+        data->device = candidate;
+        gpu_log_device(candidate, "Using", prefer_low_power);
+        break;
+      }
+
+      gpu_log_device(candidate, "Rejected", prefer_low_power);
+      fprintf(stderr,
+        "SDL_ClaimWindowForGPUDevice failed for power=%s: %s\n",
+        gpu_power_name(prefer_low_power),
+        SDL_GetError()
+      );
+      SDL_DestroyGPUDevice(candidate);
+    }
+
+    if (!data->device) {
+      gpu_backend_disabled = true;
+      ren_font_reset_loaded_atlases();
+      SDL_free(ren->backend_data);
+      ren->backend_data = NULL;
+      return false;
+    }
+  }
+
   /* Default to vsync (tear-free); the Lua side calls set_vsync() to match
      config.auto_fps (off => IMMEDIATE for max frames to screen). */
   gpu_apply_present_mode(data, ren, true);

@@ -2,6 +2,15 @@
 
 ---
 ---Core functionality to render or draw elements into the screen.
+---
+---Renderer backend selection can be overridden at startup with:
+---`PRAGTICAL_RENDERER=surface|sdlrenderer|sdlgpu`.
+---
+---When using the `sdlgpu` backend, GPU device selection can be influenced with:
+---`PRAGTICAL_SDLGPU_POWER=auto|low|high`.
+---The default `auto` mode tries the low-power GPU first, then high-performance
+---GPU before falling back to the software surface backend. `low` and `high`
+---are strict single-preference modes.
 ---@class renderer
 renderer = {}
 
