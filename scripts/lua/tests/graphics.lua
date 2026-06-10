@@ -79,7 +79,10 @@ test.describe("graphics apis", function()
   end)
 
   test.test("exports the documented renwindow, renderer and canvas functions", function()
-    for _, name in ipairs({"create", "get_size", "get_refresh_rate", "get_color", "_restore"}) do
+    for _, name in ipairs({
+      "create", "get_size", "get_refresh_rate", "get_renderer_info",
+      "set_vsync", "get_color", "_restore"
+    }) do
       test.type(renwindow[name], "function", "missing renwindow." .. name)
     end
 
@@ -311,6 +314,17 @@ test.describe("graphics apis", function()
 
     local refresh_rate = renwindow.get_refresh_rate(window)
     test.ok(refresh_rate == nil or refresh_rate > 0)
+
+    local info = window:get_renderer_info()
+    test.type(info, "table")
+    test.ok(info.backend == "surface" or info.backend == "sdlrenderer" or info.backend == "sdlgpu")
+    if info.backend == "sdlgpu" then
+      test.ok(info.power == nil or type(info.power) == "string")
+      test.ok(info.device == nil or type(info.device) == "string")
+    else
+      test.equal(info.power, nil)
+      test.equal(info.device, nil)
+    end
 
     renderer.show_debug(false)
     renderer.begin_frame(window)

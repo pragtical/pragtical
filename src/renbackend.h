@@ -5,9 +5,16 @@
 #include "renatlas.h"
 #include "rencache.h"
 
+typedef struct {
+  const char *backend;
+  const char *power;
+  const char *device;
+} RenRendererInfo;
+
 struct RenBackend {
   const char *name;
   bool (*available)(void); /* NULL = always available */
+  void (*get_renderer_info)(RenWindow *window, RenRendererInfo *info);
   const RenCacheDrawOps *draw_ops;
   bool (*use_full_frame_regions)(RenCache *cache);
   void (*begin_frame)(RenCache *cache, RenRect *rects, int count);

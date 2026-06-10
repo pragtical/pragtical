@@ -85,6 +85,31 @@ static int f_renwin_set_vsync(lua_State *L) {
   return 0;
 }
 
+static int f_renwin_get_renderer_info(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  const RenBackend *backend = window_renderer->cache.backend;
+  RenRendererInfo info = {
+    .backend = backend ? backend->name : "",
+    .power = NULL,
+    .device = NULL,
+  };
+  if (backend && backend->get_renderer_info)
+    backend->get_renderer_info(window_renderer, &info);
+
+  lua_createtable(L, 0, 3);
+  lua_pushstring(L, info.backend ? info.backend : "");
+  lua_setfield(L, -2, "backend");
+  if (info.power) {
+    lua_pushstring(L, info.power);
+    lua_setfield(L, -2, "power");
+  }
+  if (info.device) {
+    lua_pushstring(L, info.device);
+    lua_setfield(L, -2, "device");
+  }
+  return 1;
+}
+
 static int f_renwin_persist(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
 
@@ -178,6 +203,7 @@ static const luaL_Reg renwindow_lib[] = {
   { "get_size",         f_renwin_get_size   },
   { "get_refresh_rate", f_get_refresh_rate  },
   { "set_vsync",        f_renwin_set_vsync  },
+  { "get_renderer_info", f_renwin_get_renderer_info },
   { "get_color",        f_get_color         },
   { "_persist",         f_renwin_persist    },
   { "_restore",         f_renwin_restore    },

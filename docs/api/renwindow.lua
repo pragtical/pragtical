@@ -34,6 +34,16 @@ function renwindow.get_size(window) end
 function renwindow.get_refresh_rate(window) end
 
 ---
+---Gets renderer information for the backend currently attached to the window.
+---`backend` is always set. `power` and `device` are only set by backends where
+---the fields apply and the information is available.
+---
+---@param window renwindow
+---
+---@return { backend: "surface"|"sdlrenderer"|"sdlgpu"|string, power?: string, device?: string }
+function renwindow.get_renderer_info(window) end
+
+---
 ---Enable or disable vertical synchronization for the window swapchain.
 ---When enabled the backend presents tear-free (synced to the display refresh);
 ---when disabled it presents every rendered frame for the lowest latency, which
