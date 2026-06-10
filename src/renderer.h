@@ -48,6 +48,7 @@ RenFont* ren_font_load(const char *filename, float size, ERenFontAntialiasing an
 RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style, int ligatures);
 const char* ren_font_get_path(RenFont *font);
 void ren_font_free(RenFont *font);
+void ren_font_reset_loaded_atlases(void);
 int ren_font_get_metadata(const char *path, FontMetaData **data, int *count, bool *monospaced);
 int ren_font_group_get_tab_size(RenFont **font);
 int ren_font_group_get_height(RenFont **font);

@@ -130,6 +130,8 @@ typedef struct {
 } ShapedRunCacheEntry;
 
 typedef struct RenFont {
+  struct RenFont *next_loaded;
+  struct RenFont *prev_loaded;
   FT_Face face;
   hb_font_t *hb_font;
   FT_Color *palette;
@@ -153,6 +155,27 @@ typedef struct RenFont {
   ShapedRunCacheEntry shaped_run_cache[SHAPED_RUN_CACHE_MAX];
   char path[];
 } RenFont;
+
+static RenFont *loaded_fonts = NULL;
+
+static void font_link_loaded(RenFont *font) {
+  font->next_loaded = loaded_fonts;
+  font->prev_loaded = NULL;
+  if (loaded_fonts)
+    loaded_fonts->prev_loaded = font;
+  loaded_fonts = font;
+}
+
+static void font_unlink_loaded(RenFont *font) {
+  if (font->prev_loaded)
+    font->prev_loaded->next_loaded = font->next_loaded;
+  else if (loaded_fonts == font)
+    loaded_fonts = font->next_loaded;
+  if (font->next_loaded)
+    font->next_loaded->prev_loaded = font->prev_loaded;
+  font->next_loaded = NULL;
+  font->prev_loaded = NULL;
+}
 
 void update_font_scale(RenWindow *window_renderer, RenFont **fonts) {
   if (window_renderer == NULL) return;
@@ -1143,12 +1166,7 @@ static ShapedRunCacheEntry *font_store_shaped_run_cache(RenFont *font, const cha
   return entry;
 }
 
-static void font_clear_glyph_cache(RenFont* font) {
-  font_clear_shaped_width_cache(font);
-  font_clear_shaped_run_cache(font);
-  font->generation++;
-  ren_atlas_clear(&font->glyphs.atlas);
-  // clear glyph metric
+static void font_clear_glyph_metrics(RenFont *font) {
   for (int subpixel_idx = 0; subpixel_idx < FONT_BITMAP_COUNT(font); subpixel_idx++) {
     for (int glyphmap_row = 0; glyphmap_row < GLYPHMAP_ROW; glyphmap_row++) {
       SDL_free(font->glyphs.metrics[subpixel_idx][glyphmap_row]);
@@ -1156,6 +1174,26 @@ static void font_clear_glyph_cache(RenFont* font) {
     }
   }
   font->glyphs.metrics_bytesize = 0;
+}
+
+static void font_clear_glyph_cache(RenFont* font) {
+  font_clear_shaped_width_cache(font);
+  font_clear_shaped_run_cache(font);
+  font->generation++;
+  ren_atlas_clear(&font->glyphs.atlas);
+  font_clear_glyph_metrics(font);
+}
+
+void ren_font_reset_loaded_atlases(void) {
+  for (RenFont *font = loaded_fonts; font; font = font->next_loaded) {
+    font_clear_shaped_width_cache(font);
+    font_clear_shaped_run_cache(font);
+    font->generation++;
+    ren_atlas_free(&font->glyphs.atlas);
+    font_clear_glyph_metrics(font);
+    memset(&font->glyphs.atlas, 0, sizeof(font->glyphs.atlas));
+    renbackend_current()->init_atlas(&font->glyphs.atlas);
+  }
 }
 
 // based on https://github.com/libsdl-org/SDL_ttf/blob/2a094959055fba09f7deed6e1ffeb986188982ae/SDL_ttf.c#L1735
@@ -1282,6 +1320,7 @@ RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antial
     goto failure;
   if ((err = font_set_face_metrics(font, face)) != 0)
     goto failure;
+  font_link_loaded(font);
   return font;
 
 stream_failure:
@@ -1307,6 +1346,7 @@ const char* ren_font_get_path(RenFont *font) {
 }
 
 void ren_font_free(RenFont* font) {
+  font_unlink_loaded(font);
   font_clear_glyph_cache(font);
   ren_atlas_free(&font->glyphs.atlas);
   // free codepoint cache as well
