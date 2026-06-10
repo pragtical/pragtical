@@ -35,10 +35,29 @@ pragtical_sources = [
 
 if lua_jit_found
     pragtical_sources += 'ffiexports.c'
-    # Export all local symbols for LuaJIT FFI Access
     if host_machine.system() != 'windows' and host_machine.system() != 'darwin'
-        # reminder: on mingw the valid flag is -Wl,--export-all-symbols
-        pragtical_link_args += '-Wl,--export-dynamic'
+        if get_option('export_all_symbols')
+            # Export all local symbols for LuaJIT FFI access.
+            # reminder: on mingw the valid flag is -Wl,--export-all-symbols
+            pragtical_link_args += '-Wl,--export-dynamic'
+        else
+            ffi_export_symbols = [
+                'ren_get_target_window_ffi',
+                'rencache_set_clip_rect_ffi',
+                'rencache_draw_rect_ffi',
+                'rencache_draw_text_ffi',
+                'rencache_begin_frame_ffi',
+                'rencache_end_frame_ffi',
+                'system_get_time_ffi',
+                'system_wait_event_ffi',
+                'system_sleep_ffi',
+                'system_has_pending_events_ffi',
+            ]
+
+            foreach symbol : ffi_export_symbols
+                pragtical_link_args += '-Wl,--export-dynamic-symbol=' + symbol
+            endforeach
+        endif
     elif host_machine.system() == 'darwin'
         # macOS export dynamic symbols option slightly different
         pragtical_link_args += '-Wl,-export_dynamic'
