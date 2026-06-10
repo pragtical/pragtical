@@ -2155,6 +2155,16 @@ function Settings:setup_about()
     "A lightweight text editor written in Lua, adapted from lite.",
     true
   )
+  ---@type widget.label
+  local info = core.window:get_renderer_info()
+  local renderer_info_parts = { "Renderer: " .. info.backend }
+  if info.power then table.insert(renderer_info_parts, info.power) end
+  if info.device then table.insert(renderer_info_parts, info.device) end
+  local renderer_info = Label(
+    self.about,
+    table.concat(renderer_info_parts, ", "),
+    true
+  )
 
   ---@type widget.button
   local button = Button(self.about, "Visit Website")
@@ -2223,6 +2233,11 @@ local contributors_list = {
       style.padding.y
     )
 
+    description:set_position(
+      center - (description:get_width() / 2),
+      title:get_bottom() + (style.padding.y / 2)
+    )
+
     version:set_position(
       center - (version:get_width() / 2),
       title:get_bottom() + (style.padding.y / 2)
@@ -2233,9 +2248,14 @@ local contributors_list = {
       version:get_bottom() + (style.padding.y / 2)
     )
 
+    renderer_info:set_position(
+      center - (renderer_info:get_width() / 2),
+      description:get_bottom() + (style.padding.y / 2)
+    )
+
     button:set_position(
       center - (button:get_width() / 2),
-      description:get_bottom() + style.padding.y
+      renderer_info:get_bottom() + style.padding.y
     )
 
     contributors:set_position(

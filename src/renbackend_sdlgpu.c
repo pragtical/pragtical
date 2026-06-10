@@ -249,6 +249,7 @@ typedef struct {
   bool validation_reported;
   bool have_native_clip_rect;
   bool sampled_canvas_this_frame;
+  bool prefer_low_power;
 } GpuWindowData;
 
 typedef struct {
@@ -300,6 +301,7 @@ static SDL_GPUDevice *gpu_device = NULL;
 static int gpu_device_ref_count = 0;
 static bool gpu_backend_disabled = false;
 static bool gpu_window_device_ready = false;
+static bool gpu_device_prefer_low_power = false;
 static SDL_GPUGraphicsPipeline *gpu_canvas_blend_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_canvas_batch_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_canvas_batch_replace_pipeline = NULL;
@@ -4551,6 +4553,7 @@ static void gpu_release_device(void) {
     SDL_DestroyGPUDevice(gpu_device);
     gpu_device = NULL;
     gpu_window_device_ready = false;
+    gpu_device_prefer_low_power = false;
   }
 }
 
@@ -4601,6 +4604,8 @@ static SDL_GPUDevice *gpu_get_device(void) {
     GpuPowerPreference preference = gpu_power_preference();
     bool prefer_low_power = preference != GPU_POWER_HIGH;
     gpu_device = gpu_create_device(prefer_low_power);
+    if (gpu_device)
+      gpu_device_prefer_low_power = prefer_low_power;
   }
   if (!gpu_device)
     gpu_abort("SDL_CreateGPUDeviceWithProperties failed");
@@ -4657,6 +4662,7 @@ static bool gpu_init_window(RenWindow *ren) {
 
   if (gpu_device) {
     data->device = gpu_retain_device();
+    data->prefer_low_power = gpu_device_prefer_low_power;
     if (!SDL_ClaimWindowForGPUDevice(data->device, ren->window)) {
       fprintf(stderr, "SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
       gpu_release_device();
@@ -4694,7 +4700,9 @@ static bool gpu_init_window(RenWindow *ren) {
         gpu_device = candidate;
         gpu_device_ref_count = 1;
         gpu_window_device_ready = true;
+        gpu_device_prefer_low_power = prefer_low_power;
         data->device = candidate;
+        data->prefer_low_power = prefer_low_power;
         gpu_log_device(candidate, "Using", prefer_low_power);
         break;
       }
@@ -4722,6 +4730,20 @@ static bool gpu_init_window(RenWindow *ren) {
   gpu_apply_present_mode(data, ren, true);
   gpu_create_surface(ren);
   return true;
+}
+
+static void gpu_get_renderer_info(RenWindow *ren, RenRendererInfo *info) {
+  GpuWindowData *data = ren ? ren->backend_data : NULL;
+  SDL_GPUDevice *device = data ? data->device : NULL;
+  if (!device)
+    return;
+
+  info->power = gpu_power_name(data->prefer_low_power);
+  SDL_PropertiesID props = SDL_GetGPUDeviceProperties(device);
+  if (props)
+    info->device = SDL_GetStringProperty(props, SDL_PROP_GPU_DEVICE_NAME_STRING, NULL);
+  if (!info->device)
+    info->device = SDL_GetGPUDeviceDriver(device);
 }
 
 static void gpu_set_vsync(RenWindow *ren, bool enabled) {
@@ -5988,6 +6010,7 @@ static const RenCacheDrawOps gpu_draw_ops = {
 static const RenBackend sdlgpu_backend = {
   .name = "sdlgpu",
   .available = gpu_backend_available,
+  .get_renderer_info = gpu_get_renderer_info,
   .draw_ops = &gpu_draw_ops,
   .use_full_frame_regions = gpu_use_full_frame_regions,
   .begin_frame = gpu_begin_frame,
