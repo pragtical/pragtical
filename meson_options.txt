@@ -10,5 +10,6 @@ option('extra_colors', type : 'boolean', value : true, description: 'Include add
 option('extra_languages', type : 'boolean', value : true, description: 'Include additional language plugins')
 option('ppm', type : 'boolean', value : true, description: 'Include the plugin manager')
 option('jit', type : 'boolean', value : true, description: 'Use luajit')
+option('export_all_symbols', type : 'boolean', value : false, description: 'Export all executable symbols for LuaJIT FFI access on Linux')
 option('repl_history', type : 'boolean', value : true, description: 'Enable history and completion support on REPL')
 option('net', type : 'boolean', value : true, description: 'Enable networking support using SDL3_net and mbedtls')
