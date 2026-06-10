@@ -153,35 +153,23 @@ static int f_get_color(lua_State *L) {
   int x = luaL_optinteger(L, 2, 0);
   int y = luaL_optinteger(L, 3, 0);
 
-  SDL_Surface *surface = rencache_get_surface(&window_renderer->cache).surface;
   SDL_Color color = {0, 0, 0, 255};
+  RenSurface rs = rencache_get_surface(&window_renderer->cache);
+  int px = x * rs.scale_x;
+  int py = y * rs.scale_y;
 
-  if (surface && x >= 0 && y >= 0 && x < surface->w && y < surface->h) {
-    Uint8 *pixels = (Uint8*)surface->pixels;
-    int bpp = SDL_BYTESPERPIXEL(surface->format);
+  if (rs.surface && px >= 0 && py >= 0 && px < rs.surface->w && py < rs.surface->h) {
+    SDL_Surface *surface = NULL;
+    const RenBackend *backend = window_renderer->cache.backend;
+    if (backend && backend->capture_window)
+      surface = backend->capture_window(&window_renderer->cache, (RenRect){ px, py, 1, 1 });
 
-    Uint8 *p = pixels + y * surface->pitch + x * bpp;
-    Uint32 pixel = 0;
-
-    switch (bpp) {
-      case 1: pixel = *p; break;
-      case 2: pixel = *(Uint16*)p; break;
-      case 3:
-        #if SDL_BYTEORDER == SDL_BIG_ENDIAN
-        pixel = (p[0] << 16) | (p[1] << 8) | p[2];
-        #else
-        pixel = p[0] | (p[1] << 8) | (p[2] << 16);
-        #endif
-        break;
-      case 4: pixel = *(Uint32*)p; break;
+    if (surface) {
+      SDL_ReadSurfacePixel(surface, 0, 0, &color.r, &color.g, &color.b, &color.a);
+      SDL_DestroySurface(surface);
+    } else {
+      SDL_ReadSurfacePixel(rs.surface, px, py, &color.r, &color.g, &color.b, &color.a);
     }
-
-    SDL_GetRGBA(
-      pixel,
-      SDL_GetPixelFormatDetails(surface->format),
-      SDL_GetSurfacePalette(surface),
-      &color.r, &color.g, &color.b, &color.a
-    );
   }
 
   lua_createtable(L, 4, 0);
