@@ -1,5 +1,25 @@
 # Changes Log
 
+## [3.12.1] - 2026-06-10
+
+### Enhancements
+
+* Prefer low-power SDLGPU devices
+  ([#548](https://github.com/pragtical/pragtical/pull/548))
+
+* Expose renderer information on Windows
+  ([#549](https://github.com/pragtical/pragtical/pull/549))
+
+### Fixes
+
+* Fix window color readback on SDLGPU
+  ([#550](https://github.com/pragtical/pragtical/pull/550))
+
+### Build System
+
+* Limit Linux FFI symbol exports
+  ([#551](https://github.com/pragtical/pragtical/pull/551))
+
 ## [3.12.0] - 2026-06-09
 
 ### New Features
@@ -3534,6 +3554,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.12.1]: https://github.com/pragtical/pragtical/releases/tag/v3.12.1
 [3.12.0]: https://github.com/pragtical/pragtical/releases/tag/v3.12.0
 [3.11.2]: https://github.com/pragtical/pragtical/releases/tag/v3.11.2
 [3.11.1]: https://github.com/pragtical/pragtical/releases/tag/v3.11.1
