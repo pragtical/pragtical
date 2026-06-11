@@ -2263,7 +2263,11 @@ static bool gpu_poly_point_in_triangle(RenPoint *p, RenPoint *a, RenPoint *b, Re
   double c3 = gpu_poly_cross(c, a, p);
   bool has_neg = c1 < 0 || c2 < 0 || c3 < 0;
   bool has_pos = c1 > 0 || c2 > 0 || c3 > 0;
-  return !(has_neg && has_pos);
+  /* Strictly interior only. A point lying on an edge or coincident with a
+     vertex (some cross == 0) must NOT count as contained, otherwise collinear
+     vertices or a duplicated vertex (e.g. a closed circle ring whose last point
+     repeats the first) block every adjacent ear and stall triangulation. */
+  return !(has_neg && has_pos) && c1 != 0.0 && c2 != 0.0 && c3 != 0.0;
 }
 
 static bool gpu_append_flat_poly_point(GpuFrameBridge *frame, int *count, float x, float y) {
@@ -2382,7 +2386,7 @@ static int gpu_triangulate_line_poly(
   int guard = 0;
 
   while (count > 3 && guard++ < npoints * npoints) {
-    bool clipped = false;
+    bool progressed = false;
     for (int i = 0; i < count; i++) {
       int prev_i = (i + count - 1) % count;
       int next_i = (i + 1) % count;
@@ -2390,7 +2394,20 @@ static int gpu_triangulate_line_poly(
       RenPoint *b = &points[indices[i]];
       RenPoint *c = &points[indices[next_i]];
       double cross = gpu_poly_cross(a, b, c);
-      if ((ccw && cross <= 0.0) || (!ccw && cross >= 0.0))
+
+      /* Drop degenerate corners (zero area: collinear with their neighbours, or
+         coincident with one of them as in a closed ring whose last point repeats
+         the first). They contribute no triangle and would otherwise stall ear
+         clipping. */
+      if (cross == 0.0) {
+        SDL_memmove(&indices[i], &indices[i + 1], (count - i - 1) * sizeof(int));
+        count--;
+        progressed = true;
+        break;
+      }
+
+      /* Reflex (concave) corner -- not an ear. */
+      if ((ccw && cross < 0.0) || (!ccw && cross > 0.0))
         continue;
 
       bool contains = false;
@@ -2410,18 +2427,22 @@ static int gpu_triangulate_line_poly(
       vertices[vertex_count++] = (GpuPolyVertex) { c->x * scale_x, c->y * scale_y };
       SDL_memmove(&indices[i], &indices[i + 1], (count - i - 1) * sizeof(int));
       count--;
-      clipped = true;
+      progressed = true;
       break;
     }
-    if (!clipped) {
-      return 0;
-    }
+    /* No ear and no degenerate vertex this pass: stop clipping and finish the
+       remainder as a fan below instead of failing. */
+    if (!progressed)
+      break;
   }
 
-  if (count == 3) {
+  /* Emit the remaining polygon as a triangle fan. Exact for the convex
+     remainder ear clipping leaves (and the normal count == 3 finish); for a
+     stuck concave remnant it is an approximation but never fails. */
+  for (int k = 1; k + 1 < count; k++) {
     RenPoint *a = &points[indices[0]];
-    RenPoint *b = &points[indices[1]];
-    RenPoint *c = &points[indices[2]];
+    RenPoint *b = &points[indices[k]];
+    RenPoint *c = &points[indices[k + 1]];
     vertices[vertex_count++] = (GpuPolyVertex) { a->x * scale_x, a->y * scale_y };
     vertices[vertex_count++] = (GpuPolyVertex) { b->x * scale_x, b->y * scale_y };
     vertices[vertex_count++] = (GpuPolyVertex) { c->x * scale_x, c->y * scale_y };
