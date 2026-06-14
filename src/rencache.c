@@ -259,11 +259,12 @@ RenRect rencache_draw_poly(RenCache *ren_cache, RenPoint *points, int npoints, R
   if (ren_poly_cbox(points, npoints, &rect) != 0) {
     return (RenRect){-1};
   }
-  if (rects_overlap(ren_cache->last_clip_rect, rect)) {
+  RenRect draw_rect = { rect.x - 1, rect.y - 1, rect.width + 2, rect.height + 2 };
+  if (rects_overlap(ren_cache->last_clip_rect, draw_rect)) {
     size_t size = npoints + npoints * sizeof(RenPoint);
     DrawBezierCommand *cmd = push_command(ren_cache, DRAW_POLY, sizeof(DrawBezierCommand) + size);
     if (cmd) {
-      cmd->rect = rect;
+      cmd->rect = draw_rect;
       cmd->color = color;
       cmd->npoints = npoints;
       memcpy(cmd->points, points, npoints * sizeof(RenPoint));

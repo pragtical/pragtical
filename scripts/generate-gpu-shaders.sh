@@ -17,7 +17,9 @@ fi
 # ("alloc must have hung off uses") on essentially every real shader. Point
 # DXC_LIB_DIR at the lib/ directory of Microsoft's official release dxc
 # (https://github.com/microsoft/DirectXShaderCompiler/releases) to use a working
-# release build for the DXIL pass.
+# release build for the DXIL pass. On Linux, you may need to download the
+# official Microsoft binaries instead of using distro packages to avoid this
+# assertion.
 if [[ -n "${DXC_LIB_DIR:-}" ]]; then
   export LD_LIBRARY_PATH="$DXC_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 fi
