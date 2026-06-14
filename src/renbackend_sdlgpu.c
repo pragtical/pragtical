@@ -2592,12 +2592,16 @@ static bool gpu_flush_queued_polys(GpuWindowData *data, SDL_GPUCommandBuffer *cm
 static bool gpu_draw_poly_native(
   RenCache *rc, RenSurface *surface, RenPoint *points, unsigned short npoints, RenColor color
 ) {
-  if (!rc->window_target || !surface->surface || npoints < 3)
+  if (!rc->window_target || !surface->surface)
     return false;
+  if (npoints < 3)
+    return true;
 
   RenRect bounds;
-  if (ren_poly_cbox(points, npoints, &bounds) != 0 || bounds.width <= 0 || bounds.height <= 0)
+  if (ren_poly_cbox(points, npoints, &bounds) != 0)
     return false;
+  if (bounds.width <= 0 || bounds.height <= 0)
+    return true;
 
   SDL_Rect dst = gpu_pixel_rect_from_ren_rect(surface->surface, bounds);
   if (dst.w <= 0 || dst.h <= 0)
@@ -2629,7 +2633,7 @@ static bool gpu_draw_poly_native(
     surface->scale_y > 0 ? surface->scale_y : 1.0f
   );
   if (vertex_count == 0)
-    return false;
+    return true;
 
   if (!gpu_flush_window_batches(
         data,
@@ -5665,12 +5669,16 @@ static bool gpu_draw_canvas_text_native(
 static bool gpu_draw_canvas_poly_native(
   RenCache *rc, RenSurface *surface, RenPoint *points, unsigned short npoints, RenColor color
 ) {
-  if (rc->window_target || !surface || !surface->surface || npoints < 3)
+  if (rc->window_target || !surface || !surface->surface)
     return false;
+  if (npoints < 3)
+    return true;
 
   RenRect bounds;
-  if (ren_poly_cbox(points, npoints, &bounds) != 0 || bounds.width <= 0 || bounds.height <= 0)
+  if (ren_poly_cbox(points, npoints, &bounds) != 0)
     return false;
+  if (bounds.width <= 0 || bounds.height <= 0)
+    return true;
 
   GpuCanvasData *data = rc->backend_data;
   if (!data)
@@ -5691,7 +5699,7 @@ static bool gpu_draw_canvas_poly_native(
     surface->scale_y > 0 ? surface->scale_y : 1.0f
   );
   if (vertex_count == 0)
-    return false;
+    return true;
 
   bool owned = false;
   SDL_GPUCommandBuffer *cmd = gpu_canvas_command_buffer(data, &owned);
