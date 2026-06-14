@@ -36,6 +36,21 @@ local function update_time(doc)
   end
 end
 
+local function doc_changed(doc)
+  if not doc.abs_filename or not times[doc] then return false end
+  local info = system.get_file_info(doc.abs_filename)
+  return
+    info
+    and
+    info.type == "file"
+    and
+    (
+      times[doc].modified ~= info.modified
+      or
+      times[doc].size ~= info.size
+    )
+end
+
 local function reload_doc(doc)
   doc:reload()
   update_time(doc)
@@ -72,6 +87,20 @@ local function autoreload_doc(doc)
   end
 end
 
+local function process_changed_doc(doc)
+  if
+    core.active_view
+    and
+    core.active_view.doc
+    and
+    core.active_view.doc == doc
+  then
+    autoreload_doc(doc)
+  elseif not doc.deferred_reload then
+    changed[doc] = true
+  end
+end
+
 local core_set_active_view = core.set_active_view
 function core.set_active_view(view)
   core_set_active_view(view)
@@ -90,32 +119,18 @@ core.add_thread(function()
   while true do
     watch:check(function(file)
       for _, doc in ipairs(core.docs) do
-        if doc.abs_filename == file then
-          local info = system.get_file_info(doc.abs_filename or "")
-          if
-            info and info.type == "file" and times[doc]
-            and
-            (
-              times[doc].modified ~= info.modified
-              or
-              times[doc].size ~= info.size
-            )
-          then
-            if
-              core.active_view
-              and
-              core.active_view.doc
-              and
-              core.active_view.doc == doc
-            then
-              autoreload_doc(doc)
-            elseif not doc.deferred_reload then
-              changed[doc] = true
-            end
-          end
+        if doc.abs_filename == file and doc_changed(doc) then
+          process_changed_doc(doc)
         end
       end
     end)
+    for _, doc in ipairs(core.docs) do
+      if doc_changed(doc) then
+        watch:unwatch(doc.abs_filename)
+        watch:watch(doc.abs_filename)
+        process_changed_doc(doc)
+      end
+    end
     coroutine.yield(1)
   end
 end)

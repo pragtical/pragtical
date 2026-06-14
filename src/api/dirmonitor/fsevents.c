@@ -1,5 +1,9 @@
 #include <SDL3/SDL.h>
 #include <CoreServices/CoreServices.h>
+#include <dispatch/dispatch.h>
+#include <stdbool.h>
+#include <string.h>
+#include <unistd.h>
 
 #include "dirmonitor.h"
 
@@ -8,21 +12,19 @@ struct dirmonitor_internal {
   char** changes;
   size_t count;
   FSEventStreamRef stream;
+  dispatch_queue_t queue;
+  CFStringRef path;
+  CFArrayRef paths;
   int fds[2];
 };
 
-CFRunLoopRef main_run_loop;
-
 
 static struct dirmonitor_internal* init_dirmonitor(void) {
-  static bool mainloop_registered = false;
-  if (!mainloop_registered) {
-    main_run_loop = CFRunLoopGetCurrent();
-    mainloop_registered = true;
-  }
-
   struct dirmonitor_internal* monitor = SDL_calloc(1, sizeof(struct dirmonitor_internal));
   monitor->stream = NULL;
+  monitor->queue = NULL;
+  monitor->path = NULL;
+  monitor->paths = NULL;
   monitor->changes = NULL;
   monitor->count = 0;
   monitor->fds[0] = -1;
@@ -50,12 +52,27 @@ static void clear_monitor_changes(struct dirmonitor_internal* monitor) {
 static void stop_monitor_stream(struct dirmonitor_internal* monitor) {
   if (monitor->stream) {
     FSEventStreamStop(monitor->stream);
-    FSEventStreamUnscheduleFromRunLoop(
-      monitor->stream, main_run_loop, kCFRunLoopDefaultMode
-    );
+    if (monitor->queue) {
+      FSEventStreamSetDispatchQueue(monitor->stream, NULL);
+    }
     FSEventStreamInvalidate(monitor->stream);
     FSEventStreamRelease(monitor->stream);
     monitor->stream = NULL;
+  }
+
+  if (monitor->queue) {
+    dispatch_release(monitor->queue);
+    monitor->queue = NULL;
+  }
+
+  if (monitor->paths) {
+    CFRelease(monitor->paths);
+    monitor->paths = NULL;
+  }
+
+  if (monitor->path) {
+    CFRelease(monitor->path);
+    monitor->path = NULL;
   }
 
   if (monitor->fds[1] != -1) {
@@ -183,15 +200,28 @@ static int add_dirmonitor(struct dirmonitor_internal* monitor, const char* path)
     .version = 0
   };
 
-  CFStringRef paths[] = {
-    CFStringCreateWithCString(NULL, path, kCFStringEncodingUTF8)
-  };
+  monitor->path = CFStringCreateWithCString(NULL, path, kCFStringEncodingUTF8);
+  if (!monitor->path) {
+    stop_monitor_stream(monitor);
+    return -1;
+  }
+
+  monitor->paths = CFArrayCreate(
+    NULL,
+    (const void **)&monitor->path,
+    1,
+    &kCFTypeArrayCallBacks
+  );
+  if (!monitor->paths) {
+    stop_monitor_stream(monitor);
+    return -1;
+  }
 
   monitor->stream = FSEventStreamCreate(
     NULL,
     stream_callback,
     &context,
-    CFArrayCreate(NULL, (const void **)&paths, 1, NULL),
+    monitor->paths,
     kFSEventStreamEventIdSinceNow,
     0,
     kFSEventStreamCreateFlagNone
@@ -199,9 +229,17 @@ static int add_dirmonitor(struct dirmonitor_internal* monitor, const char* path)
       | kFSEventStreamCreateFlagFileEvents
   );
 
-  FSEventStreamScheduleWithRunLoop(
-    monitor->stream, main_run_loop, kCFRunLoopDefaultMode
-  );
+  if (!monitor->stream) {
+    stop_monitor_stream(monitor);
+    return -1;
+  }
+
+  monitor->queue = dispatch_queue_create("pragtical.dirmonitor.fsevents", NULL);
+  if (!monitor->queue) {
+    stop_monitor_stream(monitor);
+    return -1;
+  }
+  FSEventStreamSetDispatchQueue(monitor->stream, monitor->queue);
 
   if (!FSEventStreamStart(monitor->stream)) {
     stop_monitor_stream(monitor);

@@ -39,14 +39,20 @@ static int get_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buf
 
 
 static int translate_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buffer, int length, int (*change_callback)(int, const char*, void*), void* data) {
-  for (struct inotify_event* info = (struct inotify_event*)buffer; (char*)info < buffer + length; info = (struct inotify_event*)((char*)info + sizeof(struct inotify_event)))
+  for (struct inotify_event* info = (struct inotify_event*)buffer; (char*)info < buffer + length; info = (struct inotify_event*)((char*)info + sizeof(struct inotify_event) + info->len))
     change_callback(info->wd, NULL, data);
   return 0;
 }
 
 
 static int add_dirmonitor(struct dirmonitor_internal* monitor, const char* path) {
-  return inotify_add_watch(monitor->fd, path, IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MODIFY | IN_MOVED_TO);
+  return inotify_add_watch(
+    monitor->fd,
+    path,
+    IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO
+      | IN_MODIFY | IN_CLOSE_WRITE | IN_ATTRIB
+      | IN_DELETE_SELF | IN_MOVE_SELF | IN_IGNORED
+  );
 }
 
 
