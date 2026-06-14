@@ -1,6 +1,9 @@
 #version 450
 
 layout(location = 0) in vec2 in_position;
+layout(location = 1) in float in_coverage;
+
+layout(location = 0) out float out_coverage;
 
 layout(set = 1, binding = 0) uniform VertexUniforms {
   vec4 target;
@@ -12,4 +15,5 @@ void main() {
     (in_position.y / u.target.y) * -2.0 + 1.0
   );
   gl_Position = vec4(ndc, 0.0, 1.0);
+  out_coverage = in_coverage;
 }
