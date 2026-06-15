@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 #include "shaders/gpu_canvas.frag.dxbc.h"
@@ -238,6 +239,7 @@ typedef struct {
   int pending_pixels_texture_h;
   Uint64 stats_frames;
   Uint64 stats_native_rects;
+  Uint64 stats_native_rect_instances;
   Uint64 stats_native_rect_batches;
   Uint64 stats_native_canvases;
   Uint64 stats_native_canvas_texture_draws;
@@ -562,9 +564,10 @@ static void gpu_print_stats(GpuWindowData *data) {
 
   fprintf(
     stderr,
-    "sdlgpu stats: frames=%llu native_rects=%llu native_rect_batches=%llu native_canvases=%llu native_canvas_texture_draws=%llu native_canvas_missing_state=%llu native_canvas_clip_rejects=%llu native_pixels=%llu native_polys=%llu\n",
+    "sdlgpu stats: frames=%llu native_rects=%llu native_rect_instances=%llu native_rect_batches=%llu native_canvases=%llu native_canvas_texture_draws=%llu native_canvas_missing_state=%llu native_canvas_clip_rejects=%llu native_pixels=%llu native_polys=%llu\n",
     (unsigned long long) data->stats_frames,
     (unsigned long long) data->stats_native_rects,
+    (unsigned long long) data->stats_native_rect_instances,
     (unsigned long long) data->stats_native_rect_batches,
     (unsigned long long) data->stats_native_canvases,
     (unsigned long long) data->stats_native_canvas_texture_draws,
@@ -3638,15 +3641,6 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     return false;
   if (!gpu_ensure_rect_pipeline(data->device))
     return false;
-  bool needs_replace_pipeline = false;
-  for (int i = 0; i < data->pending_native_rect_count; i++) {
-    if (data->pending_native_rects[i].replace) {
-      needs_replace_pipeline = true;
-      break;
-    }
-  }
-  if (needs_replace_pipeline && !gpu_ensure_rect_replace_pipeline(data->device))
-    return false;
 
   int rect_count = 0;
   for (int i = 0; i < data->pending_native_rect_count; i++) {
@@ -3658,6 +3652,15 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
     data->pending_native_rect_count = 0;
     return true;
   }
+  bool needs_replace_pipeline = false;
+  for (int i = 0; i < data->pending_native_rect_count; i++) {
+    if (data->pending_native_rects[i].replace) {
+      needs_replace_pipeline = true;
+      break;
+    }
+  }
+  if (needs_replace_pipeline && !gpu_ensure_rect_replace_pipeline(data->device))
+    return false;
 
   GpuBatchRun *runs = gpu_ensure_batch_runs(&data->frame, rect_count);
 
@@ -3710,6 +3713,7 @@ static bool gpu_flush_window_native_rects(GpuWindowData *data, SDL_GPUCommandBuf
 
   SDL_EndGPURenderPass(pass);
   data->pending_native_rect_count = 0;
+  data->stats_native_rect_instances += emitted_instances;
   data->stats_native_rect_batches++;
   return true;
 }
@@ -5886,13 +5890,25 @@ static bool gpu_full_frame_regions_enabled(void) {
   return gpu_env_flag("PRAGTICAL_SDLGPU_FULL_FRAME", false);
 }
 
+static size_t gpu_full_frame_command_threshold(void) {
+  const char *value = SDL_getenv("PRAGTICAL_SDLGPU_FULL_FRAME_COMMAND_BYTES");
+  if (!value || !*value)
+    return 256 * 1024;
+  char *end = NULL;
+  unsigned long long threshold = SDL_strtoull(value, &end, 10);
+  if (end == value)
+    return 256 * 1024;
+  return threshold > (unsigned long long) SIZE_MAX ? SIZE_MAX : (size_t) threshold;
+}
+
 static bool gpu_use_full_frame_regions(RenCache *rc) {
-  /* Default to dirty-region native replay so static frames only redraw changed
-     cells into the retained frame texture, matching the surface backend's
-     frame-to-frame coherence. PRAGTICAL_SDLGPU_FULL_FRAME=1 restores the old
-     whole-frame re-emit path for A/B comparison. */
-  return rc && rc->window_target && gpu_direct_replay_enabled()
-      && gpu_full_frame_regions_enabled();
+  if (!rc || !rc->window_target || !gpu_direct_replay_enabled())
+    return false;
+  if (gpu_full_frame_regions_enabled())
+    return true;
+
+  size_t threshold = gpu_full_frame_command_threshold();
+  return threshold > 0 && rc->command_buf_idx >= threshold;
 }
 
 static bool gpu_can_native_text(
