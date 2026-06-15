@@ -20,6 +20,12 @@ local Object = require "core.object"
 ---@field single_watch_count number Number of files that are being watched.
 local DirWatch = Object:extend()
 
+local function is_same_or_child(path, parent)
+  if path == parent then return true end
+  local prefix = parent:sub(-1) == PATHSEP and parent or parent .. PATHSEP
+  return path:find(prefix, 1, true) == 1
+end
+
 
 ---Constructor.
 function DirWatch:new()
@@ -68,10 +74,10 @@ function DirWatch:watch(path, watch)
   if not self.watched[path] and not self.scanned[path] then
     if self.monitor:mode() == "single" then
       if info.type ~= "dir" then return self:scan(path) end
-      if not self.single_watch_top or path:find(self.single_watch_top, 1, true) ~= 1 then
+      if not self.single_watch_top or not is_same_or_child(path, self.single_watch_top) then
         -- Get the highest level of directory that is common to this directory, and the original.
         local target = path
-        while self.single_watch_top and self.single_watch_top:find(target, 1, true) ~= 1 do
+        while self.single_watch_top and not is_same_or_child(self.single_watch_top, target) do
           target = common.dirname(target)
         end
         if target ~= self.single_watch_top then
@@ -103,13 +109,15 @@ end
 function DirWatch:unwatch(path)
   if self.watched[path] then
     if self.monitor:mode() == "multiple" then
-      self.monitor:unwatch(self.watched[path])
-      self.reverse_watched[path] = nil
+      local watch_id = self.watched[path]
+      self.monitor:unwatch(watch_id)
+      self.reverse_watched[watch_id] = nil
     else
       self.single_watch_count = self.single_watch_count - 1
       if self.single_watch_count == 0 then
+        local watch_top = self.single_watch_top
         self.single_watch_top = nil
-        self.monitor:unwatch(path)
+        self.monitor:unwatch(watch_top)
       end
     end
     self.watched[path] = nil

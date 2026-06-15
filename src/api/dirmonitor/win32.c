@@ -12,7 +12,15 @@ static int get_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buf
   HANDLE handle = monitor->handle;
   if (handle && handle != INVALID_HANDLE_VALUE) {
     DWORD bytes_transferred;
-    if (ReadDirectoryChangesW(handle, buffer, buffer_size, TRUE,  FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME, &bytes_transferred, NULL, NULL) == 0)
+    DWORD filter =
+      FILE_NOTIFY_CHANGE_FILE_NAME
+      | FILE_NOTIFY_CHANGE_DIR_NAME
+      | FILE_NOTIFY_CHANGE_ATTRIBUTES
+      | FILE_NOTIFY_CHANGE_SIZE
+      | FILE_NOTIFY_CHANGE_LAST_WRITE
+      | FILE_NOTIFY_CHANGE_CREATION
+      | FILE_NOTIFY_CHANGE_SECURITY;
+    if (ReadDirectoryChangesW(handle, buffer, buffer_size, TRUE, filter, &bytes_transferred, NULL, NULL) == 0)
       return 0;
     return bytes_transferred;
   }

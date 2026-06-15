@@ -58,14 +58,25 @@ static int f_check_dir_callback(int watch_id, const char* path, void* L) {
   // using absolute indices from f_dirmonitor_check (2: callback, 3: error_callback, 4: watch_id notified table)
 
   // Check if we already notified about this watch
-  lua_rawgeti(L, 4, watch_id);
+  if (path) {
+    lua_pushlstring(L, path, watch_id);
+    lua_rawget(L, 4);
+  } else {
+    lua_rawgeti(L, 4, watch_id);
+  }
   bool skip = !lua_isnoneornil(L, -1);
   lua_pop(L, 1);
   if (skip) return 0;
 
   // Set watch as notified
   lua_pushboolean(L, true);
-  lua_rawseti(L, 4, watch_id);
+  if (path) {
+    lua_pushlstring(L, path, watch_id);
+    lua_insert(L, -2);
+    lua_rawset(L, 4);
+  } else {
+    lua_rawseti(L, 4, watch_id);
+  }
 
   // Prepare callback call
   lua_pushvalue(L, 2);
@@ -89,14 +100,17 @@ static int dirmonitor_check_thread(void* data) {
     if (monitor->length == 0) {
       int result = monitor->backend->get_changes(monitor->internal, monitor->buffer, sizeof(monitor->buffer));
       SDL_LockMutex(monitor->mutex);
-      if (monitor->length == 0)
+      if (monitor->length == 0) {
         monitor->length = result;
+        if (result != 0) {
+          CustomEvent event;
+          SDL_zero(event);
+          push_custom_event("dirmonitor", &event);
+        }
+      }
       SDL_UnlockMutex(monitor->mutex);
     }
     SDL_Delay(1);
-    CustomEvent event;
-    SDL_zero(event);
-    push_custom_event("dirmonitor", &event);
   }
   return 0;
 }

@@ -22,14 +22,18 @@ static struct dirmonitor_internal* init_dirmonitor(void) {
 
 
 static void deinit_dirmonitor(struct dirmonitor_internal* monitor) {
-  close(monitor->fd);
+  if (monitor->fd >= 0)
+    close(monitor->fd);
 }
 
 
 static int get_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buffer, int buffer_size) {
   struct timespec ts = { 0, 100 * 1000000 }; // 100 ms
 
-  int nev = kevent(monitor->fd, NULL, 0, (struct kevent*)buffer, buffer_size / sizeof(kevent), &ts);
+  if (monitor->fd < 0)
+    return -1;
+
+  int nev = kevent(monitor->fd, NULL, 0, (struct kevent*)buffer, buffer_size / sizeof(struct kevent), &ts);
   if (nev == -1)
     return -1;
   if (nev <= 0)
@@ -39,28 +43,46 @@ static int get_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buf
 
 
 static int translate_changes_dirmonitor(struct dirmonitor_internal* monitor, char* buffer, int buffer_size, int (*change_callback)(int, const char*, void*), void* data) {
-  for (struct kevent* info = (struct kevent*)buffer; (char*)info < buffer + buffer_size; info = (struct kevent*)(((char*)info) + sizeof(kevent)))
+  for (struct kevent* info = (struct kevent*)buffer; (char*)info < buffer + buffer_size; info = (struct kevent*)(((char*)info) + sizeof(struct kevent)))
     change_callback(info->ident, NULL, data);
   return 0;
 }
 
 
 static int add_dirmonitor(struct dirmonitor_internal* monitor, const char* path) {
-  int fd = open(path, O_RDONLY);
+  if (monitor->fd < 0)
+    return -1;
+
+  int flags = O_RDONLY;
+#ifdef O_EVTONLY
+  flags = O_EVTONLY;
+#endif
+#ifdef O_CLOEXEC
+  flags |= O_CLOEXEC;
+#endif
+
+  int fd = open(path, flags);
+  if (fd < 0)
+    return -1;
+
   struct kevent change;
 
   // a timeout of zero should make kevent return immediately
   struct timespec ts = { 0, 0 }; // 0 s
 
   EV_SET(&change, fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, NOTE_DELETE | NOTE_EXTEND | NOTE_WRITE | NOTE_ATTRIB | NOTE_LINK | NOTE_RENAME, 0, (void*)path);
-  kevent(monitor->fd, &change, 1, NULL, 0, &ts);
+  if (kevent(monitor->fd, &change, 1, NULL, 0, &ts) == -1) {
+    close(fd);
+    return -1;
+  }
 
   return fd;
 }
 
 
 static void remove_dirmonitor(struct dirmonitor_internal* monitor, int fd) {
-  close(fd);
+  if (fd >= 0)
+    close(fd);
 }
 
 
