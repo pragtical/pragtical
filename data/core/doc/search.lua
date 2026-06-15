@@ -36,7 +36,7 @@ local function init_args(doc, line, col, text, opt)
   line, col = doc:sanitize_position(line, col)
 
   if opt.no_case and not opt.pattern and not opt.regex then
-    text = text:lower()
+    text = text:ulower()
   end
 
   return doc, line, col, text, opt
@@ -98,7 +98,7 @@ function search.find(doc, line, col, text, opt)
     local line_text = doc.lines[line]
     local line_len = #line_text
     if opt.no_case and not opt.regex and not opt.pattern then
-      line_text = line_text:lower()
+      line_text = line_text:ulower()
     end
     local s, e = col, col
     local matches
