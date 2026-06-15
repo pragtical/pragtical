@@ -1,5 +1,32 @@
 # Changes Log
 
+## [3.12.2] - 2026-06-15
+
+### Enhancements
+
+* Make SDLGPU polygon triangulation degenerate-tolerant
+  ([#552](https://github.com/pragtical/pragtical/pull/552))
+
+* Speed up dense SDLGPU rect replay
+  ([#557](https://github.com/pragtical/pragtical/pull/557))
+
+* Allow system.setenv to unset values
+  ([#560](https://github.com/pragtical/pragtical/pull/560))
+
+### Fixes
+
+* Fix degenerate SDLGPU polygons
+  ([#555](https://github.com/pragtical/pragtical/pull/555))
+
+* Fix Unicode case-insensitive search
+  ([#558](https://github.com/pragtical/pragtical/pull/558))
+
+* Fix directory monitor reliability
+  ([#554](https://github.com/pragtical/pragtical/pull/554))
+
+* Fix LuaJIT 32-bit x86 startup crash
+  ([#559](https://github.com/pragtical/pragtical/pull/559))
+
 ## [3.12.1] - 2026-06-10
 
 ### Enhancements
@@ -3554,6 +3581,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.12.2]: https://github.com/pragtical/pragtical/releases/tag/v3.12.2
 [3.12.1]: https://github.com/pragtical/pragtical/releases/tag/v3.12.1
 [3.12.0]: https://github.com/pragtical/pragtical/releases/tag/v3.12.0
 [3.11.2]: https://github.com/pragtical/pragtical/releases/tag/v3.11.2
