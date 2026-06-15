@@ -415,10 +415,11 @@ function system.path_compare(path1, type1, path2, type2) end
 
 ---
 ---Sets an environment variable.
----The converse of os.getenv.
+---The converse of os.getenv. If no value is provided, or if value is nil,
+---the environment variable is unset.
 ---
 ---@param key string
----@param val string
+---@param val? string
 ---@return boolean ok True if call succeeded
 function system.setenv(key, val) end
 
