@@ -103,6 +103,12 @@ test.describe("system", function()
     local key = "PRAGTICAL_SYSTEM_TEST_ENV_" .. pid
     test.ok(system.setenv(key, "ok"))
     test.equal(os.getenv(key), "ok")
+    test.ok(system.setenv(key))
+    test.equal(os.getenv(key), nil)
+    test.ok(system.setenv(key, "ok"))
+    test.equal(os.getenv(key), "ok")
+    test.ok(system.setenv(key, nil))
+    test.equal(os.getenv(key), nil)
 
     local score = system.fuzzy_match("alphabet", "alphabet")
     test.type(score, "number")

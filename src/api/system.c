@@ -1282,29 +1282,38 @@ static int f_text_input(lua_State* L) {
 
 static int f_setenv(lua_State* L) {
   const char *key = luaL_checkstring(L, 1);
-  const char *val = luaL_checkstring(L, 2);
+  const char *val = luaL_optstring(L, 2, NULL);
 
 #ifdef _WIN32
   /* On Windows Lua's os.getenv() reads the CRT environment, which SDL's
    * environment helpers do not reliably keep in sync. Update both the CRT and
    * the Win32 process environment so Lua and subprocess creation see the same
    * value. */
-  bool ok = _putenv_s(key, val) == 0;
+  bool ok = _putenv_s(key, val ? val : "") == 0;
   LPWSTR wkey = utfconv_utf8towc(key);
-  LPWSTR wval = utfconv_utf8towc(val);
-  if (!wkey || !wval) {
+  LPWSTR wval = val ? utfconv_utf8towc(val) : NULL;
+  if (!wkey || (val && !wval)) {
     SDL_free(wkey);
     SDL_free(wval);
     lua_pushboolean(L, false);
     return 1;
   }
 
-  ok = SetEnvironmentVariableW(wkey, wval) && ok;
+  if (val) {
+    ok = SetEnvironmentVariableW(wkey, wval) && ok;
+  } else {
+    ok = (SetEnvironmentVariableW(wkey, NULL)
+      || GetLastError() == ERROR_ENVVAR_NOT_FOUND) && ok;
+  }
   SDL_free(wkey);
   SDL_free(wval);
   lua_pushboolean(L, ok);
 #else
-  lua_pushboolean(L, SDL_setenv_unsafe(key, val, 1) == 0);
+  if (val) {
+    lua_pushboolean(L, SDL_setenv_unsafe(key, val, 1) == 0);
+  } else {
+    lua_pushboolean(L, SDL_unsetenv_unsafe(key) == 0);
+  }
 #endif
   return 1;
 }
