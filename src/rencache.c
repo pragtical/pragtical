@@ -163,7 +163,6 @@ static void* push_command(RenCache *ren_cache, enum CommandType type, int size) 
   }
   Command *cmd = (Command*) (ren_cache->command_buf + ren_cache->command_buf_idx);
   ren_cache->command_buf_idx = n;
-  memset(cmd, 0, size);
   cmd->type = type;
   cmd->size = size;
   return cmd->command;
