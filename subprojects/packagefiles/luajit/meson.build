@@ -61,7 +61,9 @@ if system == 'linux' or system == 'darwin' or system == 'windows'
             native: false
         )
         ljvm_mode = 'elfasm'
-        ljvm_bout = 'lj_vm.s'
+        # Capital .S so gcc preprocesses the "#if __PIC__" guards in the VM asm.
+        # A lowercase .s skips the preprocessor and miscompiles on 32-bit x86.
+        ljvm_bout = 'lj_vm.S'
     elif host_machine.system() == 'darwin'
         add_project_arguments(
             '-DLUAJIT_OS=LUAJIT_OS_OSX',
@@ -74,7 +76,7 @@ if system == 'linux' or system == 'darwin' or system == 'windows'
             native: false
         )
         ljvm_mode = 'machasm'
-        ljvm_bout = 'lj_vm.s'
+        ljvm_bout = 'lj_vm.S'  # capital .S to preprocess the VM asm (see linux note)
     elif host_machine.system() == 'windows'
         add_project_arguments(
             '-DLUAJIT_OS=LUAJIT_OS_WINDOWS',
