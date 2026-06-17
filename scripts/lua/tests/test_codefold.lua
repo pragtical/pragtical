@@ -7,6 +7,7 @@ local core = require "core"
 local command = require "core.command"
 local config = require "core.config"
 local common = require "core.common"
+local keymap = require "core.keymap"
 local style = require "core.style"
 local syntax = require "core.syntax"
 
@@ -849,6 +850,76 @@ test.describe("codefold - virtual line mapping", function()
     SCALE = previous_scale
     view:on_scale_change(SCALE, previous_scale * 2)
     config.plugins.codefold.enabled = previous_enabled
+  end)
+
+  test.test("toggle command enables and disables code folding", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_redraw = core.redraw
+    config.plugins.codefold.enabled = true
+    core.redraw = false
+
+    test.ok(command.perform("code-folding:toggle"))
+    test.equal(config.plugins.codefold.enabled, false)
+    test.equal(core.redraw, true)
+
+    core.redraw = false
+    test.ok(command.perform("code-folding:toggle"))
+    test.equal(config.plugins.codefold.enabled, true)
+    test.equal(core.redraw, true)
+
+    config.plugins.codefold.enabled = previous_enabled
+    core.redraw = previous_redraw
+  end)
+
+  test.test("toggle-fold command toggles the active fold region", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_active_view = core.active_view
+    config.plugins.codefold.enabled = true
+
+    local view = make_docview({ "a\n", "  b\n", "c\n" })
+    view.cf_regions = { { indent = 0, start = 1, stop = 2 } }
+    view.cf_folded_regions = {}
+    view.cf_folded_region_set = {}
+    view.cf_fold_map = { 1, 2, 3 }
+    view.cf_unfold_map = { 1, 2, 3 }
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    view.doc:set_selection(1, 1)
+    core.active_view = view
+
+    test.ok(command.perform("code-folding:toggle-fold"))
+    test.ok(view.cf_folded_region_set[1])
+
+    test.ok(command.perform("code-folding:toggle-fold"))
+    test.is_nil(view.cf_folded_region_set[1])
+
+    config.plugins.codefold.enabled = previous_enabled
+    core.active_view = previous_active_view
+  end)
+
+  test.test("fold keybindings use the fold toggle command", function()
+    require "plugins.codefold"
+
+    local function matches_binding(stroke, key)
+      return stroke:find(key, 1, true)
+        and stroke:find("alt", 1, true)
+        and stroke:find("shift", 1, true)
+    end
+
+    local bindings = keymap.reverse_map["code-folding:toggle-fold"] or {}
+    local left = false
+    local right = false
+    for _, stroke in ipairs(bindings) do
+      if matches_binding(stroke, "left") then left = true end
+      if matches_binding(stroke, "right") then right = true end
+    end
+
+    test.equal(left, true)
+    test.equal(right, true)
   end)
 
   test.test("fold gutter marker visibility and color reflect state", function()

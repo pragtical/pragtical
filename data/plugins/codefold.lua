@@ -1271,6 +1271,11 @@ end
 
 command.add(nil, {
   ["code-folding:toggle"] = function()
+    config.plugins.codefold.enabled = not config.plugins.codefold.enabled
+    core.redraw = true
+  end,
+
+  ["code-folding:toggle-fold"] = function()
     local view = core.active_view
     if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
       return
@@ -1311,8 +1316,8 @@ command.add(nil, {
 ---------------------------------------------------------------------
 
 keymap.add {
-  ["alt+shift+left"] = "code-folding:toggle",
-  ["alt+shift+right"] = "code-folding:toggle",
+  ["alt+shift+left"] = "code-folding:toggle-fold",
+  ["alt+shift+right"] = "code-folding:toggle-fold",
   ["alt+shift+up"] = "code-folding:fold-all",
   ["alt+shift+down"] = "code-folding:unfold-all"
 }
