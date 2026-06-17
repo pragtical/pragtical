@@ -310,6 +310,12 @@ local function files_search_thread(tid, options)
   local file_size_limit = options.file_size_limit or (10 * 1e6)
   local includes = options.includes
   local excludes = options.excludes
+  local roots = options.roots or {
+    {
+      path = options.path,
+      name = commons.basename(options.path or "")
+    }
+  }
 
   ---Check if the given file path matches against the given list of patterns.
   ---@param file_path string
@@ -395,8 +401,10 @@ local function files_search_thread(tid, options)
     end
 
     local stop = false
-    local filename = filename_channel:wait()
-    while filename ~= "{{stop}}" do
+    local file_entry = filename_channel:wait()
+    while file_entry ~= "{{stop}}" do
+      local filename = type(file_entry) == "table" and file_entry.path or file_entry
+      local display_path = type(file_entry) == "table" and file_entry.display_path or nil
       local results = {}
       local found = false
       local fp = io.open(filename)
@@ -448,7 +456,8 @@ local function files_search_thread(tid, options)
         fp:close()
         table.insert(results, {
           filename,
-          lines
+          lines,
+          display_path
         })
       end
       stop = stop_channel:first() == "stop"
@@ -459,9 +468,9 @@ local function files_search_thread(tid, options)
         results_channel:push(true)
       end
       filename_channel:pop()
-      filename = filename_channel:wait()
-      while filename == nil do
-        filename = filename_channel:first()
+      file_entry = filename_channel:wait()
+      while file_entry == nil do
+        file_entry = filename_channel:first()
       end
     end
     if stop then
@@ -489,9 +498,7 @@ local function files_search_thread(tid, options)
   -- channel to monitor if the finding of should should be stopped.
   local channel_stop = thread.get_channel("projectsearch_stop"..tid)
 
-  local root = path
   local count = 0
-  local directories = {""}
   ---@type thread.Thread[]
   local workers_list = {}
   ---@type thread.Channel[]
@@ -523,55 +530,70 @@ local function files_search_thread(tid, options)
 
   local stop = false
   local current_worker = 1
-  while #directories > 0 do
-    for didx, directory in ipairs(directories) do
-      local dir_path = ""
+  for _, root_data in ipairs(roots) do
+    local root = root_data.path
+    local directories = {""}
+    while #directories > 0 do
+      for didx, directory in ipairs(directories) do
+        local dir_path = ""
 
-      if directory ~= "" then
-        dir_path = root .. pathsep .. directory
-        directory = directory .. pathsep
-      else
-        dir_path = root
-      end
+        if directory ~= "" then
+          dir_path = root .. pathsep .. directory
+          directory = directory .. pathsep
+        else
+          dir_path = root
+        end
 
-      local files = system.list_dir(dir_path)
+        local files = system.list_dir(dir_path)
 
-      if files then
-        for _, file in ipairs(files) do
-          local info = system.get_file_info(
-            dir_path .. pathsep .. file
-          )
-          count = count + 1
-          if
-            info and not commons.match_ignore_rule(
-              directory..file, info, ignore_files
-            ) and (
-              not includes or path_match(directory..file, includes, info)
-            ) and (
-              not excludes or not path_match(directory..file, excludes, info, true)
+        if files then
+          for _, file in ipairs(files) do
+            local info = system.get_file_info(
+              dir_path .. pathsep .. file
             )
-          then
-            if info.type == "dir" then
-              table.insert(directories, directory .. file)
-            elseif info.size <= file_size_limit then
-              filename_channels[current_worker]:push(dir_path .. pathsep .. file)
-              current_worker = current_worker + 1
-              if current_worker > workers then current_worker = 1 end
+            count = count + 1
+            if
+              info and not commons.match_ignore_rule(
+                directory..file, info, ignore_files
+              ) and (
+                not includes or path_match(directory..file, includes, info)
+              ) and (
+                not excludes or not path_match(directory..file, excludes, info, true)
+              )
+            then
+              if info.type == "dir" then
+                table.insert(directories, directory .. file)
+              elseif info.size <= file_size_limit then
+                local file_path = dir_path .. pathsep .. file
+                local display_path
+                if root_data.display_prefix then
+                  display_path = root_data.display_prefix
+                    .. pathsep
+                    .. commons.relative_path(root, file_path)
+                end
+                filename_channels[current_worker]:push({
+                  path = file_path,
+                  display_path = display_path
+                })
+                current_worker = current_worker + 1
+                if current_worker > workers then current_worker = 1 end
+              end
             end
           end
         end
+        table.remove(directories, didx)
+        break
       end
-      table.remove(directories, didx)
-      break
-    end
 
-    stop = channel_stop:first() == "stop"
-    if not stop then
-      channel_status:clear()
-      channel_status:push(count)
-    else
-      break
+      stop = channel_stop:first() == "stop"
+      if not stop then
+        channel_status:clear()
+        channel_status:push(count)
+      else
+        break
+      end
     end
+    if stop then break end
   end
 
   if not stop then
@@ -611,7 +633,7 @@ local function worker_threads_add_results(self, result_channels)
               positions = line[3]
             })
           end
-          self.results_list:add_file(result[1], lines)
+          self.results_list:add_file(result[1], lines, nil, result[3])
         end
       end
       found = true
@@ -665,6 +687,33 @@ local function parse_filters(self, filters)
   return list
 end
 
+---@param path? string
+---@return table[] roots
+---@return boolean multiple_projects
+---@return string? base_dir
+local function get_search_roots(path)
+  if path then
+    return {{ path = path, name = common.basename(path) }}, false, path
+  end
+
+  local roots = {}
+  for _, project in ipairs(core.projects) do
+    table.insert(roots, {
+      path = project.path,
+      name = project.name or common.basename(project.path)
+    })
+  end
+
+  local multiple_projects = #roots > 1
+  if multiple_projects then
+    for _, root in ipairs(roots) do
+      root.display_prefix = root.name
+    end
+  end
+
+  return roots, multiple_projects, roots[1] and roots[1].path or nil
+end
+
 ---Start the search procedure and worker threads.
 ---@param path? string
 ---@param text string
@@ -685,7 +734,8 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
       return
     end
   end
-  path = path or core.root_project().path
+  local roots, multiple_projects, base_dir = get_search_roots(path)
+  if #roots == 0 then return end
 
   self.path = path
   self.stop = false
@@ -695,7 +745,7 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
   self.total_files = 0
   self.start_time = system.get_time()
   self.end_time = self.start_time
-  self.results_list.base_dir = path
+  self.results_list.base_dir = multiple_projects and "" or base_dir
 
   threaded_search_id = threaded_search_id + 1
   core.add_thread(function()
@@ -710,7 +760,8 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
         search_type = search_type,
         insensitive = insensitive,
         whole_word = whole_word,
-        path = path,
+        path = base_dir,
+        roots = roots,
         pathsep = PATHSEP,
         ignore_files = core.get_ignore_file_rules(),
         workers = workers,
@@ -1271,6 +1322,11 @@ local projectsearch = {}
 
 ---@type plugins.projectsearch.resultsview
 projectsearch.ResultsView = ResultsView
+
+projectsearch._test = {
+  files_search_thread = files_search_thread,
+  get_search_roots = get_search_roots
+}
 
 ---Start a plain text search.
 ---@param text string
