@@ -20,8 +20,6 @@ config.plugins.codefold = common.merge({
   hide_tail_on_fold = false,
   -- If true, all fold markers are always visible.
   always_show_fold_markers = false,
-  -- Width in pixels reserved for fold toggle indicators in the gutter.
-  toggle_width = common.round(24 * SCALE),
   -- The config specification used by the settings GUI.
   config_spec = {
     name = "Code Folding",
@@ -59,6 +57,7 @@ config.plugins.codefold = common.merge({
 local TOGGLE_OPEN  = "\226\150\190"  -- ▾  (U+25BE)
 local TOGGLE_CLOSE = "\226\150\184"  -- ▸  (U+25B8)
 local RECALC_DEBOUNCE_SECONDS = 0.12
+local TOGGLE_WIDTH = common.round(24 * SCALE)
 ---@type renderer.font?
 local CODEFOLD_FONT = nil
 ---@type renderer.font?
@@ -1132,6 +1131,12 @@ function DocView:update(...)
   normalize_caret(self)
 end
 
+local docview_on_scale_change = DocView.on_scale_change
+function DocView:on_scale_change(...)
+  docview_on_scale_change(self, ...)
+  TOGGLE_WIDTH = common.round(24 * SCALE)
+end
+
 ---------------------------------------------------------------------
 -- Method overrides: gutter width
 ---------------------------------------------------------------------
@@ -1142,18 +1147,19 @@ function DocView:get_gutter_width()
     return docview_get_gutter_width(self)
   end
   local base_width, padding = docview_get_gutter_width(self)
-  local toggle_w = config.plugins.codefold.toggle_width
-  return base_width + toggle_w, padding + toggle_w
+  return base_width + TOGGLE_WIDTH, padding
 end
 
 local function fold_toggle_rect(self)
-  local toggle_w = config.plugins.codefold.toggle_width
-  return self.position.x + self:get_gutter_width() - toggle_w * 1.5, toggle_w
+  return self.position.x + self:get_gutter_width() - TOGGLE_WIDTH * 1.5, TOGGLE_WIDTH
 end
 
 local docview_draw_line_gutter = DocView.draw_line_gutter
 function DocView:draw_line_gutter(line, x, y, width)
-  local result = docview_draw_line_gutter(self, line, x, y, width)
+  local base_width = codefold_enabled_for_view(self)
+    and math.max(0, width - TOGGLE_WIDTH)
+    or width
+  local result = docview_draw_line_gutter(self, line, x, y, base_width)
   if codefold_enabled_for_view(self) then
     local region_idx = region_at_line(self, line)
     if region_idx then

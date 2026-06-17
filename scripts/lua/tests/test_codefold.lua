@@ -824,6 +824,33 @@ test.describe("codefold - virtual line mapping", function()
     core.active_view = previous_active_view
   end)
 
+  test.test("fold gutter width adds marker space without changing padding", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_scale = SCALE
+    config.plugins.codefold.enabled = false
+
+    local view = make_docview({ "a\n", "  b\n", "c\n" })
+    local base_width, base_padding = view:get_gutter_width()
+
+    config.plugins.codefold.enabled = true
+    local fold_width, fold_padding = view:get_gutter_width()
+
+    test.equal(fold_width, base_width + common.round(24 * SCALE))
+    test.equal(fold_padding, base_padding)
+
+    SCALE = SCALE * 2
+    view:on_scale_change(SCALE, previous_scale)
+    local scaled_width, scaled_padding = view:get_gutter_width()
+    test.equal(scaled_width, base_width + common.round(24 * SCALE))
+    test.equal(scaled_padding, base_padding)
+
+    SCALE = previous_scale
+    view:on_scale_change(SCALE, previous_scale * 2)
+    config.plugins.codefold.enabled = previous_enabled
+  end)
+
   test.test("fold gutter marker visibility and color reflect state", function()
     require "plugins.codefold"
 
