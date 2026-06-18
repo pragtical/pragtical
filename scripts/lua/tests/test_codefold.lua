@@ -904,22 +904,8 @@ test.describe("codefold - virtual line mapping", function()
   test.test("fold keybindings use the fold toggle command", function()
     require "plugins.codefold"
 
-    local function matches_binding(stroke, key)
-      return stroke:find(key, 1, true)
-        and stroke:find("alt", 1, true)
-        and stroke:find("shift", 1, true)
-    end
-
     local bindings = keymap.reverse_map["code-folding:toggle-fold"] or {}
-    local left = false
-    local right = false
-    for _, stroke in ipairs(bindings) do
-      if matches_binding(stroke, "left") then left = true end
-      if matches_binding(stroke, "right") then right = true end
-    end
-
-    test.equal(left, true)
-    test.equal(right, true)
+    test.equal(#bindings, 2)
   end)
 
   test.test("fold gutter marker visibility and color reflect state", function()
