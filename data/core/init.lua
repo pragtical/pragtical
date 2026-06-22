@@ -1052,9 +1052,32 @@ map_new_syntax_colors = function(clear_new)
     -- keywords like: private, public
     ["type.qualifier"]        = {                   },
     -- any variable defined or accessed on the code
-    ["variable"]              = { alt = "normal"    },
+    ["variable"]              = { alt = "symbol"    },
     -- keywords like: this, self, parent
     ["variable.builtin"]      = { alt = "keyword2"  },
+    -- object/struct field or property access
+    ["property"]              = { alt = "symbol"    },
+    -- a module/namespace name like in: import os
+    ["module"]                = { alt = "literal"  },
+    ["module.builtin"]        = {                   },
+    -- Tree-sitter markup groups used by Markdown and similar formats
+    -- headings: # Title (.1 .. .6 levels resolve to this)
+    ["markup.heading"]        = { alt = "keyword"   },
+    -- bold/emphasis/strike/underline text
+    ["markup.strong"]         = { alt = "keyword2"  },
+    ["markup.italic"]         = { alt = "keyword2"  },
+    ["markup.strikethrough"]  = { alt = "keyword2"  },
+    ["markup.underline"]      = { alt = "keyword2"  },
+    -- list bullets and numbered items
+    ["markup.list"]           = { alt = "number"    },
+    -- block quotes, math and raw/code spans and blocks
+    ["markup.quote"]          = { alt = "string"    },
+    ["markup.math"]           = { alt = "string"    },
+    ["markup.raw"]            = { alt = "string"    },
+    -- link/image label (the clickable text); .label resolves to this
+    ["markup.link"]           = { alt = "function"  },
+    -- the link/image destination (URL/path) reads as a string-like target
+    ["markup.link.url"]       = { alt = "number"    },
   }
 
   if clear_new then
