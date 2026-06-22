@@ -1228,10 +1228,11 @@ end
 
 ---Apply a keybinding and optionally save it.
 ---@param cmd string
----@param bindings table<integer, string>
+---@param bindings? table<integer, string>
 ---@param skip_save? boolean
 ---@return table | nil
 local function apply_keybinding(cmd, bindings, skip_save)
+  bindings = bindings or {}
   local row_value = nil
   local changed = false
 

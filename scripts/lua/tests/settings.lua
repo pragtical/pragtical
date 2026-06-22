@@ -1,5 +1,7 @@
 local test = require "core.test"
+local command = require "core.command"
 local config = require "core.config"
+local keymap = require "core.keymap"
 local settings = require "plugins.settings"
 local Button = require "widget.button"
 local TextBox = require "widget.textbox"
@@ -13,6 +15,16 @@ local function find_child(view, class)
   end
   for _, child in ipairs(childs) do
     if child:is(class) then return child end
+  end
+end
+
+local function get_keymap_dialog()
+  for index = 1, math.huge do
+    local name, value = debug.getupvalue(SettingsView.load_keymap_settings, index)
+    if not name then break end
+    if name == "keymap_dialog" then
+      return value
+    end
   end
 end
 
@@ -372,6 +384,47 @@ test.describe("settings", function()
     SettingsView.enable_plugin(settings.ui, "test_settings")
 
     test.equal(config.plugins.test_settings.project.name, "Website")
+  end)
+
+  test.it("resets custom keybindings for commands without default bindings", function()
+    local command_name = "test-settings:no-default-binding"
+    local binding = "ctrl+shift+f12"
+    local old_command = command.map[command_name]
+    local old_defaults = settings.default_keybindings[command_name]
+    local old_bindings = { keymap.get_binding(command_name) }
+
+    command.add(nil, {
+      [command_name] = function() end
+    })
+    settings.default_keybindings[command_name] = nil
+    settings.config.custom_keybindings = {
+      [command_name] = { binding }
+    }
+    keymap.add({ [binding] = command_name })
+
+    local keymap_dialog = get_keymap_dialog()
+    test.not_nil(keymap_dialog)
+    keymap_dialog.command = command_name
+    keymap_dialog.row_id = 1
+    keymap_dialog.listbox = {
+      row = nil,
+      set_row = function(self, idx, row)
+        self.row = row
+      end
+    }
+
+    keymap_dialog:on_reset()
+
+    test.same({ keymap.get_binding(command_name) }, {})
+    test.equal(settings.config.custom_keybindings[command_name], nil)
+    test.not_nil(keymap_dialog.listbox.row)
+
+    keymap.unbind(binding, command_name)
+    for _, old_binding in ipairs(old_bindings) do
+      keymap.add({ [old_binding] = command_name })
+    end
+    command.map[command_name] = old_command
+    settings.default_keybindings[command_name] = old_defaults
   end)
 
 end)
