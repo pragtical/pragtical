@@ -1089,8 +1089,6 @@ command.add(predicate, {
 
 -- Manually open the suggestions box on demand, showing the same document
 -- symbols as the automatic completion (bypassing the min_len requirement).
--- No default keybinding is registered to avoid clobbering other plugins
--- (eg: the lsp plugin binds ctrl+space to lsp:complete).
 command.add(get_active_view, {
   ["autocomplete:open"] = function() show_autocomplete(true) end,
 })
@@ -1099,10 +1097,11 @@ command.add(get_active_view, {
 -- Keymaps
 --
 keymap.add {
-  ["tab"]    = "autocomplete:complete",
-  ["up"]     = "autocomplete:previous",
-  ["down"]   = "autocomplete:next",
-  ["escape"] = "autocomplete:cancel",
+  ["ctrl+space"] = "autocomplete:open",
+  ["tab"]        = "autocomplete:complete",
+  ["up"]         = "autocomplete:previous",
+  ["down"]       = "autocomplete:next",
+  ["escape"]     = "autocomplete:cancel",
 }
 
 
