@@ -775,13 +775,14 @@ local function draw_suggestions_box(av)
   )
 end
 
-local function show_autocomplete()
+---@param forced? boolean Bypass the min_len requirement (manual on-demand trigger)
+local function show_autocomplete(forced)
   local av = get_active_view()
   if av then
     -- update partial symbol and suggestions
     partial = autocomplete.get_partial_symbol()
 
-    if #partial >= config.plugins.autocomplete.min_len or triggered_manually then
+    if #partial >= config.plugins.autocomplete.min_len or triggered_manually or forced then
       update_suggestions()
 
       if not triggered_manually then
@@ -1086,14 +1087,21 @@ command.add(predicate, {
   end,
 })
 
+-- Manually open the suggestions box on demand, showing the same document
+-- symbols as the automatic completion (bypassing the min_len requirement).
+command.add(get_active_view, {
+  ["autocomplete:open"] = function() show_autocomplete(true) end,
+})
+
 --
 -- Keymaps
 --
 keymap.add {
-  ["tab"]    = "autocomplete:complete",
-  ["up"]     = "autocomplete:previous",
-  ["down"]   = "autocomplete:next",
-  ["escape"] = "autocomplete:cancel",
+  ["ctrl+space"] = "autocomplete:open",
+  ["tab"]        = "autocomplete:complete",
+  ["up"]         = "autocomplete:previous",
+  ["down"]       = "autocomplete:next",
+  ["escape"]     = "autocomplete:cancel",
 }
 
 
