@@ -1,5 +1,31 @@
 # Changes Log
 
+## [3.12.3] - 2026-06-24
+
+### New Features
+
+* Add multi-project support to Project Search
+  ([#562](https://github.com/pragtical/pragtical/pull/562))
+
+* Add autocomplete:open command to trigger suggestions on demand
+  ([#568](https://github.com/pragtical/pragtical/pull/568))
+
+### Enhancements
+
+* Split code folding toggle commands
+  ([#565](https://github.com/pragtical/pragtical/pull/565))
+
+* Add more syntax colors
+  ([#569](https://github.com/pragtical/pragtical/pull/569))
+
+### Fixes
+
+* Fix code folding gutter sizing
+  ([#564](https://github.com/pragtical/pragtical/pull/564))
+
+* Fix keybinding reset without defaults
+  ([#570](https://github.com/pragtical/pragtical/pull/570))
+
 ## [3.12.2] - 2026-06-15
 
 ### Enhancements
@@ -3581,6 +3607,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.12.3]: https://github.com/pragtical/pragtical/releases/tag/v3.12.3
 [3.12.2]: https://github.com/pragtical/pragtical/releases/tag/v3.12.2
 [3.12.1]: https://github.com/pragtical/pragtical/releases/tag/v3.12.1
 [3.12.0]: https://github.com/pragtical/pragtical/releases/tag/v3.12.0
