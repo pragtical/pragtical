@@ -216,6 +216,38 @@ static bool init_lua_state(AppState *app) {
 }
 
 
+static int traceback_handler(lua_State *L) {
+  const char *msg = lua_tostring(L, 1);
+  if (msg) {
+    luaL_traceback(L, L, msg, 1);
+  } else if (!lua_isnoneornil(L, 1)) {
+    if (!luaL_callmeta(L, 1, "__tostring"))
+      lua_pushliteral(L, "(error object is not a string)");
+  } else {
+    lua_pushliteral(L, "(no error message)");
+  }
+  return 1;
+}
+
+
+static void call_core_on_error(lua_State *L, const char *errmsg) {
+  int top = lua_gettop(L);
+
+  lua_getglobal(L, "core");
+  if (lua_istable(L, -1)) {
+    lua_getfield(L, -1, "on_error");
+    if (lua_isfunction(L, -1)) {
+      lua_pushstring(L, errmsg);
+      if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+        fprintf(stderr, "Error in core.on_error: %s\n", lua_tostring(L, -1));
+      }
+    }
+  }
+
+  lua_settop(L, top);
+}
+
+
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 #ifndef _WIN32
   signal(SIGPIPE, SIG_IGN);
@@ -302,11 +334,15 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     return SDL_APP_FAILURE;
   }
 
+  lua_pushcfunction(app->L, traceback_handler);
+  int errfunc = lua_gettop(app->L);
+
   lua_rawgeti(app->L, LUA_REGISTRYINDEX, app->core_run_step_ref);
-  if (lua_pcall(app->L, 0, 1, 0) != LUA_OK) {
+  if (lua_pcall(app->L, 0, 1, errfunc) != LUA_OK) {
     const char *errmsg = lua_tostring(app->L, -1);
-    lua_pop(app->L, 1);
+    if (!errmsg) errmsg = "(error object is not a string)";
     fprintf(stderr, "Error in core.run_step: %s\n", errmsg);
+    call_core_on_error(app->L, errmsg);
 
     lua_getglobal(app->L, "system");
     lua_getfield(app->L, -1, "show_fatal_error");
@@ -319,13 +355,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
       errmsg
     );
     lua_call(app->L, 2, 0);
-    lua_pop(app->L, 1);
 
     return SDL_APP_FAILURE;
   }
 
   bool should_continue = lua_toboolean(app->L, -1);
-  lua_pop(app->L, 1);
+  lua_pop(app->L, 2);
 
   if (!should_continue) {
     /* Distinguish between quit and restart. */
