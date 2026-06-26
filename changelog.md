@@ -1,5 +1,25 @@
 # Changes Log
 
+## [3.12.4] - 2026-06-26
+
+### New Features
+
+* Add project search view controls
+  ([#575](https://github.com/pragtical/pragtical/pull/575))
+
+### Enhancements
+
+* Refactor renderer file locations and names
+  ([#574](https://github.com/pragtical/pragtical/pull/574))
+
+### Fixes
+
+* Improve runtime error diagnostics
+  ([#572](https://github.com/pragtical/pragtical/pull/572))
+
+* Fix SDLGPU subpixel text on light backgrounds
+  ([#573](https://github.com/pragtical/pragtical/pull/573))
+
 ## [3.12.3] - 2026-06-24
 
 ### New Features
@@ -3607,6 +3627,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.12.4]: https://github.com/pragtical/pragtical/releases/tag/v3.12.4
 [3.12.3]: https://github.com/pragtical/pragtical/releases/tag/v3.12.3
 [3.12.2]: https://github.com/pragtical/pragtical/releases/tag/v3.12.2
 [3.12.1]: https://github.com/pragtical/pragtical/releases/tag/v3.12.1
