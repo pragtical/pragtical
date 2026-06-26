@@ -3,7 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "renderer.h"
+#include "renderer/renderer.h"
 
 /* These values represent the maximum size that can be tracked by rencache
    7680x4320 = 8k resolution, we use a common divisor for the size of regions

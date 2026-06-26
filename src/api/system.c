@@ -11,9 +11,9 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include "api.h"
-#include "../rencache.h"
-#include "../renbackend.h"
-#include "../renwindow.h"
+#include "renderer/cache.h"
+#include "renderer/backend.h"
+#include "renderer/window.h"
 #include "arena_allocator.h"
 #include "custom_events.h"
 #include "../system_events.h"
@@ -989,7 +989,7 @@ static int f_fuzzy_match(lua_State *L) {
   const char *ptn = luaL_checklstring(L, 2, &ptnLen);
   // If true match things *backwards*. This allows for better matching on filenames than the above
   // function. For example, in the pragtical project, opening "renderer" has lib/font_render/build.sh
-  // as the first result, rather than src/renderer.c. Clearly that's wrong.
+  // as the first result, rather than src/renderer/renderer.c. Clearly that's wrong.
   bool files = lua_gettop(L) > 2 && lua_isboolean(L,3) && lua_toboolean(L, 3);
   int score = 0, run = 0, increment = files ? -1 : 1;
   const char* strTarget = files ? str + strLen - 1 : str;

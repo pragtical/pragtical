@@ -19,10 +19,10 @@
 // uncomment the line below for more debugging information through printf
 // #define RENDERER_DEBUG
 
-#include "renatlas.h"
-#include "renbackend.h"
-#include "renderer.h"
-#include "renwindow.h"
+#include "renderer/atlas.h"
+#include "renderer/backend.h"
+#include "renderer/renderer.h"
+#include "renderer/window.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

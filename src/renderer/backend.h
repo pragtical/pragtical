@@ -2,8 +2,8 @@
 #define RENBACKEND_H
 
 #include <stdbool.h>
-#include "renatlas.h"
-#include "rencache.h"
+#include "renderer/atlas.h"
+#include "renderer/cache.h"
 
 typedef struct {
   const char *backend;

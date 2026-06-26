@@ -7,9 +7,9 @@
 
 #include "api.h"
 #include "utils/lxlauxlib.h"
-#include "../renbackend.h"
-#include "../renderer.h"
-#include "../rencache.h"
+#include "renderer/backend.h"
+#include "renderer/renderer.h"
+#include "renderer/cache.h"
 
 extern int RENDERER_FONT_REF;
 extern int RENDERER_CANVAS_REF;

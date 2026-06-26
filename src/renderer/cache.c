@@ -20,9 +20,9 @@
 #endif
 
 #include <lauxlib.h>
-#include "renbackend.h"
-#include "rencache.h"
-#include "renwindow.h"
+#include "renderer/backend.h"
+#include "renderer/cache.h"
+#include "renderer/window.h"
 
 /* a cache over the software renderer -- all drawing operations are stored as
 ** commands when issued. At the end of the frame we write the commands to a grid
