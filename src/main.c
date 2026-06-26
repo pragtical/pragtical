@@ -6,7 +6,7 @@
 #include <SDL3/SDL_main.h>
 #include "api/api.h"
 #include "system_events.h"
-#include "renderer.h"
+#include "renderer/renderer.h"
 #include "custom_events.h"
 
 #ifdef _WIN32

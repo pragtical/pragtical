@@ -1,7 +1,7 @@
-#include "renbackend.h"
-#include "renbackend_sdlgpu.h"
-#include "renbackend_sdlrenderer.h"
-#include "renbackend_surface.h"
+#include "renderer/backend.h"
+#include "renderer/backend/sdlgpu.h"
+#include "renderer/backend/sdlrenderer.h"
+#include "renderer/backend/surface.h"
 #include <stdio.h>
 
 static const RenBackend *current_backend = NULL;

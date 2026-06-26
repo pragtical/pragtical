@@ -1,5 +1,5 @@
-#include "renbackend_surface.h"
-#include "renwindow.h"
+#include "renderer/backend/surface.h"
+#include "renderer/window.h"
 #include <stdio.h>
 #include <stdlib.h>
 

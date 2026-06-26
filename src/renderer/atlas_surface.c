@@ -1,4 +1,4 @@
-#include "renatlas.h"
+#include "renderer/atlas.h"
 
 #include <assert.h>
 #include <limits.h>

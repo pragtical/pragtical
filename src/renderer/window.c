@@ -2,8 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "renbackend.h"
-#include "renwindow.h"
+#include "renderer/backend.h"
+#include "renderer/window.h"
 
 RenWindow* renwin_create(SDL_Window *win) {
   assert(win);

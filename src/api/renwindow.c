@@ -1,9 +1,9 @@
 #include <lua.h>
 #include <SDL3/SDL.h>
 #include "api.h"
-#include "../renwindow.h"
-#include "../rencache.h"
-#include "../renbackend.h"
+#include "renderer/window.h"
+#include "renderer/cache.h"
+#include "renderer/backend.h"
 
 static RenWindow *persistant_window = NULL;
 

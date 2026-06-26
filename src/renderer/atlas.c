@@ -1,5 +1,5 @@
-#include "renatlas.h"
-#include "renbackend.h"
+#include "renderer/atlas.h"
+#include "renderer/backend.h"
 
 int ren_glyphformat_bytes_per_pixel(ERenGlyphFormat format) {
   switch (format) {

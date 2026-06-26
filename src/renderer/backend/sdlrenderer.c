@@ -1,5 +1,5 @@
-#include "renbackend_sdlrenderer.h"
-#include "renwindow.h"
+#include "renderer/backend/sdlrenderer.h"
+#include "renderer/window.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>

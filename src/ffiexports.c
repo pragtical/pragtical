@@ -30,9 +30,9 @@
  *   separate we do it this way (for now).
  */
 
-#include "renderer.h"
-#include "rencache.h"
-#include "renwindow.h"
+#include "renderer/renderer.h"
+#include "renderer/cache.h"
+#include "renderer/window.h"
 #include "system_events.h"
 
 #if defined(_WIN32)

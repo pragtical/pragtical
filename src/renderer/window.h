@@ -1,6 +1,6 @@
 #include <SDL3/SDL.h>
-#include "renderer.h"
-#include "rencache.h"
+#include "renderer/renderer.h"
+#include "renderer/cache.h"
 
 struct HitTestInfo {
   int title_height;

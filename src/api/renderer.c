@@ -3,10 +3,10 @@
 #include <lua.h>
 
 #include "api.h"
-#include "../renbackend.h"
-#include "../renderer.h"
-#include "../rencache.h"
-#include "../renwindow.h"
+#include "renderer/backend.h"
+#include "renderer/renderer.h"
+#include "renderer/cache.h"
+#include "renderer/window.h"
 #include "utils/lxlauxlib.h"
 
 // a reference index to a table that stores fonts during a render cycle

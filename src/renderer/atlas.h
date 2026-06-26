@@ -6,7 +6,7 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#include "renderer.h"
+#include "renderer/renderer.h"
 
 // approximate number of glyphs per atlas surface
 #define GLYPHS_PER_ATLAS 96
