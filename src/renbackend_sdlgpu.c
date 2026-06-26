@@ -321,6 +321,8 @@ static bool gpu_poly_pipeline_failed = false;
 static SDL_GPUGraphicsPipeline *gpu_text_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_text_replace_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_text_batch_pipeline = NULL;
+static SDL_GPUGraphicsPipeline *gpu_text_batch_subpixel_attenuate_pipeline = NULL;
+static SDL_GPUGraphicsPipeline *gpu_text_batch_subpixel_add_pipeline = NULL;
 static SDL_GPUSampler *gpu_text_sampler = NULL;
 static bool gpu_text_pipeline_failed = false;
 static SDL_GPUTexture *gpu_solid_white_texture = NULL;
@@ -475,7 +477,8 @@ typedef struct {
 
 typedef struct {
   Uint32 format;
-  Uint32 padding[3];
+  Uint32 pass;
+  Uint32 padding[2];
 } GpuTextBatchFragmentUniforms;
 
 typedef struct {
@@ -3447,6 +3450,79 @@ static SDL_GPUGraphicsPipeline *gpu_create_text_batch_graphics_pipeline(SDL_GPUD
   return pipeline;
 }
 
+/* Subpixel text needs per-channel destination attenuation, which SDL_GPU can only
+** express across two passes (no dual-source blend factors). Both passes reuse the
+** batch shader and geometry; only the blend state differs:
+**   attenuate (pass 1): dst *= (1 - mask*alpha)   -> src=ZERO, dst=ONE_MINUS_SRC_COLOR
+**   add       (pass 2): dst += color*mask*alpha   -> src=ONE,  dst=ONE
+** Both leave the destination alpha untouched (src_alpha=ZERO, dst_alpha=ONE), like
+** the surface renderer. */
+static SDL_GPUGraphicsPipeline *gpu_create_text_batch_subpixel_pipeline(SDL_GPUDevice *device, bool add_pass) {
+  SDL_GPUShader *vertex_shader = gpu_create_text_batch_shader(device, true);
+  SDL_GPUShader *fragment_shader = gpu_create_text_batch_shader(device, false);
+  if (!vertex_shader || !fragment_shader) {
+    if (vertex_shader) SDL_ReleaseGPUShader(device, vertex_shader);
+    if (fragment_shader) SDL_ReleaseGPUShader(device, fragment_shader);
+    return NULL;
+  }
+
+  SDL_GPUVertexBufferDescription vertex_buffer;
+  SDL_zero(vertex_buffer);
+  vertex_buffer.slot = 0;
+  vertex_buffer.pitch = sizeof(GpuTextBatchInstance);
+  vertex_buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_INSTANCE;
+
+  SDL_GPUVertexAttribute vertex_attributes[3];
+  SDL_zeroa(vertex_attributes);
+  vertex_attributes[0].location = 0;
+  vertex_attributes[0].buffer_slot = 0;
+  vertex_attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+  vertex_attributes[0].offset = 0;
+  vertex_attributes[1].location = 1;
+  vertex_attributes[1].buffer_slot = 0;
+  vertex_attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+  vertex_attributes[1].offset = offsetof(GpuTextBatchInstance, uv);
+  vertex_attributes[2].location = 2;
+  vertex_attributes[2].buffer_slot = 0;
+  vertex_attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+  vertex_attributes[2].offset = offsetof(GpuTextBatchInstance, color);
+
+  SDL_GPUColorTargetDescription color_target;
+  SDL_zero(color_target);
+  color_target.format = SDL_GetGPUTextureFormatFromPixelFormat(SDL_PIXELFORMAT_BGRA32);
+  color_target.blend_state.enable_blend = true;
+  color_target.blend_state.enable_color_write_mask = true;
+  color_target.blend_state.color_write_mask =
+    SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G |
+    SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
+  color_target.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+  color_target.blend_state.src_color_blendfactor =
+    add_pass ? SDL_GPU_BLENDFACTOR_ONE : SDL_GPU_BLENDFACTOR_ZERO;
+  color_target.blend_state.dst_color_blendfactor =
+    add_pass ? SDL_GPU_BLENDFACTOR_ONE : SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_COLOR;
+  color_target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+  color_target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+
+  SDL_GPUGraphicsPipelineCreateInfo pipeline_info;
+  SDL_zero(pipeline_info);
+  pipeline_info.vertex_shader = vertex_shader;
+  pipeline_info.fragment_shader = fragment_shader;
+  pipeline_info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+  pipeline_info.rasterizer_state.enable_depth_clip = true;
+  pipeline_info.vertex_input_state.vertex_buffer_descriptions = &vertex_buffer;
+  pipeline_info.vertex_input_state.num_vertex_buffers = 1;
+  pipeline_info.vertex_input_state.vertex_attributes = vertex_attributes;
+  pipeline_info.vertex_input_state.num_vertex_attributes = SDL_arraysize(vertex_attributes);
+  pipeline_info.target_info.num_color_targets = 1;
+  pipeline_info.target_info.color_target_descriptions = &color_target;
+
+  SDL_GPUGraphicsPipeline *pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+  SDL_ReleaseGPUShader(device, vertex_shader);
+  SDL_ReleaseGPUShader(device, fragment_shader);
+  return pipeline;
+}
+
 static bool gpu_ensure_text_pipeline(SDL_GPUDevice *device) {
   if (gpu_text_pipeline && gpu_text_sampler)
     return true;
@@ -3488,6 +3564,15 @@ static bool gpu_ensure_text_batch_pipeline(SDL_GPUDevice *device) {
 
   gpu_text_batch_pipeline = gpu_create_text_batch_graphics_pipeline(device, true);
   if (!gpu_text_batch_pipeline) {
+    gpu_text_pipeline_failed = true;
+    return false;
+  }
+
+  gpu_text_batch_subpixel_attenuate_pipeline =
+    gpu_create_text_batch_subpixel_pipeline(device, false);
+  gpu_text_batch_subpixel_add_pipeline =
+    gpu_create_text_batch_subpixel_pipeline(device, true);
+  if (!gpu_text_batch_subpixel_attenuate_pipeline || !gpu_text_batch_subpixel_add_pipeline) {
     gpu_text_pipeline_failed = true;
     return false;
   }
@@ -3538,6 +3623,14 @@ static void gpu_destroy_text_pipeline(SDL_GPUDevice *device) {
   if (gpu_text_batch_pipeline) {
     SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_batch_pipeline);
     gpu_text_batch_pipeline = NULL;
+  }
+  if (gpu_text_batch_subpixel_attenuate_pipeline) {
+    SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_batch_subpixel_attenuate_pipeline);
+    gpu_text_batch_subpixel_attenuate_pipeline = NULL;
+  }
+  if (gpu_text_batch_subpixel_add_pipeline) {
+    SDL_ReleaseGPUGraphicsPipeline(device, gpu_text_batch_subpixel_add_pipeline);
+    gpu_text_batch_subpixel_add_pipeline = NULL;
   }
   gpu_text_pipeline_failed = false;
 }
@@ -4100,13 +4193,37 @@ static bool gpu_draw_text_batches_to_bridge(
     if (run->vertex_count == 0)
       continue;
 
+    gpu_bind_fragment_sampler(pass, run->material.texture, run->material.sampler);
+
+    if (run->material.pipeline == GPU_BATCH_PIPELINE_TEXT &&
+        run->material.glyph_format == EGlyphFormatSubpixel) {
+      // Per-channel subpixel blend needs two passes (SDL_GPU has no dual-source
+      // blend factors): attenuate the destination, then add the foreground. Both
+      // draw the same instances; only the pipeline blend state and pass index differ.
+      for (Uint32 subpass = 1; subpass <= 2; subpass++) {
+        SDL_GPUGraphicsPipeline *pipeline = subpass == 1
+          ? gpu_text_batch_subpixel_attenuate_pipeline
+          : gpu_text_batch_subpixel_add_pipeline;
+        if (bound_pipeline != pipeline) {
+          SDL_BindGPUGraphicsPipeline(pass, pipeline);
+          bound_pipeline = pipeline;
+        }
+        GpuTextBatchFragmentUniforms fragment_uniforms = {
+          .format = run->material.glyph_format,
+          .pass = subpass,
+        };
+        SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
+        SDL_DrawGPUPrimitives(pass, 6, run->vertex_count, 0, run->first_vertex);
+      }
+      continue;
+    }
+
     gpu_bind_batch_pipeline(pass, run->material, &bound_pipeline);
 
     GpuTextBatchFragmentUniforms fragment_uniforms = {
       .format = run->material.glyph_format,
     };
     SDL_PushGPUFragmentUniformData(cmd, 0, &fragment_uniforms, sizeof(fragment_uniforms));
-    gpu_bind_fragment_sampler(pass, run->material.texture, run->material.sampler);
     SDL_DrawGPUPrimitives(pass, 6, run->vertex_count, 0, run->first_vertex);
   }
 
