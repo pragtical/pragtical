@@ -141,4 +141,85 @@ test.describe("projectsearch", function()
     test.equal(list.items[1].file.path, absolute_path)
     test.equal(list.items[1].file.display_path, display_path)
   end)
+
+  test.test("global helpers return the global results view", function(context)
+    local view = projectsearch.toggle({
+      path = context.project_a,
+      has_focus = false
+    })
+
+    test.not_nil(view)
+    test.equal(view, projectsearch._test.get_global_project_search())
+    test.equal(view:is_visible(), true)
+
+    local hidden_view = projectsearch.hide({
+      text = "hidden",
+      path = context.project_b,
+      run = true
+    })
+
+    test.equal(hidden_view, view)
+    test.equal(view:is_visible(), false)
+    test.equal(view.find_text:get_text(), "hidden")
+    test.equal(view.file_picker:get_path(), context.project_b)
+    test.equal(view.searching, false)
+
+    local shown_view = projectsearch.show({
+      path = context.project_b,
+      text = "needle"
+    })
+
+    test.equal(shown_view, view)
+    test.equal(shown_view:is_visible(), true)
+    test.equal(shown_view.file_picker:get_path(), context.project_b)
+    test.equal(shown_view.find_text:get_text(), "needle")
+    test.equal(shown_view.searching, false)
+  end)
+
+  test.test("show applies search options", function(context)
+    local view = projectsearch.show({
+      text = "needle",
+      path = context.project_a,
+      insensitive = false,
+      whole_word = true,
+      replacement = "thread",
+      search_type = "regex",
+      filters = {
+        includes = "src/**.txt",
+        excludes = "vendor"
+      }
+    })
+
+    test.equal(view.find_text:get_text(), "needle")
+    test.equal(view.file_picker:get_path(), context.project_a)
+    test.equal(view.sensitive_toggle:is_toggled(), true)
+    test.equal(view.wholeword_toggle:is_toggled(), true)
+    test.equal(view.replace_toggle:is_toggled(), true)
+    test.equal(view.replace_text:get_text(), "thread")
+    test.equal(view.regex_toggle:is_toggled(), true)
+    test.equal(view.filters_toggle:is_toggled(), true)
+    test.equal(view.includes_text:get_text(), "src/**.txt")
+    test.equal(view.excludes_text:get_text(), "vendor")
+  end)
+
+  test.test("show defaults invalid search type to plain", function(context)
+    local view = projectsearch.show({
+      text = "needle",
+      path = context.project_a,
+      search_type = "pattern"
+    })
+
+    test.equal(view.regex_toggle:is_toggled(), false)
+  end)
+
+  test.test("show runs search only when requested", function(context)
+    local view = projectsearch.show({
+      text = "needle",
+      path = context.project_a,
+      run = true
+    })
+
+    test.equal(view.searching, true)
+    view:stop_search()
+  end)
 end)

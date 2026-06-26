@@ -284,6 +284,55 @@ function ResultsView:update_replacement()
 end
 
 
+---@class plugins.projectsearch.resultsview.options
+---@field text? string
+---@field path? string
+---@field has_focus? boolean
+---@field insensitive? boolean
+---@field whole_word? boolean
+---@field replacement? string
+---@field search_type? "plain"|"regex"
+---@field filters? { includes: string?, excludes: string? }
+---@field run? boolean
+
+---@param options plugins.projectsearch.resultsview.options
+---@param enable_run? boolean
+function ResultsView:apply_options(options, enable_run)
+  if type(options.path) == "string" then
+    self.file_picker:set_path(options.path)
+  end
+  if type(options.text) == "string" then
+    self.find_text:set_text(options.text)
+  end
+
+  self.regex_toggle:set_toggle(options.search_type == "regex")
+
+  if type(options.insensitive) == "boolean" then
+    self.sensitive_toggle:set_toggle(not options.insensitive)
+  end
+  if type(options.whole_word) == "boolean" then
+    self.wholeword_toggle:set_toggle(options.whole_word)
+  end
+  if type(options.replacement) == "string" then
+    self.replace_text:set_text(options.replacement)
+    self.replace_toggle:set_toggle(true)
+  end
+  if type(options.filters) == "table" then
+    self.includes_text:set_text(options.filters.includes or "")
+    self.excludes_text:set_text(options.filters.excludes or "")
+    self.filters_toggle:set_toggle(
+      type(options.filters.includes) == "string"
+      or type(options.filters.excludes) == "string"
+    )
+  end
+
+  self:update_replacement()
+  if enable_run and options.run == true and #self.find_text:get_text() > 0 then
+    self:refresh()
+  end
+end
+
+
 ---Text displayed on the application title and view tab.
 ---@return string
 function ResultsView:get_name()
@@ -1364,11 +1413,61 @@ local global_project_search
 ---@type boolean?
 local previous_treeview_hidden
 
+projectsearch._test.get_global_project_search = function()
+  return global_project_search
+end
+
+---@param visible boolean
+---@param toggle boolean
+local function sync_treeview_visibility(visible, toggle)
+  if treeview and toggle then
+    local treeview_visible = not visible
+    if visible then
+      previous_treeview_hidden = not treeview.visible
+    elseif previous_treeview_hidden then
+      treeview_visible = false
+    end
+    treeview.visible = treeview_visible
+  end
+end
+
 ---@param path? string
----@param has_focus? boolean
-function projectsearch.toggle(path, has_focus)
+---@return plugins.projectsearch.resultsview
+local function ensure_global_project_search(path)
+  if global_project_search then
+    if path then global_project_search.file_picker:set_path(path) end
+    return global_project_search
+  end
+
+  global_project_search = ResultsView(path, "", "plain")
+  global_project_search.is_global = true
+  global_project_search:set_size(400 * SCALE)
+  global_project_search:show()
+  local node, split_direction = nil, "left"
+  if treeview then
+    -- when treeview enabled split to the right of it for consistent position
+    node = core.root_view.root_node:get_node_for_view(treeview)
+    if not node then node = core.root_view:get_primary_node() end
+    split_direction = "right"
+  else
+    node = core.root_view:get_active_node()
+  end
+  global_project_search.node = node:split(
+    split_direction, global_project_search, {x = true}, true
+  )
+  return global_project_search
+end
+
+---Toggle the global project search view.
+---@param options? plugins.projectsearch.resultsview.options
+---@return plugins.projectsearch.resultsview
+function projectsearch.toggle(options)
+  options = options or {}
+
   local visible = true
   local toggle = true
+  local path = options.path
+  local has_focus = options.has_focus
 
   ---@type core.docview?
   local doc_view = (core.active_view and core.active_view:is(DocView))
@@ -1387,22 +1486,7 @@ function projectsearch.toggle(path, has_focus)
   end
 
   if not global_project_search then
-    global_project_search = ResultsView(path, "", "plain")
-    global_project_search.is_global = true
-    global_project_search:set_size(400 * SCALE)
-    global_project_search:show()
-    local node, split_direction = nil, "left"
-    if treeview then
-      -- when treeview enabled split to the right of it for consistent position
-      node = core.root_view.root_node:get_node_for_view(treeview)
-      if not node then node = core.root_view:get_primary_node() end
-      split_direction = "right"
-    else
-      node = core.root_view:get_active_node()
-    end
-    global_project_search.node = node:split(
-      split_direction, global_project_search, {x = true}, true
-    )
+    ensure_global_project_search(path)
   else
     local gvisible = global_project_search:is_visible()
     if path then global_project_search.file_picker:set_path(path) end
@@ -1422,15 +1506,9 @@ function projectsearch.toggle(path, has_focus)
     end
   end
 
-  if treeview and toggle then
-    local treeview_visible = not visible
-    if visible then
-      previous_treeview_hidden = not treeview.visible
-    elseif previous_treeview_hidden then
-      treeview_visible = false
-    end
-    treeview.visible = treeview_visible
-  end
+  global_project_search:apply_options(options, visible)
+
+  sync_treeview_visibility(visible, toggle)
 
   core.add_thread(function()
     if visible then
@@ -1448,6 +1526,8 @@ function projectsearch.toggle(path, has_focus)
       previous_view = nil
     end
   end)
+
+  return global_project_search
 end
 
 ---@return boolean is_project_search
@@ -1474,10 +1554,43 @@ local function active_view_is_project_search()
   return is_results_view, view
 end
 
+---Show the global project search view.
+---@param options? plugins.projectsearch.resultsview.options
+---@return plugins.projectsearch.resultsview
+function projectsearch.show(options)
+  options = options or {}
+  if not global_project_search or not global_project_search:is_visible() then
+    options.has_focus = active_view_is_project_search()
+    return projectsearch.toggle(options)
+  end
+  global_project_search:apply_options(options, true)
+  return global_project_search
+end
+
+---Hide the global project search view.
+---@param options? plugins.projectsearch.resultsview.options
+---@return plugins.projectsearch.resultsview?
+function projectsearch.hide(options)
+  options = options or {}
+  if not global_project_search then return end
+  global_project_search:apply_options(options, false)
+  if global_project_search:is_visible() then
+    global_project_search:hide()
+    sync_treeview_visibility(false, true)
+    core.add_thread(function()
+      if previous_view then
+        core.set_active_view(previous_view)
+        previous_view = nil
+      end
+    end)
+  end
+  return global_project_search
+end
+
 command.add(nil, {
   ["project-search:find"] = function(path)
     local has_focus = active_view_is_project_search()
-    projectsearch.toggle(path, has_focus)
+    projectsearch.toggle({ path = path, has_focus = has_focus })
   end,
 
   ["project-search:open-tab"] = function(path)
