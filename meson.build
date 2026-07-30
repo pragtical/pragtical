@@ -325,6 +325,15 @@ if not get_option('source-only')
             'SDL_VENDOR_INFO': 'pragtical'
         })
 
+        if host_machine.system() == 'linux'
+            # SDL_internal.h enables GNU extensions, so CMake's libc probes
+            # need the same feature set. CMake 4 does not pass SDL's
+            # CMAKE_REQUIRED_FLAGS to check_symbol_exists() try-compiles.
+            sdl_options.add_cmake_defines({
+                'CMAKE_REQUIRED_DEFINITIONS': '-D_GNU_SOURCE=1'
+            })
+        endif
+
         if host_machine.system() == 'windows'
             # warn about the implications of missing iconv
             if not cc.find_library('iconv', required: false).found()
