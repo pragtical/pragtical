@@ -1245,6 +1245,132 @@ test.describe("codefold - virtual line mapping", function()
     core.get_views_referencing_doc = previous_get_views
   end)
 
+  test.test("newline edits do not normalize carets through stale folds", function()
+    require "plugins.codefold"
+
+    local previous_get_views = core.get_views_referencing_doc
+    local doc = Doc(nil, nil, true)
+    doc.lines = {}
+    for line = 1, 600 do
+      doc.lines[line] = "line\n"
+    end
+    doc:reset_syntax()
+    doc:set_selection(590, #doc.lines[590])
+
+    local view = DocView(doc)
+    view.size.x = 0
+    view.cf_first_update = nil
+    view.cf_regions = {
+      { indent = 0, start = 591, stop = 595 }
+    }
+    view.cf_folded_regions = { 1 }
+    view.cf_folded_region_set = { [1] = true }
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      doc.lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+    view.cf_hidden_lines = {
+      [592] = true,
+      [593] = true,
+      [594] = true,
+      [595] = true
+    }
+    view.cf_mapping_line_count = #doc.lines
+
+    core.get_views_referencing_doc = function(target)
+      return target == doc and { view } or {}
+    end
+
+    doc:text_input("\n")
+    test.equal(select(1, doc:get_selection()), 591)
+    test.equal(view.cf_mapping_line_count, 600)
+    test.equal(#doc.lines, 601)
+
+    view:update()
+    test.equal(select(1, doc:get_selection()), 591)
+
+    core.get_views_referencing_doc = previous_get_views
+  end)
+
+  test.test("newline unfolds collapsed headers and ending lines", function()
+    require "plugins.codefold"
+    require "core.commands.doc"
+
+    local previous_active_view = core.active_view
+    local previous_get_views = core.get_views_referencing_doc
+
+    local function make_folded_view()
+      local doc = Doc(nil, nil, true)
+      doc.lines = {
+        "test \"app creation\" {\n",
+        "    var app = try App.init(.{});\n",
+        "    defer app.deinit();\n",
+        "}\n",
+        "next\n"
+      }
+      doc:reset_syntax()
+
+      local view = DocView(doc)
+      view.cf_first_update = nil
+      view.cf_regions = {
+        { indent = 0, start = 1, stop = 3 }
+      }
+      view.cf_folded_regions = { 1 }
+      view.cf_folded_region_set = { [1] = true }
+      view.cf_fold_map, view.cf_unfold_map = build_maps(
+        doc.lines,
+        view.cf_regions,
+        view.cf_folded_regions
+      )
+      view.cf_hidden_lines = {
+        [2] = true,
+        [3] = true
+      }
+      view.cf_mapping_line_count = #doc.lines
+      return view, doc
+    end
+
+    local view, doc = make_folded_view()
+    core.active_view = view
+    core.get_views_referencing_doc = function(target)
+      return target == doc and { view } or {}
+    end
+    doc:set_selection(1, #doc.lines[1])
+
+    test.ok(command.perform("doc:newline"))
+    test.equal(#view.cf_folded_regions, 0)
+    test.equal(select(1, doc:get_selection()), 2)
+    test.equal(doc.lines[2], "\n")
+
+    view, doc = make_folded_view()
+    core.active_view = view
+    core.get_views_referencing_doc = function(target)
+      return target == doc and { view } or {}
+    end
+    doc:set_selection(4, 1)
+
+    test.ok(command.perform("doc:newline"))
+    test.equal(#view.cf_folded_regions, 0)
+    test.equal(select(1, doc:get_selection()), 5)
+    test.equal(doc.lines[4], "\n")
+    test.equal(doc.lines[5], "}\n")
+
+    view, doc = make_folded_view()
+    core.active_view = view
+    core.get_views_referencing_doc = function(target)
+      return target == doc and { view } or {}
+    end
+    doc:set_selection(4, #doc.lines[4])
+
+    test.ok(command.perform("doc:newline"))
+    test.equal(#view.cf_folded_regions, 1)
+    test.equal(select(1, doc:get_selection()), 5)
+
+    core.active_view = previous_active_view
+    core.get_views_referencing_doc = previous_get_views
+  end)
+
   test.test("select all occurrences reveals folded matches and keeps search highlight", function()
     require "plugins.codefold"
     require "core.commands.findreplace"

@@ -1041,6 +1041,11 @@ local function normalize_caret(self)
   if not self.cf_folded_regions or #self.cf_folded_regions == 0 then
     return
   end
+  -- Document edits shift line numbers before the debounced fold scan can
+  -- rebuild its mappings. Never move a valid caret using those stale indices.
+  if self.cf_mapping_line_count ~= #self.doc.lines then
+    return
+  end
   if not self.cf_unfold_map or #self.cf_unfold_map == 0 then
     return
   end
@@ -1051,6 +1056,45 @@ local function normalize_caret(self)
       line2 = visible_ancestor(self, line2)
     end
     self.doc:set_selection(ancestor, col1, line2, col2)
+  end
+end
+
+---Unfold a collapsed region when a newline edits one of its visible bounds.
+---@param self core.docview
+---@param line integer
+---@param col integer
+---@param text string
+local function unfold_newline_boundary(self, line, col, text)
+  if not text:find("\n", 1, true)
+    or not self.cf_unfold_map
+    or not self.cf_unfold_map[line]
+  then
+    return
+  end
+
+  local line_text = self.doc.lines[line] or ""
+  local first_token = line_text:find("%S") or #line_text
+  local folded = {}
+  local changed = false
+
+  for _, region_idx in ipairs(self.cf_folded_regions or {}) do
+    local region = self.cf_regions[region_idx]
+    local edits_header = region and line == region.start
+    local edits_end = region
+      and line == region.stop + 1
+      and col <= first_token
+    if edits_header or edits_end then
+      changed = true
+    else
+      folded[#folded + 1] = region_idx
+    end
+  end
+
+  if changed then
+    set_folded_regions(self, folded)
+    rebuild_mappings(self)
+    save_fold_state(self.doc, self.cf_regions, self.cf_folded_regions)
+    core.redraw = true
   end
 end
 
@@ -1244,9 +1288,16 @@ end
 
 local doc_raw_insert = Doc.raw_insert
 function Doc:raw_insert(line, col, text, undo_stack, time)
+  local views = core.get_views_referencing_doc(self)
+  for _, view in ipairs(views) do
+    if codefold_enabled_for_view(view) and view.cf_regions then
+      unfold_newline_boundary(view, line, col, text)
+    end
+  end
+
   local result = doc_raw_insert(self, line, col, text, undo_stack, time)
   -- Invalidate fold state on all views of this doc
-  for _, view in ipairs(core.get_views_referencing_doc(self)) do
+  for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
       schedule_recalculation(view, line)
     end
