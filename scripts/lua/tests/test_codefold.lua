@@ -1245,6 +1245,70 @@ test.describe("codefold - virtual line mapping", function()
     core.get_views_referencing_doc = previous_get_views
   end)
 
+  test.test("upper newlines keep folded regions aligned through draw and undo", function()
+    local codefold = require "plugins.codefold"
+    local previous_active_view = core.active_view
+    local previous_get_views = core.get_views_referencing_doc
+    local previous_start_folded = config.plugins.codefold.start_folded
+
+    local lines = { "const builtin = @import(\"builtin\");\n" }
+    for idx = 1, 60 do
+      lines[#lines + 1] = "if condition_" .. idx .. " then\n"
+      lines[#lines + 1] = "  body_" .. idx .. "()\n"
+    end
+
+    local view = make_docview(lines)
+    local doc = view.doc
+    view.cf_first_update = nil
+    core.active_view = view
+    core.get_views_referencing_doc = function(target)
+      return target == doc and { view } or {}
+    end
+    config.plugins.codefold.start_folded = true
+
+    codefold._test.apply_detected_regions(
+      view,
+      codefold._test.detect_fold_regions(doc)
+    )
+    test.equal(#view.cf_folded_regions, 60)
+
+    doc:set_selection(1, #doc.lines[1])
+    for _ = 1, 20 do
+      command.perform("doc:newline", view)
+    end
+
+    test.equal(view.cf_regions[1].start, 22)
+    test.equal(#view.cf_folded_regions, 60)
+    test.ok(view.cf_mapping_dirty)
+    view.draw_background = function() error("stop after fold refresh") end
+    pcall(view.draw, view)
+    test.is_nil(view.cf_mapping_dirty)
+    test.equal(view.cf_mapping_line_count, #doc.lines)
+    test.ok(view.cf_hidden_lines[23])
+
+    codefold._test.apply_detected_regions(
+      view,
+      codefold._test.detect_fold_regions(doc)
+    )
+    test.equal(#view.cf_folded_regions, 60)
+
+    doc:undo()
+    pcall(view.draw, view)
+    test.equal(#view.cf_folded_regions, 60)
+    test.equal(view.cf_mapping_line_count, #doc.lines)
+    test.ok(view.cf_hidden_lines[3])
+    codefold._test.apply_detected_regions(
+      view,
+      codefold._test.detect_fold_regions(doc)
+    )
+    test.equal(view.cf_regions[1].start, 2)
+    test.equal(#view.cf_folded_regions, 60)
+
+    config.plugins.codefold.start_folded = previous_start_folded
+    core.get_views_referencing_doc = previous_get_views
+    core.active_view = previous_active_view
+  end)
+
   test.test("newline edits do not normalize carets through stale folds", function()
     require "plugins.codefold"
 

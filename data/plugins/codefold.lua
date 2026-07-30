@@ -807,7 +807,29 @@ local function rebuild_mappings(self)
     self.cf_folded_regions or {}
   )
   self.cf_mapping_line_count = #self.doc.lines
+  self.cf_mapping_dirty = nil
   self:invalidate_visual_lines()
+end
+
+---Shift regions below a multiline edit until fold detection catches up.
+---@param self core.docview
+---@param line integer
+---@param line_delta integer
+local function shift_regions_after(self, line, line_delta)
+  if line_delta == 0 then return end
+
+  local shifted = false
+  for _, region in ipairs(self.cf_regions or {}) do
+    if region.start > line then
+      region.start = region.start + line_delta
+      region.stop = region.stop + line_delta
+      shifted = true
+    end
+  end
+  if shifted then
+    set_regions(self, self.cf_regions)
+  end
+  self.cf_mapping_dirty = #self.cf_folded_regions > 0
 end
 
 ---Given a real line that may be hidden, find the nearest visible ancestor.
@@ -1175,6 +1197,14 @@ function DocView:update(...)
   normalize_caret(self)
 end
 
+local docview_draw = DocView.draw
+function DocView:draw(...)
+  if self.cf_mapping_dirty and codefold_enabled_for_view(self) then
+    rebuild_mappings(self)
+  end
+  return docview_draw(self, ...)
+end
+
 local docview_on_scale_change = DocView.on_scale_change
 function DocView:on_scale_change(...)
   docview_on_scale_change(self, ...)
@@ -1289,6 +1319,7 @@ end
 local doc_raw_insert = Doc.raw_insert
 function Doc:raw_insert(line, col, text, undo_stack, time)
   local views = core.get_views_referencing_doc(self)
+  local line_count = #self.lines
   for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
       unfold_newline_boundary(view, line, col, text)
@@ -1299,6 +1330,9 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
   -- Invalidate fold state on all views of this doc
   for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
+      shift_regions_after(
+        view, col == 1 and line - 1 or line, #self.lines - line_count
+      )
       schedule_recalculation(view, line)
     end
   end
@@ -1307,9 +1341,14 @@ end
 
 local doc_raw_remove = Doc.raw_remove
 function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
+  local views = core.get_views_referencing_doc(self)
+  local line_count = #self.lines
   local result = doc_raw_remove(self, line1, col1, line2, col2, undo_stack, time)
-  for _, view in ipairs(core.get_views_referencing_doc(self)) do
+  for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
+      shift_regions_after(
+        view, col2 == 1 and line2 - 1 or line2, #self.lines - line_count
+      )
       schedule_recalculation(view, line1)
     end
   end
