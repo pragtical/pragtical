@@ -1029,6 +1029,38 @@ local function region_containing(self, line)
   return best
 end
 
+---Move the caret to the next or previous visible fold region.
+---@param self core.docview
+---@param direction integer
+local function navigate_region(self, direction)
+  if self.cf_mapping_dirty then
+    rebuild_mappings(self)
+  end
+
+  local line = self.doc:get_selection()
+  local hidden = self.cf_hidden_lines or build_hidden_set(self)
+  local first, last, target
+  for _, region in ipairs(self.cf_regions or {}) do
+    if not hidden[region.start] then
+      first = first or region
+      last = region
+      if direction > 0 then
+        if not target and region.start > line then
+          target = region
+        end
+      elseif region.start < line then
+        target = region
+      end
+    end
+  end
+
+  target = target or (direction > 0 and first or last)
+  if target then
+    self.doc:set_selection(target.start, 1)
+    self:scroll_to_line(target.start, true)
+  end
+end
+
 ---Toggle a fold region.
 ---@param self core.docview
 ---@param region_idx integer
@@ -1382,6 +1414,22 @@ command.add(nil, {
     end
   end,
 
+  ["code-folding:next-fold"] = function()
+    local view = core.active_view
+    if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
+      return
+    end
+    navigate_region(view, 1)
+  end,
+
+  ["code-folding:previous-fold"] = function()
+    local view = core.active_view
+    if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
+      return
+    end
+    navigate_region(view, -1)
+  end,
+
   ["code-folding:fold-all"] = function()
     local view = core.active_view
     if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
@@ -1409,7 +1457,9 @@ keymap.add {
   ["alt+shift+left"] = "code-folding:toggle-fold",
   ["alt+shift+right"] = "code-folding:toggle-fold",
   ["alt+shift+up"] = "code-folding:fold-all",
-  ["alt+shift+down"] = "code-folding:unfold-all"
+  ["alt+shift+down"] = "code-folding:unfold-all",
+  ["alt+shift+pageup"] = "code-folding:previous-fold",
+  ["alt+shift+pagedown"] = "code-folding:next-fold"
 }
 
 codefold._test = {

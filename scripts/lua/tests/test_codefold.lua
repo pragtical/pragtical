@@ -901,11 +901,94 @@ test.describe("codefold - virtual line mapping", function()
     core.active_view = previous_active_view
   end)
 
+  test.test("fold navigation skips hidden regions and wraps", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_active_view = core.active_view
+    config.plugins.codefold.enabled = true
+
+    local view = make_docview({
+      "outer\n",
+      "  nested\n",
+      "    body\n",
+      "next\n",
+      "  body\n"
+    })
+    view.cf_regions = {
+      { indent = 0, start = 1, stop = 3 },
+      { indent = 2, start = 2, stop = 3 },
+      { indent = 0, start = 4, stop = 5 }
+    }
+    view.cf_folded_regions = { 1 }
+    view.cf_folded_region_set = { [1] = true }
+    view.cf_mapping_dirty = true
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    local scrolled_to
+    view.scroll_to_line = function(_, line, ignore_if_visible)
+      scrolled_to = { line, ignore_if_visible }
+    end
+    core.active_view = view
+
+    view.doc:set_selection(1, 1)
+    test.ok(command.perform("code-folding:next-fold"))
+    test.equal(view.doc:get_selection(), 4)
+    test.same(scrolled_to, { 4, true })
+    test.is_nil(view.cf_mapping_dirty)
+
+    test.ok(command.perform("code-folding:next-fold"))
+    test.equal(view.doc:get_selection(), 1)
+
+    test.ok(command.perform("code-folding:previous-fold"))
+    test.equal(view.doc:get_selection(), 4)
+
+    test.ok(command.perform("code-folding:previous-fold"))
+    test.equal(view.doc:get_selection(), 1)
+
+    config.plugins.codefold.enabled = previous_enabled
+    core.active_view = previous_active_view
+  end)
+
+  test.test("fold navigation ignores unavailable regions", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_active_view = core.active_view
+    local view = make_docview({ "a\n", "b\n" })
+    view.cf_regions = {}
+    view.cf_first_update = nil
+    view.cf_invalidated = nil
+    view.doc:set_selection(2, 1)
+    core.active_view = view
+
+    config.plugins.codefold.enabled = true
+    test.ok(command.perform("code-folding:next-fold"))
+    test.equal(view.doc:get_selection(), 2)
+
+    view.cf_regions = { { indent = 0, start = 1, stop = 2 } }
+    config.plugins.codefold.enabled = false
+    test.ok(command.perform("code-folding:previous-fold"))
+    test.equal(view.doc:get_selection(), 2)
+
+    config.plugins.codefold.enabled = previous_enabled
+    core.active_view = previous_active_view
+  end)
+
   test.test("fold keybindings use the fold toggle command", function()
     require "plugins.codefold"
 
     local bindings = keymap.reverse_map["code-folding:toggle-fold"] or {}
     test.equal(#bindings, 2)
+  end)
+
+  test.test("fold navigation commands have default keybindings", function()
+    require "plugins.codefold"
+
+    local previous = keymap.reverse_map["code-folding:previous-fold"] or {}
+    local next = keymap.reverse_map["code-folding:next-fold"] or {}
+    test.contains(previous, "shift+alt+pageup")
+    test.contains(next, "shift+alt+pagedown")
   end)
 
   test.test("fold gutter marker visibility and color reflect state", function()
