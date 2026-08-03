@@ -1518,6 +1518,97 @@ test.describe("codefold - virtual line mapping", function()
     core.get_views_referencing_doc = previous_get_views
   end)
 
+  test.test("deleting or cutting folded content keeps the caret at the edit", function()
+    require "plugins.codefold"
+    require "core.commands.doc"
+
+    local previous_active_view = core.active_view
+    local previous_get_views = core.get_views_referencing_doc
+    for _, command_name in ipairs { "doc:delete", "doc:cut" } do
+      local view = make_docview({
+        "before\n",
+        "if condition then\n",
+        "  body()\n",
+        "end\n",
+        "after\n"
+      })
+      local doc = view.doc
+      view.cf_first_update = nil
+      view.cf_regions = { { indent = 0, start = 2, stop = 3 } }
+      view.cf_folded_regions = { 1 }
+      view.cf_folded_region_set = { [1] = true }
+      view.cf_fold_map, view.cf_unfold_map = build_maps(
+        doc.lines,
+        view.cf_regions,
+        view.cf_folded_regions
+      )
+      view.cf_hidden_lines = { [3] = true }
+      view.cf_mapping_line_count = #doc.lines
+      view.draw_background = function() error("stop after fold refresh") end
+      core.active_view = view
+      core.get_views_referencing_doc = function(target)
+        return target == doc and { view } or {}
+      end
+
+      doc:set_selection(3, 1, 4, 1)
+      test.ok(command.perform(command_name))
+      pcall(view.draw, view)
+      view:update()
+
+      test.equal(#view.cf_folded_regions, 0, command_name)
+      test.equal(select(1, doc:get_selection()), 3, command_name)
+    end
+
+    core.active_view = previous_active_view
+    core.get_views_referencing_doc = previous_get_views
+  end)
+
+  test.test("commenting folded content unfolds it before editing", function()
+    require "plugins.codefold"
+    require "plugins.language_lua"
+    require "core.commands.doc"
+
+    local previous_active_view = core.active_view
+    local previous_get_views = core.get_views_referencing_doc
+    local view = make_docview({
+      "before\n",
+      "if condition then\n",
+      "  body()\n",
+      "end\n",
+      "after\n"
+    })
+    local doc = view.doc
+    doc.syntax = syntax.get("test.lua")
+    doc.highlighter:reset()
+    view.cf_first_update = nil
+    view.cf_regions = { { indent = 0, start = 2, stop = 3 } }
+    view.cf_folded_regions = { 1 }
+    view.cf_folded_region_set = { [1] = true }
+    view.cf_fold_map, view.cf_unfold_map = build_maps(
+      doc.lines,
+      view.cf_regions,
+      view.cf_folded_regions
+    )
+    view.cf_hidden_lines = { [3] = true }
+    view.cf_mapping_line_count = #doc.lines
+    core.active_view = view
+    core.get_views_referencing_doc = function(target)
+      return target == doc and { view } or {}
+    end
+
+    doc:set_selection(2, 1, 4, 1)
+    test.ok(command.perform("doc:toggle-line-comments"))
+    view:update()
+
+    test.equal(doc.lines[2], "-- if condition then\n")
+    test.equal(doc.lines[3], "--   body()\n")
+    test.equal(#view.cf_folded_regions, 0)
+    test.equal(select(1, doc:get_selection()), 2)
+
+    core.active_view = previous_active_view
+    core.get_views_referencing_doc = previous_get_views
+  end)
+
   test.test("select all occurrences reveals folded matches and keeps search highlight", function()
     require "plugins.codefold"
     require "core.commands.findreplace"

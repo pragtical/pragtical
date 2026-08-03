@@ -1113,34 +1113,52 @@ local function normalize_caret(self)
   end
 end
 
----Unfold a collapsed region when a newline edits one of its visible bounds.
+---Unfold collapsed regions before an edit touches their hidden content.
 ---@param self core.docview
----@param line integer
----@param col integer
----@param text string
-local function unfold_newline_boundary(self, line, col, text)
-  if not text:find("\n", 1, true)
-    or not self.cf_unfold_map
-    or not self.cf_unfold_map[line]
-  then
+---@param line1 integer
+---@param col1 integer
+---@param line2 integer
+---@param col2 integer
+---@param text? string Non-nil for insertions
+local function unfold_edited_regions(self, line1, col1, line2, col2, text)
+  if not self.cf_folded_regions or #self.cf_folded_regions == 0 then
+    return
+  end
+  if text == nil and line1 == line2 and col1 == col2 then
     return
   end
 
-  local line_text = self.doc.lines[line] or ""
-  local first_token = line_text:find("%S") or #line_text
+  local region_idx = region_at_line(self, line1)
+  local folded_header = region_idx and is_folded(self, region_idx)
+  local hidden_line = self.cf_mapping_dirty
+    or self.cf_hidden_lines and self.cf_hidden_lines[line1]
+  local newline = text and text:find("\n", 1, true)
+  if line1 == line2 and not folded_header and not hidden_line and not newline then
+    return
+  end
+
+  local insertion = text ~= nil
+  local last_line = line2
+  if not insertion and line2 > line1 and col2 == 1 then
+    last_line = line2 - 1
+  end
   local folded = {}
   local changed = false
 
-  for _, region_idx in ipairs(self.cf_folded_regions or {}) do
-    local region = self.cf_regions[region_idx]
-    local edits_header = region and line == region.start
-    local edits_end = region
-      and line == region.stop + 1
-      and col <= first_token
-    if edits_header or edits_end then
+  for _, folded_idx in ipairs(self.cf_folded_regions) do
+    local region = self.cf_regions[folded_idx]
+    local intersects = region
+      and line1 <= region.stop
+      and last_line >= region.start
+    if not intersects and newline and region and line1 == region.stop + 1 then
+      local line_text = self.doc.lines[line1] or ""
+      local first_token = line_text:find("%S") or #line_text
+      intersects = col1 <= first_token
+    end
+    if intersects then
       changed = true
     else
-      folded[#folded + 1] = region_idx
+      folded[#folded + 1] = folded_idx
     end
   end
 
@@ -1354,7 +1372,7 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
   local line_count = #self.lines
   for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
-      unfold_newline_boundary(view, line, col, text)
+      unfold_edited_regions(view, line, col, line, col, text)
     end
   end
 
@@ -1375,6 +1393,11 @@ local doc_raw_remove = Doc.raw_remove
 function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
   local views = core.get_views_referencing_doc(self)
   local line_count = #self.lines
+  for _, view in ipairs(views) do
+    if codefold_enabled_for_view(view) and view.cf_regions then
+      unfold_edited_regions(view, line1, col1, line2, col2)
+    end
+  end
   local result = doc_raw_remove(self, line1, col1, line2, col2, undo_stack, time)
   for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
