@@ -1440,6 +1440,54 @@ test.describe("codefold - virtual line mapping", function()
     core.get_views_referencing_doc = previous_get_views
   end)
 
+  test.test("inactive split views do not normalize the shared caret", function()
+    require "plugins.codefold"
+
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_active_view = core.active_view
+    config.plugins.codefold.enabled = true
+
+    local doc = Doc(nil, nil, true)
+    doc.lines = {
+      "before\n",
+      "if condition then\n",
+      "  body()\n",
+      "end\n",
+      "after\n"
+    }
+    doc:reset_syntax()
+
+    local expanded = DocView(doc)
+    expanded.cf_first_update = nil
+    expanded.cf_invalidated = nil
+
+    local collapsed = DocView(doc)
+    collapsed.cf_first_update = nil
+    collapsed.cf_invalidated = nil
+    collapsed.cf_regions = { { indent = 0, start = 2, stop = 3 } }
+    collapsed.cf_folded_regions = { 1 }
+    collapsed.cf_folded_region_set = { [1] = true }
+    collapsed.cf_fold_map, collapsed.cf_unfold_map = build_maps(
+      doc.lines,
+      collapsed.cf_regions,
+      collapsed.cf_folded_regions
+    )
+    collapsed.cf_hidden_lines = { [3] = true }
+    collapsed.cf_mapping_line_count = #doc.lines
+
+    doc:set_selection(3, 3)
+    core.active_view = expanded
+    collapsed:update()
+    test.equal(select(1, doc:get_selection()), 3)
+
+    core.active_view = collapsed
+    collapsed:update()
+    test.equal(select(1, doc:get_selection()), 2)
+
+    config.plugins.codefold.enabled = previous_enabled
+    core.active_view = previous_active_view
+  end)
+
   test.test("newline unfolds collapsed headers and ending lines", function()
     require "plugins.codefold"
     require "core.commands.doc"

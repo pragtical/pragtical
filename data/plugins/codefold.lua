@@ -1092,6 +1092,7 @@ end
 ---Safe to call when maps are not yet built (during async recalculation).
 ---@param self core.docview
 local function normalize_caret(self)
+  if core.active_view ~= self then return end
   if not self.cf_folded_regions or #self.cf_folded_regions == 0 then
     return
   end
