@@ -987,8 +987,9 @@ test.describe("codefold - virtual line mapping", function()
 
     local previous = keymap.reverse_map["code-folding:previous-fold"] or {}
     local next = keymap.reverse_map["code-folding:next-fold"] or {}
-    test.contains(previous, "shift+alt+pageup")
-    test.contains(next, "shift+alt+pagedown")
+    local modifiers = PLATFORM == "Mac OS X" and "option+shift" or "shift+alt"
+    test.contains(previous, modifiers .. "+pageup")
+    test.contains(next, modifiers .. "+pagedown")
   end)
 
   test.test("fold gutter marker visibility and color reflect state", function()
