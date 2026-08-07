@@ -1612,6 +1612,57 @@ test.describe("codefold - virtual line mapping", function()
     core.get_views_referencing_doc = previous_get_views
   end)
 
+  test.test("backspace unfolds a fold ending", function()
+    require "plugins.codefold"
+    require "core.commands.doc"
+
+    local previous_active_view = core.active_view
+    local previous_get_views = core.get_views_referencing_doc
+    local previous_hide_tail = config.plugins.codefold.hide_tail_on_fold
+    for _, hide_tail in ipairs { false, true } do
+      config.plugins.codefold.hide_tail_on_fold = hide_tail
+      local view = make_docview({
+        "if condition then\n",
+        "  body()\n",
+        "end\n",
+        "after\n"
+      })
+      local doc = view.doc
+      view.cf_first_update = nil
+      view.cf_regions = { { indent = 0, start = 1, stop = 2 } }
+      view.cf_folded_regions = { 1 }
+      view.cf_folded_region_set = { [1] = true }
+      view.cf_fold_map = hide_tail and { 1, 4 } or { 1, 3, 4 }
+      view.cf_unfold_map = hide_tail
+        and { 1, nil, nil, 2 }
+        or { 1, nil, 2, 3 }
+      view.cf_hidden_lines = hide_tail
+        and { [2] = true, [3] = true }
+        or { [2] = true }
+      view.cf_mapping_line_count = #doc.lines
+      view.draw_background = function() error("stop after fold refresh") end
+      core.active_view = view
+      core.get_views_referencing_doc = function(target)
+        return target == doc and { view } or {}
+      end
+      doc:set_selection(4, 1)
+
+      test.ok(command.perform("doc:backspace"))
+      pcall(view.draw, view)
+      view:update()
+
+      local line, col = doc:get_selection()
+      test.equal(#view.cf_folded_regions, 0)
+      test.equal(line, 3)
+      test.equal(col, 4)
+      test.equal(doc.lines[3], "endafter\n")
+    end
+
+    config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
+    core.active_view = previous_active_view
+    core.get_views_referencing_doc = previous_get_views
+  end)
+
   test.test("commenting folded content unfolds it before editing", function()
     require "plugins.codefold"
     require "plugins.language_lua"
@@ -2007,6 +2058,45 @@ test.describe("codefold - translate functions", function()
     local nl, nc = translate.next_line(doc, 2, 1, dv)
     test.equal(nl, 5)
     test.equal(nc, 1)
+  end)
+
+  test.test("visible char movement crosses hidden lines in both directions", function()
+    local dv, doc = make_translate_view(
+      { "header\n", "hidden\n", "tail\n" },
+      { { start = 1, stop = 2 } },
+      { 1 }
+    )
+    local previous_active_view = core.active_view
+    core.active_view = dv
+    doc:set_selection(1, #doc.lines[1])
+
+    test.ok(command.perform("doc:move-to-next-char"))
+    local line, col = doc:get_selection()
+    test.equal(line, 3)
+    test.equal(col, 1)
+
+    doc:set_selection(1, #doc.lines[1])
+    test.ok(command.perform("doc:select-to-next-char"))
+    local line1, col1, line2, col2 = doc:get_selection()
+    test.equal(line1, 3)
+    test.equal(col1, 1)
+    test.equal(line2, 1)
+    test.equal(col2, #doc.lines[1])
+
+    test.ok(command.perform("doc:select-to-previous-char"))
+    line1, col1, line2, col2 = doc:get_selection()
+    test.equal(line1, 1)
+    test.equal(col1, #doc.lines[1])
+    test.equal(line2, 1)
+    test.equal(col2, #doc.lines[1])
+
+    doc:set_selection(3, 1)
+    test.ok(command.perform("doc:move-to-previous-char"))
+    line, col = doc:get_selection()
+    test.equal(line, 1)
+    test.equal(col, #doc.lines[1])
+
+    core.active_view = previous_active_view
   end)
 
   test.test("previous_line skips hidden lines", function()

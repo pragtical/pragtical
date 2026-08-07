@@ -1,4 +1,4 @@
--- mod-version:3
+-- mod-version:3 --priority:11
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
@@ -7,6 +7,7 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
+local translate = require "core.doc.translate"
 local tokenizer = require "core.tokenizer"
 
 ---Configuration for code folding plugin.
@@ -1148,8 +1149,16 @@ local function unfold_edited_regions(self, line1, col1, line2, col2, text)
 
   for _, folded_idx in ipairs(self.cf_folded_regions) do
     local region = self.cf_regions[folded_idx]
+    local region_stop = region and region.stop
+    if not insertion
+      and region_stop
+      and region.hide_tail ~= false
+      and region_stop < #self.doc.lines
+    then
+      region_stop = region_stop + 1
+    end
     local intersects = region
-      and line1 <= region.stop
+      and line1 <= region_stop
       and last_line >= region.start
     if not intersects and newline and region and line1 == region.stop + 1 then
       local line_text = self.doc.lines[line1] or ""
@@ -1415,6 +1424,73 @@ end
 -- Commands
 ---------------------------------------------------------------------
 
+---@param doc core.doc
+---@param line integer
+---@param col integer
+---@param view core.docview
+---@param direction -1|1
+---@return integer line
+---@return integer col
+local function visible_char(doc, line, col, view, direction)
+  local move = direction < 0 and translate.previous_char or translate.next_char
+  local target_line, target_col = move(doc, line, col)
+  if not codefold_enabled_for_view(view)
+    or not view.cf_folded_regions
+    or #view.cf_folded_regions == 0
+    or target_line == line
+    or view:is_line_visible(target_line)
+  then
+    return target_line, target_col
+  end
+
+  local row = view:visual_row_from_position(line, col)
+  local target_row = row + direction
+  if target_row < 1 or target_row > view:visual_line_count() then
+    return line, col
+  end
+  local visible_line, visible_col = view:visual_position_from_row(target_row)
+  if direction < 0 then
+    visible_col = #doc:get_utf8_line(visible_line)
+  end
+  return visible_line, visible_col
+end
+
+local function previous_visible_char(doc, line, col, view)
+  return visible_char(doc, line, col, view, -1)
+end
+
+local function next_visible_char(doc, line, col, view)
+  return visible_char(doc, line, col, view, 1)
+end
+
+---@param view core.docview
+---@param direction -1|1
+local function move_to_visible_char(view, direction)
+  local move = direction < 0 and previous_visible_char or next_visible_char
+  for idx, line1, col1, line2, col2 in view.doc:get_selections(true) do
+    if line1 ~= line2 or col1 ~= col2 then
+      if direction < 0 then
+        view.doc:set_selections(idx, line1, col1)
+      else
+        view.doc:set_selections(idx, line2, col2)
+      end
+    else
+      view.doc:move_to_cursor(idx, move, view)
+    end
+  end
+  view.doc:merge_cursors()
+end
+
+---@param view core.docview
+---@param direction -1|1
+local function select_to_visible_char(view, direction)
+  local move = direction < 0 and previous_visible_char or next_visible_char
+  view.doc:select_to(move, view)
+  if PLATFORM ~= "Windows" then
+    system.set_primary_selection(view.doc:get_selection_text())
+  end
+end
+
 command.add(nil, {
   ["code-folding:toggle"] = function()
     config.plugins.codefold.enabled = not config.plugins.codefold.enabled
@@ -1470,6 +1546,21 @@ command.add(nil, {
     end
     unfold_all(view)
     save_fold_state(view.doc, view.cf_regions, view.cf_folded_regions)
+  end,
+})
+
+command.add("core.docview", {
+  ["doc:move-to-previous-char"] = function(view)
+    move_to_visible_char(view, -1)
+  end,
+  ["doc:move-to-next-char"] = function(view)
+    move_to_visible_char(view, 1)
+  end,
+  ["doc:select-to-previous-char"] = function(view)
+    select_to_visible_char(view, -1)
+  end,
+  ["doc:select-to-next-char"] = function(view)
+    select_to_visible_char(view, 1)
   end,
 })
 
