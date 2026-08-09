@@ -1,4 +1,4 @@
--- mod-version:3
+-- mod-version:3 --priority:11
 local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
@@ -7,6 +7,7 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local DocView = require "core.docview"
 local Doc = require "core.doc"
+local translate = require "core.doc.translate"
 local tokenizer = require "core.tokenizer"
 
 ---Configuration for code folding plugin.
@@ -807,7 +808,29 @@ local function rebuild_mappings(self)
     self.cf_folded_regions or {}
   )
   self.cf_mapping_line_count = #self.doc.lines
+  self.cf_mapping_dirty = nil
   self:invalidate_visual_lines()
+end
+
+---Shift regions below a multiline edit until fold detection catches up.
+---@param self core.docview
+---@param line integer
+---@param line_delta integer
+local function shift_regions_after(self, line, line_delta)
+  if line_delta == 0 then return end
+
+  local shifted = false
+  for _, region in ipairs(self.cf_regions or {}) do
+    if region.start > line then
+      region.start = region.start + line_delta
+      region.stop = region.stop + line_delta
+      shifted = true
+    end
+  end
+  if shifted then
+    set_regions(self, self.cf_regions)
+  end
+  self.cf_mapping_dirty = #self.cf_folded_regions > 0
 end
 
 ---Given a real line that may be hidden, find the nearest visible ancestor.
@@ -1007,6 +1030,38 @@ local function region_containing(self, line)
   return best
 end
 
+---Move the caret to the next or previous visible fold region.
+---@param self core.docview
+---@param direction integer
+local function navigate_region(self, direction)
+  if self.cf_mapping_dirty then
+    rebuild_mappings(self)
+  end
+
+  local line = self.doc:get_selection()
+  local hidden = self.cf_hidden_lines or build_hidden_set(self)
+  local first, last, target
+  for _, region in ipairs(self.cf_regions or {}) do
+    if not hidden[region.start] then
+      first = first or region
+      last = region
+      if direction > 0 then
+        if not target and region.start > line then
+          target = region
+        end
+      elseif region.start < line then
+        target = region
+      end
+    end
+  end
+
+  target = target or (direction > 0 and first or last)
+  if target then
+    self.doc:set_selection(target.start, 1)
+    self:scroll_to_line(target.start, true)
+  end
+end
+
 ---Toggle a fold region.
 ---@param self core.docview
 ---@param region_idx integer
@@ -1038,7 +1093,13 @@ end
 ---Safe to call when maps are not yet built (during async recalculation).
 ---@param self core.docview
 local function normalize_caret(self)
+  if core.active_view ~= self then return end
   if not self.cf_folded_regions or #self.cf_folded_regions == 0 then
+    return
+  end
+  -- Document edits shift line numbers before the debounced fold scan can
+  -- rebuild its mappings. Never move a valid caret using those stale indices.
+  if self.cf_mapping_line_count ~= #self.doc.lines then
     return
   end
   if not self.cf_unfold_map or #self.cf_unfold_map == 0 then
@@ -1051,6 +1112,71 @@ local function normalize_caret(self)
       line2 = visible_ancestor(self, line2)
     end
     self.doc:set_selection(ancestor, col1, line2, col2)
+  end
+end
+
+---Unfold collapsed regions before an edit touches their hidden content.
+---@param self core.docview
+---@param line1 integer
+---@param col1 integer
+---@param line2 integer
+---@param col2 integer
+---@param text? string Non-nil for insertions
+local function unfold_edited_regions(self, line1, col1, line2, col2, text)
+  if not self.cf_folded_regions or #self.cf_folded_regions == 0 then
+    return
+  end
+  if text == nil and line1 == line2 and col1 == col2 then
+    return
+  end
+
+  local region_idx = region_at_line(self, line1)
+  local folded_header = region_idx and is_folded(self, region_idx)
+  local hidden_line = self.cf_mapping_dirty
+    or self.cf_hidden_lines and self.cf_hidden_lines[line1]
+  local newline = text and text:find("\n", 1, true)
+  if line1 == line2 and not folded_header and not hidden_line and not newline then
+    return
+  end
+
+  local insertion = text ~= nil
+  local last_line = line2
+  if not insertion and line2 > line1 and col2 == 1 then
+    last_line = line2 - 1
+  end
+  local folded = {}
+  local changed = false
+
+  for _, folded_idx in ipairs(self.cf_folded_regions) do
+    local region = self.cf_regions[folded_idx]
+    local region_stop = region and region.stop
+    if not insertion
+      and region_stop
+      and region.hide_tail ~= false
+      and region_stop < #self.doc.lines
+    then
+      region_stop = region_stop + 1
+    end
+    local intersects = region
+      and line1 <= region_stop
+      and last_line >= region.start
+    if not intersects and newline and region and line1 == region.stop + 1 then
+      local line_text = self.doc.lines[line1] or ""
+      local first_token = line_text:find("%S") or #line_text
+      intersects = col1 <= first_token
+    end
+    if intersects then
+      changed = true
+    else
+      folded[#folded + 1] = folded_idx
+    end
+  end
+
+  if changed then
+    set_folded_regions(self, folded)
+    rebuild_mappings(self)
+    save_fold_state(self.doc, self.cf_regions, self.cf_folded_regions)
+    core.redraw = true
   end
 end
 
@@ -1129,6 +1255,14 @@ function DocView:update(...)
   end
 
   normalize_caret(self)
+end
+
+local docview_draw = DocView.draw
+function DocView:draw(...)
+  if self.cf_mapping_dirty and codefold_enabled_for_view(self) then
+    rebuild_mappings(self)
+  end
+  return docview_draw(self, ...)
 end
 
 local docview_on_scale_change = DocView.on_scale_change
@@ -1244,10 +1378,21 @@ end
 
 local doc_raw_insert = Doc.raw_insert
 function Doc:raw_insert(line, col, text, undo_stack, time)
+  local views = core.get_views_referencing_doc(self)
+  local line_count = #self.lines
+  for _, view in ipairs(views) do
+    if codefold_enabled_for_view(view) and view.cf_regions then
+      unfold_edited_regions(view, line, col, line, col, text)
+    end
+  end
+
   local result = doc_raw_insert(self, line, col, text, undo_stack, time)
   -- Invalidate fold state on all views of this doc
-  for _, view in ipairs(core.get_views_referencing_doc(self)) do
+  for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
+      shift_regions_after(
+        view, col == 1 and line - 1 or line, #self.lines - line_count
+      )
       schedule_recalculation(view, line)
     end
   end
@@ -1256,9 +1401,19 @@ end
 
 local doc_raw_remove = Doc.raw_remove
 function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
-  local result = doc_raw_remove(self, line1, col1, line2, col2, undo_stack, time)
-  for _, view in ipairs(core.get_views_referencing_doc(self)) do
+  local views = core.get_views_referencing_doc(self)
+  local line_count = #self.lines
+  for _, view in ipairs(views) do
     if codefold_enabled_for_view(view) and view.cf_regions then
+      unfold_edited_regions(view, line1, col1, line2, col2)
+    end
+  end
+  local result = doc_raw_remove(self, line1, col1, line2, col2, undo_stack, time)
+  for _, view in ipairs(views) do
+    if codefold_enabled_for_view(view) and view.cf_regions then
+      shift_regions_after(
+        view, col2 == 1 and line2 - 1 or line2, #self.lines - line_count
+      )
       schedule_recalculation(view, line1)
     end
   end
@@ -1268,6 +1423,73 @@ end
 ---------------------------------------------------------------------
 -- Commands
 ---------------------------------------------------------------------
+
+---@param doc core.doc
+---@param line integer
+---@param col integer
+---@param view core.docview
+---@param direction -1|1
+---@return integer line
+---@return integer col
+local function visible_char(doc, line, col, view, direction)
+  local move = direction < 0 and translate.previous_char or translate.next_char
+  local target_line, target_col = move(doc, line, col)
+  if not codefold_enabled_for_view(view)
+    or not view.cf_folded_regions
+    or #view.cf_folded_regions == 0
+    or target_line == line
+    or view:is_line_visible(target_line)
+  then
+    return target_line, target_col
+  end
+
+  local row = view:visual_row_from_position(line, col)
+  local target_row = row + direction
+  if target_row < 1 or target_row > view:visual_line_count() then
+    return line, col
+  end
+  local visible_line, visible_col = view:visual_position_from_row(target_row)
+  if direction < 0 then
+    visible_col = #doc:get_utf8_line(visible_line)
+  end
+  return visible_line, visible_col
+end
+
+local function previous_visible_char(doc, line, col, view)
+  return visible_char(doc, line, col, view, -1)
+end
+
+local function next_visible_char(doc, line, col, view)
+  return visible_char(doc, line, col, view, 1)
+end
+
+---@param view core.docview
+---@param direction -1|1
+local function move_to_visible_char(view, direction)
+  local move = direction < 0 and previous_visible_char or next_visible_char
+  for idx, line1, col1, line2, col2 in view.doc:get_selections(true) do
+    if line1 ~= line2 or col1 ~= col2 then
+      if direction < 0 then
+        view.doc:set_selections(idx, line1, col1)
+      else
+        view.doc:set_selections(idx, line2, col2)
+      end
+    else
+      view.doc:move_to_cursor(idx, move, view)
+    end
+  end
+  view.doc:merge_cursors()
+end
+
+---@param view core.docview
+---@param direction -1|1
+local function select_to_visible_char(view, direction)
+  local move = direction < 0 and previous_visible_char or next_visible_char
+  view.doc:select_to(move, view)
+  if PLATFORM ~= "Windows" then
+    system.set_primary_selection(view.doc:get_selection_text())
+  end
+end
 
 command.add(nil, {
   ["code-folding:toggle"] = function()
@@ -1292,6 +1514,22 @@ command.add(nil, {
     end
   end,
 
+  ["code-folding:next-fold"] = function()
+    local view = core.active_view
+    if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
+      return
+    end
+    navigate_region(view, 1)
+  end,
+
+  ["code-folding:previous-fold"] = function()
+    local view = core.active_view
+    if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
+      return
+    end
+    navigate_region(view, -1)
+  end,
+
   ["code-folding:fold-all"] = function()
     local view = core.active_view
     if not view or not codefold_enabled_for_view(view) or not view.cf_regions then
@@ -1311,6 +1549,21 @@ command.add(nil, {
   end,
 })
 
+command.add("core.docview", {
+  ["doc:move-to-previous-char"] = function(view)
+    move_to_visible_char(view, -1)
+  end,
+  ["doc:move-to-next-char"] = function(view)
+    move_to_visible_char(view, 1)
+  end,
+  ["doc:select-to-previous-char"] = function(view)
+    select_to_visible_char(view, -1)
+  end,
+  ["doc:select-to-next-char"] = function(view)
+    select_to_visible_char(view, 1)
+  end,
+})
+
 ---------------------------------------------------------------------
 -- Keybindings
 ---------------------------------------------------------------------
@@ -1319,7 +1572,9 @@ keymap.add {
   ["alt+shift+left"] = "code-folding:toggle-fold",
   ["alt+shift+right"] = "code-folding:toggle-fold",
   ["alt+shift+up"] = "code-folding:fold-all",
-  ["alt+shift+down"] = "code-folding:unfold-all"
+  ["alt+shift+down"] = "code-folding:unfold-all",
+  ["alt+shift+pageup"] = "code-folding:previous-fold",
+  ["alt+shift+pagedown"] = "code-folding:next-fold"
 }
 
 codefold._test = {
