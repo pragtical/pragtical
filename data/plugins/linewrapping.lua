@@ -439,6 +439,12 @@ function get_line_col_from_index_and_x(docview, idx, x)
   local doc = docview.doc
   local line, col = get_idx_line_col(docview, idx)
   if idx < 1 then return 1, 1 end
+  local next_line, next_col = get_idx_line_col(docview, idx + 1)
+  local row_end_col = #doc.lines[line]
+  if next_line == line then
+    local _, previous_col = translate.previous_char(doc, line, next_col)
+    row_end_col = previous_col
+  end
   local xoffset, last_i, i = (col ~= 1 and docview.wrapped_line_offsets[line] or 0), col, 1
   if x < xoffset then return line, col end
   local default_font = docview:get_font()
@@ -448,6 +454,7 @@ function get_line_col_from_index_and_x(docview, idx, x)
     local font, w = get_font(default_font, type, indent_size), 0
     for char in common.utf8_chars(text) do
       if i >= col then
+        if i > row_end_col then return line, row_end_col end
         if xoffset >= x then
           return line, (xoffset - x > (w / 2) and last_i or i)
         end
@@ -458,7 +465,7 @@ function get_line_col_from_index_and_x(docview, idx, x)
       i = i + #char
     end
   end
-  return line, #doc.lines[line]
+  return line, row_end_col
 end
 
 
