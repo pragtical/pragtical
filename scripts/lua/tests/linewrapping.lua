@@ -529,4 +529,35 @@ test.describe("linewrapping", function()
     config.plugins.codefold.enabled = previous_codefold
     config.plugins.codefold.hide_tail_on_fold = previous_hide_tail
   end)
+
+  test.test("vertical movement stays within each target wrapped row", function()
+    local previous_mode = config.plugins.linewrapping.mode
+    config.plugins.linewrapping.mode = "word"
+
+    local view = make_view(
+      "short words followed by substantiallylongerwords and more short words\n"
+    )
+    local font = view:get_font()
+    local width = font:get_width("short words")
+    LineWrapping.reconstruct_breaks(view, font, width)
+
+    local count = view:visual_line_count()
+    test.ok(count > 2)
+    local line = view:visual_position_from_row(1)
+    local col = view:get_visual_line_col_from_x(1, width * 2)
+    test.equal(view:visual_row_from_position(line, col), 1)
+
+    view.last_x_offset = {}
+    for expected_row = 2, count do
+      line, col = DocView.translate.next_line(view.doc, line, col, view)
+      test.equal(view:visual_row_from_position(line, col), expected_row)
+    end
+
+    for expected_row = count - 1, 1, -1 do
+      line, col = DocView.translate.previous_line(view.doc, line, col, view)
+      test.equal(view:visual_row_from_position(line, col), expected_row)
+    end
+
+    config.plugins.linewrapping.mode = previous_mode
+  end)
 end)
