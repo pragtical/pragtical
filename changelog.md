@@ -1,5 +1,28 @@
 # Changes Log
 
+## [3.12.5] - 2026-08-20
+
+### Enhancements
+
+* Default missing syntax symbols
+  ([#583](https://github.com/pragtical/pragtical/pull/583))
+
+### Fixes
+
+* Fix newline edits at folded boundaries
+  ([#577](https://github.com/pragtical/pragtical/pull/577))
+
+* Fix vertical movement on wrapped lines
+  ([#581](https://github.com/pragtical/pragtical/pull/581))
+
+### Build System
+
+* Fix SDL3 probes under CMake 4
+  ([#578](https://github.com/pragtical/pragtical/pull/578))
+
+* Update SDL3 to v3.4.14
+  ([#582](https://github.com/pragtical/pragtical/pull/582))
+
 ## [3.12.4] - 2026-06-26
 
 ### New Features
@@ -3627,6 +3650,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.12.5]: https://github.com/pragtical/pragtical/releases/tag/v3.12.5
 [3.12.4]: https://github.com/pragtical/pragtical/releases/tag/v3.12.4
 [3.12.3]: https://github.com/pragtical/pragtical/releases/tag/v3.12.3
 [3.12.2]: https://github.com/pragtical/pragtical/releases/tag/v3.12.2
