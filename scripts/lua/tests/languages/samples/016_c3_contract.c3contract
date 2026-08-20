@@ -1,0 +1,6 @@
+Contract notes are comments by default.
+@require value > 0
+@ensure return? >= value
+@param value input value
+@return? computed value
+@deprecated use checked_add instead
