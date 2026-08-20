@@ -76,6 +76,7 @@ end
 ---@param t core.syntax.syntax Syntax definition to register.
 function syntax.add(t)
   if type(t.space_handling) ~= "boolean" then t.space_handling = true end
+  if type(t.symbols) ~= "table" then t.symbols = {} end
 
   if t.patterns then
     -- do a sanity check on the patterns / regex to make sure they are actually correct
