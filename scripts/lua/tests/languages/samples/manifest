@@ -14,6 +14,8 @@ return {
   { path = "013_buzz.buzz", name = "Buzz", files = "%.buzz$" },
   { path = "014_c.c", name = "C", files = "%.c$" },
   { path = "015_cel7.c7", name = "cel7", files = "%.c7$" },
+  { path = "016_c3.c3", name = "C3", files = "%.c3$|%.c3i$|%.c3t$" },
+  { path = "016_c3_contract.c3contract", name = "C3 Contract", files = "%.c3contract$" },
   { path = "Caddyfile", name = "Caddyfile", files = "/Caddyfile$|^Caddyfile$" },
   { path = "017_carbon.carbon", name = "Carbon", files = "%.carbon$" },
   { path = "018_clojure.clj", name = "Clojure", files = "%.clj$|%.cljs$|%.clc$|%.edn$" },
