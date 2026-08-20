@@ -1,7 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include "renderer/backend.h"
 #include "renderer/window.h"
 
@@ -29,6 +28,7 @@ RenWindow* renwin_create(SDL_Window *win) {
       exit(1);
     }
   }
+  renwin_update_scale(window_renderer);
   renwin_clip_to_surface(window_renderer);
 
   return window_renderer;
@@ -67,13 +67,18 @@ void renwin_resize_surface(UNUSED RenWindow *ren) {
 }
 
 void renwin_update_scale(RenWindow *ren) {
-  if (strcmp(ren->cache.backend->name, "surface") != 0)
+  int window_w, window_h;
+  if (!SDL_GetWindowSize(ren->window, &window_w, &window_h) ||
+      window_w < 1 || window_h < 1) {
+    ren->scale_x = ren->scale_y = 1;
     return;
-  SDL_Surface *surface = SDL_GetWindowSurface(ren->window);
-  int window_w = surface->w, window_h = surface->h;
-  SDL_GetWindowSize(ren->window, &window_w, &window_h);
-  ren->scale_x = (float)surface->w / window_w;
-  ren->scale_y = (float)surface->h / window_h;
+  }
+
+  RenSurface rs = rencache_get_surface(&ren->cache);
+  float surface_scale_x = rs.scale_x > 0 ? rs.scale_x : 1;
+  float surface_scale_y = rs.scale_y > 0 ? rs.scale_y : 1;
+  ren->scale_x = ((float) rs.surface->w / surface_scale_x) / window_w;
+  ren->scale_y = ((float) rs.surface->h / surface_scale_y) / window_h;
 }
 
 void renwin_show_window(RenWindow *ren) {

@@ -692,22 +692,6 @@ static void gpu_mark_canvas_surface_modified(GpuCanvasData *data, RenRect *rects
     gpu_mark_bridge_full_upload(&data->frame);
 }
 
-static void gpu_query_surface_scale(RenWindow *ren, float *scale_x, float *scale_y) {
-  int w_pixels, h_pixels;
-  int w_points, h_points;
-  SDL_GetWindowSizeInPixels(ren->window, &w_pixels, &h_pixels);
-  SDL_GetWindowSize(ren->window, &w_points, &h_points);
-  if (w_points < 1) w_points = 1;
-  if (h_points < 1) h_points = 1;
-
-  float scaleX = (float) w_pixels / (float) w_points;
-  float scaleY = (float) h_pixels / (float) h_points;
-  if (scale_x)
-    *scale_x = round(scaleX * 100) / 100;
-  if (scale_y)
-    *scale_y = round(scaleY * 100) / 100;
-}
-
 static void gpu_create_surface(RenWindow *ren) {
   GpuWindowData *data = gpu_window_data(ren);
   gpu_destroy_surface(data);
@@ -722,8 +706,8 @@ static void gpu_create_surface(RenWindow *ren) {
     gpu_abort("Error creating SDL GPU compatibility surface");
 
   ren->cache.rensurface.surface = data->frame.surface;
-  gpu_query_surface_scale(ren, &ren->cache.rensurface.scale_x, &ren->cache.rensurface.scale_y);
-  ren->scale_x = ren->scale_y = 1;
+  ren->cache.rensurface.scale_x = 1;
+  ren->cache.rensurface.scale_y = 1;
   rencache_invalidate(&ren->cache);
   gpu_mark_bridge_full_upload(&data->frame);
 }
@@ -5030,13 +5014,9 @@ static void gpu_resize_window(RenWindow *ren) {
   if (w < 1) w = 1;
   if (h < 1) h = 1;
 
-  float scale_x, scale_y;
-  gpu_query_surface_scale(ren, &scale_x, &scale_y);
   if (!data->frame.surface ||
       data->frame.surface->w != w ||
-      data->frame.surface->h != h ||
-      ren->cache.rensurface.scale_x != scale_x ||
-      ren->cache.rensurface.scale_y != scale_y) {
+      data->frame.surface->h != h) {
     gpu_create_surface(ren);
     renwin_clip_to_surface(ren);
   }

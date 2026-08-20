@@ -166,10 +166,22 @@ static void push_win32_error(lua_State *L, DWORD rc) {
 #endif
 
 
+static bool get_touch_window_size(SDL_WindowID window_id, float *w, float *h) {
+  RenWindow *window_renderer = ren_find_window_from_id(window_id);
+  int window_w, window_h;
+  if (!window_renderer ||
+      !SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &window_w, &window_h))
+    return false;
+
+  *w = window_w * window_renderer->scale_x;
+  *h = window_h * window_renderer->scale_y;
+  return true;
+}
+
+
 static int f_poll_event(lua_State *L) {
   char buf[16];
   float mx, my;
-  int w, h;
   SDL_Event e;
 
 top:
@@ -336,8 +348,9 @@ top:
 
     case SDL_EVENT_FINGER_DOWN:
       {
-        RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
-        SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &w, &h);
+        float w, h;
+        if (!get_touch_window_size(e.tfinger.windowID, &w, &h))
+          goto top;
 
         lua_pushstring(L, "touchpressed");
         lua_pushnumber(L, e.tfinger.x * w);
@@ -348,8 +361,9 @@ top:
 
     case SDL_EVENT_FINGER_UP:
       {
-        RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
-        SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &w, &h);
+        float w, h;
+        if (!get_touch_window_size(e.tfinger.windowID, &w, &h))
+          goto top;
 
         lua_pushstring(L, "touchreleased");
         lua_pushnumber(L, e.tfinger.x * w);
@@ -361,8 +375,9 @@ top:
     case SDL_EVENT_FINGER_MOTION:
       {
         /* Finger-motion events are already coalesced by system_push_event(). */
-        RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
-        SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &w, &h);
+        float w, h;
+        if (!get_touch_window_size(e.tfinger.windowID, &w, &h))
+          goto top;
 
         lua_pushstring(L, "touchmoved");
         lua_pushnumber(L, e.tfinger.x * w);
@@ -618,11 +633,13 @@ static int f_get_window_mode(lua_State *L) {
 
 static int f_set_text_input_rect(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  float scale_x = window_renderer->scale_x > 0 ? window_renderer->scale_x : 1;
+  float scale_y = window_renderer->scale_y > 0 ? window_renderer->scale_y : 1;
   SDL_Rect rect;
-  rect.x = luaL_checknumber(L, 2);
-  rect.y = luaL_checknumber(L, 3);
-  rect.w = luaL_checknumber(L, 4);
-  rect.h = luaL_checknumber(L, 5);
+  rect.x = floor(luaL_checknumber(L, 2) / scale_x);
+  rect.y = floor(luaL_checknumber(L, 3) / scale_y);
+  rect.w = ceil(luaL_checknumber(L, 4) / scale_x);
+  rect.h = ceil(luaL_checknumber(L, 5) / scale_y);
   SDL_SetTextInputArea(renwin_get_sdl_window(window_renderer), &rect, 0);
   return 0;
 }
