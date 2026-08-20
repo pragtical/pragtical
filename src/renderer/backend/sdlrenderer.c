@@ -65,8 +65,6 @@ static void sdlrenderer_create_surface_and_texture(RenWindow *ren, int w, int h)
     exit(1);
   }
 
-  ren->cache.rensurface.scale_x = 1;
-  ren->cache.rensurface.scale_y = 1;
   sdlrenderer_setup_texture(ren, w, h);
 }
 
@@ -103,8 +101,6 @@ static void sdlrenderer_destroy_window(RenWindow *ren) {
 
 static void sdlrenderer_init_canvas(RenCache *canvas, SDL_Surface *surface) {
   canvas->rensurface.surface = surface;
-  canvas->rensurface.scale_x = 1;
-  canvas->rensurface.scale_y = 1;
 }
 
 static void sdlrenderer_destroy_canvas(RenCache *canvas) {

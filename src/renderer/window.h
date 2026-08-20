@@ -26,6 +26,7 @@ void renwin_clip_to_surface(RenWindow *ren);
 void renwin_set_clip_rect(RenWindow *ren, RenRect rect);
 void renwin_resize_surface(RenWindow *ren);
 void renwin_update_scale(RenWindow *ren);
+void renwin_convert_coordinates(RenWindow *ren, float *x, float *y, bool to_renderer);
 void renwin_show_window(RenWindow *ren);
 void renwin_update_rects(RenWindow *ren, RenRect *rects, int count);
 void renwin_free(RenWindow *ren);

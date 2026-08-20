@@ -44,21 +44,9 @@ void renwin_clip_to_surface(RenWindow *ren) {
 }
 
 
-static RenRect scaled_rect(const RenRect rect, const RenSurface *rs) {
-  float scale_x = rs->scale_x;
-  float scale_y = rs->scale_y;
-  return (RenRect) {
-    rect.x * scale_x,
-    rect.y * scale_y,
-    rect.width * scale_x,
-    rect.height * scale_y
-  };
-}
-
 void renwin_set_clip_rect(RenWindow *ren, RenRect rect) {
   RenSurface rs = rencache_get_surface(&ren->cache);
-  RenRect sr = scaled_rect(rect, &rs);
-  SDL_SetSurfaceClipRect(rs.surface, &(SDL_Rect){.x = sr.x, .y = sr.y, .w = sr.width, .h = sr.height});
+  SDL_SetSurfaceClipRect(rs.surface, &(SDL_Rect){.x = rect.x, .y = rect.y, .w = rect.width, .h = rect.height});
 }
 
 
@@ -75,10 +63,15 @@ void renwin_update_scale(RenWindow *ren) {
   }
 
   RenSurface rs = rencache_get_surface(&ren->cache);
-  float surface_scale_x = rs.scale_x > 0 ? rs.scale_x : 1;
-  float surface_scale_y = rs.scale_y > 0 ? rs.scale_y : 1;
-  ren->scale_x = ((float) rs.surface->w / surface_scale_x) / window_w;
-  ren->scale_y = ((float) rs.surface->h / surface_scale_y) / window_h;
+  ren->scale_x = (float) rs.surface->w / window_w;
+  ren->scale_y = (float) rs.surface->h / window_h;
+}
+
+void renwin_convert_coordinates(RenWindow *ren, float *x, float *y, bool to_renderer) {
+  if (x)
+    *x = to_renderer ? *x * ren->scale_x : *x / ren->scale_x;
+  if (y)
+    *y = to_renderer ? *y * ren->scale_y : *y / ren->scale_y;
 }
 
 void renwin_show_window(RenWindow *ren) {

@@ -27,7 +27,7 @@ typedef struct { uint8_t b, g, r, a; } RenColor;
 typedef struct { int x, y; ERenBezierPointType tag; } RenPoint;
 typedef struct { RECT_TYPE x, y, width, height; } RenRect;
 typedef struct { double offset; } RenTab;
-typedef struct { SDL_Surface *surface; float scale_x, scale_y; } RenSurface;
+typedef struct { SDL_Surface *surface; } RenSurface;
 typedef struct { EFontMetaTag tag; char *value; size_t len; } FontMetaData;
 typedef struct {
   RenAtlas *atlas;
@@ -55,8 +55,7 @@ int ren_font_group_get_height(RenFont **font);
 int ren_font_group_get_style(RenFont **font);
 int ren_font_group_get_underline_thickness(RenFont **font);
 float ren_font_group_get_size(RenFont **font);
-void ren_font_group_set_size(RenFont **font, float size, float surface_scale);
-void update_font_scale(RenWindow *window_renderer, RenFont **fonts);
+void ren_font_group_set_size(RenFont **font, float size);
 void ren_font_group_set_tab_size(RenFont **font, int n);
 double ren_font_group_get_width(RenFont **font, const char *text, size_t len, RenTab tab, int *x_offset);
 double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab);
@@ -80,7 +79,7 @@ RenWindow* ren_create(SDL_Window *win);
 void ren_destroy(RenWindow* window_renderer);
 void ren_resize_window(RenWindow *window_renderer);
 void ren_set_clip_rect(RenSurface *rs, RenRect rect);
-void ren_get_size(RenSurface *rs, int *x, int *y); /* Reports the size in points. */
+void ren_get_size(RenSurface *rs, int *x, int *y);
 size_t ren_get_window_list(RenWindow ***window_list_dest);
 RenWindow* ren_find_window(SDL_Window *window);
 RenWindow* ren_find_window_from_id(uint32_t id);

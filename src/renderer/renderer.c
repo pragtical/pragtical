@@ -138,7 +138,6 @@ typedef struct RenFont {
   FT_UShort palette_count;
   CharMap charmap;
   GlyphMap glyphs;
-  float scale;
   float size, space_advance, color_scale;
   unsigned short baseline, height, tab_size;
   unsigned short underline_thickness;
@@ -175,18 +174,6 @@ static void font_unlink_loaded(RenFont *font) {
     font->next_loaded->prev_loaded = font->prev_loaded;
   font->next_loaded = NULL;
   font->prev_loaded = NULL;
-}
-
-void update_font_scale(RenWindow *window_renderer, RenFont **fonts) {
-  if (window_renderer == NULL) return;
-  if (strcmp(renbackend_current()->name, "sdlrenderer") != 0) return;
-  const float surface_scale = rencache_get_surface(&window_renderer->cache).scale_x;
-  for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
-    if (fonts[i]->scale != surface_scale) {
-      ren_font_group_set_size(fonts, fonts[0]->size, surface_scale);
-      return;
-    }
-  }
 }
 
 static const char* utf8_to_codepoint(const char *p, const char *endp, unsigned *dst) {
@@ -1218,7 +1205,6 @@ static void font_file_close(FT_Stream stream) {
 static int font_set_face_metrics(RenFont *font, FT_Face face) {
   FT_Error err;
   float pixel_size = font->size;
-  pixel_size *= font->scale;
   font->color_scale = 1.0f;
   if (FT_HAS_COLOR(face) && FT_HAS_FIXED_SIZES(face) && face->num_fixed_sizes > 0) {
     FT_Pos target = (FT_Pos)(pixel_size * 64.0f);
@@ -1306,7 +1292,6 @@ RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antial
   font->ligatures = ligatures;
   font->tab_size = 2;
   renbackend_current()->init_atlas(&font->glyphs.atlas);
-  font->scale = 1.0;
 
   stream = check_alloc(SDL_calloc(1, sizeof(FT_StreamRec)));
   if (!stream) goto stream_failure;
@@ -1578,12 +1563,11 @@ float ren_font_group_get_size(RenFont **fonts) {
   return fonts[0]->size;
 }
 
-void ren_font_group_set_size(RenFont **fonts, float size, float surface_scale) {
+void ren_font_group_set_size(RenFont **fonts, float size) {
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; ++i) {
     font_clear_glyph_cache(fonts[i]);
     fonts[i]->size = size;
     fonts[i]->tab_size = 2;
-    fonts[i]->scale = surface_scale;
     font_set_face_metrics(fonts[i], fonts[i]->face);
   }
 }
@@ -1668,7 +1652,7 @@ static double unshaped_run_get_width(RenFont **fonts, const char *text, const ch
     width += font_get_xadvance(fonts[0], codepoint, metric, width, tab);
     if (!*set_x_offset && metric) {
       *set_x_offset = true;
-      *x_offset = metric->bitmap_left; // TODO: should this be scaled by the surface scale?
+      *x_offset = metric->bitmap_left;
     }
   }
   return width;
@@ -1753,7 +1737,7 @@ double ren_font_group_get_width(RenFont **fonts, const char *text, size_t len, R
       width += font_get_xadvance(fonts[0], codepoint, metric, width, tab);
       if (!set_x_offset && metric) {
         set_x_offset = true;
-        *x_offset = metric->bitmap_left; // TODO: should this be scaled by the surface scale?
+        *x_offset = metric->bitmap_left;
       }
     }
   }
@@ -1761,7 +1745,7 @@ double ren_font_group_get_width(RenFont **fonts, const char *text, size_t len, R
     hb_buffer_destroy(hb_buffer);
   if (!set_x_offset)
     *x_offset = 0;
-  return width / fonts[0]->scale;
+  return width;
 }
 
 typedef struct {
@@ -1770,7 +1754,6 @@ typedef struct {
   SDL_Rect clip;
   uint8_t *destination_pixels;
   int clip_end_x, clip_end_y;
-  float surface_scale_y;
   RenColor color;
   RenGlyphDrawFn glyph_fn;
   void *glyph_userdata;
@@ -1792,7 +1775,7 @@ static void draw_glyph_bitmap(DrawGlyphContext *ctx, RenFont **fonts, RenFont *f
     return;
 
   int dst_x = start_x;
-  int dst_y = y - y_offset - metric->bitmap_top + (fonts[0]->baseline * ctx->surface_scale_y);
+  int dst_y = y - y_offset - metric->bitmap_top + fonts[0]->baseline;
   int src_x = 0;
   int src_y = metric->y0;
   int width = metric->x1;
@@ -1841,7 +1824,7 @@ static void draw_glyph_bitmap(DrawGlyphContext *ctx, RenFont **fonts, RenFont *f
     int line_start_x = start_x;
     int glyph_start = 0;
     int glyph_end = metric->x1;
-    int target_y = line - metric->y0 + y - y_offset - metric->bitmap_top + (fonts[0]->baseline * ctx->surface_scale_y);
+    int target_y = line - metric->y0 + y - y_offset - metric->bitmap_top + fonts[0]->baseline;
     if (target_y < ctx->clip.y)
       continue;
     if (target_y >= ctx->clip_end_y)
@@ -1974,11 +1957,11 @@ static double draw_unshaped_run(DrawGlyphContext *ctx, RenFont **fonts, const ch
   return pen_x;
 }
 
-static void draw_font_decoration(RenSurface *rs, RenFont *font, double start_x, double end_x, double y, float surface_scale_x, float surface_scale_y, RenColor color, bool underline, bool strikethrough) {
+static void draw_font_decoration(RenSurface *rs, RenFont *font, double start_x, double end_x, double y, RenColor color, bool underline, bool strikethrough) {
   if (underline)
-    ren_draw_rect(rs, (RenRect){start_x / surface_scale_x, y / surface_scale_y + font->height - 1, (end_x - start_x) / surface_scale_x, font->underline_thickness * surface_scale_x}, color, false);
+    ren_draw_rect(rs, (RenRect){start_x, y + font->height - 1, end_x - start_x, font->underline_thickness}, color, false);
   if (strikethrough)
-    ren_draw_rect(rs, (RenRect){start_x / surface_scale_x, y / surface_scale_y + (float)font->height / 2, (end_x - start_x) / surface_scale_x, font->underline_thickness * surface_scale_x}, color, false);
+    ren_draw_rect(rs, (RenRect){start_x, y + (float) font->height / 2, end_x - start_x, font->underline_thickness}, color, false);
 }
 
 #ifdef RENDERER_DEBUG
@@ -1997,10 +1980,8 @@ double ren_draw_text_cb_ex(
   SDL_Rect clip;
   SDL_GetSurfaceClipRect(surface, &clip);
 
-  const float surface_scale_x = rs->scale_x, surface_scale_y = rs->scale_y;
-  double pen_x = x * surface_scale_x;
+  double pen_x = x;
   double original_pen_x = pen_x;
-  y *= surface_scale_y;
   const char* end = text + len;
   hb_buffer_t *hb_buffer = NULL;
   DrawGlyphContext draw_context = {
@@ -2010,7 +1991,6 @@ double ren_draw_text_cb_ex(
     .destination_pixels = surface->pixels,
     .clip_end_x = clip.x + clip.w,
     .clip_end_y = clip.y + clip.h,
-    .surface_scale_y = surface_scale_y,
     .color = color,
     .glyph_fn = glyph_fn,
     .glyph_userdata = userdata
@@ -2032,7 +2012,7 @@ double ren_draw_text_cb_ex(
       if(!last) last = font;
       else if(font != last) {
         if (draw_decorations)
-          draw_font_decoration(rs, last, last_pen_x, pen_x, y, surface_scale_x, surface_scale_y, color, underline, strikethrough);
+          draw_font_decoration(rs, last, last_pen_x, pen_x, y, color, underline, strikethrough);
         last = font;
         last_pen_x = pen_x;
       }
@@ -2058,7 +2038,7 @@ double ren_draw_text_cb_ex(
       if(!last) last = font;
       else if(font != last) {
         if (draw_decorations)
-          draw_font_decoration(rs, last, last_pen_x, pen_x, y, surface_scale_x, surface_scale_y, color, underline, strikethrough);
+          draw_font_decoration(rs, last, last_pen_x, pen_x, y, color, underline, strikethrough);
         last = font;
         last_pen_x = pen_x;
       }
@@ -2070,8 +2050,8 @@ double ren_draw_text_cb_ex(
     hb_buffer_destroy(hb_buffer);
   if (last)
     if (draw_decorations)
-      draw_font_decoration(rs, last, last_pen_x, pen_x, y, surface_scale_x, surface_scale_y, color, underline, strikethrough);
-  return pen_x / surface_scale_x;
+      draw_font_decoration(rs, last, last_pen_x, pen_x, y, color, underline, strikethrough);
+  return pen_x;
 }
 
 double ren_draw_text_cb(RenSurface *rs, RenFont **fonts, const char *text, size_t len, float x, float y, RenColor color, RenTab tab, RenGlyphDrawFn glyph_fn, void *userdata) {
@@ -2125,8 +2105,8 @@ void ren_draw_poly(RenSurface *rs, RenPoint *points, unsigned short npoints, Ren
   if (FT_Outline_New(library, npoints, 1, &outline) != 0) return;
   for (int i = 0; i < npoints; i++) {
     // this is undocumented, but freetype seems to expect 26.6 fixed point numbers
-    outline.points[i].x = points[i].x * rs->scale_x * 64;
-    outline.points[i].y = points[i].y * rs->scale_y * 64;
+    outline.points[i].x = points[i].x * 64;
+    outline.points[i].y = points[i].y * 64;
     outline.tags[i] = points[i].tag;
   }
   outline.contours[0] = npoints - 1;
@@ -2154,13 +2134,7 @@ void ren_draw_rect(RenSurface *rs, RenRect rect, RenColor color, bool replace) {
   if (color.a == 0 && !replace) { return; }
 
   SDL_Surface *surface = rs->surface;
-  const float surface_scale_x = rs->scale_x;
-  const float surface_scale_y = rs->scale_y;
-
-  SDL_Rect dest_rect = { rect.x * surface_scale_x,
-                         rect.y * surface_scale_y,
-                         rect.width * surface_scale_x,
-                         rect.height * surface_scale_y };
+  SDL_Rect dest_rect = { rect.x, rect.y, rect.width, rect.height };
 
   if (color.a == 0xff || replace) {
     uint32_t translated = SDL_MapSurfaceRGBA(surface, color.r, color.g, color.b, color.a);
@@ -2285,28 +2259,14 @@ void ren_resize_window(RenWindow *window_renderer) {
 }
 
 
-static RenRect scaled_rect(const RenRect rect, const RenSurface *rs) {
-  float scale_x = rs->scale_x;
-  float scale_y = rs->scale_y;
-  return (RenRect) {
-    rect.x * scale_x,
-    rect.y * scale_y,
-    rect.width * scale_x,
-    rect.height * scale_y
-  };
-}
-
 void ren_set_clip_rect(RenSurface *rs, RenRect rect) {
-  RenRect sr = scaled_rect(rect, rs);
-  SDL_SetSurfaceClipRect(rs->surface, &(SDL_Rect){.x = sr.x, .y = sr.y, .w = sr.width, .h = sr.height});
+  SDL_SetSurfaceClipRect(rs->surface, &(SDL_Rect){.x = rect.x, .y = rect.y, .w = rect.width, .h = rect.height});
 }
 
 
 void ren_get_size(RenSurface *rs, int *x, int *y) {
   *x = rs->surface->w;
   *y = rs->surface->h;
-  *x /= rs->scale_x;
-  *y /= rs->scale_y;
 }
 
 size_t ren_get_window_list(RenWindow ***window_list_dest) {

@@ -5,8 +5,7 @@
 
 static RenSurface surface_get_window_surface(RenCache *cache);
 
-static bool surface_init_window(RenWindow *ren) {
-  ren->scale_x = ren->scale_y = 1;
+static bool surface_init_window(UNUSED RenWindow *ren) {
   return true;
 }
 
@@ -20,8 +19,6 @@ static void surface_destroy_window(UNUSED RenWindow *ren) {
 
 static void surface_init_canvas(RenCache *canvas, SDL_Surface *surface) {
   canvas->rensurface.surface = surface;
-  canvas->rensurface.scale_x = 1;
-  canvas->rensurface.scale_y = 1;
 }
 
 static void surface_destroy_canvas(RenCache *canvas) {
@@ -72,7 +69,7 @@ static RenSurface surface_get_window_surface(RenCache *cache) {
     fprintf(stderr, "Error getting window surface: %s", SDL_GetError());
     exit(1);
   }
-  return (RenSurface){.surface = surface, .scale_x = 1, .scale_y = 1};
+  return (RenSurface){.surface = surface};
 }
 
 static void surface_present_window_rects(RenCache *cache, RenRect *rects, int count) {

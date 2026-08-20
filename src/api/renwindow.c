@@ -155,20 +155,18 @@ static int f_get_color(lua_State *L) {
 
   SDL_Color color = {0, 0, 0, 255};
   RenSurface rs = rencache_get_surface(&window_renderer->cache);
-  int px = x * rs.scale_x;
-  int py = y * rs.scale_y;
 
-  if (rs.surface && px >= 0 && py >= 0 && px < rs.surface->w && py < rs.surface->h) {
+  if (rs.surface && x >= 0 && y >= 0 && x < rs.surface->w && y < rs.surface->h) {
     SDL_Surface *surface = NULL;
     const RenBackend *backend = window_renderer->cache.backend;
     if (backend && backend->capture_window)
-      surface = backend->capture_window(&window_renderer->cache, (RenRect){ px, py, 1, 1 });
+      surface = backend->capture_window(&window_renderer->cache, (RenRect){ x, y, 1, 1 });
 
     if (surface) {
       SDL_ReadSurfacePixel(surface, 0, 0, &color.r, &color.g, &color.b, &color.a);
       SDL_DestroySurface(surface);
     } else {
-      SDL_ReadSurfacePixel(rs.surface, px, py, &color.r, &color.g, &color.b, &color.a);
+      SDL_ReadSurfacePixel(rs.surface, x, y, &color.r, &color.g, &color.b, &color.a);
     }
   }
 
