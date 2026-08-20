@@ -45,8 +45,6 @@ struct RenCache {
   void *backend_data;
   bool window_target;
   uint64_t revision;
-  RenCacheGetSurfaceFn get_surface;
-  RenCachePresentFn present_rects;
   const RenBackend *backend;
   RenSurface rensurface;
 };
@@ -64,6 +62,5 @@ void  rencache_invalidate(RenCache *rc);
 void  rencache_begin_frame(RenCache *rc);
 void  rencache_end_frame(RenCache *rc);
 RenSurface rencache_get_surface(RenCache *rc);
-void rencache_update_rects(RenCache *rc, RenRect *rects, int count);
 
 #endif

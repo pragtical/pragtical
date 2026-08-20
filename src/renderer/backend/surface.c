@@ -5,18 +5,6 @@
 
 static RenSurface surface_get_window_surface(RenCache *cache);
 
-static bool surface_init_window(UNUSED RenWindow *ren) {
-  return true;
-}
-
-static void surface_resize_window(UNUSED RenWindow *ren) {
-}
-
-static void surface_destroy_window(UNUSED RenWindow *ren) {
-  SDL_free(ren->backend_data);
-  ren->backend_data = NULL;
-}
-
 static void surface_init_canvas(RenCache *canvas, SDL_Surface *surface) {
   canvas->rensurface.surface = surface;
 }
@@ -92,10 +80,7 @@ static void surface_present_window_rects(RenCache *cache, RenRect *rects, int co
   }
   SDL_UpdateWindowSurfaceRects(ren->window, sdl_rects, count);
   SDL_free(sdl_rects);
-  if (!ren->shown) {
-    SDL_ShowWindow(ren->window);
-    ren->shown = true;
-  }
+  renwin_show_window(ren);
 }
 
 static void surface_set_clip_rect(UNUSED RenCache *rc, RenSurface *surface, RenRect rect) {
@@ -137,9 +122,6 @@ static const RenBackend surface_backend = {
   .get_window_surface = surface_get_window_surface,
   .present_window_rects = surface_present_window_rects,
   .capture_window = surface_capture_window,
-  .init_window = surface_init_window,
-  .resize_window = surface_resize_window,
-  .destroy_window = surface_destroy_window,
   .init_canvas = surface_init_canvas,
   .destroy_canvas = surface_destroy_canvas,
   .get_canvas_surface = surface_get_canvas_surface,

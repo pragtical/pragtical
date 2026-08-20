@@ -230,10 +230,7 @@ static void sdlrenderer_present_window_rects(RenCache *cache, RenRect *rects, in
 
   SDL_RenderTexture(data->renderer, data->texture, NULL, NULL);
   SDL_RenderPresent(data->renderer);
-  if (!ren->shown) {
-    SDL_ShowWindow(ren->window);
-    ren->shown = true;
-  }
+  renwin_show_window(ren);
 }
 
 static void sdlrenderer_set_clip_rect(UNUSED RenCache *rc, RenSurface *surface, RenRect rect) {

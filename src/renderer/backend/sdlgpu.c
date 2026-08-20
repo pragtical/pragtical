@@ -5367,10 +5367,7 @@ static void gpu_present_window_rects(RenCache *cache, UNUSED RenRect *rects, UNU
     gpu_abort("SDL_SubmitGPUCommandBuffer failed");
   }
 
-  if (!ren->shown) {
-    SDL_ShowWindow(ren->window);
-    ren->shown = true;
-  }
+  renwin_show_window(ren);
 }
 
 static void gpu_init_canvas(RenCache *canvas, SDL_Surface *surface) {

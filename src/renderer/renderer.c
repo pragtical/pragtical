@@ -2254,7 +2254,8 @@ void ren_destroy(RenWindow* window_renderer) {
 }
 
 void ren_resize_window(RenWindow *window_renderer) {
-  renwin_resize_surface(window_renderer);
+  if (window_renderer->cache.backend->resize_window)
+    window_renderer->cache.backend->resize_window(window_renderer);
   renwin_update_scale(window_renderer);
 }
 
