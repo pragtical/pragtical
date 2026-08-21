@@ -215,12 +215,7 @@ static int f_font_get_size(lua_State *L) {
 static int f_font_set_size(lua_State *L) {
   RenFont* fonts[FONT_FALLBACK_MAX]; font_retrieve(L, fonts, 1);
   float size = luaL_checknumber(L, 2);
-  float scale = 1.0;
-  RenWindow *window = ren_get_target_window();
-  if (window != NULL && strcmp(renbackend_current()->name, "sdlrenderer") == 0) {
-    scale = rencache_get_surface(&window->cache).scale_x;
-  }
-  ren_font_group_set_size(fonts, size, scale);
+  ren_font_group_set_size(fonts, size);
   return 0;
 }
 
@@ -584,8 +579,6 @@ static int f_to_canvas(lua_State *L) {
   luaL_setmetatable(L, API_TYPE_CANVAS);
   rencache_init(canvas);
   canvas->backend->init_canvas(canvas, dst);
-  canvas->rensurface.scale_x = rs.scale_x;
-  canvas->rensurface.scale_y = rs.scale_y;
   rencache_begin_frame(canvas);
 
   return 1;

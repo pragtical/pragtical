@@ -20,19 +20,6 @@ static SdlRendererWindowData *sdlrenderer_window_data(RenWindow *ren) {
   return ren->backend_data;
 }
 
-static void sdlrenderer_query_surface_scale(RenWindow *ren, float *scale_x, float *scale_y) {
-  int w_pixels, h_pixels;
-  int w_points, h_points;
-  SDL_GetWindowSizeInPixels(ren->window, &w_pixels, &h_pixels);
-  SDL_GetWindowSize(ren->window, &w_points, &h_points);
-  float scaleX = (float) w_pixels / (float) w_points;
-  float scaleY = (float) h_pixels / (float) h_points;
-  if (scale_x)
-    *scale_x = round(scaleX * 100) / 100;
-  if (scale_y)
-    *scale_y = round(scaleY * 100) / 100;
-}
-
 static void sdlrenderer_destroy_texture(SdlRendererWindowData *data) {
   if (data && data->texture) {
     SDL_DestroyTexture(data->texture);
@@ -64,7 +51,6 @@ static void sdlrenderer_setup_texture(RenWindow *ren, int w, int h) {
 }
 
 static void sdlrenderer_create_surface_and_texture(RenWindow *ren, int w, int h) {
-  ren->scale_x = ren->scale_y = 1;
   if (ren->cache.rensurface.surface)
     SDL_DestroySurface(ren->cache.rensurface.surface);
 
@@ -79,11 +65,6 @@ static void sdlrenderer_create_surface_and_texture(RenWindow *ren, int w, int h)
     exit(1);
   }
 
-  sdlrenderer_query_surface_scale(
-    ren,
-    &ren->cache.rensurface.scale_x,
-    &ren->cache.rensurface.scale_y
-  );
   sdlrenderer_setup_texture(ren, w, h);
 }
 
@@ -96,13 +77,9 @@ static bool sdlrenderer_init_window(RenWindow *ren) {
 
 static void sdlrenderer_resize_window(RenWindow *ren) {
   int new_w, new_h;
-  float new_scale_x, new_scale_y;
   SDL_GetWindowSizeInPixels(ren->window, &new_w, &new_h);
-  sdlrenderer_query_surface_scale(ren, &new_scale_x, &new_scale_y);
 
-  if (new_scale_x != ren->cache.rensurface.scale_x ||
-      new_scale_y != ren->cache.rensurface.scale_y ||
-      new_w != ren->cache.rensurface.surface->w ||
+  if (new_w != ren->cache.rensurface.surface->w ||
       new_h != ren->cache.rensurface.surface->h) {
     sdlrenderer_create_surface_and_texture(ren, new_w, new_h);
     renwin_clip_to_surface(ren);
@@ -124,8 +101,6 @@ static void sdlrenderer_destroy_window(RenWindow *ren) {
 
 static void sdlrenderer_init_canvas(RenCache *canvas, SDL_Surface *surface) {
   canvas->rensurface.surface = surface;
-  canvas->rensurface.scale_x = 1;
-  canvas->rensurface.scale_y = 1;
 }
 
 static void sdlrenderer_destroy_canvas(RenCache *canvas) {
@@ -173,14 +148,12 @@ static RenSurface sdlrenderer_get_window_surface(RenCache *cache) {
   return cache->rensurface;
 }
 
-static SDL_Rect sdlrenderer_scale_rect(RenCache *cache, RenRect rect) {
-  const float scale_x = cache->rensurface.scale_x;
-  const float scale_y = cache->rensurface.scale_y;
+static SDL_Rect sdlrenderer_rect(RenRect rect) {
   return (SDL_Rect) {
-    .x = (int) floorf(scale_x * rect.x),
-    .y = (int) floorf(scale_y * rect.y),
-    .w = (int) ceilf(scale_x * rect.width),
-    .h = (int) ceilf(scale_y * rect.height),
+    .x = (int) floorf(rect.x),
+    .y = (int) floorf(rect.y),
+    .w = (int) ceilf(rect.width),
+    .h = (int) ceilf(rect.height),
   };
 }
 
@@ -224,7 +197,7 @@ static void sdlrenderer_present_window_rects(RenCache *cache, RenRect *rects, in
   int upload_count = 0;
 
   for (int i = 0; i < count; i++) {
-    SDL_Rect rect = sdlrenderer_scale_rect(cache, rects[i]);
+    SDL_Rect rect = sdlrenderer_rect(rects[i]);
     if (!sdlrenderer_clip_rect(surface, &rect))
       continue;
     dirty_area += (Uint64) rect.w * (Uint64) rect.h;
@@ -247,7 +220,7 @@ static void sdlrenderer_present_window_rects(RenCache *cache, RenRect *rects, in
       sdlrenderer_upload_rect(cache, data, bounds);
     } else {
       for (int i = 0; i < count; i++) {
-        SDL_Rect rect = sdlrenderer_scale_rect(cache, rects[i]);
+        SDL_Rect rect = sdlrenderer_rect(rects[i]);
         if (!sdlrenderer_clip_rect(surface, &rect))
           continue;
         sdlrenderer_upload_rect(cache, data, rect);
@@ -257,10 +230,7 @@ static void sdlrenderer_present_window_rects(RenCache *cache, RenRect *rects, in
 
   SDL_RenderTexture(data->renderer, data->texture, NULL, NULL);
   SDL_RenderPresent(data->renderer);
-  if (!ren->shown) {
-    SDL_ShowWindow(ren->window);
-    ren->shown = true;
-  }
+  renwin_show_window(ren);
 }
 
 static void sdlrenderer_set_clip_rect(UNUSED RenCache *rc, RenSurface *surface, RenRect rect) {

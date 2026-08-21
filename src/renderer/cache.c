@@ -3,7 +3,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <string.h>
 
 #ifdef _MSC_VER
@@ -184,8 +183,6 @@ void rencache_init(RenCache *rc) {
   rc->target = NULL;
   rc->backend_data = NULL;
   rc->window_target = false;
-  rc->get_surface = NULL;
-  rc->present_rects = NULL;
   rc->backend = renbackend_current();
   rc->rensurface.surface = NULL;
   rc->command_buf = NULL;
@@ -559,8 +556,8 @@ void rencache_end_frame(RenCache *ren_cache) {
       ren_cache->revision++;
 
     /* update dirty rects */
-    if (ren_cache->present_rects)
-      rencache_update_rects(ren_cache, ren_cache->rect_buf, rect_count);
+    if (ren_cache->window_target && ren_cache->backend->present_window_rects)
+      ren_cache->backend->present_window_rects(ren_cache, ren_cache->rect_buf, rect_count);
   }
 
   /* swap cell buffer and reset */
@@ -571,18 +568,11 @@ void rencache_end_frame(RenCache *ren_cache) {
 }
 
 RenSurface rencache_get_surface(RenCache *ren_cache) {
-  if (ren_cache->get_surface) {
-    return ren_cache->get_surface(ren_cache);
+  if (ren_cache->window_target && ren_cache->backend->get_window_surface) {
+    return ren_cache->backend->get_window_surface(ren_cache);
   } else if (!ren_cache->rensurface.surface) {
     fprintf(stderr, "RenCache surface not initialized");
     exit(1);
   }
   return ren_cache->rensurface;
-}
-
-
-void rencache_update_rects(RenCache *rc, RenRect *rects, int count) {
-  if (rc->present_rects) {
-    rc->present_rects(rc, rects, count);
-  }
 }

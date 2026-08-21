@@ -30,10 +30,10 @@ struct RenBackend {
   RenCacheGetSurfaceFn get_window_surface;
   RenCachePresentFn present_window_rects;
   SDL_Surface *(*capture_window)(RenCache *cache, RenRect rect);
-  bool (*init_window)(RenWindow *window);
-  void (*resize_window)(RenWindow *window);
+  bool (*init_window)(RenWindow *window); /* NULL = no initialization */
+  void (*resize_window)(RenWindow *window); /* NULL = no resize work */
   void (*set_vsync)(RenWindow *window, bool enabled); /* NULL = unsupported */
-  void (*destroy_window)(RenWindow *window);
+  void (*destroy_window)(RenWindow *window); /* NULL = no teardown */
   void (*init_canvas)(RenCache *canvas, SDL_Surface *surface);
   void (*destroy_canvas)(RenCache *canvas);
   SDL_Surface *(*get_canvas_surface)(RenCache *canvas);

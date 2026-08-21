@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -166,10 +165,23 @@ static void push_win32_error(lua_State *L, DWORD rc) {
 #endif
 
 
+static bool get_touch_window_size(SDL_WindowID window_id, float *w, float *h) {
+  RenWindow *window_renderer = ren_find_window_from_id(window_id);
+  int window_w, window_h;
+  if (!window_renderer ||
+      !SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &window_w, &window_h))
+    return false;
+
+  *w = window_w;
+  *h = window_h;
+  renwin_convert_coordinates(window_renderer, w, h, true);
+  return true;
+}
+
+
 static int f_poll_event(lua_State *L) {
   char buf[16];
   float mx, my;
-  int w, h;
   SDL_Event e;
 
 top:
@@ -242,11 +254,15 @@ top:
       {
         RenWindow* window_renderer = ren_find_window_from_id(e.drop.windowID);
         SDL_GetMouseState(&mx, &my);
+        if (window_renderer)
+          renwin_convert_coordinates(window_renderer, &mx, &my, true);
+        else
+          mx = my = 0;
         lua_pushstring(L, "filedropped");
         lua_pushstring(L, e.drop.data);
         // a DND into dock event fired before a window is created
-        lua_pushinteger(L, mx * (window_renderer ? window_renderer->scale_x : 0));
-        lua_pushinteger(L, my * (window_renderer ? window_renderer->scale_y : 0));
+        lua_pushinteger(L, mx);
+        lua_pushinteger(L, my);
         return 4;
       }
 
@@ -295,10 +311,16 @@ top:
       {
         if (e.button.button == 1) { SDL_CaptureMouse(1); }
         RenWindow* window_renderer = ren_find_window_from_id(e.button.windowID);
+        float x = e.button.x;
+        float y = e.button.y;
+        if (window_renderer)
+          renwin_convert_coordinates(window_renderer, &x, &y, true);
+        else
+          x = y = 0;
         lua_pushstring(L, "mousepressed");
         lua_pushstring(L, button_name(e.button.button));
-        lua_pushnumber(L, e.button.x * (window_renderer ? window_renderer->scale_x :0));
-        lua_pushnumber(L, e.button.y * (window_renderer ? window_renderer->scale_y :0));
+        lua_pushnumber(L, x);
+        lua_pushnumber(L, y);
         lua_pushinteger(L, e.button.clicks);
         return 5;
       }
@@ -307,10 +329,16 @@ top:
       {
         if (e.button.button == 1) { SDL_CaptureMouse(0); }
         RenWindow* window_renderer = ren_find_window_from_id(e.button.windowID);
+        float x = e.button.x;
+        float y = e.button.y;
+        if (window_renderer)
+          renwin_convert_coordinates(window_renderer, &x, &y, true);
+        else
+          x = y = 0;
         lua_pushstring(L, "mousereleased");
         lua_pushstring(L, button_name(e.button.button));
-        lua_pushnumber(L, e.button.x * (window_renderer ? window_renderer->scale_x : 0));
-        lua_pushnumber(L, e.button.y * (window_renderer ? window_renderer->scale_y : 0));
+        lua_pushnumber(L, x);
+        lua_pushnumber(L, y);
         return 4;
       }
 
@@ -319,11 +347,21 @@ top:
         /* Motion events are already coalesced by system_push_event(); no need
          * to pump / peek the SDL queue here. */
         RenWindow* window_renderer = ren_find_window_from_id(e.motion.windowID);
+        float x = e.motion.x;
+        float y = e.motion.y;
+        float xrel = e.motion.xrel;
+        float yrel = e.motion.yrel;
+        if (window_renderer) {
+          renwin_convert_coordinates(window_renderer, &x, &y, true);
+          renwin_convert_coordinates(window_renderer, &xrel, &yrel, true);
+        } else {
+          x = y = xrel = yrel = 0;
+        }
         lua_pushstring(L, "mousemoved");
-        lua_pushnumber(L, e.motion.x * (window_renderer ? window_renderer->scale_x : 0));
-        lua_pushnumber(L, e.motion.y * (window_renderer ? window_renderer->scale_y : 0));
-        lua_pushnumber(L, e.motion.xrel * (window_renderer ? window_renderer->scale_x : 0));
-        lua_pushnumber(L, e.motion.yrel * (window_renderer ? window_renderer->scale_y : 0));
+        lua_pushnumber(L, x);
+        lua_pushnumber(L, y);
+        lua_pushnumber(L, xrel);
+        lua_pushnumber(L, yrel);
         return 5;
       }
 
@@ -336,8 +374,9 @@ top:
 
     case SDL_EVENT_FINGER_DOWN:
       {
-        RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
-        SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &w, &h);
+        float w, h;
+        if (!get_touch_window_size(e.tfinger.windowID, &w, &h))
+          goto top;
 
         lua_pushstring(L, "touchpressed");
         lua_pushnumber(L, e.tfinger.x * w);
@@ -348,8 +387,9 @@ top:
 
     case SDL_EVENT_FINGER_UP:
       {
-        RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
-        SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &w, &h);
+        float w, h;
+        if (!get_touch_window_size(e.tfinger.windowID, &w, &h))
+          goto top;
 
         lua_pushstring(L, "touchreleased");
         lua_pushnumber(L, e.tfinger.x * w);
@@ -361,8 +401,9 @@ top:
     case SDL_EVENT_FINGER_MOTION:
       {
         /* Finger-motion events are already coalesced by system_push_event(). */
-        RenWindow* window_renderer = ren_find_window_from_id(e.tfinger.windowID);
-        SDL_GetWindowSize(renwin_get_sdl_window(window_renderer), &w, &h);
+        float w, h;
+        if (!get_touch_window_size(e.tfinger.windowID, &w, &h))
+          goto top;
 
         lua_pushstring(L, "touchmoved");
         lua_pushnumber(L, e.tfinger.x * w);
@@ -558,10 +599,14 @@ static int f_set_window_hit_test(lua_State *L) {
     SDL_SetWindowHitTest(renwin_get_sdl_window(window_renderer), NULL, NULL);
     return 0;
   }
-  float scale = window_renderer->scale_x;
-  window_renderer->hit_test_info.title_height = luaL_checkinteger(L, 2) / scale;
-  window_renderer->hit_test_info.controls_width = luaL_checkinteger(L, 3) / scale;
-  window_renderer->hit_test_info.resize_border = luaL_checkinteger(L, 4) / scale;
+  float controls_width = luaL_checkinteger(L, 3);
+  float title_height = luaL_checkinteger(L, 2);
+  float resize_border = luaL_checkinteger(L, 4);
+  renwin_convert_coordinates(window_renderer, &controls_width, &title_height, false);
+  renwin_convert_coordinates(window_renderer, &resize_border, NULL, false);
+  window_renderer->hit_test_info.title_height = title_height;
+  window_renderer->hit_test_info.controls_width = controls_width;
+  window_renderer->hit_test_info.resize_border = resize_border;
   SDL_SetWindowHitTest(renwin_get_sdl_window(window_renderer), &hit_test, window_renderer);
   return 0;
 }
@@ -618,11 +663,17 @@ static int f_get_window_mode(lua_State *L) {
 
 static int f_set_text_input_rect(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  float x = luaL_checknumber(L, 2);
+  float y = luaL_checknumber(L, 3);
+  float w = luaL_checknumber(L, 4);
+  float h = luaL_checknumber(L, 5);
+  renwin_convert_coordinates(window_renderer, &x, &y, false);
+  renwin_convert_coordinates(window_renderer, &w, &h, false);
   SDL_Rect rect;
-  rect.x = luaL_checknumber(L, 2);
-  rect.y = luaL_checknumber(L, 3);
-  rect.w = luaL_checknumber(L, 4);
-  rect.h = luaL_checknumber(L, 5);
+  rect.x = floor(x);
+  rect.y = floor(y);
+  rect.w = ceil(w);
+  rect.h = ceil(h);
   SDL_SetTextInputArea(renwin_get_sdl_window(window_renderer), &rect, 0);
   return 0;
 }
