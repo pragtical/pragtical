@@ -2503,6 +2503,76 @@ For more detailed instructions visit: https://pragtical.dev/docs/setup/building
     node:close_view(core.root_view.root_node, view)
   end)
 
+  test.test("shows document context items based on markdown support", function(context)
+    local contextmenu = require "plugins.contextmenu"
+    local divider = contextmenu.DIVIDER
+
+    local function shown_items_for(path)
+      write_file(path, "# Context menu\n")
+      local view = core.open_file(path)
+      test.ok(view:extends(DocView))
+      test.equal(contextmenu:show(0, 0), true)
+
+      local items = {}
+      for index, item in ipairs(contextmenu.items) do
+        items[index] = item
+      end
+      contextmenu:hide()
+      return items
+    end
+
+    local function item_index(items, text)
+      for index, item in ipairs(items) do
+        if item ~= divider and item.text == text then
+          return index
+        end
+      end
+    end
+
+    local function assert_normalized(items)
+      test.not_equal(items[1], divider)
+      test.not_equal(items[#items], divider)
+      for index = 2, #items do
+        test.not_ok(
+          items[index - 1] == divider and items[index] == divider,
+          "context menu contains adjacent dividers"
+        )
+      end
+    end
+
+    for _, extension in ipairs { "md", "markdown" } do
+      local items = shown_items_for(
+        context.temp_root .. PATHSEP .. "context-menu." .. extension
+      )
+      local preview_index = item_index(items, "Preview Markdown")
+      local find_index = item_index(items, "Find")
+      local replace_index = item_index(items, "Replace")
+
+      test.not_nil(preview_index)
+      test.not_nil(find_index)
+      test.not_nil(replace_index)
+      test.ok(preview_index < find_index)
+      test.ok(find_index < replace_index)
+      assert_normalized(items)
+    end
+
+    local items = shown_items_for(
+      context.temp_root .. PATHSEP .. "context-menu.txt"
+    )
+    local reset_index = item_index(items, "Font Reset")
+    local find_index = item_index(items, "Find")
+    local replace_index = item_index(items, "Replace")
+
+    test.is_nil(item_index(items, "Preview Markdown"))
+    test.not_nil(reset_index, "Scale context items should be enabled")
+    test.not_nil(find_index)
+    test.not_nil(replace_index)
+    test.equal(items[reset_index + 1], divider)
+    test.equal(find_index, reset_index + 2)
+    test.equal(replace_index, find_index + 1)
+    assert_normalized(items)
+  end)
+
   test.test("previews the active markdown doc", function(context)
     local path = context.temp_root .. PATHSEP .. "preview.md"
     write_file(path, "# Preview\n\nInitial text.\n")

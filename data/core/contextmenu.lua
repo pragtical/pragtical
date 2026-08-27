@@ -92,23 +92,27 @@ end
 ---@return boolean # If true, the context menu is shown.
 function ContextMenu:show(x, y)
   self.items = nil
-  local items_list = { width = 0, height = 0 }
+  local items_list = {}
   for _, items in ipairs(self.itemset) do
     if items.predicate(x, y) then
-      update_items_size(items.items)
-      items_list.width = math.max(items_list.width, items.items.width)
-      items_list.height = items_list.height
       for _, subitems in ipairs(items.items) do
         if not subitems.command or command.is_valid(subitems.command) then
-          local lw, lh = get_item_size(subitems)
-          items_list.height = items_list.height + lh
-          table.insert(items_list, subitems)
+          if subitems ~= DIVIDER
+            or (#items_list > 0 and items_list[#items_list] ~= DIVIDER)
+          then
+            table.insert(items_list, subitems)
+          end
         end
       end
     end
   end
 
+  if items_list[#items_list] == DIVIDER then
+    table.remove(items_list)
+  end
+
   if #items_list > 0 then
+    update_items_size(items_list)
     self.items = items_list
     local w, h = self.items.width, self.items.height
 
