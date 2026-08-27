@@ -5,6 +5,15 @@
 
 static RenSurface surface_get_window_surface(RenCache *cache);
 
+static bool surface_init_window(UNUSED RenWindow *ren) {
+#ifdef _WIN32
+  const char *acceleration = SDL_GetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION);
+  if (!acceleration || !*acceleration)
+    SDL_SetHint(SDL_HINT_FRAMEBUFFER_ACCELERATION, "1");
+#endif
+  return true;
+}
+
 static void surface_init_canvas(RenCache *canvas, SDL_Surface *surface) {
   canvas->rensurface.surface = surface;
 }
@@ -107,6 +116,14 @@ static void surface_draw_pixels(UNUSED RenCache *rc, RenSurface *surface, RenRec
   ren_draw_pixels(surface, rect, bytes, len);
 }
 
+static void surface_set_vsync(RenWindow *ren, bool enabled) {
+  if (ren)
+    SDL_SetWindowSurfaceVSync(
+      ren->window,
+      enabled ? 1 : SDL_WINDOW_SURFACE_VSYNC_DISABLED
+    );
+}
+
 static const RenCacheDrawOps surface_draw_ops = {
   .set_clip_rect = surface_set_clip_rect,
   .draw_rect = surface_draw_rect,
@@ -122,6 +139,8 @@ static const RenBackend surface_backend = {
   .get_window_surface = surface_get_window_surface,
   .present_window_rects = surface_present_window_rects,
   .capture_window = surface_capture_window,
+  .init_window = surface_init_window,
+  .set_vsync = surface_set_vsync,
   .init_canvas = surface_init_canvas,
   .destroy_canvas = surface_destroy_canvas,
   .get_canvas_surface = surface_get_canvas_surface,
