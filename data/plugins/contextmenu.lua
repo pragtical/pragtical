@@ -80,7 +80,7 @@ local cmds = {
 }
 
 if config.plugins.scale ~= false and require("plugins.scale") then
-  table.move(cmds, 4, 6, 7)
+  table.move(cmds, 4, #cmds, 7)
   cmds[4] = { text = "Font +",     command = "scale:increase" }
   cmds[5] = { text = "Font -",     command = "scale:decrease" }
   cmds[6] = { text = "Font Reset", command = "scale:reset"    }
