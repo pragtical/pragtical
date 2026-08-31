@@ -4,8 +4,10 @@ local config = require "core.config"
 local keymap = require "core.keymap"
 local settings = require "plugins.settings"
 local Button = require "widget.button"
+local Label = require "widget.label"
 local TextBox = require "widget.textbox"
 local Toggle = require "widget.toggle"
+local WidgetList = require "widget.widgetlist"
 local SettingsView = getmetatable(settings.ui)
 
 local function find_child(view, class)
@@ -34,6 +36,7 @@ test.describe("settings", function()
   local old_settings_plugins
   local old_plugin_sections
   local old_test_settings_module
+  local old_disabled_transitions
 
   test.before_each(function()
     old_test_settings = config.plugins.test_settings
@@ -41,6 +44,7 @@ test.describe("settings", function()
     old_settings_plugins = settings.plugins
     old_plugin_sections = settings.plugin_sections
     old_test_settings_module = package.preload["plugins.test_settings"]
+    old_disabled_transitions = config.disabled_transitions
     config.plugins.test_settings = {}
     settings.config = {}
     settings.plugins = {}
@@ -54,6 +58,7 @@ test.describe("settings", function()
     settings.plugins = old_settings_plugins
     settings.plugin_sections = old_plugin_sections
     package.preload["plugins.test_settings"] = old_test_settings_module
+    config.disabled_transitions = old_disabled_transitions
     os.remove(USERDIR .. "/user_settings.lua")
   end)
 
@@ -118,6 +123,121 @@ test.describe("settings", function()
 
     test.equal(config.plugins.test_settings.enabled, true)
     test.equal(settings.config.plugins.test_settings.enabled, true)
+  end)
+
+  test.it("persists values from filterable custom widget lists", function()
+    config.plugins.test_settings.languages = {}
+    local view = settings.show_config("Language Settings", {
+      path_prefix = "plugins.test_settings",
+      {
+        label = "Languages",
+        path = "languages",
+        type = settings.type.LIST_WIDGETS,
+        default = {},
+        visible_rows = 2,
+        items = {
+          { name = "Lua" },
+          { name = "Python" }
+        },
+        item_text = function(item)
+          return item.name
+        end,
+        build_item = function(row, item, value, commit)
+          local label = Label(row, item.name)
+          row:set_child_properties(label, { stretch = 1 })
+
+          local toggle = Toggle(row, "", value[item.name] == true)
+          function toggle:on_change(enabled)
+            value[item.name] = enabled and true or nil
+            commit(value)
+          end
+
+          Button(row, "Action")
+        end
+      }
+    })
+
+    local list = find_child(view, WidgetList)
+    test.not_nil(list)
+    test.equal(#list.items, 2)
+
+    local lua_toggle
+    local found_button = false
+    for _, child in ipairs(list.items[1].row.childs) do
+      if child:is(Toggle) then lua_toggle = child end
+      if child:is(Button) then found_button = true end
+    end
+    test.not_nil(lua_toggle)
+    test.ok(found_button)
+
+    lua_toggle:on_change(true)
+    test.equal(config.plugins.test_settings.languages.Lua, true)
+    test.equal(settings.config.plugins.test_settings.languages.Lua, true)
+
+    list.scroll.y = 10
+    list.scroll.to.y = 10
+    list:filter("Python")
+    list:relayout()
+    test.equal(list.scroll.y, 0)
+    test.equal(list.scroll.to.y, 0)
+    test.equal(list.items[1].matched, false)
+    test.equal(list.items[2].matched, true)
+
+    local saved = dofile(USERDIR .. "/user_settings.lua")
+    test.equal(saved.config.plugins.test_settings.languages.Lua, true)
+  end)
+
+  test.it("groups disabled transitions in a widget list", function()
+    local option
+    for _, candidate in ipairs(settings.core.Graphics) do
+      if candidate.path == "disabled_transitions" then
+        option = candidate
+        break
+      end
+    end
+
+    test.not_nil(option)
+    test.equal(option.type, settings.type.LIST_WIDGETS)
+    test.equal(option.filterable, false)
+    test.equal(option.visible_rows, 8)
+    test.equal(#option.items, 8)
+
+    config.disabled_transitions = {
+      scroll = false,
+      commandview = true,
+      contextmenu = false,
+      logview = false,
+      nagbar = false,
+      tabs = false,
+      tab_drag = false,
+      statusbar = false
+    }
+    local view = settings.show_config("Transition Settings", { option })
+    local list = find_child(view, WidgetList)
+    test.not_nil(list)
+    test.equal(#list.items, 8)
+
+    local scroll_toggle
+    for _, entry in ipairs(list.items) do
+      if entry.data.key == "scroll" then
+        for _, child in ipairs(entry.row.childs) do
+          if child:is(Toggle) then
+            scroll_toggle = child
+            break
+          end
+        end
+      end
+    end
+    test.not_nil(scroll_toggle)
+    scroll_toggle:on_change(true)
+
+    test.equal(config.disabled_transitions.scroll, true)
+    test.equal(config.disabled_transitions.commandview, true)
+    test.equal(settings.config.disabled_transitions.scroll, true)
+
+    local saved = dofile(USERDIR .. "/user_settings.lua")
+    test.equal(saved.config.disabled_transitions.scroll, true)
+    test.equal(saved.config.disabled_transitions.commandview, true)
   end)
 
   test.it("opens sub config views from settings options", function()
