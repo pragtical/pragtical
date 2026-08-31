@@ -513,9 +513,10 @@ end)
 
 test.describe("codefold - virtual line mapping", function()
   test.test("hide tail on fold is disabled by default", function()
-    require "plugins.codefold"
+    local codefold = require "plugins.codefold"
 
     test.equal(config.plugins.codefold.hide_tail_on_fold, false)
+    test.equal(config.plugins.codefold.use_whitelist, false)
 
     local found_spec = false
     for _, item in ipairs(config.plugins.codefold.config_spec) do
@@ -525,6 +526,55 @@ test.describe("codefold - virtual line mapping", function()
       end
     end
     test.ok(found_spec)
+
+    local found_plain_text = false
+    for _, item in ipairs(codefold._test.language_settings_items()) do
+      if item.name == "Plain Text" then found_plain_text = true end
+    end
+    test.ok(found_plain_text)
+  end)
+
+  test.test("whitelist accepts selected languages and extensions", function()
+    local codefold = require "plugins.codefold"
+    local previous_enabled = config.plugins.codefold.enabled
+    local previous_whitelist = config.plugins.codefold.use_whitelist
+    local previous_languages = config.plugins.codefold.languages
+    local previous_extensions = config.plugins.codefold.extensions
+
+    local doc = Doc(nil, nil, true)
+    doc.filename = "notes.md"
+    doc.syntax = { name = "Lua" }
+    local view = DocView(doc)
+
+    config.plugins.codefold.enabled = true
+    config.plugins.codefold.use_whitelist = false
+    config.plugins.codefold.languages = {}
+    config.plugins.codefold.extensions = {}
+    test.ok(codefold._test.codefold_enabled_for_view(view))
+
+    config.plugins.codefold.use_whitelist = true
+    test.not_ok(codefold._test.codefold_enabled_for_view(view))
+
+    config.plugins.codefold.languages = { Lua = true }
+    test.ok(codefold._test.codefold_enabled_for_view(view))
+
+    config.plugins.codefold.languages = {}
+    config.plugins.codefold.extensions = { ".TXT", "tar.gz" }
+    doc.filename = "NOTES.txt"
+    test.ok(codefold._test.codefold_enabled_for_view(view))
+    doc.filename = "archive.TAR.GZ"
+    test.ok(codefold._test.codefold_enabled_for_view(view))
+    doc.filename = "notes.md"
+    test.not_ok(codefold._test.codefold_enabled_for_view(view))
+
+    config.plugins.codefold.enabled = false
+    config.plugins.codefold.languages = { Lua = true }
+    test.not_ok(codefold._test.codefold_enabled_for_view(view))
+
+    config.plugins.codefold.enabled = previous_enabled
+    config.plugins.codefold.use_whitelist = previous_whitelist
+    config.plugins.codefold.languages = previous_languages
+    config.plugins.codefold.extensions = previous_extensions
   end)
 
   test.test("folded regions hide their ending boundary line", function()
@@ -829,8 +879,12 @@ test.describe("codefold - virtual line mapping", function()
     require "plugins.codefold"
 
     local previous_enabled = config.plugins.codefold.enabled
+    local previous_whitelist = config.plugins.codefold.use_whitelist
+    local previous_languages = config.plugins.codefold.languages
+    local previous_extensions = config.plugins.codefold.extensions
     local previous_scale = SCALE
     config.plugins.codefold.enabled = false
+    config.plugins.codefold.use_whitelist = false
 
     local view = make_docview({ "a\n", "  b\n", "c\n" })
     local base_width, base_padding = view:get_gutter_width()
@@ -841,6 +895,17 @@ test.describe("codefold - virtual line mapping", function()
     test.equal(fold_width, base_width + common.round(24 * SCALE))
     test.equal(fold_padding, base_padding)
 
+    config.plugins.codefold.use_whitelist = true
+    config.plugins.codefold.languages = {}
+    config.plugins.codefold.extensions = {}
+    local excluded_width, excluded_padding = view:get_gutter_width()
+    test.equal(excluded_width, base_width)
+    test.equal(excluded_padding, base_padding)
+
+    config.plugins.codefold.languages = { [view.doc.syntax.name] = true }
+    local included_width = view:get_gutter_width()
+    test.equal(included_width, fold_width)
+
     SCALE = SCALE * 2
     view:on_scale_change(SCALE, previous_scale)
     local scaled_width, scaled_padding = view:get_gutter_width()
@@ -850,6 +915,9 @@ test.describe("codefold - virtual line mapping", function()
     SCALE = previous_scale
     view:on_scale_change(SCALE, previous_scale * 2)
     config.plugins.codefold.enabled = previous_enabled
+    config.plugins.codefold.use_whitelist = previous_whitelist
+    config.plugins.codefold.languages = previous_languages
+    config.plugins.codefold.extensions = previous_extensions
   end)
 
   test.test("toggle command enables and disables code folding", function()
