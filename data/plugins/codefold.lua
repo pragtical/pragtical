@@ -9,12 +9,29 @@ local DocView = require "core.docview"
 local Doc = require "core.doc"
 local translate = require "core.doc.translate"
 local tokenizer = require "core.tokenizer"
+local syntax = require "core.syntax"
+local Label = require "widget.label"
+local Toggle = require "widget.toggle"
+
+local apply_filter_settings
+local build_language_setting
+local language_settings_items
 
 ---Configuration for code folding plugin.
 ---@class config.plugins.codefold
+---@field enabled boolean
+---@field use_whitelist boolean
+---@field languages table<string, boolean>
+---@field extensions string[]
 config.plugins.codefold = common.merge({
   -- Whether code folding is enabled.
   enabled = true,
+  -- Only enable folding for configured languages and extensions.
+  use_whitelist = false,
+  -- Syntax names enabled when whitelist mode is active.
+  languages = {},
+  -- Literal filename extensions enabled when whitelist mode is active.
+  extensions = {},
   -- If true, newly opened documents have all fold regions initially collapsed.
   start_folded = false,
   -- If true, folded regions hide the folded end-line tail.
@@ -29,7 +46,56 @@ config.plugins.codefold = common.merge({
       description = "Toggle code folding capabilities.",
       path = "enabled",
       type = "toggle",
-      default = true
+      default = true,
+      on_apply = function()
+        if apply_filter_settings then apply_filter_settings() end
+      end
+    },
+    {
+      label = "Use Whitelist",
+      description = "Only enable folding for selected languages and extensions.",
+      path = "use_whitelist",
+      type = "toggle",
+      default = false,
+      on_apply = function()
+        if apply_filter_settings then apply_filter_settings() end
+      end
+    },
+    {
+      label = "Languages",
+      description = "Languages allowed when whitelist mode is enabled.",
+      path = "languages",
+      type = "list_widgets",
+      default = {},
+      visible_rows = 8,
+      filter_placeholder = "filter languages...",
+      get_value = function(value)
+        return common.merge({}, type(value) == "table" and value or {})
+      end,
+      items = function()
+        return language_settings_items and language_settings_items() or {}
+      end,
+      item_text = function(item)
+        return item.name
+      end,
+      build_item = function(row, item, value, commit)
+        if build_language_setting then
+          build_language_setting(row, item, value, commit)
+        end
+      end,
+      on_apply = function()
+        if apply_filter_settings then apply_filter_settings() end
+      end
+    },
+    {
+      label = "Extensions",
+      description = "Literal filename extensions allowed in whitelist mode.",
+      path = "extensions",
+      type = "list_strings",
+      default = {},
+      on_apply = function()
+        if apply_filter_settings then apply_filter_settings() end
+      end
     },
     {
       label = "Fold On Open",
@@ -66,6 +132,47 @@ local CODEFOLD_SOURCE_FONT = nil
 
 local codefold = {}
 
+local extension_filter_source
+local extension_filter = {}
+
+local function rebuild_extension_filter()
+  extension_filter = {}
+  extension_filter_source = config.plugins.codefold.extensions
+  local extensions = type(extension_filter_source) == "table"
+    and extension_filter_source or {}
+  for _, extension in ipairs(extensions) do
+    extension = tostring(extension):lower():match("^%s*(.-)%s*$")
+    extension = extension:gsub("^%.+", "")
+    if extension ~= "" then
+      extension_filter["." .. extension] = true
+    end
+  end
+end
+
+---@param filename? string
+---@return boolean
+local function extension_is_whitelisted(filename)
+  if extension_filter_source ~= config.plugins.codefold.extensions then
+    rebuild_extension_filter()
+  end
+  filename = (filename or ""):lower()
+  for extension in pairs(extension_filter) do
+    if filename:sub(-#extension) == extension then return true end
+  end
+  return false
+end
+
+---@param doc core.doc
+---@return boolean
+local function document_is_whitelisted(doc)
+  local language = doc.syntax and doc.syntax.name
+  local languages = config.plugins.codefold.languages
+  if language and type(languages) == "table" and languages[language] == true then
+    return true
+  end
+  return extension_is_whitelisted(doc.filename or doc.abs_filename)
+end
+
 ---Return whether code folding should run for a given view.
 ---@param self core.view
 ---@return boolean
@@ -73,7 +180,43 @@ local function codefold_enabled_for_view(self)
   return config.plugins.codefold.enabled
     and self:is(DocView)
     and not self.code_folding_disabled
+    and (
+      not config.plugins.codefold.use_whitelist
+      or document_is_whitelisted(self.doc)
+    )
 end
+
+language_settings_items = function()
+  local names = {
+    [syntax.plain_text_syntax.name or "Plain Text"] = true
+  }
+  for _, item in ipairs(syntax.items) do
+    if type(item.name) == "string" and item.name ~= "" then
+      names[item.name] = true
+    end
+  end
+
+  local items = {}
+  for name in pairs(names) do items[#items + 1] = { name = name } end
+  table.sort(items, function(a, b)
+    local aname, bname = a.name:lower(), b.name:lower()
+    return aname == bname and a.name < b.name or aname < bname
+  end)
+  return items
+end
+
+build_language_setting = function(row, item, value, commit)
+  local label = Label(row, item.name)
+  row:set_child_properties(label, { stretch = 1 })
+
+  local toggle = Toggle(row, "", value[item.name] == true)
+  function toggle:on_change(enabled)
+    value[item.name] = enabled and true or nil
+    commit(value)
+  end
+end
+
+rebuild_extension_filter()
 
 local function maybe_yield()
   if coroutine.isyieldable() then coroutine.yield() end
@@ -967,6 +1110,22 @@ local function init_fold_state(self)
   self.cf_state_loaded = false
 end
 
+apply_filter_settings = function()
+  rebuild_extension_filter()
+  local root_node = core.root_view and core.root_view.root_node
+  if root_node then
+    for _, view in ipairs(root_node:get_children()) do
+      if view:is(DocView) then
+        replace_recalculation_thread(view)
+        init_fold_state(view)
+        view.cf_first_update = true
+        view:invalidate_visual_lines()
+      end
+    end
+  end
+  core.redraw = true
+end
+
 ---Fold all regions.
 ---@param self core.docview
 local function fold_all(self)
@@ -1494,7 +1653,7 @@ end
 command.add(nil, {
   ["code-folding:toggle"] = function()
     config.plugins.codefold.enabled = not config.plugins.codefold.enabled
-    core.redraw = true
+    apply_filter_settings()
   end,
 
   ["code-folding:toggle-fold"] = function()
@@ -1579,7 +1738,11 @@ keymap.add {
 
 codefold._test = {
   apply_detected_regions = apply_detected_regions,
+  codefold_enabled_for_view = codefold_enabled_for_view,
   detect_fold_regions = detect_fold_regions,
+  document_is_whitelisted = document_is_whitelisted,
+  extension_is_whitelisted = extension_is_whitelisted,
+  language_settings_items = language_settings_items,
   doc_state_key = doc_state_key,
   hash_text = hash_text,
   load_fold_state = load_fold_state,
