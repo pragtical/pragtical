@@ -36,6 +36,7 @@ local ListBox = require "widget.listbox"
 local FoldingBook = require "widget.foldingbook"
 local FontsList = require "widget.fontslist"
 local ItemsList = require "widget.itemslist"
+local WidgetList = require "widget.widgetlist"
 local KeybindingDialog = require "widget.keybinddialog"
 local Fonts = require "widget.fonts"
 local FilePicker = require "widget.filepicker"
@@ -66,7 +67,8 @@ settings.type = {
   FILE = 8,
   DIRECTORY = 9,
   COLOR = 10,
-  SUBCONFIG = 11
+  SUBCONFIG = 11,
+  LIST_WIDGETS = 12
 }
 
 ---@alias settings.types
@@ -81,6 +83,7 @@ settings.type = {
 ---| `settings.type.DIRECTORY`
 ---| `settings.type.COLOR`
 ---| `settings.type.SUBCONFIG`
+---| `settings.type.LIST_WIDGETS`
 
 ---Represents a setting to render on a settings pane.
 ---@class settings.option
@@ -125,6 +128,18 @@ settings.type = {
 ---Lua patterns used on FILE or DIRECTORY to filter browser results and
 ---also force the selection to match one of the filters.
 ---@field public filters table<integer,string>
+---Items displayed by a LIST_WIDGETS, or a function that generates them.
+---@field public items? table|fun(value:any):table
+---Return the text used to filter a LIST_WIDGETS item.
+---@field public item_text? fun(item:any):string
+---Populate a LIST_WIDGETS row with child controls.
+---@field public build_item? fun(row:widget.widgetlist.item, item:any, value:any, commit:fun(value:any))
+---Maximum number of LIST_WIDGETS rows visible without scrolling.
+---@field public visible_rows? integer
+---Whether a LIST_WIDGETS includes a text filter. Defaults to true.
+---@field public filterable? boolean
+---Placeholder displayed by a LIST_WIDGETS filter.
+---@field public filter_placeholder? string
 
 ---Represents a standalone settings specification.
 ---@class settings.config_spec
@@ -286,6 +301,17 @@ settings.add("General",
   }
 )
 
+local disabled_transition_items = {
+  { key = "scroll", label = "Scrolling" },
+  { key = "commandview", label = "Command View" },
+  { key = "contextmenu", label = "Context Menu" },
+  { key = "logview", label = "Log View" },
+  { key = "nagbar", label = "Nag Bar" },
+  { key = "tabs", label = "Tabs" },
+  { key = "tab_drag", label = "Tab Drag" },
+  { key = "statusbar", label = "Status Bar" }
+}
+
 settings.add("Graphics",
   {
     {
@@ -366,52 +392,39 @@ settings.add("Graphics",
       default = false
     },
     {
-      label = "Disable Scrolling Transitions",
-      path = "disabled_transitions.scroll",
-      type = settings.type.TOGGLE,
-      default = false
-    },
-    {
-      label = "Disable Command View Transitions",
-      path = "disabled_transitions.commandview",
-      type = settings.type.TOGGLE,
-      default = false
-    },
-    {
-      label = "Disable Context Menu Transitions",
-      path = "disabled_transitions.contextmenu",
-      type = settings.type.TOGGLE,
-      default = false
-    },
-    {
-      label = "Disable Log View Transitions",
-      path = "disabled_transitions.logview",
-      type = settings.type.TOGGLE,
-      default = false
-    },
-    {
-      label = "Disable Nag Bar Transitions",
-      path = "disabled_transitions.nagbar",
-      type = settings.type.TOGGLE,
-      default = false
-    },
-    {
-      label = "Disable Tab Transitions",
-      path = "disabled_transitions.tabs",
-      type = settings.type.TOGGLE,
-      default = false
-    },
-    {
-      label = "Disable Tab Drag Transitions",
-      path = "disabled_transitions.tab_drag",
-      type = settings.type.TOGGLE,
-      default = false
-    },
-    {
-      label = "Disable Status Bar Transitions",
-      path = "disabled_transitions.statusbar",
-      type = settings.type.TOGGLE,
-      default = false
+      label = "Disable Transitions",
+      description = "Choose which individual transitions should be disabled.",
+      path = "disabled_transitions",
+      type = settings.type.LIST_WIDGETS,
+      default = {
+        scroll = false,
+        commandview = false,
+        contextmenu = false,
+        logview = false,
+        nagbar = false,
+        tabs = false,
+        tab_drag = false,
+        statusbar = false
+      },
+      filterable = false,
+      visible_rows = #disabled_transition_items,
+      get_value = function(value)
+        return common.merge({}, type(value) == "table" and value or {})
+      end,
+      items = disabled_transition_items,
+      item_text = function(item)
+        return item.label
+      end,
+      build_item = function(row, item, value, commit)
+        local label = Label(row, item.label)
+        row:set_child_properties(label, { stretch = 1 })
+
+        local toggle = Toggle(row, "", value[item.key] == true)
+        function toggle:on_change(disabled)
+          value[item.key] = disabled
+          commit(value)
+        end
+      end
     },
   }
 )
@@ -1629,6 +1642,41 @@ local function add_control(pane, option, context)
     widget = list
     found = true
 
+  elseif option.type == settings.type.LIST_WIDGETS then
+    ---@type widget.label
+    Label(pane, option.label .. ":", true)
+    ---@type widget.textbox?
+    local filter
+    if option.filterable ~= false then
+      filter = TextBox(
+        pane,
+        "",
+        option.filter_placeholder or "filter items..."
+      )
+    end
+    ---@type widget.widgetlist
+    local list = WidgetList(pane)
+    local items = type(option.items) == "function"
+      and option.items(option_value) or option.items or {}
+    for _, item in ipairs(items) do
+      local text = option.item_text and option.item_text(item) or tostring(item)
+      list:add_item(item, function(row, data)
+        if option.build_item then
+          option.build_item(row, data, option_value, function(value)
+            list:on_change(value)
+          end)
+        end
+      end, text)
+    end
+    list:set_visible_row_count(option.visible_rows or 8)
+    if filter then
+      function filter:on_change(value)
+        list:filter(value)
+      end
+    end
+    widget = list
+    found = true
+
   elseif option.type == settings.type.FONT then
     --get fonts without conversion to renderer.font
     if type(path) ~= "nil" then
@@ -1961,8 +2009,6 @@ function Settings:load_plugin_settings()
     pane = pane.container
   end
 
-  -- TODO: improve how the plugin enable/disable toggles look
-
   -- requires earlier access to startup process
   Label(
     pane,
@@ -1972,9 +2018,8 @@ function Settings:load_plugin_settings()
 
   Line(pane, 2, 10)
 
-  local container = Container(pane, nil, Container.alignment.LEFT)
-  container:set_spacing(25)
-  container:set_padding({x = 0, y = 0})
+  local filter = TextBox(pane, "", "filter plugins...")
+  local list = WidgetList(pane)
 
   local plugins = get_installed_plugins()
   for _, plugin in ipairs(plugins) do
@@ -2013,16 +2058,29 @@ function Settings:load_plugin_settings()
         name = prettify_name(plugin)
       end
 
-      ---@type widget.toggle
-      local toggle = Toggle(container, name, enabled)
-      function toggle:on_change(value)
-        if value then
-          this:enable_plugin(plugin)
-        else
-          this:disable_plugin(plugin)
+      list:add_item({
+        enabled = enabled,
+        name = name,
+        plugin = plugin
+      }, function(row, item)
+        local label = Label(row, item.name)
+        row:set_child_properties(label, { stretch = 1 })
+
+        ---@type widget.toggle
+        local toggle = Toggle(row, "", item.enabled)
+        function toggle:on_change(value)
+          if value then
+            this:enable_plugin(item.plugin)
+          else
+            this:disable_plugin(item.plugin)
+          end
         end
-      end
+      end, name .. " " .. plugin)
     end
+  end
+  list:set_visible_row_count(10)
+  function filter:on_change(value)
+    list:filter(value)
   end
 
   table.sort(settings.plugin_sections)
@@ -2286,6 +2344,8 @@ local function layout_settings_childs(childs, width)
         (prev_child:is(Label) and not prev_child.desc)
         or
         (child:is(Label) and child.desc)
+        or
+        (prev_child:is(TextBox) and child:is(WidgetList))
       then
         y = prev_child:get_bottom() + (10 * SCALE)
       elseif not child:is(Line) then
@@ -2295,7 +2355,7 @@ local function layout_settings_childs(childs, width)
     if child:is(Line) then
       x = 0
     elseif
-      child:is(ItemsList) or child:is(FilePicker)
+      child:is(ItemsList) or child:is(WidgetList) or child:is(FilePicker)
       or
       child:is(TextBox) or child:is(Container)
     then
