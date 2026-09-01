@@ -136,6 +136,8 @@ function DiffView:new(a, b, compare_type, names)
   self.b_gaps = {}
   self.a_changes = {}
   self.b_changes = {}
+  self.diff_layout_generation = 0
+  self.aligned_layout = nil
   self.views_patched = false
 
   self:patch_views()
@@ -188,10 +190,10 @@ function DiffView:update_diff()
     local b_len = #self.doc_view_b.doc.lines
 
     local computing_start = system.get_time()
-    local a_gaps = #self.a_gaps == 0 and self.a_gaps or {}
-    local b_gaps = #self.b_gaps == 0 and self.b_gaps or {}
-    local a_changes = #self.a_changes == 0 and self.a_changes or {}
-    local b_changes = #self.b_changes == 0 and self.b_changes or {}
+    local a_gaps = {}
+    local b_gaps = {}
+    local a_changes = {}
+    local b_changes = {}
     for edit in diff.diff_iter(self.doc_view_a.doc.lines, self.doc_view_b.doc.lines) do
       if edit.tag == "equal" or edit.tag == "modify" then
         -- Assign gaps for this line
@@ -259,6 +261,8 @@ function DiffView:update_diff()
     self.b_gaps = b_gaps
     self.a_changes = a_changes
     self.b_changes = b_changes
+    self.diff_layout_generation = self.diff_layout_generation + 1
+    self.aligned_layout = nil
 
     self.updater_idx = nil
 
@@ -338,6 +342,8 @@ function DiffView:sync(line, target_line, is_a)
 
     common.splice(target_gaps, target_line, 0, gaps_inserts)
   end
+  self.diff_layout_generation = self.diff_layout_generation + 1
+  self.aligned_layout = nil
 end
 
 function DiffView:sync_selected()
@@ -523,8 +529,10 @@ function DiffView:on_mouse_wheel(y, x)
     y = 0
   end
   if y and y ~= 0 then
-    self.doc_view_a.scroll.to.y = self.doc_view_a.scroll.to.y + y * -config.mouse_wheel_scroll
-    self.doc_view_b.scroll.to.y = self.doc_view_b.scroll.to.y + y * -config.mouse_wheel_scroll
+    local delta = y * -config.mouse_wheel_scroll
+    self.scroll.to.y = self.scroll.to.y + delta
+    self.doc_view_a.scroll.to.y = self.doc_view_a.scroll.to.y + delta
+    self.doc_view_b.scroll.to.y = self.doc_view_b.scroll.to.y + delta
   end
   if x and x ~= 0 then
     self.doc_view_a.scroll.to.x = self.doc_view_a.scroll.to.x + x * -config.mouse_wheel_scroll
@@ -545,16 +553,138 @@ function DiffView:on_touch_moved(...)
   self.doc_view_b:on_touch_moved(...)
 end
 
+local function add_layout_side(slots, view, gaps, side_name)
+  local max_slot = 0
+  local gap_total = 0
+  for line = 1, #view.doc.lines do
+    local gap = gaps[line]
+    if gap then gap_total = gap[2] end
+    local slot_index = line - 1 + gap_total
+    local slot = slots[slot_index + 1]
+    if not slot then
+      slot = { index = slot_index }
+      slots[slot_index + 1] = slot
+    end
+    local first_row, row_count = view:visual_rows_for_line(line)
+    slot[side_name .. "_line"] = line
+    slot[side_name .. "_row_count"] = math.max(1, row_count)
+    slot[side_name .. "_native_start"] = first_row or 1
+    max_slot = math.max(max_slot, slot_index)
+  end
+  return max_slot
+end
+
+---Return the cached shared visual-row layout for both comparison panes.
+---@return table layout
+function DiffView:get_aligned_layout()
+  local a_model = self.doc_view_a:get_visual_lines()
+  local b_model = self.doc_view_b:get_visual_lines()
+  local a_line_count = #self.doc_view_a.doc.lines
+  local b_line_count = #self.doc_view_b.doc.lines
+  local a_line_height = self.doc_view_a:get_line_height()
+  local b_line_height = self.doc_view_b:get_line_height()
+  local cached = self.aligned_layout
+
+  if cached
+    and cached.a_model == a_model
+    and cached.b_model == b_model
+    and cached.a_gaps == self.a_gaps
+    and cached.b_gaps == self.b_gaps
+    and cached.a_line_count == a_line_count
+    and cached.b_line_count == b_line_count
+    and cached.a_line_height == a_line_height
+    and cached.b_line_height == b_line_height
+    and cached.generation == self.diff_layout_generation
+  then
+    return cached
+  end
+
+  local slots = {}
+  local max_slot = add_layout_side(slots, self.doc_view_a, self.a_gaps, "a")
+  max_slot = math.max(
+    max_slot,
+    add_layout_side(slots, self.doc_view_b, self.b_gaps, "b")
+  )
+
+  local layout = {
+    a_model = a_model,
+    b_model = b_model,
+    a_gaps = self.a_gaps,
+    b_gaps = self.b_gaps,
+    a_line_count = a_line_count,
+    b_line_count = b_line_count,
+    a_line_height = a_line_height,
+    b_line_height = b_line_height,
+    line_height = a_line_height,
+    generation = self.diff_layout_generation,
+    slots = slots,
+    a = { starts = {}, heights = {}, row_counts = {}, native_starts = {} },
+    b = { starts = {}, heights = {}, row_counts = {}, native_starts = {} },
+  }
+
+  local row = 0
+  for slot_index = 0, max_slot do
+    local slot = slots[slot_index + 1] or { index = slot_index }
+    slots[slot_index + 1] = slot
+    local height = math.max(
+      1,
+      slot.a_row_count or 0,
+      slot.b_row_count or 0
+    )
+    slot.start = row
+    slot.height = height
+    if slot.a_line then
+      layout.a.starts[slot.a_line] = row
+      layout.a.heights[slot.a_line] = height
+      layout.a.row_counts[slot.a_line] = slot.a_row_count
+      layout.a.native_starts[slot.a_line] = slot.a_native_start
+    end
+    if slot.b_line then
+      layout.b.starts[slot.b_line] = row
+      layout.b.heights[slot.b_line] = height
+      layout.b.row_counts[slot.b_line] = slot.b_row_count
+      layout.b.native_starts[slot.b_line] = slot.b_native_start
+    end
+    row = row + height
+  end
+  layout.total_rows = math.max(1, row)
+  self.aligned_layout = layout
+  return layout
+end
+
+local function get_layout_side(layout, is_a)
+  return is_a and layout.a or layout.b
+end
+
+---Resolve an aligned zero-based visual row to a line and native visual row.
+local function position_from_aligned_row(layout, is_a, aligned_row)
+  local side = get_layout_side(layout, is_a)
+  local line_count = is_a and layout.a_line_count or layout.b_line_count
+  local low, high, line = 1, line_count, 1
+  while low <= high do
+    local mid = math.floor((low + high) / 2)
+    if (side.starts[mid] or 0) <= aligned_row then
+      line = mid
+      low = mid + 1
+    else
+      high = mid - 1
+    end
+  end
+  local local_row = common.clamp(
+    aligned_row - (side.starts[line] or 0),
+    0,
+    (side.row_counts[line] or 1) - 1
+  )
+  return line, (side.native_starts[line] or 1) + local_row
+end
+
 function DiffView:get_scrollable_size()
-  local a_lines, b_lines = #self.doc_view_a.doc.lines, #self.doc_view_b.doc.lines
-  local a_gaps = (self.a_gaps[a_lines] and self.a_gaps[a_lines][2] or 0)
-  local b_gaps = (self.b_gaps[b_lines] and self.b_gaps[b_lines][2] or 0)
-  local lc = math.max(a_lines + a_gaps, b_lines + b_gaps)
+  local layout = self:get_aligned_layout()
   if not config.scroll_past_end then
     local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
-    return self.doc_view_a:get_line_height() * (lc) + style.padding.y * 2 + h_scroll
+    return layout.line_height * layout.total_rows + style.padding.y * 2 + h_scroll
   end
-  return self.doc_view_a:get_line_height() * (lc - 1) + self.size.y
+  return layout.line_height * (layout.total_rows - 1) + self.size.y
 end
 
 ---@param parent core.diffview
@@ -564,8 +694,8 @@ end
 ---@param y number
 ---@param changes diff.changes[]
 local function draw_line_text_override(parent, self, line, x, y, changes)
-  y = y + self:get_line_text_y_offset()
-  local h = self:get_line_height()
+  local lh = self:get_line_height()
+  local h = self:get_line_visual_height(line)
   local change = changes[line]
   if change and change.tag ~= "equal" then
     local delete_bg = style.diff_delete_background
@@ -599,26 +729,45 @@ local function draw_line_text_override(parent, self, line, x, y, changes)
         end
         ---@type diff.changes[]
         local mods = change.changes
-        local text = ""
-        local deletes = 0
-        for i, edit in ipairs(mods) do
+        local col = 1
+        for _, edit in ipairs(mods) do
           if edit.tag == "insert" then
-            text = text .. edit.val
-            local tx = self:get_col_x_offset(line, i - deletes)
-            local w = self:get_font():get_width(edit.val);
+            local tx, ty = self:get_line_screen_position(line, col)
+            local w = self:get_font():get_width(edit.val)
             renderer.draw_rect(
-              x + tx, y, w, h,
+              tx, ty, w, lh,
               changes == parent.a_changes
                 and delete_inline
                 or insert_inline
             )
+            col = col + #edit.val
           elseif edit.tag == "delete" then
-            deletes = deletes + 1
+            -- Deleted characters are absent from the line being drawn.
+          else
+            col = col + #edit.val
           end
         end
       end
     end
   end
+end
+
+local function draw_plain_line_text(self, line, x, y, color)
+  local starts = self:get_line_wraps(line) or { 1 }
+  local text = self.doc.lines[line]
+  local lh = self:get_line_height()
+  local text_y_offset = self:get_line_text_y_offset()
+  if text:sub(-1) == "\n" then text = text:sub(1, -2) end
+  for row, col in ipairs(starts) do
+    local next_col = starts[row + 1] or (#text + 1)
+    local segment = text:sub(col, next_col - 1)
+    local tx = x + self:get_col_x_offset(line, col)
+    renderer.draw_text(
+      self:get_font(), segment, tx, y + (row - 1) * lh + text_y_offset,
+      color, { tab_offset = tx - x }
+    )
+  end
+  return math.max(1, #starts) * lh
 end
 
 function DiffView:patch_views()
@@ -663,13 +812,9 @@ function DiffView:patch_views()
         end)
       end
       if has_changes and config.plugins.diffview.plain_text then
-        renderer.draw_text(
-          self:get_font(),
-          self.doc.lines[line],
-          x, y + self:get_line_text_y_offset(),
-          config.plugins.diffview.plain_text_color
+        return draw_plain_line_text(
+          self, line, x, y, config.plugins.diffview.plain_text_color
         )
-        return self:get_line_height()
       else
         return orig(self, line, x, y)
       end
@@ -681,10 +826,14 @@ function DiffView:patch_views()
   local function wrap_get_line_screen_position(doc_view, is_a)
     doc_view.get_line_screen_position = function(self, line, col)
       local x, y = self:get_content_offset()
-      local lh = self:get_line_height()
-      local gaps = is_a and parent.a_gaps or parent.b_gaps
-      local gap_y = (gaps[line] and gaps[line][2] or 0) * lh
-      y = y + (line - 1) * lh + gap_y + style.padding.y
+      local layout = parent:get_aligned_layout()
+      local side = get_layout_side(layout, is_a)
+      local row = side.starts[line] or 0
+      if col then
+        local native_row = self:visual_row_from_position(line, col)
+        row = row + native_row - (side.native_starts[line] or native_row)
+      end
+      y = y + row * layout.line_height + style.padding.y
       if col then
         return x + self:get_gutter_width() + self:get_col_x_offset(line, col), y
       else
@@ -697,29 +846,17 @@ function DiffView:patch_views()
   ---@param is_a boolean
   local function wrap_resolve_screen_position(doc_view, is_a)
     doc_view.resolve_screen_position = function(self, x, y)
-      local lines = self.doc.lines
-      local lh = self:get_line_height()
-      local gaps = is_a and parent.a_gaps or parent.b_gaps
-
-      for i = 1, #lines do
-        local line_x, line_y = self:get_line_screen_position(i)
-        local next_y
-        if i < #lines then
-          local _
-          _, next_y = self:get_line_screen_position(i + 1)
-        else
-          next_y = line_y + lh + ((gaps[i] and gaps[i][1] or 0) * lh)
-        end
-
-        if (y >= line_y or i == 1) and y < next_y then
-          local col = self:get_x_offset_col(i, x - line_x)
-          return i, col
-        end
-      end
-
-      local last = #lines
-      local line_x, _ = self:get_line_screen_position(last)
-      return last, self:get_x_offset_col(last, x - line_x)
+      local layout = parent:get_aligned_layout()
+      local ox, oy = self:get_content_offset()
+      local gw = self:get_gutter_width()
+      local aligned_row = math.floor(
+        (y - oy - style.padding.y) / layout.line_height
+      )
+      local line, native_row = position_from_aligned_row(
+        layout, is_a, aligned_row
+      )
+      local col = self:get_visual_line_col_from_x(native_row, x - ox - gw)
+      return line, col
     end
   end
 
@@ -728,35 +865,20 @@ function DiffView:patch_views()
   local function wrap_get_visible_line_range(doc_view, is_a)
     doc_view.get_visible_line_range = function(self)
       local _, oy, _, y2 = self:get_content_bounds()
-      local lh = self:get_line_height()
-      local lines = self.doc.lines
-      local minline, maxline = 1, #lines
-      local gaps = is_a and parent.a_gaps or parent.b_gaps
-
-      local y = style.padding.y
-      for i = 1, #lines do
-        local gap = (gaps[i] and gaps[i][2] or 0) * lh
-        local h = lh
-        local total = y + h
-        y = total
-        if total + gap > oy then
-          minline = i
-          break
-        end
-      end
-
-      for i = minline, #lines do
-        local gap = (gaps[i] and gaps[i][2] or 0) * lh
-        local h = lh
-        local total = y + h
-        y = total
-        if total + gap > y2 then
-          maxline = i
-          break
-        end
-      end
-
-      return minline, maxline
+      local layout = parent:get_aligned_layout()
+      local first_aligned = math.floor(
+        (oy - style.padding.y) / layout.line_height
+      )
+      local last_aligned = math.floor(
+        (y2 - style.padding.y) / layout.line_height
+      ) + 1
+      local _, first_row = position_from_aligned_row(
+        layout, is_a, first_aligned
+      )
+      local _, last_row = position_from_aligned_row(
+        layout, is_a, last_aligned
+      )
+      return first_row, last_row
     end
   end
 
@@ -764,14 +886,13 @@ function DiffView:patch_views()
   ---@param is_a boolean
   local function wrap_get_scrollable_size(doc_view, is_a)
     doc_view.get_scrollable_size = function(self)
-      local gaps = is_a and parent.a_gaps or parent.b_gaps
-      local lc = #self.doc.lines
-      lc = lc + (gaps[lc] and gaps[lc][2] or 0)
+      local layout = parent:get_aligned_layout()
       if not config.scroll_past_end then
         local _, _, _, h_scroll = self.h_scrollbar:get_track_rect()
-        return self:get_line_height() * (lc) + style.padding.y * 2 + h_scroll
+        return layout.line_height * layout.total_rows
+          + style.padding.y * 2 + h_scroll
       end
-      return self:get_line_height() * (lc - 1) + self.size.y
+      return layout.line_height * (layout.total_rows - 1) + self.size.y
     end
   end
 
@@ -801,21 +922,32 @@ function DiffView:patch_views()
       self:get_font():set_tab_size(indent_size)
 
       local minline, maxline = self:get_visible_line_range()
-      local lh = self:get_line_height()
 
       local gw, gpad = self:get_gutter_width()
-      for i = minline, maxline do
-        local _, y = self:get_line_screen_position(i)
-        self:draw_line_gutter(i, self.position.x, y, gpad and gw - gpad or gw)
+      local drawn_gutters = {}
+      for row = minline, maxline do
+        local line = self:visual_position_from_row(row)
+        if line and self.doc.lines[line] and not drawn_gutters[line] then
+          local _, y = self:get_line_screen_position(line)
+          self:draw_line_gutter(
+            line, self.position.x, y, gpad and gw - gpad or gw
+          )
+          drawn_gutters[line] = true
+        end
       end
 
       local pos = self.position
       -- the clip below ensure we don't write on the gutter region. On the
       -- right side it is redundant with the Node's clip.
       core.push_clip_rect(pos.x + gw, pos.y, self.size.x - gw, self.size.y)
-      for i = minline, maxline do
-        local x, y = self:get_line_screen_position(i)
-        y = y + (self:draw_line_body(i, x, y) or lh)
+      local drawn_lines = {}
+      for row = minline, maxline do
+        local line = self:visual_position_from_row(row)
+        if line and self.doc.lines[line] and not drawn_lines[line] then
+          local x, y = self:get_line_screen_position(line)
+          self:draw_line_body(line, x, y)
+          drawn_lines[line] = true
+        end
       end
       self:draw_overlay()
       core.pop_clip_rect()
@@ -1021,8 +1153,9 @@ end
 function DiffView:draw_scrollbar()
   DiffView.super.draw_scrollbar(self)
 
+  local layout = self:get_aligned_layout()
   local parent_scrollable = self:get_scrollable_size()
-  local parent_lh = self.doc_view_a:get_line_height()
+  local parent_lh = layout.line_height
   local parent_x, parent_y, parent_w, parent_h = get_scrollbar_marker_lane(
     self.v_scrollbar
   )
@@ -1031,17 +1164,17 @@ function DiffView:draw_scrollbar()
     {
       view = self.doc_view_a,
       changes = self.a_changes,
-      gaps = self.a_gaps
+      layout_side = layout.a
     },
     {
       view = self.doc_view_b,
       changes = self.b_changes,
-      gaps = self.b_gaps
+      layout_side = layout.b
     },
   } do
     local view = side.view
     local changes = side.changes
-    local gaps = side.gaps
+    local layout_side = side.layout_side
     local scrollbar = view.v_scrollbar
     local scrollable = view:get_scrollable_size()
     local lh = view:get_line_height()
@@ -1076,10 +1209,9 @@ function DiffView:draw_scrollbar()
         or tag == "modify" and style.diff_modify
 
       if color then
-        local start_gap = gaps[start_line] and gaps[start_line][2] or 0
-        local end_gap = gaps[end_line] and gaps[end_line][2] or start_gap
-        local start_row = start_line - 1 + start_gap
-        local end_row = end_line + end_gap
+        local start_row = layout_side.starts[start_line] or 0
+        local end_row = (layout_side.starts[end_line] or start_row)
+          + (layout_side.heights[end_line] or 1)
         local marker_y, marker_h = get_scrollbar_marker_rect(
           y, h, start_row, end_row, scrollable, lh, style.padding.y
         )
@@ -1120,6 +1252,19 @@ function DiffView:update()
 
   self.doc_view_a:update()
   self.doc_view_b:update()
+
+  local source = self
+  if self.doc_view_a:scrollbar_dragging() or core.active_view == self.doc_view_a then
+    source = self.doc_view_a
+  elseif self.doc_view_b:scrollbar_dragging() or core.active_view == self.doc_view_b then
+    source = self.doc_view_b
+  end
+  for _, view in ipairs { self, self.doc_view_a, self.doc_view_b } do
+    if view ~= source then
+      view.scroll.y = source.scroll.y
+      view.scroll.to.y = source.scroll.to.y
+    end
+  end
 end
 
 function DiffView:draw()

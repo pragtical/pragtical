@@ -792,25 +792,50 @@ function translate.start_of_line(doc, line, col)
   return line, ncol2 + 1
 end
 
+---Enable or disable wrapping for a document view.
+---@param docview core.docview
+---@param enabled boolean
+function LineWrapping.set_enabled(docview, enabled)
+  if not docview or not docview.doc then return end
+  docview.wrapping_enabled = enabled
+  if enabled then
+    LineWrapping.update_docview_breaks(docview)
+  else
+    LineWrapping.reconstruct_breaks(docview, docview:get_font(), math.huge)
+  end
+end
+
+local function each_command_view(fn)
+  local view = core.active_view
+  if not view or not view.doc then return end
+  local parent = view.diff_view_parent
+  if parent then
+    fn(parent.doc_view_a)
+    fn(parent.doc_view_b)
+  else
+    fn(view)
+  end
+end
+
 command.add(nil, {
   ["line-wrapping:enable"] = function()
-    if core.active_view and core.active_view.doc then
-      core.active_view.wrapping_enabled = true
-      LineWrapping.update_docview_breaks(core.active_view)
-    end
+    each_command_view(function(view) LineWrapping.set_enabled(view, true) end)
   end,
   ["line-wrapping:disable"] = function()
-    if core.active_view and core.active_view.doc then
-      core.active_view.wrapping_enabled = false
-      LineWrapping.reconstruct_breaks(core.active_view, core.active_view:get_font(), math.huge)
-    end
+    each_command_view(function(view) LineWrapping.set_enabled(view, false) end)
   end,
   ["line-wrapping:toggle"] = function()
-    if core.active_view and core.active_view.doc and core.active_view.wrapped_settings then
-      command.perform("line-wrapping:disable")
+    local view = core.active_view
+    if not view or not view.doc then return end
+    local parent = view.diff_view_parent
+    local enabled
+    if parent then
+      enabled = parent.doc_view_a.wrapping_enabled
+        and parent.doc_view_b.wrapping_enabled
     else
-      command.perform("line-wrapping:enable")
+      enabled = view.wrapping_enabled
     end
+    each_command_view(function(item) LineWrapping.set_enabled(item, not enabled) end)
   end
 })
 
