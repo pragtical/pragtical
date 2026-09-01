@@ -7,11 +7,6 @@ local style = require "core.style"
 local LineWrapping = require "plugins.linewrapping"
 local DiffView = require "plugins.diffview"
 
-local previous_active_view
-local previous_width_override
-local previous_scroll_past_end
-local previous_plain_text
-
 local function set_diff(view, a_gaps, b_gaps, a_changes, b_changes)
   view.a_gaps = a_gaps
   view.b_gaps = b_gaps
@@ -95,19 +90,23 @@ local function with_renderer_calls(fn)
 end
 
 test.describe("diffview line wrapping", function()
-  test.before_each(function()
-    previous_active_view = core.active_view
-    previous_width_override = config.plugins.linewrapping.width_override
-    previous_scroll_past_end = config.scroll_past_end
-    previous_plain_text = config.plugins.diffview.plain_text
+  test.before_each(function(context)
+    context.previous_active_view = core.active_view
+    context.previous_cwd = system.getcwd()
+    context.previous_width_override = config.plugins.linewrapping.width_override
+    context.previous_scroll_past_end = config.scroll_past_end
+    context.previous_plain_text = config.plugins.diffview.plain_text
     config.plugins.diffview.plain_text = false
   end)
 
-  test.after_each(function()
-    config.plugins.linewrapping.width_override = previous_width_override
-    config.scroll_past_end = previous_scroll_past_end
-    config.plugins.diffview.plain_text = previous_plain_text
-    if previous_active_view then core.set_active_view(previous_active_view) end
+  test.after_each(function(context)
+    config.plugins.linewrapping.width_override = context.previous_width_override
+    config.scroll_past_end = context.previous_scroll_past_end
+    config.plugins.diffview.plain_text = context.previous_plain_text
+    if context.previous_active_view then
+      core.set_active_view(context.previous_active_view)
+    end
+    system.chdir(context.previous_cwd)
   end)
 
   test.test("F10 behavior toggles both panes from either side", function()
