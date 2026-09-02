@@ -222,6 +222,25 @@ config.scroll_context_lines = 1
 ---@type boolean
 config.show_line_numbers = true
 
+---The extension assigned to new untitled documents for syntax detection and
+---as the suggested filename when saving. A leading period is optional. An
+---empty string disables the configured extension, but "current" mode can
+---still inherit an extension from the active document.
+---
+---Defaults to an empty string.
+---@type string
+config.new_file_extension = ""
+
+---@alias config.newfileextensionmode
+---| "configured" # Always use `config.new_file_extension`.
+---| "current" # Follow the active document, falling back to the configured extension.
+
+---How the extension for new untitled documents is selected.
+---
+---Defaults to "configured".
+---@type config.newfileextensionmode
+config.new_file_extension_mode = "configured"
+
 ---The number of spaces each level of indentation represents.
 ---
 ---The default is 2.
