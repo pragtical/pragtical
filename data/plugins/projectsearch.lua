@@ -5,6 +5,7 @@ local keymap = require "core.keymap"
 local command = require "core.command"
 local config = require "core.config"
 local style = require "core.style"
+local ContextMenu = require "core.contextmenu"
 local DocView = require "core.docview"
 local Widget = require "widget"
 local Button = require "widget.button"
@@ -27,6 +28,7 @@ config.plugins.projectsearch = common.merge({
   },
   live_search = false,
   syntax_highlighting = true,
+  split_direction = "right",
   -- The config specification used by gui generators
   config_spec = {
     name = "Project Search",
@@ -51,6 +53,19 @@ config.plugins.projectsearch = common.merge({
       path = "syntax_highlighting",
       type = "toggle",
       default = true
+    },
+    {
+      label = "Split Direction",
+      description = "Where to open project search results when control-clicked.",
+      path = "split_direction",
+      type = "selection",
+      default = "right",
+      values = {
+        { "Right", "right" },
+        { "Left", "left" },
+        { "Up", "up" },
+        { "Down", "down" }
+      }
     }
   }
 }, config.plugins.projectsearch)
@@ -65,6 +80,10 @@ local threaded_replace_id = 0
 
 ---@class plugins.projectsearch.resultsview : widget
 ---@field results_list widget.searchreplacelist
+---@field context_menu core.contextmenu
+---@field source_view core.view?
+---@field result_split_node core.node?
+---@field result_split_views core.docview[]?
 ---@overload fun(path?:string,text:string,type:'"plain"'|'"regex"',insensitive?:boolean,whole_word?:boolean,replacement?:string):plugins.projectsearch.resultsview
 local ResultsView = Widget:extend()
 
@@ -155,6 +174,14 @@ function ResultsView:new(path, text, search_type, insensitive, whole_word, repla
   self.results_list.on_item_click = function(this, item, clicks)
     self:open_selected_result()
   end
+  self.context_menu = ContextMenu()
+  self.context_menu:register(function()
+    local item = self.results_list:get_selected()
+    return core.active_view == self and item and item.position
+  end, {
+    { text = "Open", command = "project-search:open-selected" },
+    { text = "Open in Split", command = "project-search:open-selected-split" }
+  })
 
   local function toggle_filters(enabled)
     if enabled then
@@ -1160,12 +1187,102 @@ end
 ---@type core.view?
 local previous_view
 
+local split_directions = {
+  left = true,
+  right = true,
+  up = true,
+  down = true
+}
+local split_click_modifier = PLATFORM == "Mac OS X" and "cmd" or "ctrl"
+
+local function get_split_direction()
+  local direction = config.plugins.projectsearch.split_direction
+  return split_directions[direction] and direction or "right"
+end
+
+local function node_is_in_tree(root, target)
+  if root == target then return true end
+  if root.type ~= "leaf" then
+    return node_is_in_tree(root.a, target)
+      or node_is_in_tree(root.b, target)
+  end
+  return false
+end
+
+local function get_result_split_node(self)
+  local root = core.root_view.root_node
+  local node = self.result_split_node
+  if
+    node and node.type == "leaf" and not node.locked
+    and node_is_in_tree(root, node)
+  then
+    return node
+  end
+
+  -- A collapsed split can preserve these views in the main pane. Do not
+  -- follow them there, since that pane is no longer the result split.
+  self.result_split_node = nil
+  self.result_split_views = {}
+end
+
+local function get_result_split_source_node(self)
+  local root = core.root_view.root_node
+  local node = self.source_view and root:get_node_for_view(self.source_view)
+  if not node then
+    node = root:get_node_for_view(self)
+  end
+  if not node or node.type ~= "leaf" or node.locked then
+    node = core.root_view:get_primary_node()
+  end
+  return node
+end
+
+local function remember_result_split_view(self, node, view)
+  self.result_split_node = node
+  self.result_split_views = self.result_split_views or {}
+  for i = #self.result_split_views, 1, -1 do
+    if self.result_split_views[i] == view then
+      table.remove(self.result_split_views, i)
+    end
+  end
+  table.insert(self.result_split_views, view)
+end
+
+local function open_doc_in_result_split(self, doc)
+  local node = get_result_split_node(self)
+  local view
+  if node then
+    for _, candidate in ipairs(node.views) do
+      if candidate:extends(DocView) and candidate.doc == doc then
+        view = candidate
+        node:set_active_view(view)
+        break
+      end
+    end
+    if not view then
+      view = DocView(doc)
+      node:add_view(view)
+    end
+  else
+    view = DocView(doc)
+    node = get_result_split_source_node(self):split(
+      get_split_direction(), view
+    )
+  end
+  remember_result_split_view(self, node, view)
+  return view
+end
+
 ---Opens a DocView of the user selected match.
-function ResultsView:open_selected_result()
+---@param open_in_split? boolean
+function ResultsView:open_selected_result(open_in_split)
   local item = self.results_list:get_selected()
   if not item or not item.position then return end
   core.try(function()
-    local dv = core.root_view:open_doc(core.open_doc(item.parent.file.path))
+    local doc = core.open_doc(item.parent.file.path)
+    local dv = open_in_split
+      and open_doc_in_result_split(self, doc)
+      or core.root_view:open_doc(doc)
     previous_view = dv
     core.root_view.root_node:update_layout()
     local l, c1, c2 = item.line.line, item.position.col1, item.position.col2+1
@@ -1176,6 +1293,43 @@ function ResultsView:open_selected_result()
     if self.is_global then core.set_active_view(self) end
   end)
   return true
+end
+
+function ResultsView:on_mouse_pressed(button, x, y, clicks)
+  local menu = self.context_menu
+  if menu.show_context_menu then
+    return menu:on_mouse_pressed(button, x, y, clicks)
+  end
+
+  local list = self.results_list
+  if
+    button == "right" and list:mouse_on_top(x, y)
+    and not list:scrollbar_overlaps_point(x, y)
+  then
+    local item = list.items[list.hovered]
+    if item and item.position and not list.hovered_checkbox then
+      list.selected = list.hovered
+      return menu:on_mouse_pressed(button, x, y, clicks)
+    end
+  end
+
+  if
+    button == "left" and keymap.modkeys[split_click_modifier]
+    and list:mouse_on_top(x, y)
+    and not list:scrollbar_overlaps_point(x, y)
+  then
+    local item = list.items[list.hovered]
+    if item and item.position and not list.hovered_checkbox then
+      list.selected = list.hovered
+      return false
+    end
+  end
+  return ResultsView.super.on_mouse_pressed(self, button, x, y, clicks)
+end
+
+function ResultsView:on_mouse_moved(x, y, dx, dy)
+  if self.context_menu:on_mouse_moved(x, y) then return true end
+  return ResultsView.super.on_mouse_moved(self, x, y, dx, dy)
 end
 
 function ResultsView:on_scale_change(new_scale, prev_scale)
@@ -1190,6 +1344,7 @@ end
 
 function ResultsView:update()
   if not ResultsView.super.update(self) then return false end
+  self.context_menu:update()
   self:move_towards("brightness", 0, 0.1)
 
   local px = style.padding.x
@@ -1285,6 +1440,7 @@ end
 
 function ResultsView:draw()
   if self.queue_skip_draw or not ResultsView.super.draw(self) then return false end
+  self.context_menu:draw()
   if not self.total_files_processed then return true end
 
   -- status
@@ -1345,11 +1501,13 @@ end
 ---@return plugins.projectsearch.resultsview?
 local function begin_search(path, text, search_type, insensitive, whole_word, replacement)
   if text == "" then core.error("Expected non-empty string") return end
+  local node = core.root_view:get_active_node_default()
   local rv = ResultsView(
     path, text, search_type, insensitive, whole_word, replacement
   )
+  rv.source_view = node.active_view
   rv:show()
-  core.root_view:get_active_node_default():add_view(rv)
+  node:add_view(rv)
   core.add_thread(function() core.set_active_view(rv) end)
   return rv
 end
@@ -1441,6 +1599,7 @@ local function ensure_global_project_search(path)
 
   global_project_search = ResultsView(path, "", "plain")
   global_project_search.is_global = true
+  global_project_search.source_view = previous_view
   global_project_search:set_size(400 * SCALE)
   global_project_search:show()
   local node, split_direction = nil, "left"
@@ -1504,6 +1663,10 @@ function projectsearch.toggle(options)
     else
       toggle = false
     end
+  end
+
+  if visible and previous_view then
+    global_project_search.source_view = previous_view
   end
 
   global_project_search:apply_options(options, visible)
@@ -1594,9 +1757,11 @@ command.add(nil, {
   end,
 
   ["project-search:open-tab"] = function(path)
+    local node = core.root_view:get_active_node_default()
     local rv = ResultsView(path, "", "plain")
+    rv.source_view = node.active_view
     rv:show()
-    core.root_view:get_active_node_default():add_view(rv)
+    node:add_view(rv)
     core.add_thread(function()
       core.set_active_view(rv)
       rv:swap_active_child(rv.find_text)
@@ -1736,6 +1901,10 @@ command.add(ResultsView, {
     view:open_selected_result()
   end,
 
+  ["project-search:open-selected-split"] = function(view)
+    view:open_selected_result(true)
+  end,
+
   ["project-search:move-to-previous-page"] = function(view)
     view.results_list.scroll.to.y = view.results_list.scroll.to.y - view.results_list.size.y
   end,
@@ -1781,7 +1950,8 @@ keymap.add {
 }
 
 keymap.add {
-  ["return"]             = "project-search:open-selected"
+  ["return"]             = "project-search:open-selected",
+  ["ctrl+lclick"]        = "project-search:open-selected-split"
 }
 
 return projectsearch
