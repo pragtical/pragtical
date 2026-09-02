@@ -10,6 +10,29 @@ local previous_win_mode = "normal"
 local previous_win_pos = core.window_size
 local restore_title_view = false
 
+local function new_doc_extension()
+  local fallback = config.new_file_extension
+  if type(fallback) == "string" then
+    fallback = fallback:match("^%s*(.-)%s*$"):gsub("^%.*", "")
+    if fallback == "" or fallback:find("[/\\]") then fallback = nil end
+  else
+    fallback = nil
+  end
+
+  if config.new_file_extension_mode == "current" then
+    local doc = core.active_view and core.active_view.doc
+    if doc then
+      if doc.suggested_extension then return doc.suggested_extension end
+      local filename = doc.filename or doc.abs_filename
+      if filename then
+        local extension = common.basename(filename):match("^.+%.([^%.]+)$")
+        if extension then return extension end
+      end
+    end
+  end
+  return fallback
+end
+
 local function suggest_directory(text)
   text = common.home_expand(text)
   local basedir = common.dirname(core.root_project().path)
@@ -254,7 +277,9 @@ command.add(nil, {
   end,
 
   ["core:new-doc"] = function()
-    core.root_view:open_doc(core.open_doc())
+    local doc = core.open_doc()
+    doc:set_suggested_extension(new_doc_extension())
+    core.root_view:open_doc(doc)
   end,
 
   ["core:new-named-doc"] = function()

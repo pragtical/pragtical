@@ -168,6 +168,7 @@ end
 function DocView:get_state()
   return {
     filename = self.doc.filename,
+    suggested_extension = self.doc.suggested_extension,
     selection = { self.doc:get_selection() },
     scroll = { x = self.scroll.to.x, y = self.scroll.to.y },
     crlf = self.doc.crlf,
@@ -189,6 +190,9 @@ function DocView.from_state(state)
     end
   end
   if dv and dv.doc then
+    if not state.filename then
+      dv.doc:set_suggested_extension(state.suggested_extension)
+    end
     if dv.doc.new_file and state.text then
       dv.doc:insert(1, 1, state.text)
       dv.doc.crlf = state.crlf

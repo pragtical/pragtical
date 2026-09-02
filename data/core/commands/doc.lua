@@ -634,6 +634,9 @@ local commands = {
       text = core.normalize_to_project_dir(dirname) .. PATHSEP
       if text == core.root_project().path then text = "" end
     end
+    if not dv.doc.filename and dv.doc.suggested_extension then
+      text = (text or "") .. dv.doc:get_name()
+    end
     core.command_view:enter("Save As", {
       text = text,
       submit = function(filename)

@@ -664,6 +664,26 @@ settings.add("Editor",
       end
     },
     {
+      label = "New File Extension",
+      description = "The extension suggested for new untitled documents. "
+        .. "Leave empty for no fallback; a leading period is optional.",
+      path = "new_file_extension",
+      type = settings.type.STRING,
+      default = ""
+    },
+    {
+      label = "New File Extension Mode",
+      description = "Always use the configured extension or follow the active "
+        .. "document and use the configured extension as a fallback.",
+      path = "new_file_extension_mode",
+      type = settings.type.SELECTION,
+      default = "configured",
+      values = {
+        {"Configured Extension", "configured"},
+        {"Follow Current File", "current"}
+      }
+    },
+    {
       label = "Keep Newline Whitespace",
       description = "Do not remove whitespace when pressing enter.",
       path = "keep_newline_whitespace",

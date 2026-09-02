@@ -8,6 +8,7 @@ local common = require "core.common"
 local tokenizer = require "core.tokenizer"
 
 ---@class core.doc : core.object
+---@field suggested_extension? string Extension hint for an untitled document.
 local Doc = Object:extend()
 
 function Doc:__tostring() return "Doc" end
@@ -23,6 +24,7 @@ end
 
 function Doc:new(filename, abs_filename, new_file)
   self.new_file = new_file
+  self.suggested_extension = nil
   self.encoding = nil
   self.bom = nil
   self.binary = false
@@ -77,6 +79,8 @@ function Doc:reset_syntax()
   local path = self.abs_filename
   if not path and self.filename then
     path = core.root_project().path .. PATHSEP .. self.filename
+  elseif not path and self.suggested_extension then
+    path = "unsaved." .. self.suggested_extension
   end
   if path then path = common.normalize_path(path) end
   local syn = syntax.get(path, header)
@@ -90,7 +94,29 @@ end
 function Doc:set_filename(filename, abs_filename)
   self.filename = filename
   self.abs_filename = abs_filename
+  self.suggested_extension = nil
   self:reset_syntax()
+end
+
+
+---Set the extension suggested for an untitled document.
+---A leading period is optional. Empty or path-like values clear the hint.
+---@param extension? string
+function Doc:set_suggested_extension(extension)
+  if type(extension) == "string" then
+    extension = extension:match("^%s*(.-)%s*$")
+    extension = extension:gsub("^%.*", "")
+    if extension == "" or extension:find("[/\\]") then
+      extension = nil
+    end
+  else
+    extension = nil
+  end
+
+  if self.suggested_extension ~= extension then
+    self.suggested_extension = extension
+    self:reset_syntax()
+  end
 end
 
 
@@ -241,7 +267,9 @@ end
 
 
 function Doc:get_name()
-  return self.filename or "unsaved"
+  return self.filename
+    or (self.suggested_extension and "unsaved." .. self.suggested_extension)
+    or "unsaved"
 end
 
 
