@@ -1,5 +1,6 @@
 pragtical_sources = [
     'api/api.c',
+    'api/audio.c',
     'api/dirmonitor.c',
     'api/renderer.c',
     'api/renwindow.c',
