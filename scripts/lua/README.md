@@ -7,7 +7,7 @@ This directory contains lua scripts for running with Pragtical.
 Run the full Lua test suite:
 
 ```sh
-SDL_VIDEO_DRIVER=dummy ./scripts/run-local build test scripts/lua/tests
+SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy ./scripts/run-local build test scripts/lua/tests
 ```
 
 Run a single Lua test file:
@@ -15,6 +15,10 @@ Run a single Lua test file:
 ```sh
 SDL_VIDEO_DRIVER=dummy ./scripts/run-local build test scripts/lua/tests/tokenizer.lua
 ```
+
+Audio device tests require `SDL_AUDIO_DRIVER=dummy`; otherwise they are skipped
+to avoid accessing speakers or microphones. Offline audio conversion tests do
+not require an audio device.
 
 ### Build
 
