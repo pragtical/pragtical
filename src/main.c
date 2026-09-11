@@ -398,5 +398,6 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     SDL_free(app);
   }
   free_custom_events();
+  api_audio_shutdown();
   ren_free();
 }

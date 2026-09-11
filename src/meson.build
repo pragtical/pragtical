@@ -1,5 +1,6 @@
 pragtical_sources = [
     'api/api.c',
+    'api/audio.c',
     'api/dirmonitor.c',
     'api/renderer.c',
     'api/renwindow.c',
@@ -163,11 +164,14 @@ if host_machine.system() == 'windows'
 elif host_machine.system() == 'darwin'
     pragtical_sources += 'bundle_open.m'
 
-    # solve missing symbols when building from sdl3 cmake subproject
+    # SDL's CMake framework dependencies are not propagated by the subproject.
     if sdl_dep.type_name() == 'internal'
         pragtical_link_args += [
             '-framework', 'Carbon',
             '-framework', 'CoreFoundation',
+            '-framework', 'CoreAudio',
+            '-framework', 'AudioToolbox',
+            '-framework', 'AVFoundation',
             '-framework', 'Metal',
             '-framework', 'AppKit',
             '-framework', 'CoreVideo',

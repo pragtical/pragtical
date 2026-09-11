@@ -18,9 +18,14 @@
 #define API_TYPE_NATIVE_PLUGIN "NativePlugin"
 #define API_TYPE_SHARED_MEMORY "SharedMemory"
 #define API_TYPE_RENWINDOW "RenWindow"
+#define API_TYPE_AUDIO_DEVICE "AudioDevice"
+#define API_TYPE_AUDIO_STREAM "AudioStream"
+#define API_TYPE_AUDIO_SOUND "AudioSound"
+#define API_TYPE_AUDIO_VOICE "AudioVoice"
 
 #define API_CONSTANT_DEFINE(L, idx, key, n) (lua_pushnumber(L, n), lua_setfield(L, idx - 1, key))
 
 void api_load_libs(lua_State *L);
+void api_audio_shutdown(void);
 
 #endif
