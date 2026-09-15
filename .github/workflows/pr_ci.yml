@@ -158,6 +158,9 @@ jobs:
         run: |
           bash --version
           bash scripts/build.sh --debug --forcefallback
+      - name: Check EXE version info
+        shell: pwsh
+        run: ./scripts/check-windows-version-info.ps1 -BuildDir build-windows-${{ matrix.config.arch }}
       - name: Run Tests
         run: |
           source scripts/common.sh
@@ -206,6 +209,8 @@ jobs:
         run: |
           meson compile -j 1 -C build
           meson install -C build --destdir="../pragtical"
+      - name: Check EXE version info
+        run: ./scripts/check-windows-version-info.ps1 -BuildDir build
       - name: Package
         run: |
           Remove-Item -Recurse -Force -Path "pragtical/lib","pragtical/include"
