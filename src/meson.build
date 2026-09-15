@@ -146,6 +146,12 @@ if host_machine.system() == 'windows'
     windows = import('windows')
     pragtical_rc += windows.compile_resources('../resources/icons/icon.rc')
     pragtical_rc += windows.compile_resources('../resources/windows/manifest.rc')
+    version_rc = configure_file(
+        input: '../resources/windows/version.rc.in',
+        output: 'version.rc',
+        configuration: conf_data
+    )
+    pragtical_rc += windows.compile_resources(version_rc)
 
     # solve missing symbols when building from sdl3 cmake subproject
     if sdl_dep.type_name() == 'internal'
