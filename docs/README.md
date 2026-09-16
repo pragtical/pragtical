@@ -17,7 +17,7 @@ any options to your **User Module File** (init.lua).
 ## The Base Core
 
 Most of the code that is written in Lua for Pragtical is powered by the exposed
-C API in the four namespaces that follow:
+C API in the namespaces that follow:
 
 * [system](api/system.lua)
 * [renderer](api/renderer.lua)
@@ -29,6 +29,7 @@ C API in the four namespaces that follow:
 * [shmem](api/shmem.lua)
 * [thread](api/thread.lua)
 * [canvas](api/canvas.lua)
+* [audio](api/audio.lua)
 
 Finally, all global variables are documented in the file named
 [globals.lua](api/globals.lua).

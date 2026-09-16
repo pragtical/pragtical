@@ -28,6 +28,8 @@
 	<string>To access, edit and index your projects.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>To access, edit and index your projects.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>To record audio when you use a plugin's recording feature.</string>
 	<key>CFBundleShortVersionString</key>
 	<string>@PROJECT_VERSION@</string>
 	<key>NSHumanReadableCopyright</key>
