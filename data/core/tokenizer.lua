@@ -11,6 +11,30 @@ local native_tokenizer = require "tokenizer"
 local tokenizer = {}
 
 local bad_patterns = {}
+local ordinary_pattern_cache = setmetatable({}, { __mode = "k" })
+local disabled_opening_pattern = { disabled = true }
+
+-- Preserve array indices for the byte-string state. A disabled placeholder
+-- skips first-line openers using find_text's existing disabled-rule check.
+local function opening_patterns(syn, first_line)
+  if first_line then return syn.patterns end
+  local patterns = ordinary_pattern_cache[syn]
+  if not patterns then
+    patterns = syn.patterns
+    for _, pattern in ipairs(patterns) do
+      if pattern.first_line then
+        patterns = {}
+        for i, p in ipairs(syn.patterns) do
+          patterns[i] = p.first_line and disabled_opening_pattern or p
+        end
+        break
+      end
+    end
+    ordinary_pattern_cache[syn] = patterns
+  end
+  return patterns
+end
+
 
 local function push_token(t, type, text)
   if not text or #text == 0 then return end
@@ -239,8 +263,13 @@ end
 ---@param incoming_syntax core.syntax.syntax
 ---@param text string
 ---@param state? string
----@param resume? table
-local function lua_tokenize(incoming_syntax, text, state, resume)
+---@param options? core.tokenizer.options|table
+local function lua_tokenize(incoming_syntax, text, state, options)
+  local resume = options and (options.res and options or options.resume)
+  local first_line = resume and resume.first_line or false
+  if options and options.first_line ~= nil then
+    first_line = options.first_line
+  end
   local res
   local i = 1
 
@@ -272,6 +301,7 @@ local function lua_tokenize(incoming_syntax, text, state, resume)
   -- current_level      : how many subsyntaxes deep we are.
   local current_syntax, subsyntax_info, current_pattern_idx, current_level =
     retrieve_syntax_state(incoming_syntax, state)
+  local patterns = opening_patterns(current_syntax, first_line)
 
   local text_len = text:ulen(nil, nil, true)
   local start_time = system.get_time()
@@ -287,7 +317,8 @@ local function lua_tokenize(incoming_syntax, text, state, resume)
         return res, string.char(0), {
           res = res,
           i = i,
-          state = state
+          state = state,
+          first_line = first_line
         }
       end
     end
@@ -348,6 +379,7 @@ local function lua_tokenize(incoming_syntax, text, state, resume)
         -- On finding unescaped delimiter, pop it.
         current_syntax, subsyntax_info, current_pattern_idx, current_level, state =
           pop_subsyntax(incoming_syntax, state, current_level)
+        patterns = opening_patterns(current_syntax, first_line)
         i = e + 1
       else
         break
@@ -356,7 +388,7 @@ local function lua_tokenize(incoming_syntax, text, state, resume)
 
     -- find matching pattern
     local matched = false
-    for n, p in ipairs(current_syntax.patterns) do
+    for n, p in ipairs(patterns) do
       local find_results = { find_text(text, p, i, true, false) }
       if find_results[1] then
         -- Check for patterns successfully matching nothing but allows
@@ -388,6 +420,7 @@ local function lua_tokenize(incoming_syntax, text, state, resume)
             if p.syntax then
               current_syntax, subsyntax_info, current_pattern_idx, current_level, state =
                 push_subsyntax(incoming_syntax, current_level, state, p, n)
+              patterns = opening_patterns(current_syntax, first_line)
             else
               current_pattern_idx = n
               state = set_subsyntax_pattern_idx(state, current_level, n)
@@ -465,13 +498,14 @@ function tokenizer.is_using_native()
 end
 
 
----Clear cached native syntax userdata for known syntaxes.
+---Clear cached native syntax userdata and Lua opening-rule lists.
 ---
 ---This should be called when switching tokenizer backends so syntax tables are
----reimported by the native tokenizer on their next use.
+---reimported on their next use. Also call it after changing syntax rules.
 ---
 ---@param root_syntax? core.syntax.syntax Optional syntax table to clear before clearing the global syntax registries.
 function tokenizer.clear_native_cache(root_syntax)
+  ordinary_pattern_cache = setmetatable({}, { __mode = "k" })
   local visited = {}
   clear_native_cache_from_syntax(root_syntax, visited)
   clear_native_cache_from_syntax(syntax.plain_text_syntax, visited)
@@ -484,21 +518,28 @@ function tokenizer.clear_native_cache(root_syntax)
 end
 
 
+---@class core.tokenizer.options
+---@field first_line? boolean Whether this is the first line of the input document.
+---@field resume? table Resume information from an incomplete call on the same line.
+
 ---Tokenize a single line of text for the given syntax and state.
 ---
 ---Returns tokens in the form `{ type, text, ... }`. When the tokenizer runs
 ---out of time, a third return value is included with resume information that
 ---can be passed back into this function to continue tokenizing the same line.
+---The fourth argument accepts either options or a legacy raw resume table.
+---First-line context defaults to false, or to the saved context when resuming;
+---an explicit options.first_line overrides it. Nested syntaxes share this context.
 ---
 ---@param incoming_syntax core.syntax.syntax The syntax to tokenize against.
 ---@param text string The line text to tokenize.
 ---@param state? string Current tokenizer state.
----@param resume? table Resume information returned by a previous incomplete call.
+---@param options? core.tokenizer.options|table Options or a legacy raw resume table.
 ---@return string[] tokens Tokens in the form `{ type, text, ... }`.
 ---@return string state Updated tokenizer state.
 ---@return table? resume Resume data when tokenization yields before finishing.
-function tokenizer.tokenize(incoming_syntax, text, state, resume)
-  return active_tokenizer.tokenize(incoming_syntax, text, state, resume)
+function tokenizer.tokenize(incoming_syntax, text, state, options)
+  return active_tokenizer.tokenize(incoming_syntax, text, state, options)
 end
 
 

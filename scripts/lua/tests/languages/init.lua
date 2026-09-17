@@ -125,13 +125,14 @@ local function split_lines(text)
   return lines
 end
 
-local function tokenize_line(engine, syn, state, text)
+local function tokenize_line(engine, syn, state, text, first_line)
   local resume
+  local options = first_line and { first_line = true } or nil
   local tokens
   local next_state = state
 
   repeat
-    tokens, next_state, resume = engine.tokenize(syn, text, next_state, resume)
+    tokens, next_state, resume = engine.tokenize(syn, text, next_state, resume or options)
   until not resume
 
   return tokens or {}, next_state
@@ -252,7 +253,7 @@ test.describe("language tokenizer fixtures", function()
           fixture.name ~= "" and fixture.name or fixture.files
         )
         local ok, err = pcall(function()
-          lua_tokens, lua_state = tokenize_line(lua_tokenizer, lua_syn, lua_state, text)
+          lua_tokens, lua_state = tokenize_line(lua_tokenizer, lua_syn, lua_state, text, line_idx == 1)
         end)
         test.ok(ok, context .. " lua tokenizer error: " .. tostring(err))
 
@@ -261,7 +262,8 @@ test.describe("language tokenizer fixtures", function()
             tokenizer,
             native_syn,
             native_state,
-            text
+            text,
+            line_idx == 1
           )
         end)
         test.ok(ok, context .. " native tokenizer error: " .. tostring(err))

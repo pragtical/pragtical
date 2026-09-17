@@ -2063,9 +2063,11 @@ local function add_paragraph(commands, y, block, fontset, color, accent_color, m
   return y + block_height + (spacing or BLOCK_SPACING), used_width
 end
 
-local function get_code_fragments(line, code_font, code_syntax, state)
+local function get_code_fragments(line, code_font, code_syntax, state, first_line)
   local tokens
-  tokens, state = tokenizer.tokenize(code_syntax, line .. "\n", state)
+  tokens, state = tokenizer.tokenize(
+    code_syntax, line .. "\n", state, first_line and { first_line = true } or nil
+  )
 
   local fragments = {}
   local line_width = 0
@@ -2116,7 +2118,7 @@ local function add_code_block(commands, y, lines, font, info, max_width, x_offse
     maybe_yield_parser(yield_state)
 
     local fragments, line_width
-    fragments, line_width, state = get_code_fragments(line, font, code_syntax, state)
+    fragments, line_width, state = get_code_fragments(line, font, code_syntax, state, i == 1)
     tokenized_lines[i] = fragments
     code_width = math.max(code_width, line_width)
   end

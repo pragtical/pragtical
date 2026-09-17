@@ -416,20 +416,13 @@ test.describe("tokenizer", function()
       patterns = { { pattern = "%a+", type = "keyword" } },
       symbols = {}
     }
-    local original_get_time = system.get_time
     local original_co_max_time = core.co_max_time
-    local tick = 0
-
-    system.get_time = function()
-      tick = tick + 1
-      return tick
-    end
-    core.co_max_time = 0.0001
+    -- Force a timeout even when the native clock has not advanced.
+    core.co_max_time = -1
 
     local text = string.rep("a", 256)
     local partial_tokens, partial_state, resume = tokenizer.tokenize(syntax, text, string.char(0))
 
-    system.get_time = original_get_time
     core.co_max_time = original_co_max_time
 
     test.equal(partial_state, string.char(0))
@@ -462,3 +455,153 @@ test.describe("tokenizer", function()
     test.same(items, {})
   end)
 end)
+
+for _, native in ipairs { false, true } do
+  test.describe("tokenizer first_line (" .. (native and "native" or "Lua") .. ")", function()
+    test.before_each(function(context)
+      context.native = tokenizer.is_using_native()
+      context.max_time = core.co_max_time
+      tokenizer.set_use_native(native)
+    end)
+
+    test.after_each(function(context)
+      core.co_max_time = context.max_time
+      tokenizer.set_use_native(context.native)
+    end)
+
+    for _, matcher in ipairs { "pattern", "regex" } do
+      test.test(matcher .. " restricts starts without imposing a column", function()
+        local syn = { patterns = {
+          { [matcher] = "@", first_line = true, type = "keyword" },
+          { pattern = "@", first_line = false, type = "symbol" },
+        }, symbols = {} }
+        -- Emulate a plugin that forwards exactly the original four arguments.
+        local function forward(syntax, text, state, resume)
+          return tokenizer.tokenize(syntax, text, state, resume)
+        end
+        local tokens, state = forward(syn, "x@@", nil, { first_line = true })
+        test.same(tokens, { "normal", "x", "keyword", "@@" })
+        test.equal(state, string.char(0))
+        for _, options in ipairs { {}, { first_line = false } } do
+          test.same(forward(syn, "x@@", nil, options),
+            { "normal", "x", "symbol", "@@" })
+        end
+        test.same(forward(syn, "x@@"), { "normal", "x", "symbol", "@@" })
+      end)
+
+      for _, embedded in ipairs { false, true } do
+        test.test(matcher .. " multiline pair, embedded=" .. tostring(embedded), function()
+          local syn = { patterns = {
+            {
+              [matcher] = { "^BEGIN", "^END", "\\" },
+              first_line = true, type = "string",
+              syntax = embedded and {
+                patterns = { { pattern = "%d+", type = "number" } }, symbols = {}
+              } or nil
+            }
+          }, symbols = {} }
+          local tokens, state = tokenizer.tokenize(syn, "BEGIN\n", nil, { first_line = true })
+          test.equal(state:byte(1), 1)
+          tokens, state = tokenizer.tokenize(syn, "123\n", state)
+          test.equal(tokens[1], embedded and "number" or "string")
+          test.equal(state:byte(1), 1)
+          tokens, state = tokenizer.tokenize(syn, "END\n", state)
+          test.equal(state:byte(1), 0)
+          tokens, state = tokenizer.tokenize(syn, "BEGIN\n", state)
+          test.equal(tokens[1], "normal")
+          test.equal(state:byte(1), 0)
+        end)
+      end
+    end
+
+    test.test("nested syntaxes inherit document position", function()
+      local inner = { patterns = {
+        { pattern = "@", first_line = true, type = "keyword" }
+      }, symbols = {} }
+      local syn = { patterns = {
+        { pattern = { "<", ">" }, type = "string", syntax = inner }
+      }, symbols = {} }
+      local tokens = tokenizer.tokenize(syn, "<@>", nil, { first_line = true })
+      test.same(tokens, { "string", "<", "keyword", "@", "string", ">" })
+      tokens = tokenizer.tokenize(syn, "<@>")
+      test.same(tokens, { "string", "<", "normal", "@", "string", ">" })
+    end)
+
+    test.test("filtered opening rules preserve original nested state indices", function()
+      local syn = { patterns = {
+        { pattern = "@", first_line = true, type = "keyword" },
+        { pattern = { "<", ">" }, type = "string", syntax = {
+          patterns = {
+            { pattern = "@", first_line = true, type = "keyword" },
+            { pattern = { '"', '"' }, type = "number" },
+          }, symbols = {}
+        } }
+      }, symbols = {} }
+      local _, state = tokenizer.tokenize(syn, '<"')
+      test.equal(state, string.char(2, 2))
+      local tokens
+      tokens, state = tokenizer.tokenize(syn, '">', state)
+      test.equal(state:byte(1), 0)
+      test.same(tokens, { "number", '"', "string", ">" })
+    end)
+
+    test.test("clearing syntax caches picks up changed first_line flags", function()
+      local syn = { patterns = {
+        { pattern = "@", first_line = true, type = "keyword" },
+      }, symbols = {} }
+      test.same(tokenizer.tokenize(syn, "@"), { "normal", "@" })
+      syn.patterns[1].first_line = false
+      tokenizer.clear_native_cache(syn)
+      test.same(tokenizer.tokenize(syn, "@"), { "keyword", "@" })
+      syn.patterns[1].first_line = true
+      tokenizer.clear_native_cache(syn)
+      test.same(tokenizer.tokenize(syn, "@"), { "normal", "@" })
+    end)
+
+    test.test("raw and wrapped resumes preserve or override first-line context", function(context)
+      for _, mode in ipairs { "raw", "wrapped", "override", "legacy" } do
+        local syn = { patterns = {
+          { pattern = "@+", first_line = true, type = "keyword" },
+          { pattern = "@+", type = "symbol" }
+        }, symbols = {} }
+        -- Both backends must yield even if their clocks have not advanced.
+        core.co_max_time = -1
+        local text = string.rep("@", 256)
+        local _, state, resume = tokenizer.tokenize(syn, text, nil, { first_line = true })
+        core.co_max_time = context.max_time
+        test.type(resume, "table")
+        test.equal(resume.first_line, true)
+        local options = resume
+        if mode == "wrapped" then options = { resume = resume } end
+        if mode == "override" then options = { resume = resume, first_line = false } end
+        if mode == "legacy" then resume.first_line = nil end
+        local tokens, final_state, pending = tokenizer.tokenize(syn, text, state, options)
+        test.same(tokens, { (mode == "override" or mode == "legacy") and "symbol" or "keyword", text })
+        test.equal(final_state, string.char(0))
+        test.is_nil(pending)
+      end
+    end)
+
+    test.test("frontmatter-style regions cannot reopen at later delimiters", function()
+      local syn = { patterns = {
+        {
+          pattern = { "^%-%-%-%s*\n", "^%-%-%-%s*$" },
+          first_line = true,
+          type = "string",
+          syntax = {
+            patterns = { { pattern = "%a+", type = "symbol" } },
+            symbols = {}
+          }
+        }
+      }, symbols = {} }
+      local state
+      local lines = { "---\n", "title: example\n", "---\n", "text\n", "---\n", "ordinary text\n" }
+      for i, line in ipairs(lines) do
+        local tokens
+        tokens, state = tokenizer.tokenize(syn, line, state, i == 1 and { first_line = true } or nil)
+        if i == 1 or i == 2 then test.ok(state:byte(1) ~= 0) end
+        if i >= 3 then test.equal(state:byte(1), 0) end
+      end
+    end)
+  end)
+end
