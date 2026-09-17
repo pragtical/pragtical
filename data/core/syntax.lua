@@ -18,6 +18,7 @@ local syntax = {}
 ---@field regex? core.syntax.matcher Regex matcher.
 ---@field type? core.syntax.token_type Token type, or capture token types.
 ---@field syntax? core.syntax.syntax|string Nested syntax table or syntax lookup key.
+---@field first_line? boolean Only allow this rule to start on the first document line; paired regions may continue and close on later lines.
 ---@field disabled? boolean True when the rule should be ignored by tokenizers.
 
 ---A language syntax definition used by syntax plugins and tokenizers.

@@ -74,15 +74,16 @@ end
 
 local doc = Doc(file_arg, abs_path, false)
 
-local function tokenize_line(tokenizer, state, text)
+local function tokenize_line(tokenizer, state, text, first_line)
   local resume
+  local options = first_line and { first_line = true } or nil
   local out
   local next_state = state
   local total_resumes = 0
 
   repeat
     local tokens
-    tokens, next_state, resume = tokenizer.tokenize(doc.syntax, text, next_state, resume)
+    tokens, next_state, resume = tokenizer.tokenize(doc.syntax, text, next_state, resume or options)
     out = tokens
     if resume then
       total_resumes = total_resumes + 1
@@ -106,8 +107,8 @@ local function verify_parity()
     local line_lua_resumes
     local line_native_resumes
 
-    lua_tokens, lua_state, line_lua_resumes = tokenize_line(lua_tokenizer, lua_state, text)
-    native_tokens, native_state, line_native_resumes = tokenize_line(native_tokenizer, native_state, text)
+    lua_tokens, lua_state, line_lua_resumes = tokenize_line(lua_tokenizer, lua_state, text, i == 1)
+    native_tokens, native_state, line_native_resumes = tokenize_line(native_tokenizer, native_state, text, i == 1)
 
     lua_resumes = lua_resumes + line_lua_resumes
     native_resumes = native_resumes + line_native_resumes
@@ -145,7 +146,7 @@ local function benchmark_once(tokenizer)
 
   for i = 1, #doc.lines do
     local text = doc:get_utf8_line(i)
-    local _, next_state, line_resumes = tokenize_line(tokenizer, state, text)
+    local _, next_state, line_resumes = tokenize_line(tokenizer, state, text, i == 1)
     state = next_state
     total_resumes = total_resumes + line_resumes
   end

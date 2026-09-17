@@ -69,6 +69,7 @@ typedef struct {
   bool is_regex;
   bool has_pair;
   bool has_subsyntax;
+  bool first_line;
   bool reported_bad_pattern;
   bool whole_line[2];
   regex_pattern regex[2];
@@ -1523,6 +1524,10 @@ static void tokenizer_import_pattern(lua_State *L, int pattern_idx, TokenizerPat
   pattern->disabled = lua_toboolean(L, -1);
   lua_pop(L, 1);
 
+  lua_getfield(L, pattern_idx, "first_line");
+  pattern->first_line = lua_toboolean(L, -1);
+  lua_pop(L, 1);
+
   lua_getfield(L, pattern_idx, "pattern");
   if (!lua_isnil(L, -1)) {
     pattern->is_regex = false;
@@ -2096,6 +2101,28 @@ static int f_tokenizer_get_syntax_stats(lua_State *L) {
 
 static int f_tokenizer_tokenize(lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
+  int resume_idx = 0;
+  bool first_line = false;
+  if (lua_istable(L, 4)) {
+    lua_getfield(L, 4, "res");
+    bool legacy_resume = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+    if (legacy_resume) {
+      resume_idx = 4;
+    } else {
+      lua_getfield(L, 4, "resume");
+      if (lua_istable(L, -1)) resume_idx = lua_gettop(L);
+      else lua_pop(L, 1);
+    }
+    if (resume_idx) {
+      lua_getfield(L, resume_idx, "first_line");
+      first_line = lua_toboolean(L, -1);
+      lua_pop(L, 1);
+    }
+    lua_getfield(L, 4, "first_line");
+    if (!lua_isnil(L, -1)) first_line = lua_toboolean(L, -1);
+    lua_pop(L, 1);
+  }
   TokenizerSyntax *incoming_syntax = tokenizer_get_syntax_cache(L, 1);
 
   TokenizerArenaUserdata *text_arena = tokenizer_push_runtime_arena(
@@ -2151,13 +2178,13 @@ static int f_tokenizer_tokenize(lua_State *L) {
   }
 
   lua_Integer i = 1;
-  if (lua_istable(L, 4)) {
-    lua_getfield(L, 4, "res");
+  if (resume_idx) {
+    lua_getfield(L, resume_idx, "res");
     int res_idx = lua_gettop(L);
-    lua_getfield(L, 4, "i");
+    lua_getfield(L, resume_idx, "i");
     i = luaL_checkinteger(L, -1);
     lua_pop(L, 1);
-    lua_getfield(L, 4, "state");
+    lua_getfield(L, resume_idx, "state");
     tokenizer_state_uninit(&state);
     tokenizer_state_init_from_lua(L, -1, &state, true);
     lua_pop(L, 1);
@@ -2190,6 +2217,8 @@ static int f_tokenizer_tokenize(lua_State *L) {
         lua_setfield(L, -2, "i");
         tokenizer_state_push(L, &state);
         lua_setfield(L, -2, "state");
+        lua_pushboolean(L, first_line);
+        lua_setfield(L, -2, "first_line");
         tokenizer_find_results_uninit(&find_results);
         tokenizer_find_results_uninit(&raw_find_results);
         tokenizer_state_uninit(&state);
@@ -2276,6 +2305,7 @@ static int f_tokenizer_tokenize(lua_State *L) {
 
     for (size_t n = 0; n < cursor.current_syntax->pattern_count; n++) {
       TokenizerPattern *pattern = &cursor.current_syntax->patterns[n];
+      if (pattern->first_line && !first_line) continue;
       if (pattern->whole_line[0] && i > 1) {
         cursor.current_syntax->skipped_by_starter++;
         pattern->skipped_by_starter++;
