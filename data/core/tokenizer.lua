@@ -195,10 +195,11 @@ local function pop_subsyntax(incoming_syntax, state, current_level)
 end
 
 local function find_text(text, p, offset, at_start, close)
+  -- Disabled first-line placeholders should not allocate match results.
+  if p.disabled then return end
   local target, res = p.pattern or p.regex, { 1, offset - 1 }
   local p_idx = close and 2 or 1
   local code = type(target) == "table" and target[p_idx] or target
-  if p.disabled then return end
 
   if p.whole_line == nil then p.whole_line = {} end
   if p.whole_line[p_idx] == nil then
@@ -257,7 +258,8 @@ local function find_text(text, p, offset, at_start, close)
       end
     end
   until at_start or not close or not target[3]
-  return table.unpack(res)
+  -- Let callers reuse the capture table instead of unpacking and rebuilding it.
+  if res[1] then return res end
 end
 
 ---@param incoming_syntax core.syntax.syntax
@@ -325,8 +327,8 @@ local function lua_tokenize(incoming_syntax, text, state, options)
     -- continue trying to match the end pattern of a pair if we have a state set
     if current_pattern_idx > 0 then
       local p = current_syntax.patterns[current_pattern_idx]
-      local find_results = { find_text(text, p, i, false, true) }
-      local s, e = find_results[1], find_results[2]
+      local find_results = find_text(text, p, i, false, true)
+      local s, e = find_results and find_results[1], find_results and find_results[2]
       -- Use the first token type specified in the type table for the "middle"
       -- part of the subsyntax.
       local token_type = type(p.type) == "table" and p.type[1] or p.type
@@ -338,7 +340,8 @@ local function lua_tokenize(incoming_syntax, text, state, options)
       -- is perform if we are not inside a child subsyntax to prevent the
       -- parent subsyntax from prematurely ending the child.
       if subsyntax_info and not s then
-        local ss, se = find_text(text, subsyntax_info, i, false, true)
+        local subsyntax_end = find_text(text, subsyntax_info, i, false, true)
+        local ss = subsyntax_end and subsyntax_end[1]
         -- If we find that we end the subsyntax before the
         -- delimiter, push the token, and signal we shouldn't
         -- treat the bit after as a token to be normally parsed
@@ -372,8 +375,8 @@ local function lua_tokenize(incoming_syntax, text, state, options)
     -- we're ending early in the middle of a delimiter, or
     -- just normally, upon finding a token.
     while subsyntax_info do
-      local find_results = { find_text(text, subsyntax_info, i, true, true) }
-      local s, e = find_results[1], find_results[2]
+      local find_results = find_text(text, subsyntax_info, i, true, true)
+      local s, e = find_results and find_results[1], find_results and find_results[2]
       if s then
         push_tokens(res, current_syntax, subsyntax_info, text, find_results)
         -- On finding unescaped delimiter, pop it.
@@ -389,8 +392,8 @@ local function lua_tokenize(incoming_syntax, text, state, options)
     -- find matching pattern
     local matched = false
     for n, p in ipairs(patterns) do
-      local find_results = { find_text(text, p, i, true, false) }
-      if find_results[1] then
+      local find_results = find_text(text, p, i, true, false)
+      if find_results then
         -- Check for patterns successfully matching nothing but allows
         -- those that delegate the result to a subsyntax
         if find_results[1] > find_results[2] and not p.syntax then

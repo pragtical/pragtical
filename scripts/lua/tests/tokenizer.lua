@@ -514,6 +514,19 @@ for _, native in ipairs { false, true } do
       end
     end
 
+    if not native then
+      test.test("escaped first-line openers are skipped before a valid opener", function()
+        local syn = { patterns = {
+          { pattern = { "@", "@", "\\" }, first_line = true, type = "string" },
+        }, symbols = {} }
+        local text = "\\@x@body@"
+        local tokens, state = tokenizer.tokenize(syn, text, nil, { first_line = true })
+        test.same(tokens, { "normal", "\\@x", "string", "@body@" })
+        test.equal(state, string.char(0))
+        test.same(tokenizer.tokenize(syn, text), { "normal", text })
+      end)
+    end
+
     test.test("nested syntaxes inherit document position", function()
       local inner = { patterns = {
         { pattern = "@", first_line = true, type = "keyword" }
