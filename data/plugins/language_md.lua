@@ -58,6 +58,38 @@ syntax.add {
     -- optimization
     { pattern = "%s+",                      type = "normal" },
 
+    ---- Frontmatter
+    -- YAML
+    -- ---
+    -- title: Example
+    -- ---
+    {
+      pattern = { "^%-%-%-%s*\n", "^%-%-%-%s*$" },
+      type = "string",
+      syntax = ".yaml",
+      first_line = true
+    },
+    -- TOML
+    -- +++
+    -- title = "Example"
+    -- +++
+    {
+      pattern = { "^%+%+%+%s*\n", "^%+%+%+%s*$" },
+      type = "string",
+      syntax = ".toml",
+      first_line = true
+    },
+    -- JSON
+    -- {
+    --   "title": "Example"
+    -- }
+    {
+      pattern = { "^{%s*\n", "^}%s*$" },
+      type = "string",
+      syntax = ".json",
+      first_line = true
+    },
+
   ---- HTML rules imported and adapted from language_html
   ---- to not conflict with markdown rules
     -- Inline JS and CSS
