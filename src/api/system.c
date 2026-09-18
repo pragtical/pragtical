@@ -1337,9 +1337,9 @@ static int f_setenv(lua_State* L) {
 
 #ifdef _WIN32
   /* On Windows Lua's os.getenv() reads the CRT environment, which SDL's
-   * environment helpers do not reliably keep in sync. Update both the CRT and
-   * the Win32 process environment so Lua and subprocess creation see the same
-   * value. */
+   * environment helpers do not reliably keep in sync. Update the CRT, Win32
+   * process environment and SDL's cached environment so Lua, SDL and subprocess
+   * creation see the same value. */
   bool ok = _putenv_s(key, val ? val : "") == 0;
   LPWSTR wkey = utfconv_utf8towc(key);
   LPWSTR wval = val ? utfconv_utf8towc(val) : NULL;
@@ -1352,9 +1352,11 @@ static int f_setenv(lua_State* L) {
 
   if (val) {
     ok = SetEnvironmentVariableW(wkey, wval) && ok;
+    ok = SDL_SetEnvironmentVariable(SDL_GetEnvironment(), key, val, true) && ok;
   } else {
     ok = (SetEnvironmentVariableW(wkey, NULL)
       || GetLastError() == ERROR_ENVVAR_NOT_FOUND) && ok;
+    ok = SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), key) && ok;
   }
   SDL_free(wkey);
   SDL_free(wval);

@@ -6,6 +6,14 @@
 ---Renderer backend selection can be overridden at startup with:
 ---`PRAGTICAL_RENDERER=surface|sdlrenderer|sdlgpu`.
 ---
+---Settings > Core > Graphics > Renderer saves a preference in `USERDIR/renderer`.
+---The file contains `surface`, `sdlrenderer`, or `sdlgpu`; surrounding whitespace
+---is ignored. Missing, unreadable, or invalid files use the compiled-in default.
+---A non-empty `PRAGTICAL_RENDERER` takes precedence over the saved preference.
+---Selecting Default removes the file. Changes require closing and reopening
+---Pragtical, not the in-process restart command. Backend fallback still applies;
+---`renwindow:get_renderer_info()` reports the actual backend in use.
+---
 ---When using the `sdlgpu` backend, GPU device selection can be influenced with:
 ---`PRAGTICAL_SDLGPU_POWER=auto|low|high`.
 ---The default `auto` mode tries the low-power GPU first, then high-performance

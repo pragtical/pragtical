@@ -23,6 +23,21 @@ USERDIR = (system.get_file_info(EXEDIR .. PATHSEP .. 'user') and (EXEDIR .. PATH
        or ((os.getenv("XDG_CONFIG_HOME") and os.getenv("XDG_CONFIG_HOME") .. PATHSEP .. "pragtical"))
        or (HOME and (HOME .. PATHSEP .. '.config' .. PATHSEP .. 'pragtical'))
 
+-- Backend selection happens when the first font or window is created. A soft
+-- restart retains those native resources, so only apply this on process startup.
+local renderer_override = os.getenv("PRAGTICAL_RENDERER")
+if not RESTARTED and (not renderer_override or renderer_override == "") then
+  local file = io.open(USERDIR .. PATHSEP .. "renderer", "r")
+  if file then
+    local backend = file:read("*a")
+    file:close()
+    backend = backend and backend:match("^%s*(.-)%s*$")
+    if backend == "surface" or backend == "sdlgpu" or backend == "sdlrenderer" then
+      system.setenv("PRAGTICAL_RENDERER", backend)
+    end
+  end
+end
+
 package.path = DATADIR .. '/?.lua;'
 package.path = DATADIR .. '/?/init.lua;' .. package.path
 package.path = USERDIR .. '/?.lua;' .. package.path

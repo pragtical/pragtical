@@ -112,7 +112,8 @@ settings.type = {
 ---Optional function that is used to manipulate the current value on retrieval.
 ---@field public get_value nil | fun(value:any):any
 ---Optional function that is used to manipulate the saved value on save.
----@field public set_value nil | fun(value:any):any
+---Return nil and an error as the second result to reject the change.
+---@field public set_value nil | fun(value:any):any, string?
 ---The icon set for a BUTTON
 ---@field public icon string
 ---Command or function executed when a BUTTON is clicked
@@ -314,6 +315,48 @@ local disabled_transition_items = {
 
 settings.add("Graphics",
   {
+    {
+      label = "Renderer",
+      description = "Requires closing and reopening Pragtical. Default uses the build's default renderer. PRAGTICAL_RENDERER overrides this choice.",
+      path = "renderer",
+      type = settings.type.SELECTION,
+      default = "default",
+      values = {
+        { "Default", "default" },
+        { "Surface", "surface" },
+        { "SDLGPU", "sdlgpu" },
+        { "SDLRenderer", "sdlrenderer" }
+      },
+      get_value = function()
+        local file = io.open(USERDIR .. PATHSEP .. "renderer", "r")
+        if file then
+          local value = file:read("*a")
+          file:close()
+          value = value and value:match("^%s*(.-)%s*$")
+          if value == "surface" or value == "sdlgpu" or value == "sdlrenderer" then
+            return value
+          end
+        end
+        return "default"
+      end,
+      set_value = function(value)
+        local path = USERDIR .. PATHSEP .. "renderer"
+        if value == "default" then
+          local ok, err, code = os.remove(path)
+          if not ok and code ~= 2 then return nil, err end -- ENOENT is already default.
+          return value
+        end
+
+        local file, err = io.open(path, "w")
+        if not file then return nil, err end
+        local written, write_err = file:write(value .. "\n")
+        local closed, close_err = file:close()
+        if not written or not closed then
+          return nil, write_err or close_err
+        end
+        return value
+      end
+    },
     {
       label = "Auto FPS",
       description = "Automatically set frames per second from current display refresh rate. If supported also toggles the current renderer v-sync.",
@@ -1767,7 +1810,10 @@ local function add_control(pane, option, context)
   end
 
   if widget and type(path) ~= "nil" then
+    local previous_selection = widget:is(SelectBox) and widget:get_selected()
+    local restoring = false
     function widget:on_change(value)
+      if restoring then return end
       if self:is(SelectBox) then
         value = self:get_selected_data()
       elseif self:is(ItemsList) then
@@ -1780,7 +1826,17 @@ local function add_control(pane, option, context)
       end
 
       if option.set_value then
-        value = option.set_value(value)
+        local err
+        value, err = option.set_value(value)
+        if value == nil and err then
+          core.error("Could not save %s: %s", option.label, err)
+          if self:is(SelectBox) then
+            restoring = true
+            self:set_selected(previous_selection)
+            restoring = false
+          end
+          return
+        end
       end
 
       if self:is(FontsList) then
@@ -1815,6 +1871,7 @@ local function add_control(pane, option, context)
       if option.on_apply then
         option.on_apply(value)
       end
+      if self:is(SelectBox) then previous_selection = self:get_selected() end
     end
   end
 
