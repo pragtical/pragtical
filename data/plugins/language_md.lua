@@ -14,23 +14,43 @@ syntax.add {
   patterns = {
   ---- Place patterns that require spaces at start to optimize matching speed
   ---- and apply the %s+ optimization immediately afterwards
+    -- checkbox
+    -- - [x]
+    -- - [X]
+    -- - [-] Partially done
+    {
+      pattern = "^%s*%-%s()%[()[xX%-]()%]",
+      type = { "number", "comment", "string", "comment" },
+    },
+    -- - [ ]
+    {
+      pattern = "^%s*%-%s()%[%s+%]",
+      type = { "number", "comment" }
+    },
     -- bullets
+    -- * example1
+    -- - example2
+    -- + example3
     { pattern = "^%s*%*%s",                 type = "number" },
     { pattern = "^%s*%-%s",                 type = "number" },
     { pattern = "^%s*%+%s",                 type = "number" },
     -- numbered bullet
+    -- 1. example
     { pattern = "^%s*[0-9]+[%.%)]%s",       type = "number" },
     -- blockquote
+    -- > example
     { pattern = "^%s*>+%s",                 type = "string" },
     -- alternative bold italic formats
     { pattern = { "%s___", "___" },         type = "markdown_bold_italic" },
     { pattern = { "%s__", "__" },           type = "markdown_bold" },
     { pattern = { "%s_[%S]", "_" },         type = "markdown_italic" },
     -- reference links
+    -- [example]: https://example.com
     {
       pattern = "^%s*%[%^()["..in_squares_match.."]+()%]: ",
       type = { "function", "number", "function" }
     },
+    -- [^note]: footnote
     {
       pattern = "^%s*%[%^?()["..in_squares_match.."]+()%]:%s+.*",
       type = { "function", "number", "function" }
@@ -67,6 +87,7 @@ syntax.add {
       type = "function"
     },
     -- Comments
+    -- <!-- example -->
     { pattern = { "<!%-%-", "%-%->" },   type = "comment" },
     -- Tags
     { pattern = "%f[^<]![%a_][%w_]*",    type = "keyword2" },
@@ -258,20 +279,50 @@ syntax.add {
       pattern = "!?%[!?%[?()["..in_squares_match.."]+()%]?%]%(()["..in_parenthesis_match.."]+()%)",
       type = { "function", "string", "function", "number", "function" }
     },
+    -- inline metadata
+    -- [key::value]
+    {
+      pattern = "%[()[^:%]%s]+()::()[^%]%s]+()%]",
+      type = { "function", "string", "comment", "number", "function" },
+    },
     -- reference links
+    -- [example][example]
     {
       pattern = "%[()["..in_squares_match.."]+()%] *()%[()["..in_squares_match.."]+()%]",
       type = { "function", "string", "function", "function", "number", "function" }
     },
+    -- wikilinks
+    -- ![[example]]
     {
-      pattern = "!?%[%^?()["..in_squares_match.."]+()%]",
-      type = { "function", "number", "function" }
+      pattern = "!()%[%[()[" .. in_squares_match .. "]+()%]%]",
+      type = { "normal", "comment", "number", "comment" },
     },
-    -- url's and email
+    -- [[example]]
+    {
+      pattern = "%[%[()[" .. in_squares_match .. "]+()%]%]",
+      type = { "comment", "number", "comment" },
+    },
+    -- ![example]
+    {
+      pattern = "!()%[()[" .. in_squares_match .. "]+()%]",
+      type = { "normal", "comment", "number", "comment" },
+    },
+    -- [^note]
+    {
+      pattern = "%[%^()[" .. in_squares_match .. "]+()%]",
+      type = { "comment", "normal", "comment" },
+    },
+    -- [example]
+    {
+      pattern = "%[()[" .. in_squares_match .. "]+()%]",
+      type = { "comment", "number", "comment" },
+    },
+    -- email
     {
       pattern = "<[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+%.[a-zA-Z0-9-.]+>",
       type = "function"
     },
+    -- url
     { pattern = "<https?://%S+>",           type = "function" },
     { pattern = "https?://%S+",             type = "function" },
     -- optimize consecutive dashes used in tables
