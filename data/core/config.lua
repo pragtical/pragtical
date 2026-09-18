@@ -4,6 +4,12 @@ local common = require "core.common"
 ---@class core.config
 local config = {}
 
+---Saved renderer preference managed by Settings through USERDIR/renderer.
+---Requires closing and reopening Pragtical; assigning this field alone does not
+---switch backends. "default" uses the compiled-in default backend.
+---@type "default" | "surface" | "sdlgpu" | "sdlrenderer"
+config.renderer = "default"
+
 ---Keep the maximum FPS locked to current display refresh rate.
 ---
 ---Defaults to true.

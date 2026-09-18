@@ -28,6 +28,7 @@ test.describe("system", function()
   end)
 
   test.after_each(function(context)
+    if context.env_key then system.setenv(context.env_key) end
     if context.original_cwd then
       system.chdir(context.original_cwd)
     end
@@ -88,6 +89,30 @@ test.describe("system", function()
 
     if PLATFORM == "Linux" then
       test.type(system.get_fs_type(nested), "string")
+    end
+  end)
+
+  test.test("keeps Lua and SDL's cached environment synchronized", function(context)
+    local key = "PRAGTICAL_SYSTEM_TEST_SDL_ENV_" .. system.get_process_id()
+    context.env_key = key
+    for _, value in ipairs({"first", "changed", false, false}) do
+      test.ok(system.setenv(key, value or nil))
+      test.equal(os.getenv(key), value or nil)
+      local cached
+      local proc = process.start({EXEFILE, "--version"}, {
+        stdout = process.REDIRECT_DISCARD,
+        stderr = process.REDIRECT_DISCARD,
+        env = function(system_env)
+          cached = system_env[key]
+          local entries = {}
+          for name, entry in pairs(system_env) do
+            entries[#entries + 1] = name .. "=" .. entry
+          end
+          return table.concat(entries, "\0") .. "\0\0"
+        end
+      })
+      test.equal(proc:wait(process.WAIT_INFINITE, 0.01), 0)
+      test.equal(cached, value or nil)
     end
   end)
 
