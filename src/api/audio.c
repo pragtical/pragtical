@@ -1,86 +1,108 @@
 #include "api.h"
+#include "custom_events.h"
 
 #include <SDL3/SDL.h>
+#include <SDL3_mixer/SDL_mixer.h>
 #include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <string.h>
 
 #define AUDIO_ALLOCATION "AudioAllocation"
+#define AUDIO_MIXERS "audio.mixers"
+#define AUDIO_EVENT "audio.complete"
+#define AUDIO_TRACK_ERROR "Pragtical.audio.error"
 
-typedef struct AudioDevice AudioDevice;
-typedef struct AudioStream AudioStream;
+typedef struct AudioMixer AudioMixer;
+typedef struct AudioGroup AudioGroup;
 typedef struct AudioVoice AudioVoice;
+typedef struct AudioStream AudioStream;
 
 typedef struct {
+  MIX_Audio *audio;
   SDL_AudioSpec spec;
-  Uint8 *data;
-  int size;
+  void *data;
+  size_t size;
   unsigned refs;
+  bool pcm;
 } AudioSound;
 
-struct AudioStream {
-  SDL_AudioStream *stream;
-  AudioDevice *device;
-  AudioStream *next;
+struct AudioGroup {
+  AudioMixer *mixer;
+  AudioGroup *next;
+  float gain;
   bool paused;
 };
 
 typedef enum { VOICE_ACTIVE, VOICE_FINISHED, VOICE_STOPPED } VoiceState;
-
 struct AudioVoice {
-  AudioDevice *device;
+  AudioMixer *mixer;
+  AudioGroup *group;
   AudioVoice *next;
-  AudioSound *sound;
+  MIX_Track *track;
   SDL_AudioStream *stream;
-  Uint8 *loop_data;
-  int size, offset;
+  SDL_AudioSpec spec;
+  Sint64 position, duration, end, fade_in;
   unsigned refs;
-  float gain, rate;
-  bool loop, paused, eof, failed;
+  float gain, rate, pan;
+  bool panning, paused, writable, sealed, stopping, notify;
   VoiceState state;
+  SDL_AtomicInt done;
   char error[256];
 };
 
-struct AudioDevice {
-  SDL_AudioDeviceID id;
-  AudioDevice *next;
-  AudioStream *streams;
+struct AudioMixer {
+  MIX_Mixer *mixer;
+  AudioMixer *next;
+  AudioGroup *groups;
   AudioVoice *voices;
+  SDL_AudioDeviceID device;
+  SDL_AudioSpec spec;
   unsigned refs;
   int max_voices, voice_count;
+  float gain, rate;
+  bool offline, follows_default, paused, main_thread, dispatching;
+  SDL_AtomicInt pending;
+};
+
+struct AudioStream {
+  SDL_AudioStream *stream;
+  SDL_AudioDeviceID device;
+  AudioStream *next;
   bool recording, follows_default;
 };
 
-/* Protect ownership across Lua states and the reaper. Never call Lua while this
- * mutex is held. SDL callbacks take only their stream lock, never this mutex. */
+/* Lua allocation and callbacks must never happen under this ownership lock.
+ * Lock order is ownership -> MIX mixer -> SDL stream. Audio callbacks only use
+ * their existing MIX lock and atomics; the reaper destroys tracks afterwards. */
 static SDL_Mutex *audio_mutex;
-static SDL_SpinLock audio_mutex_init;
+static SDL_SpinLock mutex_init;
 static SDL_Semaphore *audio_wake;
 static SDL_Thread *audio_reaper;
-static AudioDevice *audio_devices;
-static bool audio_initialized, audio_stopping;
+static AudioMixer *mixers;
+static AudioStream *recordings;
+static unsigned sound_count;
+static bool hardware_initialized, mixer_initialized, audio_stopping;
+static SDL_AtomicInt main_pending;
 
 static const struct { const char *name; SDL_AudioFormat value; } formats[] = {
   { "u8", SDL_AUDIO_U8 }, { "s8", SDL_AUDIO_S8 },
   { "s16le", SDL_AUDIO_S16LE }, { "s16be", SDL_AUDIO_S16BE },
   { "s32le", SDL_AUDIO_S32LE }, { "s32be", SDL_AUDIO_S32BE },
   { "f32le", SDL_AUDIO_F32LE }, { "f32be", SDL_AUDIO_F32BE },
-  { "s16", SDL_AUDIO_S16 }, { "s32", SDL_AUDIO_S32 },
-  { "f32", SDL_AUDIO_F32 }
+  { "s16", SDL_AUDIO_S16 }, { "s32", SDL_AUDIO_S32 }, { "f32", SDL_AUDIO_F32 }
 };
 
 static int audio_error(lua_State *L) {
   char error[1024];
   SDL_strlcpy(error, SDL_GetError(), sizeof(error));
-  lua_pushnil(L);
-  lua_pushstring(L, error);
+  lua_pushnil(L); lua_pushstring(L, error);
   return 2;
 }
 
-static int audio_result(lua_State *L, bool success) {
+static int audio_result(lua_State *L, bool ok) {
   SDL_UnlockMutex(audio_mutex);
-  if (!success) return audio_error(L);
+  if (!ok) return audio_error(L);
   lua_pushboolean(L, true);
   return 1;
 }
@@ -94,8 +116,7 @@ static void *new_object(lua_State *L, size_t size, const char *type) {
 
 static int allocation_gc(lua_State *L) {
   void **data = luaL_checkudata(L, 1, AUDIO_ALLOCATION);
-  SDL_free(*data);
-  *data = NULL;
+  SDL_free(*data); *data = NULL;
   return 0;
 }
 
@@ -107,20 +128,32 @@ static int check_integer(lua_State *L, int index, int min, int max) {
   return (int) value;
 }
 
-static float check_multiplier(lua_State *L, int index, bool rate) {
+static double check_number(lua_State *L, int index, double min, double max) {
   luaL_checktype(L, index, LUA_TNUMBER);
-  lua_Number value = lua_tonumber(L, index);
-  luaL_argcheck(L, isfinite(value) && value >= (rate ? 0.01 : 0)
-    && value <= (rate ? 100 : FLT_MAX), index, "multiplier out of range");
-  return (float) value;
+  double value = lua_tonumber(L, index);
+  luaL_argcheck(L, isfinite(value) && value >= min && value <= max, index, "number out of range");
+  return value;
 }
 
-static bool option_bool(lua_State *L, int table, const char *key) {
+static float check_multiplier(lua_State *L, int index, bool rate) {
+  return (float) check_number(L, index, rate ? 0.01 : 0, rate ? 100 : FLT_MAX);
+}
+
+static bool option_bool(lua_State *L, int table, const char *key, bool fallback) {
   lua_getfield(L, table, key);
-  if (!lua_isnil(L, -1)) luaL_checktype(L, -1, LUA_TBOOLEAN);
-  bool value = lua_toboolean(L, -1);
+  if (!lua_isnil(L, -1)) {
+    luaL_checktype(L, -1, LUA_TBOOLEAN);
+    fallback = lua_toboolean(L, -1);
+  }
   lua_pop(L, 1);
-  return value;
+  return fallback;
+}
+
+static double option_number(lua_State *L, int table, const char *key, double fallback, double min, double max) {
+  lua_getfield(L, table, key);
+  if (!lua_isnil(L, -1)) fallback = check_number(L, -1, min, max);
+  lua_pop(L, 1);
+  return fallback;
 }
 
 static SDL_AudioSpec check_spec(lua_State *L, int index) {
@@ -129,27 +162,21 @@ static SDL_AudioSpec check_spec(lua_State *L, int index) {
   luaL_checktype(L, index, LUA_TTABLE);
   lua_getfield(L, index, "format");
   luaL_checktype(L, -1, LUA_TSTRING);
-  size_t name_size;
-  const char *name = lua_tolstring(L, -1, &name_size);
+  size_t size;
+  const char *name = lua_tolstring(L, -1, &size);
   for (size_t i = 0; i < SDL_arraysize(formats); i++) {
-    if (strlen(formats[i].name) == name_size && memcmp(name, formats[i].name, name_size) == 0) {
-      spec.format = formats[i].value;
-      break;
+    if (strlen(formats[i].name) == size && memcmp(name, formats[i].name, size) == 0) {
+      spec.format = formats[i].value; break;
     }
   }
   luaL_argcheck(L, spec.format != SDL_AUDIO_UNKNOWN, index, "unsupported PCM format");
   lua_pop(L, 1);
-  lua_getfield(L, index, "channels");
-  spec.channels = check_integer(L, -1, 1, 8);
-  lua_pop(L, 1);
-  lua_getfield(L, index, "sample_rate");
-  spec.freq = check_integer(L, -1, 1, INT_MAX);
-  lua_pop(L, 1);
+  lua_getfield(L, index, "channels"); spec.channels = check_integer(L, -1, 1, 8); lua_pop(L, 1);
+  lua_getfield(L, index, "sample_rate"); spec.freq = check_integer(L, -1, 1, INT_MAX); lua_pop(L, 1);
   return spec;
 }
 
 static bool valid_frequency(const SDL_AudioSpec *spec, float rate) {
-  /* SDL scales the source frequency in float, then converts it to signed int. */
   float frequency = (float) spec->freq * rate;
   return (frequency >= 1 && frequency < (float) INT_MAX)
     || SDL_SetError("sample rate and playback rate exceed SDL's conversion range");
@@ -159,9 +186,7 @@ static void push_spec(lua_State *L, const SDL_AudioSpec *spec) {
   lua_createtable(L, 0, 3);
   for (size_t i = 0; i < SDL_arraysize(formats); i++) {
     if (formats[i].value == spec->format) {
-      lua_pushstring(L, formats[i].name);
-      lua_setfield(L, -2, "format");
-      break;
+      lua_pushstring(L, formats[i].name); lua_setfield(L, -2, "format"); break;
     }
   }
   lua_pushinteger(L, spec->channels); lua_setfield(L, -2, "channels");
@@ -178,110 +203,132 @@ static const char *check_pcm(lua_State *L, int index, const SDL_AudioSpec *spec,
   return data;
 }
 
-static bool init_locked(void) {
+static const char *check_path(lua_State *L, int index) {
+  size_t size;
+  luaL_checktype(L, index, LUA_TSTRING);
+  const char *path = lua_tolstring(L, index, &size);
+  luaL_argcheck(L, size == strlen(path), index, "path contains NUL");
+  return path;
+}
+
+static SDL_AudioDeviceID check_device(lua_State *L, int options, bool recording, bool *follows_default) {
+  SDL_AudioDeviceID id = recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+  *follows_default = true;
+  if (!lua_isnoneornil(L, options)) {
+    lua_getfield(L, options, "id");
+    if (!lua_isnil(L, -1)) {
+      double value = check_number(L, -1, 1, SDL_AUDIO_DEVICE_DEFAULT_RECORDING - 1.0);
+      luaL_argcheck(L, value == floor(value), options, "invalid device ID");
+      id = (SDL_AudioDeviceID) value;
+      *follows_default = false;
+    }
+    lua_pop(L, 1);
+  }
+  return id;
+}
+
+static bool init_locked(bool hardware) {
   if (audio_stopping) return SDL_SetError("audio is shutting down");
-  if (audio_initialized) return true;
-  if (!SDL_IsMainThread()) return SDL_SetError("initialize audio on the main thread before using devices in a worker");
-  if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return false;
-  audio_initialized = true;
+  if (hardware && !SDL_IsMainThread()) return SDL_SetError("audio devices require the main thread");
+  if (hardware && !hardware_initialized) {
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return false;
+    hardware_initialized = true;
+  }
+  if (!mixer_initialized) {
+    if (!MIX_Init()) return false;
+    mixer_initialized = true;
+  }
   return true;
 }
 
-static bool device_open(AudioDevice *device) {
-  return device && device->id ? true : SDL_SetError("audio device is closed");
-}
-
-static bool stream_open(AudioStream *stream) {
-  return stream->stream ? true : SDL_SetError("audio stream is closed");
-}
-
-static void sound_unref(AudioSound *sound) {
-  if (sound && --sound->refs == 0) {
-    SDL_free(sound->data);
-    SDL_free(sound);
+static void maybe_quit(void) {
+  if (audio_stopping && mixer_initialized && !mixers && !sound_count) {
+    MIX_Quit(); mixer_initialized = false;
   }
 }
 
-static void device_unref(AudioDevice *device) {
-  if (device && --device->refs == 0) SDL_free(device);
+static bool mixer_open(AudioMixer *mixer) {
+  return (mixer && mixer->mixer) || SDL_SetError("audio mixer is closed");
+}
+
+static void mixer_unref(AudioMixer *mixer) {
+  if (mixer && --mixer->refs == 0) {
+    while (mixer->groups) {
+      AudioGroup *next = mixer->groups->next;
+      SDL_free(mixer->groups); mixer->groups = next;
+    }
+    SDL_free(mixer);
+  }
 }
 
 static void voice_unref(AudioVoice *voice) {
   if (voice && --voice->refs == 0) {
-    device_unref(voice->device);
+    mixer_unref(voice->mixer);
     SDL_free(voice);
   }
 }
 
-static void stream_close(AudioStream *stream) {
-  if (!stream->stream) return;
-  SDL_DestroyAudioStream(stream->stream);
-  stream->stream = NULL;
-  if (stream->device) {
-    AudioStream **link = &stream->device->streams;
-    while (*link && *link != stream) link = &(*link)->next;
-    if (*link) *link = stream->next;
-    stream->next = NULL;
+static bool voice_paused(AudioVoice *voice) {
+  return voice->paused || voice->mixer->paused || (voice->group && voice->group->paused);
+}
+
+static void SDLCALL voice_stopped(void *userdata, MIX_Track *track) {
+  AudioVoice *voice = userdata;
+  voice->position = MIX_GetTrackPlaybackPosition(track);
+  SDL_strlcpy(voice->error, SDL_GetStringProperty(MIX_GetTrackProperties(track), AUDIO_TRACK_ERROR, ""), sizeof(voice->error));
+  SDL_SetAtomicInt(&voice->done, 1);
+  if (voice->notify) {
+    SDL_SetAtomicInt(&voice->mixer->pending, 1);
+    if (voice->mixer->main_thread && !SDL_SetAtomicInt(&main_pending, 1)) {
+      CustomEvent event = {0};
+      push_custom_event(AUDIO_EVENT, &event);
+    }
+  }
+  SDL_SignalSemaphore(audio_wake);
+}
+
+static void collect_voices(AudioMixer *mixer) {
+  AudioVoice **link = &mixer->voices;
+  while (*link) {
+    AudioVoice *voice = *link;
+    if (!SDL_GetAtomicInt(&voice->done)) { link = &voice->next; continue; }
+    MIX_DestroyTrack(voice->track); voice->track = NULL;
+    SDL_DestroyAudioStream(voice->stream); voice->stream = NULL;
+    voice->state = voice->stopping || *voice->error ? VOICE_STOPPED : VOICE_FINISHED;
+    *link = voice->next; voice->next = NULL;
+    mixer->voice_count--;
+    voice_unref(voice);
   }
 }
 
-static void voice_finish(AudioVoice *voice, VoiceState state) {
-  if (voice->state != VOICE_ACTIVE) return;
-  /* Destroy waits for an in-flight SDL callback before releasing its userdata. */
-  SDL_DestroyAudioStream(voice->stream);
-  voice->stream = NULL;
-  sound_unref(voice->sound);
-  voice->sound = NULL;
-  SDL_free(voice->loop_data);
-  voice->loop_data = NULL;
-  voice->state = state;
-  AudioVoice **link = &voice->device->voices;
-  while (*link != voice) link = &(*link)->next;
-  *link = voice->next;
-  voice->next = NULL;
-  voice->device->voice_count--;
-  voice_unref(voice); /* Release the device's active-voice reference. */
-}
-
-static void collect_voices(AudioDevice *device) {
-  AudioVoice *voice = device->voices;
-  while (voice) {
-    AudioVoice *next = voice->next;
-    SDL_LockAudioStream(voice->stream);
-    bool failed = voice->failed;
-    bool finished = voice->eof && SDL_GetAudioStreamQueued(voice->stream) == 0
-      && SDL_GetAudioStreamAvailable(voice->stream) == 0;
-    SDL_UnlockAudioStream(voice->stream);
-    if (failed || finished) voice_finish(voice, failed ? VOICE_STOPPED : VOICE_FINISHED);
-    voice = next;
+static void mixer_close(AudioMixer *mixer) {
+  if (!mixer || !mixer->mixer) return;
+  MIX_LockMixer(mixer->mixer);
+  for (AudioVoice *voice = mixer->voices; voice; voice = voice->next) {
+    MIX_SetTrackStoppedCallback(voice->track, NULL, NULL);
+    if (!SDL_GetAtomicInt(&voice->done)) {
+      voice->position = MIX_GetTrackPlaybackPosition(voice->track);
+      voice->stopping = true;
+      SDL_SetAtomicInt(&voice->done, 1);
+    }
   }
-}
-
-static void device_close(AudioDevice *device) {
-  if (!device || !device->id) return;
-  while (device->voices) voice_finish(device->voices, VOICE_STOPPED);
-  while (device->streams) stream_close(device->streams);
-  SDL_CloseAudioDevice(device->id);
-  device->id = 0;
-  AudioDevice **link = &audio_devices;
-  while (*link != device) link = &(*link)->next;
-  *link = device->next;
-  device->next = NULL;
+  MIX_UnlockMixer(mixer->mixer);
+  collect_voices(mixer);
+  MIX_DestroyMixer(mixer->mixer); mixer->mixer = NULL;
+  mixer->device = 0;
+  AudioMixer **link = &mixers;
+  while (*link != mixer) link = &(*link)->next;
+  *link = mixer->next; mixer->next = NULL;
+  maybe_quit();
 }
 
 static int SDLCALL reap_voices(void *unused) {
   (void) unused;
-  bool active = false;
   for (;;) {
-    if (active) SDL_WaitSemaphoreTimeout(audio_wake, 10);
-    else SDL_WaitSemaphore(audio_wake);
+    SDL_WaitSemaphore(audio_wake);
     SDL_LockMutex(audio_mutex);
     if (audio_stopping) { SDL_UnlockMutex(audio_mutex); return 0; }
-    active = false;
-    for (AudioDevice *device = audio_devices; device; device = device->next) {
-      collect_voices(device);
-      active |= device->voices != NULL;
-    }
+    for (AudioMixer *mixer = mixers; mixer; mixer = mixer->next) collect_voices(mixer);
     SDL_UnlockMutex(audio_mutex);
   }
 }
@@ -291,42 +338,32 @@ static bool start_reaper(void) {
   audio_wake = SDL_CreateSemaphore(0);
   if (!audio_wake) return false;
   audio_reaper = SDL_CreateThread(reap_voices, "audio-voices", NULL);
-  if (!audio_reaper) {
-    SDL_DestroySemaphore(audio_wake);
-    audio_wake = NULL;
-    return false;
-  }
+  if (!audio_reaper) { SDL_DestroySemaphore(audio_wake); audio_wake = NULL; return false; }
   return true;
 }
 
-/* This runs with SDL's stream lock, not on the Lua thread. It never accesses Lua,
- * takes our ownership lock, or destroys a stream. Reclamation is left to reaper. */
-static void SDLCALL feed_voice(void *userdata, SDL_AudioStream *stream, int additional, int total) {
-  (void) total;
-  AudioVoice *voice = userdata;
-  if (additional <= 0 || voice->eof || voice->failed) return;
-  int frame = (int) SDL_AUDIO_FRAMESIZE(voice->sound->spec);
-  Sint64 needed = ((Sint64) additional + frame - 1) / frame * frame;
-  const Uint8 *data = voice->loop_data ? voice->loop_data : voice->sound->data;
-  while (needed > 0) {
-    int count = (int) SDL_min(needed, voice->size - voice->offset);
-    if (!SDL_PutAudioStreamData(stream, data + voice->offset, count)) {
-      voice->failed = true;
-      break;
-    }
-    voice->offset += count;
-    needed -= count;
-    if (voice->offset == voice->size) {
-      if (voice->loop) voice->offset = 0;
-      else {
-        voice->eof = true;
-        if (!SDL_FlushAudioStream(stream)) voice->failed = true;
-        break;
-      }
-    }
+static void sound_unref(AudioSound *sound) {
+  if (sound && --sound->refs == 0) {
+    MIX_DestroyAudio(sound->audio);
+    SDL_free(sound);
+    sound_count--;
+    maybe_quit();
   }
-  if (voice->failed) SDL_strlcpy(voice->error, SDL_GetError(), sizeof(voice->error));
-  if (voice->eof || voice->failed) SDL_SignalSemaphore(audio_wake);
+}
+
+static bool stream_open(AudioStream *stream) {
+  return stream->stream || SDL_SetError("audio stream is closed");
+}
+
+static void stream_close(AudioStream *stream) {
+  if (!stream->stream) return;
+  SDL_DestroyAudioStream(stream->stream); stream->stream = NULL;
+  if (stream->device) {
+    SDL_CloseAudioDevice(stream->device); stream->device = 0;
+    AudioStream **link = &recordings;
+    while (*link != stream) link = &(*link)->next;
+    *link = stream->next; stream->next = NULL;
+  }
 }
 
 void api_audio_shutdown(void) {
@@ -338,19 +375,13 @@ void api_audio_shutdown(void) {
   SDL_UnlockMutex(audio_mutex);
   if (reaper) SDL_WaitThread(reaper, NULL);
   SDL_LockMutex(audio_mutex);
-  while (audio_devices) device_close(audio_devices);
-  SDL_DestroySemaphore(audio_wake);
-  audio_wake = NULL;
-  audio_reaper = NULL;
-  if (audio_initialized) SDL_QuitSubSystem(SDL_INIT_AUDIO);
-  audio_initialized = false;
+  while (mixers) mixer_close(mixers);
+  while (recordings) stream_close(recordings);
+  SDL_DestroySemaphore(audio_wake); audio_wake = NULL; audio_reaper = NULL;
+  maybe_quit();
+  if (hardware_initialized) SDL_QuitSubSystem(SDL_INIT_AUDIO);
+  hardware_initialized = false;
   SDL_UnlockMutex(audio_mutex);
-  /* Keep the ownership mutex valid for late finalizers in worker Lua states. */
-}
-
-static int f_init(lua_State *L) {
-  SDL_LockMutex(audio_mutex);
-  return audio_result(L, init_locked());
 }
 
 static int f_get_drivers(lua_State *L) {
@@ -365,25 +396,32 @@ static int f_get_drivers(lua_State *L) {
 static int f_get_driver(lua_State *L) {
   char name[128] = "";
   SDL_LockMutex(audio_mutex);
-  if (audio_initialized) {
-    const char *driver = SDL_GetCurrentAudioDriver();
-    if (driver) SDL_strlcpy(name, driver, sizeof(name));
-  }
+  const char *driver = hardware_initialized ? SDL_GetCurrentAudioDriver() : NULL;
+  if (driver) SDL_strlcpy(name, driver, sizeof(name));
   SDL_UnlockMutex(audio_mutex);
   if (*name) lua_pushstring(L, name); else lua_pushnil(L);
   return 1;
 }
 
-static bool check_kind(lua_State *L, int index) {
-  static const char *const kinds[] = { "playback", "recording", NULL };
-  return luaL_checkoption(L, index, "playback", kinds) == 1;
+static int f_get_decoders(lua_State *L) {
+  SDL_LockMutex(audio_mutex);
+  bool ok = init_locked(false);
+  int count = ok ? MIX_GetNumAudioDecoders() : -1;
+  SDL_UnlockMutex(audio_mutex);
+  if (count < 0) return audio_error(L);
+  lua_createtable(L, count, 0);
+  for (int i = 0; i < count; i++) {
+    lua_pushstring(L, MIX_GetAudioDecoder(i)); lua_rawseti(L, -2, i + 1);
+  }
+  return 1;
 }
 
 static int f_get_devices(lua_State *L) {
-  bool recording = check_kind(L, 1);
+  static const char *const kinds[] = { "playback", "recording", NULL };
+  bool recording = luaL_checkoption(L, 1, "playback", kinds) == 1;
   void **allocation = new_object(L, sizeof(void *), AUDIO_ALLOCATION);
   SDL_LockMutex(audio_mutex);
-  if (!init_locked()) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
+  if (!init_locked(true)) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
   int count = 0;
   SDL_AudioDeviceID *ids = recording ? SDL_GetAudioRecordingDevices(&count) : SDL_GetAudioPlaybackDevices(&count);
   *allocation = ids;
@@ -391,93 +429,151 @@ static int f_get_devices(lua_State *L) {
   if (!ids) return audio_error(L);
   lua_createtable(L, count, 0);
   for (int i = 0; i < count; i++) {
-    char name[1024];
-    SDL_LockMutex(audio_mutex);
-    const char *s = !audio_stopping ? SDL_GetAudioDeviceName(ids[i]) : NULL;
-    SDL_strlcpy(name, s ? s : "", sizeof(name));
-    SDL_UnlockMutex(audio_mutex);
+    const char *name = SDL_GetAudioDeviceName(ids[i]);
     lua_createtable(L, 0, 3);
     lua_pushnumber(L, ids[i]); lua_setfield(L, -2, "id");
-    lua_pushstring(L, name); lua_setfield(L, -2, "name");
-    lua_pushstring(L, recording ? "recording" : "playback"); lua_setfield(L, -2, "kind");
+    lua_pushstring(L, name ? name : ""); lua_setfield(L, -2, "name");
+    lua_pushstring(L, kinds[recording]); lua_setfield(L, -2, "kind");
     lua_rawseti(L, -2, i + 1);
   }
   SDL_free(ids); *allocation = NULL;
   return 1;
 }
 
-static int f_open_device(lua_State *L) {
-  bool recording = check_kind(L, 1), follows_default = true, has_spec = false;
-  SDL_AudioDeviceID requested = recording ? SDL_AUDIO_DEVICE_DEFAULT_RECORDING : SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
-  SDL_AudioSpec spec;
+static bool validate_device(SDL_AudioDeviceID id, bool follows_default, bool recording) {
+  return follows_default || (SDL_IsAudioDevicePhysical(id) && SDL_IsAudioDevicePlayback(id) != recording)
+    || SDL_SetError("audio device ID is not a physical device of the requested kind");
+}
+
+static int f_create_mixer(lua_State *L) {
+  lua_settop(L, 1);
+  bool offline = false, has_spec = false, follows_default;
+  SDL_AudioSpec spec = {0};
   int max_voices = 64;
-  if (!lua_isnoneornil(L, 2)) {
-    luaL_checktype(L, 2, LUA_TTABLE);
-    lua_getfield(L, 2, "id");
-    if (!lua_isnil(L, -1)) {
-      luaL_checktype(L, -1, LUA_TNUMBER);
-      lua_Number id = lua_tonumber(L, -1);
-      luaL_argcheck(L, isfinite(id) && id > 0 && id < SDL_AUDIO_DEVICE_DEFAULT_RECORDING && floor(id) == id, 2, "invalid device ID");
-      requested = (SDL_AudioDeviceID) id;
-      follows_default = false;
-    }
-    lua_pop(L, 1);
-    lua_getfield(L, 2, "spec");
+  if (!lua_isnil(L, 1)) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    offline = option_bool(L, 1, "offline", false);
+    lua_getfield(L, 1, "spec");
     if (!lua_isnil(L, -1)) { spec = check_spec(L, -1); has_spec = true; }
     lua_pop(L, 1);
-    lua_getfield(L, 2, "max_voices");
-    if (!lua_isnil(L, -1)) {
-      luaL_argcheck(L, !recording, 2, "max_voices is only valid for playback");
-      max_voices = check_integer(L, -1, 1, INT_MAX);
-    }
+    lua_getfield(L, 1, "max_voices");
+    if (!lua_isnil(L, -1)) max_voices = check_integer(L, -1, 1, INT_MAX);
     lua_pop(L, 1);
   }
-  AudioDevice **ud = new_object(L, sizeof(*ud), API_TYPE_AUDIO_DEVICE);
+  SDL_AudioDeviceID id = check_device(L, 1, false, &follows_default);
+  luaL_argcheck(L, !offline || (has_spec && follows_default), 1, "offline mixers require spec and cannot select a device");
+  AudioMixer **ud = new_object(L, sizeof(*ud), API_TYPE_AUDIO_MIXER);
+  int object = lua_gettop(L);
+  lua_newtable(L);
+  lua_newtable(L); lua_setfield(L, -2, "groups");
+  lua_newtable(L); lua_setfield(L, -2, "callbacks");
+  lua_setuservalue(L, object);
   if (has_spec && !valid_frequency(&spec, 1)) return audio_error(L);
   SDL_LockMutex(audio_mutex);
-  if (!init_locked()) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-  if (!follows_default && (!SDL_IsAudioDevicePhysical(requested)
-      || SDL_IsAudioDevicePlayback(requested) == recording)) {
-    SDL_SetError("audio device ID is not a physical device of the requested kind");
+  if (!init_locked(!offline) || (!offline && !validate_device(id, follows_default, false)) || !start_reaper()) {
     SDL_UnlockMutex(audio_mutex); return audio_error(L);
   }
-  AudioDevice *device = SDL_calloc(1, sizeof(*device));
-  if (!device) { SDL_OutOfMemory(); SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-  device->id = SDL_OpenAudioDevice(requested, has_spec ? &spec : NULL);
-  if (!device->id) { SDL_free(device); SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-  device->refs = 1;
-  device->max_voices = max_voices;
-  device->recording = recording;
-  device->follows_default = follows_default;
-  device->next = audio_devices;
-  audio_devices = device;
-  *ud = device;
-  bool ok = SDL_PauseAudioDevice(device->id);
-  if (!ok) device_close(device);
+  AudioMixer *mixer = SDL_calloc(1, sizeof(*mixer));
+  if (!mixer) { SDL_OutOfMemory(); SDL_UnlockMutex(audio_mutex); return audio_error(L); }
+  mixer->mixer = offline ? MIX_CreateMixer(&spec) : MIX_CreateMixerDevice(id, has_spec ? &spec : NULL);
+  if (!mixer->mixer) { SDL_free(mixer); SDL_UnlockMutex(audio_mutex); return audio_error(L); }
+  mixer->refs = 1;
+  mixer->offline = offline;
+  mixer->main_thread = SDL_IsMainThread();
+  mixer->follows_default = follows_default;
+  mixer->gain = mixer->rate = 1;
+  mixer->max_voices = max_voices;
+  MIX_GetMixerFormat(mixer->mixer, &mixer->spec);
+  mixer->device = (SDL_AudioDeviceID) SDL_GetNumberProperty(MIX_GetMixerProperties(mixer->mixer), MIX_PROP_MIXER_DEVICE_NUMBER, 0);
+  mixer->next = mixers; mixers = mixer;
+  *ud = mixer;
   SDL_UnlockMutex(audio_mutex);
-  if (!ok) return audio_error(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, AUDIO_MIXERS);
+  lua_pushlightuserdata(L, mixer); lua_pushvalue(L, object); lua_rawset(L, -3);
+  lua_settop(L, object);
   return 1;
 }
 
-static int f_load_wav(lua_State *L) {
-  size_t size;
-  luaL_checktype(L, 1, LUA_TSTRING);
-  const char *data = lua_tolstring(L, 1, &size);
+/* The returned allocation is owned by the caller, even on failure. */
+static bool decode_pcm(const void *data, size_t size, SDL_AudioSpec *spec, void **pcm, size_t *bytes, SDL_PropertiesID metadata) {
+  SDL_IOStream *io = SDL_IOFromConstMem(data, size);
+  if (!io) return false;
+  MIX_AudioDecoder *decoder = MIX_CreateAudioDecoder_IO(io, false, 0);
+  if (!decoder) { SDL_CloseIO(io); return false; }
+  bool ok = MIX_GetAudioDecoderFormat(decoder, spec) && valid_frequency(spec, 1);
+  SDL_PropertiesID props = MIX_GetAudioDecoderProperties(decoder);
+  if (ok && SDL_GetBooleanProperty(props, MIX_PROP_METADATA_DURATION_INFINITE_BOOLEAN, false))
+    ok = SDL_SetError("cannot extract infinite audio into a PCM buffer");
+  if (ok && metadata) ok = SDL_CopyProperties(props, metadata);
+  size_t capacity = 0;
+  *bytes = 0;
+  while (ok) {
+    size_t frame = SDL_AUDIO_FRAMESIZE(*spec);
+    size_t limit = INT_MAX / frame * frame;
+    if (capacity - *bytes < 65536) {
+      size_t next = SDL_min(limit, capacity ? capacity * 2 : 65536);
+      if (next == capacity) { ok = SDL_SetError("decoded PCM exceeds INT_MAX bytes"); break; }
+      void *buffer = SDL_realloc(*pcm, next);
+      if (!buffer) { ok = false; break; }
+      *pcm = buffer; capacity = next;
+    }
+    int chunk = (int) (SDL_min(capacity - *bytes, 65536) / frame * frame);
+    int read = MIX_DecodeAudio(decoder, (char *) *pcm + *bytes, chunk, spec);
+    if (read < 0) { ok = false; break; }
+    *bytes += (size_t) read;
+    if (!read) break;
+  }
+  MIX_DestroyAudioDecoder(decoder);
+  SDL_CloseIO(io);
+  return ok;
+}
+
+static int f_load(lua_State *L) {
   bool memory = lua_toboolean(L, lua_upvalueindex(1));
-  if (!memory) luaL_argcheck(L, strlen(data) == size, 1, "path contains NUL");
+  lua_settop(L, 2);
+  size_t size = 0;
+  luaL_checktype(L, 1, LUA_TSTRING);
+  const char *input = memory ? lua_tolstring(L, 1, &size) : check_path(L, 1);
+  bool predecode = false;
+  if (!lua_isnil(L, 2)) {
+    luaL_checktype(L, 2, LUA_TTABLE);
+    predecode = option_bool(L, 2, "predecode", false);
+  }
+  void **buffer = new_object(L, sizeof(*buffer), AUDIO_ALLOCATION);
+  void **decoded = new_object(L, sizeof(*decoded), AUDIO_ALLOCATION);
   AudioSound **ud = new_object(L, sizeof(*ud), API_TYPE_AUDIO_SOUND);
-  AudioSound *sound = SDL_calloc(1, sizeof(*sound));
-  if (!sound) { SDL_OutOfMemory(); return audio_error(L); }
+  SDL_LockMutex(audio_mutex);
+  if (!init_locked(false)) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
+  *buffer = memory ? SDL_malloc(size ? size : 1) : SDL_LoadFile(input, &size);
+  if (*buffer && memory) SDL_memcpy(*buffer, input, size);
+  AudioSound *sound = *buffer ? SDL_calloc(1, sizeof(*sound)) : NULL;
+  if (!sound) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
   sound->refs = 1;
+  sound_count++;
   *ud = sound;
-  Uint32 bytes = 0;
-  bool ok = memory
-    ? SDL_LoadWAV_IO(SDL_IOFromConstMem(data, size), true, &sound->spec, &sound->data, &bytes)
-    : SDL_LoadWAV(data, &sound->spec, &sound->data, &bytes);
-  if (ok && (bytes == 0 || bytes > INT_MAX || bytes % SDL_AUDIO_FRAMESIZE(sound->spec)))
-    ok = SDL_SetError("WAV must contain complete PCM frames within INT_MAX bytes");
-  if (!ok) { sound_unref(sound); *ud = NULL; return audio_error(L); }
-  sound->size = (int) bytes;
+  bool ok = true;
+  SDL_PropertiesID metadata = predecode ? SDL_CreateProperties() : 0;
+  if (predecode) {
+    ok = metadata && decode_pcm(*buffer, size, &sound->spec, decoded, &sound->size, metadata);
+    if (ok) sound->audio = MIX_LoadRawAudioNoCopy(NULL, *decoded, sound->size, &sound->spec, true);
+    if (sound->audio) {
+      sound->data = *decoded; *decoded = NULL; sound->pcm = true;
+      ok = SDL_CopyProperties(metadata, MIX_GetAudioProperties(sound->audio));
+    }
+  } else {
+    sound->audio = MIX_LoadAudioNoCopy(NULL, *buffer, size, true);
+    if (sound->audio) {
+      sound->data = *buffer; *buffer = NULL; sound->size = size;
+      ok = MIX_GetAudioFormat(sound->audio, &sound->spec);
+    }
+  }
+  SDL_DestroyProperties(metadata);
+  ok = ok && sound->audio && valid_frequency(&sound->spec, 1);
+  SDL_free(*buffer); *buffer = NULL;
+  SDL_free(*decoded); *decoded = NULL;
+  if (!ok) { sound_unref(sound); *ud = NULL; }
+  SDL_UnlockMutex(audio_mutex);
+  if (!ok) return audio_error(L);
   return 1;
 }
 
@@ -486,174 +582,306 @@ static int f_new_sound(lua_State *L) {
   int size;
   const char *data = check_pcm(L, 1, &spec, &size, false);
   AudioSound **ud = new_object(L, sizeof(*ud), API_TYPE_AUDIO_SOUND);
+  SDL_LockMutex(audio_mutex);
+  if (!init_locked(false) || !valid_frequency(&spec, 1)) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
   AudioSound *sound = SDL_calloc(1, sizeof(*sound));
-  if (!sound) { SDL_OutOfMemory(); return audio_error(L); }
-  sound->refs = 1;
-  *ud = sound;
+  if (!sound) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
   sound->data = SDL_malloc((size_t) size);
-  if (!sound->data) { SDL_OutOfMemory(); sound_unref(sound); *ud = NULL; return audio_error(L); }
-  SDL_memcpy(sound->data, data, size);
-  sound->spec = spec;
-  sound->size = size;
+  if (sound->data) {
+    SDL_memcpy(sound->data, data, size);
+    sound->audio = MIX_LoadRawAudioNoCopy(NULL, sound->data, size, &spec, true);
+  }
+  if (!sound->audio) {
+    SDL_free(sound->data); SDL_free(sound);
+    SDL_UnlockMutex(audio_mutex); return audio_error(L);
+  }
+  sound->refs = 1; sound->pcm = true; sound->size = size; sound->spec = spec;
+  sound_count++; *ud = sound;
+  SDL_UnlockMutex(audio_mutex);
   return 1;
 }
 
-static int f_create_stream(lua_State *L) {
-  SDL_AudioSpec input = check_spec(L, 1), output = check_spec(L, 2);
-  if (!valid_frequency(&input, 1)) return audio_error(L);
-  AudioStream *stream = new_object(L, sizeof(*stream), API_TYPE_AUDIO_STREAM);
-  stream->stream = SDL_CreateAudioStream(&input, &output);
-  if (!stream->stream) return audio_error(L);
+static int f_sound_close(lua_State *L) {
+  AudioSound **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
+  SDL_LockMutex(audio_mutex); sound_unref(*ud); *ud = NULL; SDL_UnlockMutex(audio_mutex);
+  return 0;
+}
+
+static AudioSound *check_sound(lua_State *L) {
+  AudioSound *sound = *(AudioSound **) luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
+  if (!sound) SDL_SetError("audio sound is closed");
+  return sound;
+}
+
+static int f_sound_get_spec(lua_State *L) {
+  AudioSound *sound = check_sound(L);
+  if (!sound) return audio_error(L);
+  SDL_AudioSpec spec = sound->spec;
+  push_spec(L, &spec);
   return 1;
 }
 
-static int f_convert(lua_State *L) {
-  SDL_AudioSpec input = check_spec(L, 2), output = check_spec(L, 3);
-  int size, converted_size;
-  const char *data = check_pcm(L, 1, &input, &size, true);
-  if (!size) { lua_pushliteral(L, ""); return 1; }
-  if (!valid_frequency(&input, 1)) return audio_error(L);
-  Uint8 **converted = new_object(L, sizeof(*converted), AUDIO_ALLOCATION);
-  if (!SDL_ConvertAudioSamples(&input, (const Uint8 *) data, size, &output, converted, &converted_size))
-    return audio_error(L);
-  lua_pushlstring(L, (const char *) *converted, (size_t) converted_size);
-  SDL_free(*converted); *converted = NULL;
+static int f_sound_get_size(lua_State *L) {
+  AudioSound *sound = check_sound(L);
+  if (!sound) return audio_error(L);
+  lua_pushinteger(L, (lua_Integer) sound->size);
   return 1;
 }
 
-static int f_device_get_info(lua_State *L) {
-  AudioDevice *device = *(AudioDevice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_DEVICE);
+static int f_sound_get_duration(lua_State *L) {
+  AudioSound *sound = check_sound(L);
+  if (!sound) return audio_error(L);
+  Sint64 frames = MIX_GetAudioDuration(sound->audio);
+  if (frames == MIX_DURATION_UNKNOWN) lua_pushnil(L);
+  else lua_pushnumber(L, frames == MIX_DURATION_INFINITE ? HUGE_VAL : (double) frames / sound->spec.freq);
+  return 1;
+}
+
+static AudioSound *guard_sound(lua_State *L) {
+  AudioSound **owner = luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
+  AudioSound **guard = new_object(L, sizeof(*guard), API_TYPE_AUDIO_SOUND);
+  AudioSound *sound = *owner;
+  if (sound) {
+    SDL_LockMutex(audio_mutex); sound->refs++; *guard = sound; SDL_UnlockMutex(audio_mutex);
+  } else SDL_SetError("audio sound is closed");
+  return sound;
+}
+
+static int f_sound_get_data(lua_State *L) {
+  AudioSound *sound = guard_sound(L);
+  if (!sound) return audio_error(L);
+  if (sound->pcm) { lua_pushlstring(L, sound->data, sound->size); return 1; }
+  void **buffer = new_object(L, sizeof(*buffer), AUDIO_ALLOCATION);
+  size_t bytes;
   SDL_AudioSpec spec;
-  int frames;
-  char name[1024];
   SDL_LockMutex(audio_mutex);
-  if (!device_open(device) || !SDL_GetAudioDeviceFormat(device->id, &spec, &frames)) {
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
-  }
-  const char *s = SDL_GetAudioDeviceName(device->id);
-  if (!s) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-  SDL_strlcpy(name, s, sizeof(name));
-  SDL_AudioDeviceID id = device->id;
-  bool paused = SDL_AudioDevicePaused(id);
-  bool recording = device->recording, follows_default = device->follows_default;
-  int max_voices = device->max_voices;
-  float gain = SDL_GetAudioDeviceGain(id);
+  bool ok = decode_pcm(sound->data, sound->size, &spec, buffer, &bytes, 0);
   SDL_UnlockMutex(audio_mutex);
-  if (gain < 0) return audio_error(L);
-  lua_createtable(L, 0, 9);
-  lua_pushnumber(L, id); lua_setfield(L, -2, "id");
-  lua_pushstring(L, name); lua_setfield(L, -2, "name");
-  lua_pushstring(L, recording ? "recording" : "playback"); lua_setfield(L, -2, "kind");
-  push_spec(L, &spec); lua_setfield(L, -2, "spec");
-  lua_pushinteger(L, frames); lua_setfield(L, -2, "buffer_frames");
-  lua_pushboolean(L, paused); lua_setfield(L, -2, "paused");
-  lua_pushnumber(L, gain); lua_setfield(L, -2, "gain");
-  lua_pushboolean(L, follows_default); lua_setfield(L, -2, "follows_default");
-  if (!recording) { lua_pushinteger(L, max_voices); lua_setfield(L, -2, "max_voices"); }
+  if (!ok) return audio_error(L);
+  lua_pushlstring(L, *buffer, bytes);
+  SDL_free(*buffer); *buffer = NULL;
   return 1;
 }
 
-static int f_device_create_stream(lua_State *L) {
-  AudioDevice **owner = luaL_checkudata(L, 1, API_TYPE_AUDIO_DEVICE);
-  SDL_AudioSpec app = check_spec(L, 2), hardware;
-  AudioStream *stream = new_object(L, sizeof(*stream), API_TYPE_AUDIO_STREAM);
-  AudioDevice *device = *owner;
-  SDL_LockMutex(audio_mutex);
-  if (!device_open(device) || !SDL_GetAudioDeviceFormat(device->id, &hardware, NULL)) {
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
+static int f_sound_get_metadata(lua_State *L) {
+  AudioSound *sound = guard_sound(L);
+  if (!sound) return audio_error(L);
+  SDL_PropertiesID props = MIX_GetAudioProperties(sound->audio);
+  if (!props) return audio_error(L);
+  static const char *const names[] = { "title", "artist", "album", "copyright", "track", "total_tracks", "year" };
+  static const char *const keys[] = { MIX_PROP_METADATA_TITLE_STRING, MIX_PROP_METADATA_ARTIST_STRING,
+    MIX_PROP_METADATA_ALBUM_STRING, MIX_PROP_METADATA_COPYRIGHT_STRING, MIX_PROP_METADATA_TRACK_NUMBER,
+    MIX_PROP_METADATA_TOTAL_TRACKS_NUMBER, MIX_PROP_METADATA_YEAR_NUMBER };
+  lua_newtable(L);
+  for (int i = 0; i < 7; i++) {
+    if (!SDL_HasProperty(props, keys[i])) continue;
+    if (i < 4) lua_pushstring(L, SDL_GetStringProperty(props, keys[i], ""));
+    else lua_pushinteger(L, (lua_Integer) SDL_GetNumberProperty(props, keys[i], 0));
+    lua_setfield(L, -2, names[i]);
   }
-  if (!valid_frequency(device->recording ? &hardware : &app, 1)) {
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
-  }
-  stream->stream = SDL_CreateAudioStream(device->recording ? &hardware : &app, device->recording ? &app : &hardware);
-  if (!stream->stream) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-  if (!SDL_BindAudioStream(device->id, stream->stream)) {
-    SDL_DestroyAudioStream(stream->stream); stream->stream = NULL;
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
-  }
-  stream->device = device;
-  device->refs++;
-  stream->next = device->streams;
-  device->streams = stream;
-  SDL_UnlockMutex(audio_mutex);
   return 1;
 }
 
-static int f_device_play(lua_State *L) {
-  AudioDevice **owner = luaL_checkudata(L, 1, API_TYPE_AUDIO_DEVICE);
-  AudioSound **sample = luaL_checkudata(L, 2, API_TYPE_AUDIO_SOUND);
-  float gain = 1, rate = 1;
-  bool loop = false, paused = false;
-  if (!lua_isnoneornil(L, 3)) {
+static AudioMixer *check_owner(lua_State *L, AudioGroup **group) {
+  AudioGroup **ud = luaL_testudata(L, 1, API_TYPE_AUDIO_GROUP);
+  *group = ud ? *ud : NULL;
+  if (ud) return *ud ? (*ud)->mixer : NULL;
+  return *(AudioMixer **) luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
+}
+
+static int f_mixer_group(lua_State *L) {
+  AudioMixer **owner = luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
+  size_t length;
+  luaL_checktype(L, 2, LUA_TSTRING);
+  lua_tolstring(L, 2, &length);
+  luaL_argcheck(L, length > 0, 2, "group name cannot be empty");
+  lua_getuservalue(L, 1);
+  lua_getfield(L, -1, "groups");
+  lua_pushvalue(L, 2); lua_rawget(L, -2);
+  if (!mixer_open(*owner)) return audio_error(L);
+  if (!lua_isnil(L, -1)) return 1;
+  lua_pop(L, 1);
+  AudioGroup **ud = new_object(L, sizeof(*ud), API_TYPE_AUDIO_GROUP);
+  SDL_LockMutex(audio_mutex);
+  AudioMixer *mixer = *owner;
+  if (!mixer_open(mixer)) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
+  AudioGroup *group = SDL_calloc(1, sizeof(*group));
+  if (!group) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
+  group->mixer = mixer; mixer->refs++;
+  group->gain = 1;
+  group->next = mixer->groups; mixer->groups = group;
+  *ud = group;
+  SDL_UnlockMutex(audio_mutex);
+  lua_pushvalue(L, 2); lua_pushvalue(L, -2); lua_rawset(L, -4);
+  return 1;
+}
+
+static int f_group_gc(lua_State *L) {
+  AudioGroup **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_GROUP);
+  SDL_LockMutex(audio_mutex);
+  if (*ud) mixer_unref((*ud)->mixer);
+  *ud = NULL;
+  SDL_UnlockMutex(audio_mutex);
+  return 0;
+}
+
+static bool time_frames(double seconds, int frequency, Sint64 *frames) {
+  double count = floor(seconds * frequency);
+  if (!isfinite(count) || count >= 9223372036854775808.0)
+    return SDL_SetError("audio time exceeds the sample-frame range");
+  *frames = (Sint64) count;
+  return true;
+}
+
+static bool sync_pause(AudioVoice *voice) {
+  return voice_paused(voice) ? MIX_PauseTrack(voice->track) : MIX_ResumeTrack(voice->track);
+}
+
+static bool sync_gain(AudioVoice *voice) {
+  double gain = (double) voice->gain * (voice->group ? voice->group->gain : 1);
+  return (gain <= FLT_MAX || SDL_SetError("combined group/voice gain exceeds float range"))
+    && MIX_SetTrackGain(voice->track, (float) gain);
+}
+
+static bool sync_pan(AudioVoice *voice) {
+  MIX_StereoGains gains = { 1 - SDL_max(voice->pan, 0), 1 + SDL_min(voice->pan, 0) };
+  return MIX_SetTrackStereo(voice->track, voice->panning ? &gains : NULL);
+}
+
+static int f_play(lua_State *L) {
+  int kind = (int) lua_tointeger(L, lua_upvalueindex(1));
+  lua_settop(L, 3);
+  AudioGroup *group;
+  AudioMixer *mixer = check_owner(L, &group);
+  AudioSound **sample = kind == 0 ? luaL_checkudata(L, 2, API_TYPE_AUDIO_SOUND) : NULL;
+  const char *path = kind == 1 ? check_path(L, 2) : NULL;
+  SDL_AudioSpec spec = {0};
+  if (kind == 2) spec = check_spec(L, 2);
+  bool paused = false, panning = false;
+  float gain = 1, rate = 1, pan = 0;
+  double start = 0, loop_start = 0, end = -1, fade = 0;
+  int loops = 0;
+  if (!lua_isnil(L, 3)) {
     luaL_checktype(L, 3, LUA_TTABLE);
-    loop = option_bool(L, 3, "loop"); paused = option_bool(L, 3, "paused");
-    lua_getfield(L, 3, "gain");
-    if (!lua_isnil(L, -1)) gain = check_multiplier(L, -1, false);
+    paused = option_bool(L, 3, "paused", false);
+    gain = (float) option_number(L, 3, "gain", 1, 0, FLT_MAX);
+    rate = (float) option_number(L, 3, "rate", 1, 0.01, 100);
+    fade = option_number(L, 3, "fade_in", 0, 0, DBL_MAX);
+    lua_getfield(L, 3, "pan");
+    if (!lua_isnil(L, -1)) { pan = (float) check_number(L, -1, -1, 1); panning = true; }
     lua_pop(L, 1);
-    lua_getfield(L, 3, "rate");
-    if (!lua_isnil(L, -1)) rate = check_multiplier(L, -1, true);
+    const char *seek_options[] = { "loops", "start", "loop_start", "loop_end" };
+    if (kind == 2) for (int i = 0; i < 4; i++) {
+      lua_getfield(L, 3, seek_options[i]);
+      luaL_argcheck(L, lua_isnil(L, -1), 3, "writable PCM cannot loop or seek"); lua_pop(L, 1);
+    }
+    lua_getfield(L, 3, "loop");
+    luaL_argcheck(L, lua_isnil(L, -1), 3, "use numeric loops, not loop"); lua_pop(L, 1);
+    lua_getfield(L, 3, "loops");
+    if (!lua_isnil(L, -1)) loops = check_integer(L, -1, -1, INT_MAX);
     lua_pop(L, 1);
-  }
+    start = option_number(L, 3, "start", 0, 0, DBL_MAX);
+    loop_start = option_number(L, 3, "loop_start", 0, 0, DBL_MAX);
+    end = option_number(L, 3, "loop_end", -1, 0, DBL_MAX);
+    lua_getfield(L, 3, "on_complete");
+    if (!lua_isnil(L, -1)) luaL_checktype(L, -1, LUA_TFUNCTION);
+  } else lua_pushnil(L);
+  int callback = lua_gettop(L);
+  /* Retrieve the weak owner before allocating the voice: children must not keep
+   * the mixer open, but it must remain reachable during this operation. */
+  mixer = check_owner(L, &group);
+  lua_getfield(L, LUA_REGISTRYINDEX, AUDIO_MIXERS);
+  lua_pushlightuserdata(L, mixer); lua_rawget(L, -2);
+  int owner_index = lua_gettop(L);
+  if (lua_isnil(L, owner_index)) { SDL_SetError("audio mixer is closed"); return audio_error(L); }
+  lua_getuservalue(L, owner_index); lua_getfield(L, -1, "callbacks");
+  int callbacks = lua_gettop(L);
+  bool notify = !lua_isnil(L, callback);
   AudioVoice **ud = new_object(L, sizeof(*ud), API_TYPE_AUDIO_VOICE);
-  /* Option-table metamethods can close a handle while arguments are parsed. */
-  AudioDevice *device = *owner;
-  AudioSound *sound = *sample;
+  int object = lua_gettop(L);
   SDL_LockMutex(audio_mutex);
-  if (!device_open(device)) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-  if (device->recording || !sound) {
-    SDL_SetError(device->recording ? "cannot play on a recording device" : "audio sound is closed");
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
-  }
-  if (!valid_frequency(&sound->spec, rate)) {
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
-  }
-  collect_voices(device);
-  if (device->voice_count >= device->max_voices) {
+  if (!mixer_open(mixer)) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
+  collect_voices(mixer);
+  if (mixer->voice_count >= mixer->max_voices) {
     SDL_SetError("audio voice limit reached"); SDL_UnlockMutex(audio_mutex); return audio_error(L);
   }
-  SDL_AudioSpec hardware;
-  if (!SDL_GetAudioDeviceFormat(device->id, &hardware, NULL) || !start_reaper()) {
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
-  }
+  AudioSound *sound = sample ? *sample : NULL;
+  if (sample && !sound) { SDL_SetError("audio sound is closed"); SDL_UnlockMutex(audio_mutex); return audio_error(L); }
   AudioVoice *voice = SDL_calloc(1, sizeof(*voice));
-  if (!voice) { SDL_OutOfMemory(); SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-  voice->refs = 1;
-  voice->device = device; device->refs++;
-  voice->state = VOICE_STOPPED;
-  voice->gain = gain; voice->rate = rate;
-  voice->loop = loop; voice->paused = paused;
-  voice->size = sound->size;
+  if (!voice) { SDL_UnlockMutex(audio_mutex); return audio_error(L); }
   *ud = voice;
-  /* Expand very short loops once, avoiding thousands of tiny queue allocations
-   * inside each SDL callback. Longer samples continue sharing their PCM storage. */
-  if (loop && sound->size < 4096) {
-    voice->size = 4096 / sound->size * sound->size;
-    voice->loop_data = SDL_malloc((size_t) voice->size);
-    if (!voice->loop_data) { SDL_OutOfMemory(); SDL_UnlockMutex(audio_mutex); return audio_error(L); }
-    SDL_memcpy(voice->loop_data, sound->data, sound->size);
-    for (int n = sound->size; n < voice->size;) {
-      int count = SDL_min(n, voice->size - n);
-      SDL_memcpy(voice->loop_data + n, voice->loop_data, count); n += count;
-    }
+  voice->refs = 1; voice->mixer = mixer; mixer->refs++;
+  voice->group = group; voice->gain = gain; voice->rate = rate;
+  voice->paused = paused; voice->panning = panning; voice->pan = pan;
+  voice->state = VOICE_STOPPED; voice->writable = kind == 2;
+  voice->notify = notify;
+  voice->duration = -1; voice->end = -1;
+  voice->track = MIX_CreateTrack(mixer->mixer);
+  bool ok = voice->track != NULL;
+  if (ok && sound) {
+    voice->spec = sound->spec;
+    voice->duration = MIX_GetAudioDuration(sound->audio);
+    ok = MIX_SetTrackAudio(voice->track, sound->audio);
+  } else if (ok && path) {
+    SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+    MIX_AudioDecoder *probe = io ? MIX_CreateAudioDecoder_IO(io, false, 0) : NULL;
+    ok = probe && MIX_GetAudioDecoderFormat(probe, &voice->spec);
+    if (ok) voice->duration = SDL_GetNumberProperty(MIX_GetAudioDecoderProperties(probe), MIX_PROP_METADATA_DURATION_FRAMES_NUMBER, -1);
+    MIX_DestroyAudioDecoder(probe);
+    if (ok) ok = SDL_SeekIO(io, 0, SDL_IO_SEEK_SET) >= 0;
+    if (ok) ok = MIX_SetTrackIOStream(voice->track, io, true);
+    else if (io) SDL_CloseIO(io);
+  } else if (ok) {
+    voice->spec = spec;
+    voice->stream = SDL_CreateAudioStream(&spec, &spec);
+    ok = voice->stream && MIX_SetTrackAudioStream(voice->track, voice->stream);
   }
-  voice->stream = SDL_CreateAudioStream(&sound->spec, &hardware);
-  bool ok = voice->stream && SDL_SetAudioStreamGain(voice->stream, gain)
-    && SDL_SetAudioStreamFrequencyRatio(voice->stream, rate);
-  voice->sound = sound; sound->refs++;
-  if (ok) ok = SDL_SetAudioStreamGetCallback(voice->stream, feed_voice, voice);
-  if (ok && !paused) ok = SDL_BindAudioStream(device->id, voice->stream);
+  Sint64 start_frame = 0, loop_frame = 0;
+  if (ok) ok = valid_frequency(&voice->spec, rate)
+    && time_frames(start, voice->spec.freq, &start_frame)
+    && time_frames(loop_start, voice->spec.freq, &loop_frame)
+    && time_frames(fade, voice->spec.freq, &voice->fade_in)
+    && (end < 0 || time_frames(end, voice->spec.freq, &voice->end));
+  if (ok && (loop_frame > INT_MAX || voice->fade_in > INT_MAX))
+    ok = SDL_SetError("loop start or fade exceeds SDL_mixer's frame range");
+  Sint64 last = voice->end >= 0 ? voice->end : voice->duration;
+  if (ok && ((last >= 0 && (start_frame >= last || (loops && loop_frame >= last)))
+      || (voice->duration >= 0 && voice->end > voice->duration)))
+    ok = SDL_SetError("start/loop boundaries must form nonempty ranges within the source");
+  if (ok && loops) ok = MIX_SetTrackPlaybackPosition(voice->track, loop_frame);
+  SDL_PropertiesID options = ok ? SDL_CreateProperties() : 0;
+  if (ok) ok = options && SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOPS_NUMBER, loops)
+    && SDL_SetNumberProperty(options, MIX_PROP_PLAY_START_FRAME_NUMBER, start_frame)
+    && SDL_SetNumberProperty(options, MIX_PROP_PLAY_LOOP_START_FRAME_NUMBER, loop_frame)
+    && SDL_SetNumberProperty(options, MIX_PROP_PLAY_MAX_FRAME_NUMBER, voice->end)
+    && SDL_SetNumberProperty(options, MIX_PROP_PLAY_FADE_IN_FRAMES_NUMBER, voice->fade_in)
+    && SDL_SetBooleanProperty(options, MIX_PROP_PLAY_HALT_WHEN_EXHAUSTED_BOOLEAN, kind != 2);
+  if (ok) {
+    MIX_LockMixer(mixer->mixer);
+    ok = sync_gain(voice) && sync_pan(voice) && MIX_SetTrackFrequencyRatio(voice->track, rate)
+      && MIX_SetTrackStoppedCallback(voice->track, voice_stopped, voice)
+      && MIX_PlayTrack(voice->track, options) && sync_pause(voice);
+    if (ok) {
+      voice->state = VOICE_ACTIVE; voice->refs++;
+      voice->next = mixer->voices; mixer->voices = voice; mixer->voice_count++;
+    } else MIX_SetTrackStoppedCallback(voice->track, NULL, NULL);
+    MIX_UnlockMixer(mixer->mixer);
+  }
+  SDL_DestroyProperties(options);
   if (!ok) {
+    MIX_DestroyTrack(voice->track); voice->track = NULL;
     SDL_DestroyAudioStream(voice->stream); voice->stream = NULL;
-    sound_unref(voice->sound); voice->sound = NULL;
-    SDL_free(voice->loop_data); voice->loop_data = NULL;
-    SDL_UnlockMutex(audio_mutex); return audio_error(L);
   }
-  voice->state = VOICE_ACTIVE;
-  voice->refs++;
-  voice->next = device->voices; device->voices = voice;
-  device->voice_count++;
-  SDL_SignalSemaphore(audio_wake);
   SDL_UnlockMutex(audio_mutex);
+  if (!ok) return audio_error(L);
+  if (voice->notify) {
+    lua_pushlightuserdata(L, voice);
+    lua_createtable(L, 2, 0);
+    lua_pushvalue(L, object); lua_rawseti(L, -2, 1);
+    lua_pushvalue(L, callback); lua_rawseti(L, -2, 2);
+    lua_rawset(L, callbacks);
+  }
+  lua_settop(L, object);
   return 1;
 }
 
@@ -671,41 +899,412 @@ static int push_control(lua_State *L, Control control, bool ok, double value) {
   return 1;
 }
 
-static int device_control(lua_State *L, Control control) {
-  AudioDevice *device = *(AudioDevice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_DEVICE);
-  double value = control == SET_GAIN ? check_multiplier(L, 2, false) : 0;
+static int owner_control(lua_State *L) {
+  Control control = (Control) lua_tointeger(L, lua_upvalueindex(1));
+  double value = control == SET_GAIN || control == SET_RATE ? check_multiplier(L, 2, control == SET_RATE) : 0;
+  AudioGroup *group;
+  AudioMixer *mixer = check_owner(L, &group);
   SDL_LockMutex(audio_mutex);
-  if (!device_open(device)) return push_control(L, control, false, 0);
+  if (!mixer_open(mixer)) return push_control(L, control, false, 0);
+  collect_voices(mixer);
   bool ok = true;
+  MIX_LockMixer(mixer->mixer);
   switch (control) {
-    case PAUSE: ok = SDL_PauseAudioDevice(device->id); break;
-    case RESUME: ok = SDL_ResumeAudioDevice(device->id); break;
-    case IS_PAUSED: value = SDL_AudioDevicePaused(device->id); break;
-    case GET_GAIN: value = SDL_GetAudioDeviceGain(device->id); ok = value >= 0; break;
-    case SET_GAIN: ok = SDL_SetAudioDeviceGain(device->id, (float) value); break;
+    case GET_GAIN: value = group ? group->gain : mixer->gain; break;
+    case GET_RATE: value = mixer->rate; break;
+    case IS_PAUSED: value = group ? group->paused : mixer->paused; break;
+    case SET_RATE:
+      ok = valid_frequency(&mixer->spec, (float) value) && MIX_SetMixerFrequencyRatio(mixer->mixer, (float) value);
+      if (ok) mixer->rate = (float) value;
+      break;
+    case SET_GAIN:
+      if (group) {
+        for (AudioVoice *v = mixer->voices; v; v = v->next)
+          if (v->group == group && (double) v->gain * value > FLT_MAX) ok = false;
+        if (!ok) SDL_SetError("combined group/voice gain exceeds float range");
+        else {
+          group->gain = (float) value;
+          for (AudioVoice *v = mixer->voices; v; v = v->next)
+            if (v->group == group && !SDL_GetAtomicInt(&v->done)) ok = sync_gain(v) && ok;
+        }
+      } else {
+        ok = MIX_SetMixerGain(mixer->mixer, (float) value);
+        if (ok) mixer->gain = (float) value;
+      }
+      break;
+    case PAUSE: case RESUME:
+      if (group) group->paused = control == PAUSE; else mixer->paused = control == PAUSE;
+      for (AudioVoice *v = mixer->voices; v; v = v->next)
+        if ((!group || v->group == group) && !SDL_GetAtomicInt(&v->done)) ok = sync_pause(v) && ok;
+      break;
     default: break;
   }
+  MIX_UnlockMixer(mixer->mixer);
   return push_control(L, control, ok, value);
 }
 
-static int f_device_pause(lua_State *L) { return device_control(L, PAUSE); }
-static int f_device_resume(lua_State *L) { return device_control(L, RESUME); }
-static int f_device_is_paused(lua_State *L) { return device_control(L, IS_PAUSED); }
-static int f_device_get_gain(lua_State *L) { return device_control(L, GET_GAIN); }
-static int f_device_set_gain(lua_State *L) { return device_control(L, SET_GAIN); }
+static double check_fade_out(lua_State *L) {
+  if (lua_isnoneornil(L, 2)) return 0;
+  luaL_checktype(L, 2, LUA_TTABLE);
+  return option_number(L, 2, "fade_out", 0, 0, DBL_MAX);
+}
 
-static int f_device_close(lua_State *L) {
-  AudioDevice *device = *(AudioDevice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_DEVICE);
-  SDL_LockMutex(audio_mutex); device_close(device); SDL_UnlockMutex(audio_mutex);
+static bool stop_voice(AudioVoice *voice, double fade) {
+  if (voice->state != VOICE_ACTIVE || SDL_GetAtomicInt(&voice->done)) return true;
+  Sint64 frames;
+  if (!time_frames(fade, voice->spec.freq, &frames)) return false;
+  if (frames > INT_MAX) return SDL_SetError("fade exceeds SDL_mixer's frame range");
+  if (voice_paused(voice)) frames = 0;
+  if (voice->stopping && frames) return true;
+  voice->stopping = true;
+  MIX_SetTrackLoops(voice->track, 0);
+  return MIX_StopTrack(voice->track, frames);
+}
+
+static int f_owner_stop(lua_State *L) {
+  double fade = check_fade_out(L);
+  AudioGroup *group;
+  AudioMixer *mixer = check_owner(L, &group);
+  SDL_LockMutex(audio_mutex);
+  if (!mixer_open(mixer)) return audio_result(L, false);
+  bool ok = true;
+  MIX_LockMixer(mixer->mixer);
+  for (AudioVoice *v = mixer->voices; v; v = v->next)
+    if (!group || v->group == group) ok = stop_voice(v, fade) && ok;
+  MIX_UnlockMixer(mixer->mixer);
+  collect_voices(mixer);
+  return audio_result(L, ok);
+}
+
+static int f_mixer_close(lua_State *L) {
+  AudioMixer **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
+  SDL_LockMutex(audio_mutex); mixer_close(*ud); SDL_UnlockMutex(audio_mutex);
+  lua_getuservalue(L, 1);
+  if (lua_istable(L, -1)) { lua_newtable(L); lua_setfield(L, -2, "callbacks"); }
   return 0;
 }
 
-static int f_device_gc(lua_State *L) {
-  AudioDevice **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_DEVICE);
+static int f_mixer_gc(lua_State *L) {
+  AudioMixer **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
   SDL_LockMutex(audio_mutex);
-  device_close(*ud); device_unref(*ud); *ud = NULL;
+  mixer_close(*ud); mixer_unref(*ud); *ud = NULL;
   SDL_UnlockMutex(audio_mutex);
   return 0;
+}
+
+static int f_mixer_resume_together(lua_State *L) {
+  AudioMixer **owner = luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
+  luaL_checktype(L, 2, LUA_TTABLE);
+  size_t count = lua_rawlen(L, 2);
+  luaL_argcheck(L, count > 0 && count <= INT_MAX / sizeof(AudioVoice *), 2, "expected a nonempty voice array");
+  AudioVoice **voices = lua_newuserdata(L, count * sizeof(*voices));
+  for (size_t i = 0; i < count; i++) {
+    lua_rawgeti(L, 2, (lua_Integer) i + 1);
+    voices[i] = *(AudioVoice **) luaL_checkudata(L, -1, API_TYPE_AUDIO_VOICE);
+    lua_pop(L, 1);
+    for (size_t j = 0; j < i; j++) luaL_argcheck(L, voices[i] != voices[j], 2, "duplicate voice");
+  }
+  AudioMixer *mixer = *owner;
+  SDL_LockMutex(audio_mutex);
+  if (!mixer_open(mixer)) return audio_result(L, false);
+  MIX_LockMixer(mixer->mixer);
+  bool ok = !mixer->paused;
+  for (size_t i = 0; i < count; i++) {
+    AudioVoice *v = voices[i];
+    ok = ok && v && v->mixer == mixer && v->state == VOICE_ACTIVE && !SDL_GetAtomicInt(&v->done)
+      && v->paused && (!v->group || !v->group->paused);
+  }
+  if (!ok) SDL_SetError("voices must be individually paused on this mixer with unpaused parents");
+  else {
+    for (size_t i = 0; i < count && ok; i++) ok = MIX_ResumeTrack(voices[i]->track);
+    for (size_t i = 0; i < count; i++) {
+      if (ok) voices[i]->paused = false;
+      else MIX_PauseTrack(voices[i]->track);
+    }
+  }
+  MIX_UnlockMixer(mixer->mixer);
+  return audio_result(L, ok);
+}
+
+static int f_mixer_render(lua_State *L) {
+  AudioMixer **owner = luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
+  int frames = check_integer(L, 2, 1, INT_MAX);
+  AudioMixer *mixer = *owner;
+  if (!mixer_open(mixer) || (!mixer->offline && !SDL_SetError("render requires an offline mixer"))) {
+    lua_pushnil(L); audio_error(L); return 3;
+  }
+  int frame = SDL_AUDIO_FRAMESIZE(mixer->spec);
+  luaL_argcheck(L, frames <= INT_MAX / frame, 2, "render size exceeds INT_MAX bytes");
+  if ((double) frames * mixer->spec.channels * sizeof(float) * SDL_max(mixer->rate, 1) > INT_MAX / 3 - 512) {
+    SDL_SetError("render request exceeds the mixer working-buffer limit");
+    lua_pushnil(L); audio_error(L); return 3;
+  }
+  int size = frames * frame;
+  void *buffer = lua_newuserdata(L, (size_t) size);
+  // Upstream MIX_Generate can leave a resampled short read partially unwritten.
+  SDL_memset(buffer, SDL_GetSilenceValueForFormat(mixer->spec.format), size);
+  SDL_LockMutex(audio_mutex);
+  int bytes = -1;
+  if (mixer_open(mixer)) {
+    if (mixer->paused) bytes = 0;
+    else bytes = MIX_Generate(mixer->mixer, buffer, size);
+    collect_voices(mixer);
+  }
+  SDL_UnlockMutex(audio_mutex);
+  if (bytes < 0) { lua_pushnil(L); audio_error(L); return 3; }
+  lua_pushlstring(L, buffer, size); lua_pushinteger(L, bytes / frame);
+  return 2;
+}
+
+static int f_voice_gc(lua_State *L) {
+  AudioVoice **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex); voice_unref(*ud); *ud = NULL; SDL_UnlockMutex(audio_mutex);
+  return 0;
+}
+
+static int f_voice_get_state(lua_State *L) {
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  const char *state = "stopped";
+  char error[256] = "";
+  SDL_LockMutex(audio_mutex);
+  if (voice) {
+    collect_voices(voice->mixer);
+    state = voice->state == VOICE_FINISHED ? "finished" : voice->state == VOICE_STOPPED ? "stopped"
+      : voice_paused(voice) ? "paused" : "playing";
+    SDL_strlcpy(error, voice->error, sizeof(error));
+  }
+  SDL_UnlockMutex(audio_mutex);
+  lua_pushstring(L, state);
+  if (*error) { lua_pushstring(L, error); return 2; }
+  return 1;
+}
+
+static int voice_control(lua_State *L) {
+  Control control = (Control) lua_tointeger(L, lua_upvalueindex(1));
+  double value = control == SET_GAIN || control == SET_RATE ? check_multiplier(L, 2, control == SET_RATE) : 0;
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  if (!voice) { SDL_SetError("voice is closed"); return push_control(L, control, false, 0); }
+  collect_voices(voice->mixer);
+  if (control == GET_GAIN || control == GET_RATE)
+    return push_control(L, control, true, control == GET_GAIN ? voice->gain : voice->rate);
+  if (voice->state != VOICE_ACTIVE) {
+    SDL_SetError("voice has finished or stopped"); return push_control(L, control, false, 0);
+  }
+  MIX_LockMixer(voice->mixer->mixer);
+  bool ok = true;
+  switch (control) {
+    case PAUSE: case RESUME:
+      voice->paused = control == PAUSE;
+      ok = sync_pause(voice);
+      break;
+    case SET_GAIN: {
+      float old = voice->gain;
+      voice->gain = (float) value;
+      ok = sync_gain(voice);
+      if (!ok) voice->gain = old;
+      break;
+    }
+    case SET_RATE:
+      ok = valid_frequency(&voice->spec, (float) value) && MIX_SetTrackFrequencyRatio(voice->track, (float) value);
+      if (ok) voice->rate = (float) value;
+      break;
+    default: break;
+  }
+  MIX_UnlockMixer(voice->mixer->mixer);
+  return push_control(L, control, ok, value);
+}
+
+static int f_voice_stop(lua_State *L) {
+  double fade = check_fade_out(L);
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  bool ok = true;
+  if (voice && voice->mixer->mixer) {
+    MIX_LockMixer(voice->mixer->mixer);
+    ok = stop_voice(voice, fade);
+    MIX_UnlockMixer(voice->mixer->mixer);
+    collect_voices(voice->mixer);
+  }
+  return audio_result(L, ok);
+}
+
+static int f_voice_get_pan(lua_State *L) {
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  if (voice && voice->panning) lua_pushnumber(L, voice->pan); else lua_pushnil(L);
+  return 1;
+}
+
+static int f_voice_set_pan(lua_State *L) {
+  bool panning = !lua_isnoneornil(L, 2);
+  float pan = panning ? (float) check_number(L, 2, -1, 1) : 0;
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  if (voice) collect_voices(voice->mixer);
+  if (!voice || voice->state != VOICE_ACTIVE) {
+    SDL_SetError("voice has finished or stopped"); return audio_result(L, false);
+  }
+  MIX_LockMixer(voice->mixer->mixer);
+  bool old_panning = voice->panning;
+  float old_pan = voice->pan;
+  voice->panning = panning; voice->pan = pan;
+  bool ok = sync_pan(voice);
+  if (!ok) { voice->panning = old_panning; voice->pan = old_pan; }
+  MIX_UnlockMixer(voice->mixer->mixer);
+  return audio_result(L, ok);
+}
+
+static int f_voice_get_position(lua_State *L) {
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  if (!voice || voice->writable) {
+    SDL_SetError("source position is unavailable for this voice"); SDL_UnlockMutex(audio_mutex); return audio_error(L);
+  }
+  collect_voices(voice->mixer);
+  Sint64 position = voice->track ? MIX_GetTrackPlaybackPosition(voice->track) : voice->position;
+  double seconds = (double) position / voice->spec.freq;
+  SDL_UnlockMutex(audio_mutex);
+  if (position < 0) return audio_error(L);
+  lua_pushnumber(L, seconds);
+  return 1;
+}
+
+static int f_voice_seek(lua_State *L) {
+  double seconds = check_number(L, 2, 0, DBL_MAX);
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  if (voice) collect_voices(voice->mixer);
+  if (!voice || voice->writable || voice->state != VOICE_ACTIVE) {
+    SDL_SetError("cannot seek this voice"); return audio_result(L, false);
+  }
+  Sint64 frames;
+  bool ok = time_frames(seconds, voice->spec.freq, &frames);
+  if (ok && ((voice->end >= 0 && frames >= voice->end) || (voice->duration >= 0 && frames >= voice->duration)))
+    ok = SDL_SetError("seek position is outside the source range");
+  if (ok) ok = MIX_SetTrackPlaybackPosition(voice->track, frames);
+  return audio_result(L, ok);
+}
+
+static bool writable_voice(AudioVoice *voice, bool active) {
+  if (!voice || !voice->writable) return SDL_SetError("operation requires a writable PCM voice");
+  collect_voices(voice->mixer);
+  if (active && (voice->state != VOICE_ACTIVE || voice->sealed))
+    return SDL_SetError("PCM voice is finished, stopped, or sealed");
+  return true;
+}
+
+static int f_voice_write(lua_State *L) {
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  bool ok = writable_voice(voice, true);
+  SDL_UnlockMutex(audio_mutex);
+  if (!ok) return audio_error(L);
+  int size;
+  const char *data = check_pcm(L, 2, &voice->spec, &size, true);
+  SDL_LockMutex(audio_mutex);
+  ok = writable_voice(voice, true) && (!size || SDL_PutAudioStreamData(voice->stream, data, size));
+  SDL_UnlockMutex(audio_mutex);
+  if (!ok) return audio_error(L);
+  lua_pushinteger(L, size);
+  return 1;
+}
+
+static int f_voice_queued(lua_State *L) {
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  int bytes = !writable_voice(voice, false) ? -1
+    : voice->stream ? SDL_GetAudioStreamQueued(voice->stream) : 0;
+  return push_control(L, QUEUED, bytes >= 0, bytes);
+}
+
+static int f_voice_clear(lua_State *L) {
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  return audio_result(L, writable_voice(voice, true) && SDL_ClearAudioStream(voice->stream));
+}
+
+static int f_voice_finish(lua_State *L) {
+  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
+  SDL_LockMutex(audio_mutex);
+  if (!writable_voice(voice, false)) return audio_result(L, false);
+  if (voice->sealed || voice->state != VOICE_ACTIVE) return audio_result(L, true);
+  MIX_LockMixer(voice->mixer->mixer);
+  bool ok = SDL_FlushAudioStream(voice->stream);
+  /* Replaying an external PCM stream preserves its queue and resampler. Only
+   * change its exhaustion policy; preserve any fade-in and independent pauses.
+   * A pending stop already guarantees termination and keeps its fade intact. */
+  if (ok && !voice->stopping) {
+    Sint64 fade = MIX_GetTrackFadeFrames(voice->track);
+    SDL_PropertiesID options = SDL_CreateProperties();
+    ok = options && SDL_SetBooleanProperty(options, MIX_PROP_PLAY_HALT_WHEN_EXHAUSTED_BOOLEAN, true);
+    if (ok && fade > 0) {
+      float gain = 1 - (float) fade / (float) voice->fade_in;
+      ok = SDL_SetNumberProperty(options, MIX_PROP_PLAY_FADE_IN_FRAMES_NUMBER, fade)
+        && SDL_SetFloatProperty(options, MIX_PROP_PLAY_FADE_IN_START_GAIN_FLOAT, gain);
+    }
+    if (ok) ok = MIX_PlayTrack(voice->track, options) && sync_pause(voice);
+    SDL_DestroyProperties(options);
+  }
+  if (ok) voice->sealed = true;
+  MIX_UnlockMixer(voice->mixer->mixer);
+  return audio_result(L, ok);
+}
+
+static int f_create_stream(lua_State *L) {
+  SDL_AudioSpec input = check_spec(L, 1), output = check_spec(L, 2);
+  AudioStream *stream = new_object(L, sizeof(*stream), API_TYPE_AUDIO_STREAM);
+  if (!valid_frequency(&input, 1)) return audio_error(L);
+  stream->stream = SDL_CreateAudioStream(&input, &output);
+  if (!stream->stream) return audio_error(L);
+  return 1;
+}
+
+static int f_open_recording(lua_State *L) {
+  SDL_AudioSpec output = check_spec(L, 1), input;
+  bool follows_default, paused = true;
+  if (!lua_isnoneornil(L, 2)) {
+    luaL_checktype(L, 2, LUA_TTABLE);
+    paused = option_bool(L, 2, "paused", true);
+  }
+  SDL_AudioDeviceID id = check_device(L, 2, true, &follows_default);
+  AudioStream *stream = new_object(L, sizeof(*stream), API_TYPE_AUDIO_STREAM);
+  SDL_LockMutex(audio_mutex);
+  bool ok = init_locked(true) && validate_device(id, follows_default, true);
+  if (ok) {
+    stream->device = SDL_OpenAudioDevice(id, NULL);
+    ok = stream->device && SDL_PauseAudioDevice(stream->device)
+      && SDL_GetAudioDeviceFormat(stream->device, &input, NULL);
+  }
+  if (ok) {
+    stream->stream = SDL_CreateAudioStream(&input, &output);
+    ok = stream->stream && SDL_BindAudioStream(stream->device, stream->stream)
+      && (paused || SDL_ResumeAudioDevice(stream->device));
+  }
+  if (ok) {
+    stream->recording = true; stream->follows_default = follows_default;
+    stream->next = recordings; recordings = stream;
+  } else {
+    SDL_DestroyAudioStream(stream->stream); stream->stream = NULL;
+    if (stream->device) SDL_CloseAudioDevice(stream->device);
+    stream->device = 0;
+  }
+  SDL_UnlockMutex(audio_mutex);
+  if (!ok) return audio_error(L);
+  return 1;
+}
+
+static int f_convert(lua_State *L) {
+  SDL_AudioSpec input = check_spec(L, 2), output = check_spec(L, 3);
+  int size, converted_size;
+  const char *data = check_pcm(L, 1, &input, &size, true);
+  if (!size) { lua_pushliteral(L, ""); return 1; }
+  if (!valid_frequency(&input, 1)) return audio_error(L);
+  Uint8 **converted = new_object(L, sizeof(*converted), AUDIO_ALLOCATION);
+  if (!SDL_ConvertAudioSamples(&input, (const Uint8 *) data, size, &output, converted, &converted_size))
+    return audio_error(L);
+  lua_pushlstring(L, (const char *) *converted, (size_t) converted_size);
+  SDL_free(*converted); *converted = NULL;
+  return 1;
 }
 
 static int f_stream_write(lua_State *L) {
@@ -713,14 +1312,14 @@ static int f_stream_write(lua_State *L) {
   SDL_AudioSpec input;
   SDL_LockMutex(audio_mutex);
   bool ok = stream_open(stream);
-  if (ok && stream->device && stream->device->recording) ok = SDL_SetError("cannot write to a recording stream");
+  if (ok && stream->recording) ok = SDL_SetError("cannot write to a recording stream");
   if (ok) ok = SDL_GetAudioStreamFormat(stream->stream, &input, NULL);
   SDL_UnlockMutex(audio_mutex);
   if (!ok) return audio_error(L);
   int size;
   const char *data = check_pcm(L, 2, &input, &size, true);
   SDL_LockMutex(audio_mutex);
-  ok = stream_open(stream) && (size == 0 || SDL_PutAudioStreamData(stream->stream, data, size));
+  ok = stream_open(stream) && (!size || SDL_PutAudioStreamData(stream->stream, data, size));
   SDL_UnlockMutex(audio_mutex);
   if (!ok) return audio_error(L);
   lua_pushinteger(L, size);
@@ -732,16 +1331,14 @@ static int f_stream_read(lua_State *L) {
   int requested = lua_isnoneornil(L, 2) ? 4096 : check_integer(L, 2, 1, INT_MAX);
   SDL_AudioSpec output;
   SDL_LockMutex(audio_mutex);
-  bool ok = stream_open(stream);
-  if (ok && stream->device && !stream->device->recording) ok = SDL_SetError("cannot read a playback stream");
-  if (ok) ok = SDL_GetAudioStreamFormat(stream->stream, NULL, &output);
+  bool ok = stream_open(stream) && SDL_GetAudioStreamFormat(stream->stream, NULL, &output);
   int available = ok ? SDL_GetAudioStreamAvailable(stream->stream) : -1;
   SDL_UnlockMutex(audio_mutex);
   if (available < 0) return audio_error(L);
-  int frame = (int) SDL_AUDIO_FRAMESIZE(output);
+  int frame = SDL_AUDIO_FRAMESIZE(output);
   luaL_argcheck(L, requested >= frame, 2, "read size is smaller than one PCM frame");
   int size = SDL_min(requested, available) / frame * frame;
-  if (size == 0) { lua_pushliteral(L, ""); return 1; }
+  if (!size) { lua_pushliteral(L, ""); return 1; }
   char *buffer = lua_newuserdata(L, (size_t) size);
   SDL_LockMutex(audio_mutex);
   int count = stream_open(stream) ? SDL_GetAudioStreamData(stream->stream, buffer, size) : -1;
@@ -762,9 +1359,10 @@ static int f_stream_get_formats(lua_State *L) {
   return 2;
 }
 
-static int stream_control(lua_State *L, Control control) {
+static int stream_control(lua_State *L) {
+  Control control = (Control) lua_tointeger(L, lua_upvalueindex(1));
   AudioStream *stream = luaL_checkudata(L, 1, API_TYPE_AUDIO_STREAM);
-  double value = (control == SET_GAIN || control == SET_RATE) ? check_multiplier(L, 2, control == SET_RATE) : 0;
+  double value = control == SET_GAIN || control == SET_RATE ? check_multiplier(L, 2, control == SET_RATE) : 0;
   SDL_LockMutex(audio_mutex);
   if (!stream_open(stream)) return push_control(L, control, false, 0);
   if ((control == PAUSE || control == RESUME || control == IS_PAUSED) && !stream->device) {
@@ -772,11 +1370,9 @@ static int stream_control(lua_State *L, Control control) {
   }
   bool ok = true;
   switch (control) {
-    case PAUSE: SDL_UnbindAudioStream(stream->stream); stream->paused = true; break;
-    case RESUME:
-      if (stream->paused) { ok = SDL_BindAudioStream(stream->device->id, stream->stream); if (ok) stream->paused = false; }
-      break;
-    case IS_PAUSED: value = stream->paused || SDL_AudioDevicePaused(stream->device->id); break;
+    case PAUSE: ok = SDL_PauseAudioDevice(stream->device); break;
+    case RESUME: ok = SDL_ResumeAudioDevice(stream->device); break;
+    case IS_PAUSED: value = SDL_AudioDevicePaused(stream->device); break;
     case GET_GAIN: value = SDL_GetAudioStreamGain(stream->stream); ok = value >= 0; break;
     case SET_GAIN: ok = SDL_SetAudioStreamGain(stream->stream, (float) value); break;
     case GET_RATE: value = SDL_GetAudioStreamFrequencyRatio(stream->stream); ok = value > 0; break;
@@ -795,197 +1391,247 @@ static int stream_control(lua_State *L, Control control) {
   return push_control(L, control, ok, value);
 }
 
-static int f_stream_pause(lua_State *L) { return stream_control(L, PAUSE); }
-static int f_stream_resume(lua_State *L) { return stream_control(L, RESUME); }
-static int f_stream_is_paused(lua_State *L) { return stream_control(L, IS_PAUSED); }
-static int f_stream_get_gain(lua_State *L) { return stream_control(L, GET_GAIN); }
-static int f_stream_set_gain(lua_State *L) { return stream_control(L, SET_GAIN); }
-static int f_stream_get_rate(lua_State *L) { return stream_control(L, GET_RATE); }
-static int f_stream_set_rate(lua_State *L) { return stream_control(L, SET_RATE); }
-static int f_stream_queued(lua_State *L) { return stream_control(L, QUEUED); }
-static int f_stream_available(lua_State *L) { return stream_control(L, AVAILABLE); }
-static int f_stream_clear(lua_State *L) { return stream_control(L, CLEAR); }
-static int f_stream_flush(lua_State *L) { return stream_control(L, FLUSH); }
-
 static int f_stream_close(lua_State *L) {
   AudioStream *stream = luaL_checkudata(L, 1, API_TYPE_AUDIO_STREAM);
   SDL_LockMutex(audio_mutex); stream_close(stream); SDL_UnlockMutex(audio_mutex);
   return 0;
 }
 
-static int f_stream_gc(lua_State *L) {
+typedef struct {
+  SDL_AudioDeviceID id;
+  SDL_AudioSpec spec;
+  char name[1024];
+  int frames;
+  float gain;
+  bool recording, follows_default, paused;
+} DeviceInfo;
+
+static bool device_info(DeviceInfo *info, SDL_AudioDeviceID id, bool recording, bool follows_default) {
+  info->id = id; info->recording = recording; info->follows_default = follows_default;
+  if (!SDL_GetAudioDeviceFormat(id, &info->spec, &info->frames)) return false;
+  const char *name = SDL_GetAudioDeviceName(id);
+  if (!name) return false;
+  SDL_strlcpy(info->name, name, sizeof(info->name));
+  info->paused = SDL_AudioDevicePaused(id);
+  info->gain = SDL_GetAudioDeviceGain(id);
+  return info->gain >= 0;
+}
+
+static void push_device_info(lua_State *L, const DeviceInfo *info) {
+  lua_createtable(L, 0, 8);
+  lua_pushnumber(L, info->id); lua_setfield(L, -2, "id");
+  lua_pushstring(L, info->name); lua_setfield(L, -2, "name");
+  lua_pushstring(L, info->recording ? "recording" : "playback"); lua_setfield(L, -2, "kind");
+  push_spec(L, &info->spec); lua_setfield(L, -2, "spec");
+  lua_pushinteger(L, info->frames); lua_setfield(L, -2, "buffer_frames");
+  lua_pushboolean(L, info->paused); lua_setfield(L, -2, "paused");
+  lua_pushnumber(L, info->gain); lua_setfield(L, -2, "gain");
+  lua_pushboolean(L, info->follows_default); lua_setfield(L, -2, "follows_default");
+}
+
+static int f_stream_device_info(lua_State *L) {
   AudioStream *stream = luaL_checkudata(L, 1, API_TYPE_AUDIO_STREAM);
+  DeviceInfo info;
   SDL_LockMutex(audio_mutex);
-  stream_close(stream); device_unref(stream->device); stream->device = NULL;
+  bool ok = stream_open(stream);
+  if (ok && !stream->recording) ok = SDL_SetError("converter has no audio device");
+  if (ok) ok = device_info(&info, stream->device, true, stream->follows_default);
   SDL_UnlockMutex(audio_mutex);
-  return 0;
-}
-
-static int f_sound_get_spec(lua_State *L) {
-  AudioSound *sound = *(AudioSound **) luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
-  if (!sound) { SDL_SetError("audio sound is closed"); return audio_error(L); }
-  SDL_AudioSpec spec = sound->spec;
-  push_spec(L, &spec);
+  if (!ok) return audio_error(L);
+  push_device_info(L, &info);
   return 1;
 }
 
-static int f_sound_get_size(lua_State *L) {
-  AudioSound *sound = *(AudioSound **) luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
-  if (!sound) { SDL_SetError("audio sound is closed"); return audio_error(L); }
-  lua_pushinteger(L, sound->size);
-  return 1;
-}
-
-static int f_sound_get_duration(lua_State *L) {
-  AudioSound *sound = *(AudioSound **) luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
-  if (!sound) { SDL_SetError("audio sound is closed"); return audio_error(L); }
-  lua_pushnumber(L, (double) (sound->size / (int) SDL_AUDIO_FRAMESIZE(sound->spec)) / sound->spec.freq);
-  return 1;
-}
-
-static int f_sound_get_data(lua_State *L) {
-  AudioSound **owner = luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
-  /* Lua string allocation can run a finalizer which closes the original handle.
-   * A temporary owner also releases the reference if allocation raises an error. */
-  AudioSound **guard = new_object(L, sizeof(*guard), API_TYPE_AUDIO_SOUND);
-  AudioSound *sound = *owner;
-  if (!sound) { SDL_SetError("audio sound is closed"); return audio_error(L); }
+static int f_mixer_get_info(lua_State *L) {
+  AudioMixer *mixer = *(AudioMixer **) luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
+  DeviceInfo device;
+  SDL_AudioSpec spec;
   SDL_LockMutex(audio_mutex);
-  sound->refs++;
-  *guard = sound;
+  bool ok = mixer_open(mixer) && MIX_GetMixerFormat(mixer->mixer, &spec);
+  if (ok && !mixer->offline) ok = device_info(&device, mixer->device, false, mixer->follows_default);
   SDL_UnlockMutex(audio_mutex);
-  lua_pushlstring(L, (const char *) sound->data, (size_t) sound->size);
-  SDL_LockMutex(audio_mutex);
-  sound_unref(sound);
-  *guard = NULL;
-  SDL_UnlockMutex(audio_mutex);
+  if (!ok) return audio_error(L);
+  lua_createtable(L, 0, 7);
+  lua_pushboolean(L, mixer->offline); lua_setfield(L, -2, "offline");
+  push_spec(L, &spec); lua_setfield(L, -2, "spec");
+  lua_pushinteger(L, mixer->max_voices); lua_setfield(L, -2, "max_voices");
+  lua_pushboolean(L, mixer->paused); lua_setfield(L, -2, "paused");
+  lua_pushnumber(L, mixer->gain); lua_setfield(L, -2, "gain");
+  lua_pushnumber(L, mixer->rate); lua_setfield(L, -2, "rate");
+  if (!mixer->offline) { push_device_info(L, &device); lua_setfield(L, -2, "device"); }
   return 1;
 }
 
-static int f_sound_close(lua_State *L) {
-  AudioSound **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_SOUND);
-  SDL_LockMutex(audio_mutex); sound_unref(*ud); *ud = NULL; SDL_UnlockMutex(audio_mutex);
-  return 0;
-}
-
-static int f_voice_get_state(lua_State *L) {
-  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
-  char error[256] = "";
-  const char *state = "stopped";
-  SDL_LockMutex(audio_mutex);
-  if (voice) {
-    if (voice->state == VOICE_ACTIVE) collect_voices(voice->device);
-    state = voice->state == VOICE_FINISHED ? "finished" : voice->state == VOICE_STOPPED ? "stopped"
-      : voice->paused || SDL_AudioDevicePaused(voice->device->id) ? "paused" : "playing";
-    if (voice->state != VOICE_ACTIVE) SDL_strlcpy(error, voice->error, sizeof(error));
+static int dispatch_callbacks(lua_State *L) {
+  AudioMixer *mixer = *(AudioMixer **) lua_touserdata(L, 1);
+  lua_getuservalue(L, 1); lua_getfield(L, -1, "callbacks");
+  int callbacks = lua_gettop(L);
+  lua_newtable(L);
+  int snapshot = lua_gettop(L), count = 0, delivered = 0;
+  lua_pushnil(L);
+  while (lua_next(L, callbacks)) {
+    AudioVoice *voice = lua_touserdata(L, -2);
+    SDL_LockMutex(audio_mutex);
+    collect_voices(mixer);
+    bool terminal = voice->state != VOICE_ACTIVE;
+    SDL_UnlockMutex(audio_mutex);
+    if (terminal) {
+      lua_pushvalue(L, -1); lua_rawseti(L, snapshot, ++count);
+      lua_pushvalue(L, -2); lua_pushnil(L); lua_rawset(L, callbacks);
+    }
+    lua_pop(L, 1);
   }
-  SDL_UnlockMutex(audio_mutex);
-  lua_pushstring(L, state);
-  if (*error) { lua_pushstring(L, error); return 2; }
-  return 1;
-}
-
-static int voice_control(lua_State *L, Control control) {
-  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
-  double value = (control == SET_GAIN || control == SET_RATE) ? check_multiplier(L, 2, control == SET_RATE) : 0;
-  SDL_LockMutex(audio_mutex);
-  if (!voice) { SDL_SetError("audio voice is closed"); return push_control(L, control, false, 0); }
-  if (control == GET_GAIN || control == GET_RATE)
-    return push_control(L, control, true, control == GET_GAIN ? voice->gain : voice->rate);
-  if (voice->state == VOICE_ACTIVE) collect_voices(voice->device);
-  if (voice->state != VOICE_ACTIVE) {
-    SDL_SetError("audio voice has finished or stopped"); return push_control(L, control, false, 0);
+  lua_pushnil(L);
+  int first_error = lua_gettop(L);
+  for (int i = 1; i <= count && mixer->mixer; i++) {
+    lua_rawgeti(L, snapshot, i);
+    lua_rawgeti(L, -1, 1);
+    AudioVoice *voice = *(AudioVoice **) lua_touserdata(L, -1);
+    lua_pop(L, 1);
+    lua_rawgeti(L, -1, 2);
+    lua_rawgeti(L, -2, 1);
+    lua_pushstring(L, *voice->error ? "error" : voice->state == VOICE_FINISHED ? "finished" : "stopped");
+    if (*voice->error) lua_pushstring(L, voice->error); else lua_pushnil(L);
+    delivered++;
+    if (lua_pcall(L, 3, 0, 0) != LUA_OK) {
+      if (lua_isnil(L, first_error)) {
+        if (!lua_isstring(L, -1)) { lua_pop(L, 1); lua_pushliteral(L, "audio completion callback failed"); }
+        lua_replace(L, first_error);
+      } else lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
   }
-  bool ok = true;
-  switch (control) {
-    case PAUSE: SDL_UnbindAudioStream(voice->stream); voice->paused = true; break;
-    case RESUME:
-      if (voice->paused) { ok = SDL_BindAudioStream(voice->device->id, voice->stream); if (ok) voice->paused = false; }
-      break;
-    case SET_GAIN: ok = SDL_SetAudioStreamGain(voice->stream, (float) value); if (ok) voice->gain = (float) value; break;
-    case SET_RATE:
-      ok = valid_frequency(&voice->sound->spec, (float) value)
-        && SDL_SetAudioStreamFrequencyRatio(voice->stream, (float) value);
-      if (ok) voice->rate = (float) value;
-      break;
-    default: break;
+  lua_pushinteger(L, delivered); lua_pushvalue(L, first_error);
+  return 2;
+}
+
+static int f_mixer_dispatch_events(lua_State *L) {
+  AudioMixer *mixer = *(AudioMixer **) luaL_checkudata(L, 1, API_TYPE_AUDIO_MIXER);
+  if (!mixer_open(mixer)) return audio_error(L);
+  if (mixer->dispatching) { SDL_SetError("recursive audio callback dispatch is not allowed"); return audio_error(L); }
+  lua_pushcfunction(L, dispatch_callbacks); lua_pushvalue(L, 1);
+  mixer->dispatching = true;
+  SDL_SetAtomicInt(&mixer->pending, 0);
+  int status = lua_pcall(L, 1, 2, 0);
+  mixer->dispatching = false;
+  if (status != LUA_OK) return lua_error(L);
+  return 2;
+}
+
+void api_audio_dispatch(lua_State *L) {
+  if (!SDL_SetAtomicInt(&main_pending, 0)) return;
+  int top = lua_gettop(L);
+  lua_getfield(L, LUA_REGISTRYINDEX, AUDIO_MIXERS);
+  if (!lua_istable(L, -1)) { lua_settop(L, top); return; }
+  lua_newtable(L);
+  int snapshot = lua_gettop(L), count = 0;
+  lua_pushnil(L);
+  while (lua_next(L, snapshot - 1)) {
+    AudioMixer *mixer = *(AudioMixer **) lua_touserdata(L, -1);
+    if (mixer && mixer->mixer && SDL_GetAtomicInt(&mixer->pending)) {
+      lua_pushvalue(L, -1); lua_rawseti(L, snapshot, ++count);
+    }
+    lua_pop(L, 1);
   }
-  return push_control(L, control, ok, value);
+  for (int i = 1; i <= count; i++) {
+    lua_pushcfunction(L, f_mixer_dispatch_events); lua_rawgeti(L, snapshot, i);
+    int status = lua_pcall(L, 1, 2, 0);
+    if (status != LUA_OK || !lua_isnil(L, -1)) {
+      const char *message = lua_tostring(L, -1);
+      SDL_LogError(SDL_LOG_CATEGORY_AUDIO, "Audio callback: %s", message ? message : "unknown error");
+    }
+    lua_settop(L, snapshot);
+  }
+  lua_settop(L, top);
 }
 
-static int f_voice_pause(lua_State *L) { return voice_control(L, PAUSE); }
-static int f_voice_resume(lua_State *L) { return voice_control(L, RESUME); }
-static int f_voice_get_gain(lua_State *L) { return voice_control(L, GET_GAIN); }
-static int f_voice_set_gain(lua_State *L) { return voice_control(L, SET_GAIN); }
-static int f_voice_get_rate(lua_State *L) { return voice_control(L, GET_RATE); }
-static int f_voice_set_rate(lua_State *L) { return voice_control(L, SET_RATE); }
-
-static int f_voice_stop(lua_State *L) {
-  AudioVoice *voice = *(AudioVoice **) luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
-  SDL_LockMutex(audio_mutex);
-  if (voice) voice_finish(voice, VOICE_STOPPED);
-  SDL_UnlockMutex(audio_mutex);
-  return 0;
-}
-
-static int f_voice_gc(lua_State *L) {
-  AudioVoice **ud = luaL_checkudata(L, 1, API_TYPE_AUDIO_VOICE);
-  SDL_LockMutex(audio_mutex); voice_unref(*ud); *ud = NULL; SDL_UnlockMutex(audio_mutex);
-  return 0;
-}
-
-static const luaL_Reg device_methods[] = {
-  { "get_info", f_device_get_info }, { "create_stream", f_device_create_stream },
-  { "play", f_device_play }, { "pause", f_device_pause }, { "resume", f_device_resume },
-  { "is_paused", f_device_is_paused }, { "get_gain", f_device_get_gain },
-  { "set_gain", f_device_set_gain }, { "close", f_device_close }, { "__gc", f_device_gc }, { NULL, NULL }
+static const luaL_Reg mixer_methods[] = {
+  { "group", f_mixer_group }, { "get_info", f_mixer_get_info },
+  { "stop", f_owner_stop }, { "render", f_mixer_render },
+  { "resume_together", f_mixer_resume_together }, { "dispatch_events", f_mixer_dispatch_events },
+  { "close", f_mixer_close }, { "__gc", f_mixer_gc }, { NULL, NULL }
 };
-static const luaL_Reg stream_methods[] = {
-  { "write", f_stream_write }, { "read", f_stream_read }, { "get_formats", f_stream_get_formats },
-  { "get_queued_bytes", f_stream_queued }, { "get_available_bytes", f_stream_available },
-  { "flush", f_stream_flush }, { "clear", f_stream_clear }, { "pause", f_stream_pause },
-  { "resume", f_stream_resume }, { "is_paused", f_stream_is_paused },
-  { "get_gain", f_stream_get_gain }, { "set_gain", f_stream_set_gain },
-  { "get_rate", f_stream_get_rate }, { "set_rate", f_stream_set_rate },
-  { "close", f_stream_close }, { "__gc", f_stream_gc }, { NULL, NULL }
+
+static const luaL_Reg group_methods[] = {
+  { "stop", f_owner_stop }, { "__gc", f_group_gc }, { NULL, NULL }
 };
+
+static const luaL_Reg voice_methods[] = {
+  { "get_state", f_voice_get_state }, { "stop", f_voice_stop },
+  { "get_position", f_voice_get_position }, { "seek", f_voice_seek },
+  { "get_pan", f_voice_get_pan }, { "set_pan", f_voice_set_pan },
+  { "write", f_voice_write }, { "get_queued_bytes", f_voice_queued },
+  { "clear", f_voice_clear }, { "finish", f_voice_finish }, { "__gc", f_voice_gc }, { NULL, NULL }
+};
+
 static const luaL_Reg sound_methods[] = {
   { "get_spec", f_sound_get_spec }, { "get_size", f_sound_get_size },
   { "get_duration", f_sound_get_duration }, { "get_data", f_sound_get_data },
-  { "close", f_sound_close }, { "__gc", f_sound_close }, { NULL, NULL }
-};
-static const luaL_Reg voice_methods[] = {
-  { "get_state", f_voice_get_state }, { "pause", f_voice_pause }, { "resume", f_voice_resume },
-  { "stop", f_voice_stop }, { "get_gain", f_voice_get_gain }, { "set_gain", f_voice_set_gain },
-  { "get_rate", f_voice_get_rate }, { "set_rate", f_voice_set_rate }, { "__gc", f_voice_gc }, { NULL, NULL }
-};
-static const luaL_Reg module_functions[] = {
-  { "init", f_init }, { "get_drivers", f_get_drivers }, { "get_driver", f_get_driver },
-  { "get_devices", f_get_devices }, { "open_device", f_open_device },
-  { "new_sound", f_new_sound }, { "create_stream", f_create_stream }, { "convert", f_convert }, { NULL, NULL }
+  { "get_metadata", f_sound_get_metadata }, { "close", f_sound_close },
+  { "__gc", f_sound_close }, { NULL, NULL }
 };
 
-static void register_type(lua_State *L, const char *name, const luaL_Reg *methods) {
-  luaL_newmetatable(L, name);
+static const luaL_Reg stream_methods[] = {
+  { "write", f_stream_write }, { "read", f_stream_read }, { "get_formats", f_stream_get_formats },
+  { "get_device_info", f_stream_device_info }, { "close", f_stream_close },
+  { "__gc", f_stream_close }, { NULL, NULL }
+};
+
+static const luaL_Reg module_functions[] = {
+  { "get_drivers", f_get_drivers }, { "get_driver", f_get_driver },
+  { "get_devices", f_get_devices }, { "get_decoders", f_get_decoders },
+  { "create_mixer", f_create_mixer }, { "open_recording", f_open_recording },
+  { "new_sound", f_new_sound }, { "create_stream", f_create_stream },
+  { "convert", f_convert }, { NULL, NULL }
+};
+
+static void register_type(lua_State *L, const char *type, const luaL_Reg *methods, lua_CFunction control) {
+  static const char *const controls[] = {
+    "pause", "resume", "is_paused", "get_gain", "set_gain", "get_rate", "set_rate",
+    "get_queued_bytes", "get_available_bytes", "clear", "flush"
+  };
+  luaL_newmetatable(L, type);
   luaL_setfuncs(L, methods, 0);
   lua_pushvalue(L, -1); lua_setfield(L, -2, "__index");
+  if (control) {
+    for (int i = PAUSE; i <= (control == stream_control ? FLUSH : SET_RATE); i++) {
+      if ((control == voice_control && i == IS_PAUSED)
+          || (methods == group_methods && (i == GET_RATE || i == SET_RATE))) continue;
+      lua_pushinteger(L, i); lua_pushcclosure(L, control, 1); lua_setfield(L, -2, controls[i]);
+    }
+  }
+  if (control == owner_control) {
+    static const char *const names[] = { "play", "play_file", "play_stream" };
+    for (int i = 0; i < 3; i++) {
+      lua_pushinteger(L, i); lua_pushcclosure(L, f_play, 1); lua_setfield(L, -2, names[i]);
+    }
+  }
   lua_pop(L, 1);
 }
 
 int luaopen_audio(lua_State *L) {
-  SDL_LockSpinlock(&audio_mutex_init);
+  SDL_LockSpinlock(&mutex_init);
   if (!audio_mutex) audio_mutex = SDL_CreateMutex();
-  SDL_UnlockSpinlock(&audio_mutex_init);
+  SDL_UnlockSpinlock(&mutex_init);
   if (!audio_mutex) return luaL_error(L, "%s", SDL_GetError());
-  register_type(L, API_TYPE_AUDIO_DEVICE, device_methods);
-  register_type(L, API_TYPE_AUDIO_STREAM, stream_methods);
-  register_type(L, API_TYPE_AUDIO_SOUND, sound_methods);
-  register_type(L, API_TYPE_AUDIO_VOICE, voice_methods);
+  if (SDL_IsMainThread() && !register_custom_event(AUDIO_EVENT, NULL))
+    return luaL_error(L, "cannot register audio completion event: %s", SDL_GetError());
+  register_type(L, API_TYPE_AUDIO_MIXER, mixer_methods, owner_control);
+  register_type(L, API_TYPE_AUDIO_GROUP, group_methods, owner_control);
+  register_type(L, API_TYPE_AUDIO_VOICE, voice_methods, voice_control);
+  register_type(L, API_TYPE_AUDIO_SOUND, sound_methods, NULL);
+  register_type(L, API_TYPE_AUDIO_STREAM, stream_methods, stream_control);
   luaL_newmetatable(L, AUDIO_ALLOCATION);
-  lua_pushcfunction(L, allocation_gc); lua_setfield(L, -2, "__gc");
+  lua_pushcfunction(L, allocation_gc); lua_setfield(L, -2, "__gc"); lua_pop(L, 1);
+  lua_getfield(L, LUA_REGISTRYINDEX, AUDIO_MIXERS);
+  if (lua_isnil(L, -1)) {
+    lua_newtable(L); lua_newtable(L);
+    lua_pushliteral(L, "v"); lua_setfield(L, -2, "__mode"); lua_setmetatable(L, -2);
+    lua_setfield(L, LUA_REGISTRYINDEX, AUDIO_MIXERS);
+  }
   lua_pop(L, 1);
   luaL_newlib(L, module_functions);
-  lua_pushboolean(L, false); lua_pushcclosure(L, f_load_wav, 1); lua_setfield(L, -2, "load_wav");
-  lua_pushboolean(L, true); lua_pushcclosure(L, f_load_wav, 1); lua_setfield(L, -2, "decode_wav");
+  lua_pushboolean(L, false); lua_pushcclosure(L, f_load, 1); lua_setfield(L, -2, "load");
+  lua_pushboolean(L, true); lua_pushcclosure(L, f_load, 1); lua_setfield(L, -2, "load_memory");
   return 1;
 }

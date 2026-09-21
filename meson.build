@@ -349,8 +349,12 @@ if not get_option('source-only')
     sdl_image = dependency('SDL3_image', 'sdl3-image', fallback: ['sdl3_image', 'sdl3_image_dep'],
         default_options: default_fallback_options + ['default_library=static']
     )
+    sdl_mixer = dependency('SDL3_mixer', 'sdl3-mixer', version: '>=3.2.4',
+        fallback: ['sdl3_mixer', 'sdl3_mixer_dep'],
+        default_options: default_fallback_options + ['default_library=static']
+    )
 
-    pragtical_deps = [lua_dep, sdl_dep, sdl_image, freetype_dep, harfbuzz_pragtical_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdl_image, sdl_mixer, freetype_dep, harfbuzz_pragtical_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 lua_compat_needed = lua_dep.version() < '5.3.0'

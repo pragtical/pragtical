@@ -19,7 +19,8 @@
 #define API_TYPE_NATIVE_PLUGIN "NativePlugin"
 #define API_TYPE_SHARED_MEMORY "SharedMemory"
 #define API_TYPE_RENWINDOW "RenWindow"
-#define API_TYPE_AUDIO_DEVICE "AudioDevice"
+#define API_TYPE_AUDIO_MIXER "AudioMixer"
+#define API_TYPE_AUDIO_GROUP "AudioGroup"
 #define API_TYPE_AUDIO_STREAM "AudioStream"
 #define API_TYPE_AUDIO_SOUND "AudioSound"
 #define API_TYPE_AUDIO_VOICE "AudioVoice"
@@ -30,5 +31,6 @@ void api_load_libs(lua_State *L);
 void api_thread_shutdown(lua_State *L);
 bool api_thread_poll(lua_State *L);
 void api_audio_shutdown(void);
+void api_audio_dispatch(lua_State *L);
 
 #endif

@@ -1,0 +1,9 @@
+[wrap-file]
+directory = opusfile-0.12
+source_url = https://downloads.xiph.org/releases/opus/opusfile-0.12.tar.gz
+source_filename = opusfile-0.12.tar.gz
+source_hash = 118d8601c12dd6a44f52423e68ca9083cc9f2bfe72da7a8c1acb22a80ae3550b
+patch_directory = opusfile
+
+[provide]
+opusfile = opusfile_dep

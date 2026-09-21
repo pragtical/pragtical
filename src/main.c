@@ -413,7 +413,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     if (app->L) lua_close(app->L);
     SDL_free(app);
   }
-  free_custom_events();
   api_audio_shutdown();
+  free_custom_events();
   ren_free();
 }

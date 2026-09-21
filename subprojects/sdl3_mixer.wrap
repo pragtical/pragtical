@@ -1,0 +1,11 @@
+[wrap-file]
+directory = SDL3_mixer-3.2.4
+source_url = https://github.com/libsdl-org/SDL_mixer/releases/download/release-3.2.4/SDL3_mixer-3.2.4.tar.gz
+source_filename = SDL3_mixer-3.2.4.tar.gz
+source_hash = 182a07c745375e113dc740d43964ff21b0be29f29f59876c4dbc4db3d32f6901
+patch_directory = sdl3_mixer
+# Optional exact-rendering fixes; see packagefiles/sdl3_mixer/README.pragtical.md.
+# diff_files = sdl3_mixer-playback.patch
+
+[provide]
+sdl3_mixer = sdl3_mixer_dep
