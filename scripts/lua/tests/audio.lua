@@ -290,6 +290,101 @@ test.describe("audio", function()
     return (string.unpack("<f", data, (index or 0) * 4 + 1))
   end
 
+  test.test("captures bounded non-consuming post-mix snapshots in frame order", function()
+    local mix = mixer()
+    local values, chunks = {}, {}
+    for i = 1, 4096 do
+      values[i] = (i % 101) / 101
+      chunks[i] = string.pack("<f", values[i])
+    end
+    local sound = keep(audio.new_sound(table.concat(chunks), float))
+    local a, b, err = mix:get_samples()
+    test.is_nil(a)
+    failure(b, err)
+    assert(mix:set_sample_buffer(700))
+    test.equal(#assert(mix:get_samples()), 0)
+    local voice = keep(mix:play(sound, { gain = 0.5 }))
+    for _ = 1, 3 do
+      local data = assert(mix:render(1024))
+      local samples, spec = mix:get_samples(1024)
+      test.equal(spec.channels, 1)
+      test.equal(spec.sample_rate, 48000)
+      test.equal(#samples, 700)
+      for i = 1, 700 do test.near(samples[i], sample(data, 324 + i - 1), 1e-6) end
+      test.same(mix:get_samples(1024), samples)
+      test.equal(#assert(mix:get_samples(32)), 32)
+      samples[1] = 99
+      test.not_equal(mix:get_samples(1024)[1], 99)
+    end
+    test.near(voice:get_position(), 3072 / 48000, 1e-6)
+    assert(mix:set_sample_buffer(700))
+    assert(voice:seek(0))
+    for pass = 1, 3 do
+      assert(mix:render(512))
+      local samples = assert(mix:get_samples(1024))
+      test.equal(#samples, math.min(700, pass * 512))
+      for i = 1, #samples do
+        test.near(samples[i], values[pass * 512 - #samples + i] * 0.5, 1e-6)
+      end
+    end
+    assert(mix:set_sample_buffer(32))
+    test.equal(#assert(mix:get_samples()), 0)
+    assert(mix:render(512))
+    test.equal(#assert(mix:get_samples()), 32)
+    assert(mix:set_sample_buffer(0))
+    a, b, err = mix:get_samples()
+    test.is_nil(a)
+    failure(b, err)
+    for _, value in ipairs({ -1, 65537, 1.5, math.huge }) do
+      test.error(function() mix:set_sample_buffer(value) end)
+    end
+    test.error(function() mix:get_samples(0) end)
+    mix:close()
+    failure(mix:set_sample_buffer(32))
+    a, b, err = mix:get_samples()
+    test.is_nil(a)
+    failure(b, err)
+  end)
+
+  test.test("captures interleaved stereo and releases capture on close", function()
+    local spec = { format = "f32le", channels = 2, sample_rate = 48000 }
+    local mix = mixer({ spec = spec })
+    local sound = keep(audio.new_sound(string.pack("<ff", 0.25, -0.5):rep(2048), spec))
+    assert(mix:set_sample_buffer(1024))
+    keep(mix:play(sound))
+    mix:render(512)
+    local samples, returned = mix:get_samples()
+    test.equal(returned.channels, 2)
+    test.equal(#samples, 1024)
+    for i = 1, #samples, 2 do
+      test.near(samples[i], 0.25, 1e-6)
+      test.near(samples[i + 1], -0.5, 1e-6)
+    end
+    assert(mix:pause())
+    mix:render(512)
+    test.same(mix:get_samples(), samples)
+    assert(mix:set_sample_buffer(65536))
+    mix:close()
+    mix:close()
+  end)
+
+  test.test("exposes duration for loaded and streamed voices without decoding PCM", function()
+    local mix = mixer()
+    local v = keep(mix:play(tone(4800)))
+    test.near(v:get_duration(), 0.1, 1e-9)
+    v:stop()
+    test.near(v:get_duration(), 0.1, 1e-9)
+    local path = core.temp_filename(".wav")
+    local file = assert(io.open(path, "wb"))
+    file:write(wav(silence))
+    file:close()
+    local streamed, err = mix:play_file(path)
+    if streamed then streamed:stop() end
+    os.remove(path)
+    test.near(keep(streamed, err):get_duration(), 0.1, 1e-9)
+    test.is_nil(keep(mix:play_stream(mono)):get_duration())
+  end)
+
   local function render_float(mix, frames, spec)
     spec = spec or float
     local data, count, err = mix:render(frames)
@@ -860,6 +955,23 @@ test.describe("audio", function()
       failure(b, err)
       first:close()
       test.ok(second:resume())
+    end)
+
+    test.test("captures device playback while resizing and disabling the buffer", function()
+      local mix = keep(audio.create_mixer({ spec = mono }))
+      assert(mix:set_sample_buffer(1024))
+      local v = keep(mix:play(tone(4800), { loops = -1 }))
+      wait_until(function() return #assert(mix:get_samples()) > 0 end)
+      for i = 1, 20 do
+        assert(mix:set_sample_buffer(i * 64))
+        system.sleep(0.005)
+        local data, spec = mix:get_samples(1024)
+        test.ok(#data <= math.min(i * 64, 1024) * spec.channels)
+        assert(mix:set_sample_buffer(0))
+      end
+      test.equal(v:get_state(), "playing")
+      assert(mix:set_sample_buffer(1024))
+      mix:close()
     end)
 
     test.test("records dummy PCM without opening a real microphone", function()

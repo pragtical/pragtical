@@ -469,6 +469,34 @@ function audio.mixer:stop(options) end
 ---@return string? errmsg
 function audio.mixer:render(frames) end
 
+---Enable a bounded rolling buffer of post-mix samples for visualization.
+---Disabled by default. Zero disables capture and frees the buffer; otherwise
+---accepts 1-65536 frames. Every call clears the previous snapshot. Storage is
+---reserved for up to eight channels, at most 2 MiB. The audio callback only
+---copies samples: no Lua callbacks, allocation, or analysis run on that thread.
+---Works with device and offline mixers; closing the mixer releases the buffer.
+---SDL reference: https://wiki.libsdl.org/SDL3_mixer/MIX_SetPostMixCallback
+---@param frames integer
+---@return boolean? success
+---@return string? errmsg
+function audio.mixer:set_sample_buffer(frames) end
+
+---Copy the newest captured frames into an interleaved array of float samples,
+---oldest first. Does not consume samples or advance playback. Returns fewer
+---frames (or an empty array) until the buffer fills. Format changes clear old
+---samples; inspect the returned spec rather than assuming a channel count.
+---Values are normally in [-1, 1], but mixing/gain can exceed that range. These
+---are mixer samples before final device conversions, not a hardware playback
+---clock: audible output can lag the snapshot. Paused mixers may retain their
+---last snapshot. Not a lossless recording API; old frames are overwritten.
+---Poll only as often as the visualization needs, e.g. 30 times per second.
+---Disabled/closed buffers return nil, nil, errmsg.
+---@param frames? integer Maximum frames to copy, 1-65536; default 1024.
+---@return number[]? samples
+---@return audio.spec? spec Native-endian float32 PCM specification.
+---@return string? errmsg
+function audio.mixer:get_samples(frames) end
+
 ---Dispatch a snapshot of pending on_complete callbacks on the creating Lua thread,
 ---after releasing native mixer locks. The editor does this automatically for
 ---main-thread mixers; worker/offline scripts without an editor event loop call it
@@ -677,6 +705,15 @@ function audio.voice:set_pan(pan) end
 ---@return number? seconds
 ---@return string? errmsg
 function audio.voice:get_position() end
+
+---Return source duration in seconds for a loaded sound or streamed file, without
+---loading the whole file. Excludes loops, playback rate, and loop boundaries.
+---Returns nil with no error when unknown, including writable PCM sources.
+---Infinite sources return math.huge. Decoder estimates may be inexact.
+---Remains available after playback ends.
+---@return number? seconds
+---@return string? errmsg
+function audio.voice:get_duration() end
 
 ---Seek an active sound/file voice to a nonnegative source offset in seconds.
 ---Retains pause flags, gain, rate, pan, loop boundaries, and remaining repeat count.
