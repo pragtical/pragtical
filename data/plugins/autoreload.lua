@@ -67,7 +67,11 @@ local function check_prompt_reload(doc)
         { font = style.font, text = "Yes", default_yes = true },
         { font = style.font, text = "No" , default_no = true }
       }, function(item)
-      if item.text == "Yes" then reload_doc(doc) end
+      if item.text == "Yes" then
+        reload_doc(doc)
+      else
+        update_time(doc)
+      end
       doc.deferred_reload = false
     end)
   end
