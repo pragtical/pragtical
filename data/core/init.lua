@@ -1421,7 +1421,8 @@ function core.open_audio(path)
   end
   core.set_active_view(audio_view)
   if path and path ~= "" then
-    path = core.root_project():absolute_path(common.home_expand(path))
+    path = common.normalize_path(common.home_expand(path))
+    path = core.root_project():absolute_path(path)
     local info = system.get_file_info(path)
     if info and info.type == "dir" then
       audio_view:scan(path)

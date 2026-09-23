@@ -112,7 +112,7 @@ test.describe("audio player", function()
   end
 
   local function wav_file(c)
-    local path = core.temp_filename(".WAV")
+    local path = common.normalize_path(core.temp_filename(".WAV"))
     c.files[#c.files + 1] = path
     local pcm = string.pack("<i2", 8000):rep(4800)
     local file = assert(io.open(path, "wb"))
@@ -443,6 +443,7 @@ test.describe("audio player", function()
     end
     local path = wav_file(c)
     test.equal(core.open_file(path), restored)
+    test.is_nil(restored.error, restored.error)
     test.equal(restored.current.path, path)
     test.equal(#restored.tracks, #view.tracks + 1)
     test.equal(#node.views, count)
@@ -482,6 +483,7 @@ test.describe("audio player", function()
     c.views[#c.views + 1] = view
     test.ok(view:is(Player))
     test.equal(core.open_file(relative), view)
+    test.is_nil(view.error, view.error)
     test.equal(view.current.path, path)
     test.equal(view.state, "playing")
     test.equal(#view.tracks, 1)
@@ -500,6 +502,21 @@ test.describe("audio player", function()
     core.open_file(path)
     test.equal(view.state, "playing")
     test.equal(#view.tracks, 1)
+  end)
+
+  test.test("opens Windows audio paths with forward and mixed separators", function(c)
+    test.skip_if(PLATFORM ~= "Windows", "Windows path syntax is required")
+    local view = core.open_audio("")
+    c.views[#c.views + 1] = view
+    view.mixer = assert(audio.create_mixer({ offline = true,
+      spec = { format = "f32", channels = 1, sample_rate = 48000 } }))
+    local path = wav_file(c)
+    for _, variant in ipairs({ path:gsub("\\", "/"), (path:gsub("\\", "/", 1)) }) do
+      test.equal(core.open_file(variant), view)
+      test.is_nil(view.error, view.error)
+      test.equal(view.current.path, path)
+      test.equal(#view.tracks, 1)
+    end
   end)
 
   test.test("external file opens stop after that track even with repeat or shuffle", function(c)

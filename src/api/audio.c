@@ -409,7 +409,8 @@ void api_audio_shutdown(void) {
   SDL_LockMutex(audio_mutex);
   while (mixers) mixer_close(mixers);
   while (recordings) stream_close(recordings);
-  SDL_DestroySemaphore(audio_wake); audio_wake = NULL; audio_reaper = NULL;
+  if (audio_wake) SDL_DestroySemaphore(audio_wake);
+  audio_wake = NULL; audio_reaper = NULL;
   maybe_quit();
   if (hardware_initialized) SDL_QuitSubSystem(SDL_INIT_AUDIO);
   hardware_initialized = false;

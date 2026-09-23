@@ -84,15 +84,16 @@ test.describe("shmem", function()
     test.ok(memory:set("alpha", "stale"))
 
     memory = nil
-    collectgarbage("collect")
+    -- Pragtical's "collect" only steps the GC; finalizers need a full collection.
+    collectgarbage("forcecollect")
 
     local other, other_err = shmem.open(namespace, 4)
     test.is_nil(other)
     test.match(other_err, "layout", nil, true)
 
     mirror = nil
-    collectgarbage("collect")
-    collectgarbage("collect")
+    collectgarbage("forcecollect")
+    collectgarbage("forcecollect")
 
     local reopened_same, reopened_same_err = shmem.open(namespace, 2)
     test.not_nil(reopened_same, reopened_same_err)
