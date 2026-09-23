@@ -184,9 +184,26 @@ function core.prompt_project_trust(project, options, callback)
 end
 
 
+local function close_unreferenced_docs()
+  for i = #core.docs, 1, -1 do
+    local doc = core.docs[i]
+    if #core.get_views_referencing_doc(doc) == 0 then
+      table.remove(core.docs, i)
+      doc:on_close()
+      core.collect_garbage = true
+      if #core.docs == 0 then
+        system.chdir(core.projects[1].path)
+      end
+    end
+  end
+end
+
+
 function core.open_project(project)
   local project = core.set_project(project)
   core.root_view:close_all_docviews()
+  -- Restart runs before the next frame can remove the closed documents.
+  close_unreferenced_docs()
   update_recents_project("add", project.path)
   command.perform("core:restart")
 end
@@ -1721,17 +1738,7 @@ function core.step(next_frame_time)
   core.redraw = false
 
   -- close unreferenced docs
-  for i = #core.docs, 1, -1 do
-    local doc = core.docs[i]
-    if #core.get_views_referencing_doc(doc) == 0 then
-      table.remove(core.docs, i)
-      doc:on_close()
-      core.collect_garbage = true
-      if #core.docs == 0 then
-        system.chdir(core.projects[1].path)
-      end
-    end
-  end
+  close_unreferenced_docs()
 
   -- update window title
   local current_title = core.get_view_title(core.active_view)
