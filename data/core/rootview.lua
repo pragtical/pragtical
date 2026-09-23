@@ -517,12 +517,9 @@ function RootView:process_defer_open_docs()
   for _, drop in ipairs(self.defer_open_docs) do
     -- file dragged into editor, try to open it
     local filename, x, y = table.unpack(drop)
-    local ok, doc = core.try(core.open_doc, filename)
-    if ok then
-      local node = core.root_view.root_node:get_child_overlapping_point(x, y)
-      node:set_active_view(node.active_view)
-      core.root_view:open_doc(doc)
-    end
+    local node = self.root_node:get_child_overlapping_point(x, y)
+    if node then node:set_active_view(node.active_view) end
+    core.try(core.open_file, filename)
   end
   self.defer_open_docs = {}
 end

@@ -15,6 +15,8 @@ local CommandView
 local NagView
 local DocView
 local ImageView
+local AudioView
+local audio_view
 local MarkdownView
 local Doc
 local Project
@@ -448,6 +450,7 @@ function core.init()
   Project = require "core.project"
   DocView = require "core.docview"
   ImageView = require "core.imageview"
+  AudioView = require "core.audioview"
   MarkdownView = require "core.markdownview"
   Doc = require "core.doc"
 
@@ -1391,6 +1394,46 @@ function core.open_image(filename)
 end
 
 
+---Open the audio player, optionally scanning a directory or playing a file.
+---Reuses the existing player tab. An empty path skips the default directory.
+---@param path? string
+---@return core.audioview
+function core.open_audio(path)
+  local node = audio_view and not audio_view.closed
+    and core.root_view.root_node:get_node_for_view(audio_view)
+  if not node then
+    for _, view in ipairs(core.root_view.root_node:get_children()) do
+      if view:is(AudioView) and not view.closed then
+        audio_view = view
+        node = core.root_view.root_node:get_node_for_view(view)
+        break
+      end
+    end
+  end
+  if node then
+    node:set_active_view(audio_view)
+  else
+    audio_view = AudioView()
+    audio_view:show()
+    core.root_view:get_active_node_default():add_view(audio_view)
+    core.root_view.root_node:update_layout()
+    if path == nil then path = config.audio_player.directory end
+  end
+  core.set_active_view(audio_view)
+  if path and path ~= "" then
+    path = common.normalize_path(common.home_expand(path))
+    path = core.root_project():absolute_path(path)
+    local info = system.get_file_info(path)
+    if info and info.type == "dir" then
+      audio_view:scan(path)
+    else
+      audio_view:open_file(path)
+    end
+  end
+  return audio_view
+end
+
+
 ---@param filename string
 ---@return core.markdownview? markdown_view
 function core.open_markdown(filename)
@@ -1419,11 +1462,14 @@ end
 
 
 ---Opens the given file path in the root view.
----If the given file is a supported image, it will open it in the image viewer;
----otherwise, it will open it as a normal text file.
+---Supported images and audio open in their respective views; other files open
+---as text. Media files are never read into a document before dispatching.
 ---@param filename string Path to the file to open
----@return core.imageview|core.docview
+---@return core.imageview|core.audioview|core.docview
 function core.open_file(filename)
+  if AudioView.is_supported(filename) then
+    return core.open_audio(filename)
+  end
   local view = core.open_image(filename)
   if not view then
     return core.root_view:open_doc(core.open_doc(filename))

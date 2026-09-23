@@ -97,7 +97,9 @@ local function run_shutdown_child(context, mode)
   end
   output = output .. (context.child:read_stdout() or "")
   test.not_ok(context.child:running(), "shutdown timed out: " .. output)
-  test.equal(context.child:returncode(), 0, output)
+  test.equal(context.child:returncode(), 0, string.format(
+    "shutdown child exited with %s: %s", context.child:returncode(), output
+  ))
   if mode == "restart" then test.contains(output, "RESTART CLEANUP OK") end
   for _, name in ipairs({"wait", "supply", "nested", "parent", "finite"}) do
     local marker = assert(io.open(context.root .. "/1-" .. name))

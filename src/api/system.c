@@ -180,6 +180,7 @@ static bool get_touch_window_size(SDL_WindowID window_id, float *w, float *h) {
 
 
 static int f_poll_event(lua_State *L) {
+  api_audio_dispatch(L);
   char buf[16];
   float mx, my;
   SDL_Event e;

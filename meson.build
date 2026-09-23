@@ -312,8 +312,8 @@ if not get_option('source-only')
             'CMAKE_POSITION_INDEPENDENT_CODE': 'ON',
             'CMAKE_OSX_DEPLOYMENT_TARGET': sdl_osx_deploy_target,
             'SDL_DEPS_SHARED': 'ON', 'SDL_SHARED': 'OFF', 'SDL_STATIC': 'ON',
-            'SDL_DBUS': 'ON', 'SDL_IBUS': 'ON', 'SDL_AUDIO': 'OFF',
-            'SDL_GPU': 'ON', 'SDL_RPATH': 'OFF', 'SDL_PIPEWIRE': 'OFF',
+            'SDL_DBUS': 'ON', 'SDL_IBUS': 'ON', 'SDL_AUDIO': 'ON',
+            'SDL_GPU': 'ON', 'SDL_RPATH': 'OFF', 'SDL_PIPEWIRE': 'ON',
             'SDL_CAMERA': 'OFF', 'SDL_JOYSTICK': 'OFF', 'SDL_HAPTIC': 'OFF',
             'SDL_HIDAPI': 'OFF', 'SDL_DIALOG': 'ON', 'SDL_POWER': 'OFF',
             'SDL_SENSOR': 'OFF', 'SDL_VULKAN': sdl_vulkan, 'SDL_METAL': sdl_metal, 'SDL_LIBUDEV': 'ON',
@@ -349,8 +349,12 @@ if not get_option('source-only')
     sdl_image = dependency('SDL3_image', 'sdl3-image', fallback: ['sdl3_image', 'sdl3_image_dep'],
         default_options: default_fallback_options + ['default_library=static']
     )
+    sdl_mixer = dependency('SDL3_mixer', 'sdl3-mixer', version: '>=3.2.4',
+        fallback: ['sdl3_mixer', 'sdl3_mixer_dep'],
+        default_options: default_fallback_options + ['default_library=static']
+    )
 
-    pragtical_deps = [lua_dep, sdl_dep, sdl_image, freetype_dep, harfbuzz_pragtical_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
+    pragtical_deps = [lua_dep, sdl_dep, sdl_image, sdl_mixer, freetype_dep, harfbuzz_pragtical_dep, pcre2_dep, uchardet_dep, libm, libdl, librt]
 endif
 
 lua_compat_needed = lua_dep.version() < '5.3.0'

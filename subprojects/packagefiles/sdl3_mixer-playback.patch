@@ -1,0 +1,222 @@
+--- a/src/SDL_mixer.c
++++ b/src/SDL_mixer.c
+@@ -303,7 +303,12 @@
+ 
+     bool retval = true;
+     while (SDL_GetAudioStreamAvailable(track->input_stream) < bytes_needed) {
++        SDL_ClearError();
+         if (!track->input_audio->decoder->decode(track->decoder_userdata, track->input_stream)) {
++            if (*SDL_GetError()) {
++                SDL_SetStringProperty(track->props, "Pragtical.audio.error", SDL_GetError());
++                track->loops_remaining = 0;
++            }
+             SDL_FlushAudioStream(track->input_stream);  // make sure we read _everything_ now.
+             retval = false;
+             break;
+@@ -337,7 +342,7 @@
+ 
+     if (additional_amount == 0) {
+         return;  // don't need to generate more audio yet.
+-    } else if (track->state != MIX_STATE_PLAYING) {
++    } else if ((track->state != MIX_STATE_PLAYING) || track->draining) {
+         return;  // paused or stopped, don't make progress.
+     }
+ 
+@@ -349,10 +354,20 @@
+         SDL_GetAudioStreamFormat(track->input_stream, NULL, &raw_spec);
+     }
+ 
++    // Pragtical: SDL's callback request excludes resampler lookahead. Supply a
++    // small extra input window so tiny pulls do not insert silent gaps.
++    if (track->input_stream && ((raw_spec.freq != track->output_spec.freq) ||
++        SDL_GetAudioStreamFrequencyRatio(stream) != 1.0f)) {
++        const int lookahead = 16 * SDL_AUDIO_FRAMESIZE(raw_spec);
++        if (additional_amount > SDL_MAX_SINT32 - lookahead) return;
++        additional_amount += lookahead;
++    }
++
+     // do we need to grow our buffer?
+     if ((unsigned)additional_amount > track->input_buffer_len) {
+         void *ptr = SDL_realloc(track->input_buffer, additional_amount);
+         if (!ptr) {   // uhoh.
++            SDL_SetStringProperty(track->props, "Pragtical.audio.error", "Audio buffer allocation failed");
+             TrackStopped(track);
+             return;  // not much to be done, we're out of memory!
+         }
+@@ -361,7 +376,7 @@
+     }
+ 
+     float *pcm = track->input_buffer;  // we always work in float32 format.
+-    const int output_framesize = SDL_AUDIO_FRAMESIZE(track->output_spec);
++    const int input_framesize = track->input_stream ? SDL_AUDIO_FRAMESIZE(raw_spec) : sizeof(float);
+     int bytes_remaining = additional_amount;
+ 
+     // Calling TrackStopped() might have a stopped_callback that restarts the track, so don't break the loop
+@@ -371,7 +386,7 @@
+         int br = 0;   // bytes read.
+ 
+         // make sure we're not trying to read half a sample frame.
+-        bytes_remaining = SDL_max(bytes_remaining, output_framesize);
++        bytes_remaining = SDL_max(bytes_remaining, input_framesize);
+ 
+         if (track->silence_frames > 0) {
+             SDL_assert(track->input_stream != NULL);  // should have data bound if you landed here (we need raw_spec to be initialized).
+@@ -386,6 +401,10 @@
+         // if input_audio and input_stream are both NULL, there's nothing to play (maybe they changed out the input on us?), br will be zero and we'll go to end_of_audio=true.
+ 
+         if (br <= 0) {  // if 0: EOF. if < 0: decoding/input failure, we're done by default. But maybe it'll loop and play the start again...!
++            if (br < 0) {
++                SDL_SetStringProperty(track->props, "Pragtical.audio.error", SDL_GetError());
++                track->loops_remaining = 0;
++            }
+             end_of_audio = true;
+         } else {
+             SDL_assert(track->input_stream != NULL);  // should have data bound if you landed here.
+@@ -459,6 +478,7 @@
+                     track_stopped = true;
+                 } else {
+                     if (!track->input_audio->decoder->seek(track->decoder_userdata, track->loop_start)) {
++                        SDL_SetStringProperty(track->props, "Pragtical.audio.error", SDL_GetError());
+                         track_stopped = true;  // uhoh, can't seek! Abandon ship!
+                     } else {
+                         track->position = track->loop_start;
+@@ -468,7 +488,10 @@
+ 
+             if (track_stopped) {
+                 if (track->halt_when_exhausted) {
+-                    TrackStopped(track);
++                    // Pragtical: EOF is not completion until resampled output drains.
++                    SDL_FlushAudioStream(stream);
++                    track->draining = true;
++                    break;
+                 } else {
+                     break;  // done with this track for now, but don't halt the track. We'll try it again later.
+                 }
+@@ -544,6 +567,12 @@
+         return;  // nothing to actually do yet. This was a courtesy call; the stream still has enough buffered.
+     }
+ 
++    if (SDL_GetAudioStreamFrequencyRatio(stream) != 1.0f) {
++        const int lookahead = 16 * SDL_AUDIO_FRAMESIZE(mixer->spec);
++        if (additional_amount > SDL_MAX_SINT32 - lookahead) return;
++        additional_amount += lookahead;
++    }
++
+     // it should be asking for float data...
+     SDL_assert((additional_amount % sizeof (float)) == 0);
+ 
+@@ -553,6 +582,7 @@
+     // do we need to grow our buffer?
+     const bool skip_group_mixing = !mixer->all_groups || !mixer->all_groups->next;
+     const int alloc_multiplier = skip_group_mixing ? 2 : 3;
++    if (additional_amount > SDL_MAX_SINT32 / alloc_multiplier) return;
+     const int alloc_size = additional_amount * alloc_multiplier;
+     if ((unsigned)alloc_size > mixer->mix_buffer_allocation) {
+         void *ptr = SDL_realloc(mixer->mix_buffer, alloc_size);
+@@ -584,7 +614,8 @@
+             track->currently_inuse = true;
+ 
+             const int to_be_read = (additional_amount / SDL_AUDIO_FRAMESIZE(mixer->spec)) * SDL_AUDIO_FRAMESIZE(track->output_spec);
+-            const int br = SDL_GetAudioStreamData(track->output_stream, getbuf, to_be_read);
++            const int br = track->state == MIX_STATE_PAUSED ? 0
++                : SDL_GetAudioStreamData(track->output_stream, getbuf, to_be_read);
+             if (br > 0) {
+                 if (track->cooked_callback) {
+                     track->cooked_callback(track->cooked_callback_userdata, track, &track->output_spec, getbuf, br / sizeof (float));
+@@ -615,6 +646,11 @@
+                 }
+             }
+ 
++            if (track->draining && track->state == MIX_STATE_PLAYING &&
++                SDL_GetAudioStreamAvailable(track->output_stream) == 0) {
++                track->draining = false;
++                TrackStopped(track);
++            }
+             track->currently_inuse = false;
+             if (track->destroy_requested) {  // callback asked to destroy the track while we were still using it.
+                 MIX_DestroyTrack(track);  // actually kill it now.
+@@ -638,6 +674,13 @@
+         mixer->postmix_callback(mixer->postmix_callback_userdata, mixer, &mixer->spec, final_mixbuf, additional_amount / sizeof (float));
+     }
+ 
++    if (!mixer->device_id) {
++        if (mixer->actual_mixed_bytes > 0) {
++            mixer->mixed_until_frame = mixer->submitted_frames +
++                mixer->actual_mixed_bytes / SDL_AUDIO_FRAMESIZE(mixer->spec);
++        }
++        mixer->submitted_frames += additional_amount / SDL_AUDIO_FRAMESIZE(mixer->spec);
++    }
+     SDL_PutAudioStreamData(stream, final_mixbuf, additional_amount);
+ }
+ 
+@@ -651,11 +694,24 @@
+         return -1;
+     } else if (!SDL_GetAudioStreamFormat(mixer->output_stream, NULL, &output_spec)) {
+         return -1;
+-    } else if (!SDL_GetAudioStreamData(mixer->output_stream, buffer, buflen)) {  // will fire MixerCallback() to generate audio.
++    }
++    LockMixer(mixer);
++    const int bytes = SDL_GetAudioStreamData(mixer->output_stream, buffer, buflen);
++    if (bytes < 0) {
++        UnlockMixer(mixer);
+         return -1;
+     }
+-
+-    return (mixer->actual_mixed_bytes / sizeof (float)) * SDL_AUDIO_BYTESIZE(output_spec.format);
++    if (bytes < buflen) {
++        SDL_memset((Uint8 *)buffer + bytes, SDL_GetSilenceValueForFormat(output_spec.format), buflen - bytes);
++    }
++    const int frames = bytes / SDL_AUDIO_FRAMESIZE(output_spec);
++    const int input_rate = (int)((float)mixer->spec.freq * SDL_GetAudioStreamFrequencyRatio(mixer->output_stream));
++    const double rate = (double)input_rate / output_spec.freq;
++    const double remaining = SDL_ceil((mixer->mixed_until_frame - mixer->generated_frames) / rate);
++    const int mixed_frames = (int) SDL_clamp(remaining, 0, frames);
++    mixer->generated_frames += frames * rate;
++    UnlockMixer(mixer);
++    return mixed_frames * SDL_AUDIO_FRAMESIZE(output_spec);
+ }
+ 
+ static void InitDecoders(void)
+@@ -2059,6 +2115,8 @@
+         retval = track->input_audio->decoder->seek(track->decoder_userdata, (Uint64) frames);
+         if (retval) {
+             SDL_ClearAudioStream(track->input_stream);   // make sure that any extra buffered input from before the seek is removed.
++            SDL_ClearAudioStream(track->output_stream);
++            track->draining = false;
+             track->position = (Uint64) frames;
+         }
+     }
+@@ -2313,6 +2371,7 @@
+     }
+ 
+     track->max_frame = max_frame;
++    track->draining = false;
+     track->loops_remaining = loops;
+     track->loop_start = (int) loop_start;
+     track->total_fade_frames = (fade_in > 0) ? fade_in : 0;
+--- a/src/SDL_mixer_internal.h
++++ b/src/SDL_mixer_internal.h
+@@ -152,6 +152,7 @@
+     bool destroy_requested;  // true if MIX_DestroyTrack called while the track is actively mixing.
+     bool closeio;  // true if we should close `io` when changing track data.
+     bool halt_when_exhausted;  // true if we should stop the track when input runs out.
++    bool draining;  // Pragtical: retain resampler output until the final mix consumes it.
+     SDL_AudioStream *input_stream;  // used for both MIX_SetTrackAudio and MIX_SetTrackAudioStream. Maybe not owned by SDL_mixer!
+     SDL_AudioStream *internal_stream;  // used with MIX_SetTrackAudio, where it is also assigned to input_stream. Owned by SDL_mixer!
+     void *decoder_userdata;  // MIX_Decoder-specific data for this run, if any.
+@@ -210,6 +211,10 @@
+     float *mix_buffer;
+     size_t mix_buffer_allocation;
+     int actual_mixed_bytes;   // on each iteration of the mixer, number of bytes of real mixed audio, ignoring silence at end if no audio was available to mix there.
++    // Pragtical: source-timeline accounting for rate-scaled offline output.
++    double generated_frames;
++    Sint64 submitted_frames;
++    Sint64 mixed_until_frame;
+     float gain;
+     MIX_VBAP2D vbap2d;
+     MIX_Mixer *prev;  // double-linked list for all_mixers.
+@@ -301,4 +306,3 @@
+ extern const MIX_Decoder MIX_Decoder_XMP;
+ extern const MIX_Decoder MIX_Decoder_SINEWAVE;
+ extern const MIX_Decoder MIX_Decoder_RAW;
+-
