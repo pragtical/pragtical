@@ -450,9 +450,9 @@ local function files_search_thread(tid, options)
   )
     tid = math.floor(tid)
     id = math.floor(id)
-    local results_channel = thread.get_channel("projectsearch_results"..tid..id)
-    local filename_channel = thread.get_channel("projectsearch_fname"..tid..id)
-    local stop_channel = thread.get_channel("projectsearch_stop"..tid..id)
+    local results_channel = thread.get_channel("projectsearch_results"..tid..":"..id)
+    local filename_channel = thread.get_channel("projectsearch_fname"..tid..":"..id)
+    local stop_channel = thread.get_channel("projectsearch_stop"..tid..":"..id)
 
     local re = nil
     if search_type == "regex" then
@@ -479,6 +479,8 @@ local function files_search_thread(tid, options)
     local stop = false
     local file_entry = filename_channel:wait()
     while file_entry ~= "{{stop}}" do
+      stop = stop_channel:first() == "stop"
+      if stop then break end
       local filename = type(file_entry) == "table" and file_entry.path or file_entry
       local display_path = type(file_entry) == "table" and file_entry.display_path or nil
       local results = {}
@@ -545,9 +547,6 @@ local function files_search_thread(tid, options)
       end
       filename_channel:pop()
       file_entry = filename_channel:wait()
-      while file_entry == nil do
-        file_entry = filename_channel:first()
-      end
     end
     if stop then
       results_channel:clear()
@@ -560,11 +559,7 @@ local function files_search_thread(tid, options)
   ---Wait for a list of workers to finish
   ---@param list thread.Thread[]
   local function workers_wait(list)
-    if #list > 0 then
-      list[1]:wait()
-      table.remove(list, 1)
-      workers_wait(list)
-    end
+    for _, worker in ipairs(list) do worker:wait() end
   end
 
   -- channel used to inform the status of searching to coroutine
@@ -581,18 +576,28 @@ local function files_search_thread(tid, options)
   local result_channels = {}
   ---@type thread.Channel[]
   local filename_channels = {}
+  local stop_channels = {}
+
+  local function finish_workers(cancelled)
+    for id = 1, #workers_list do
+      if cancelled then stop_channels[id]:push("stop") end
+      filename_channels[id]:push("{{stop}}")
+    end
+    workers_wait(workers_list)
+  end
 
   workers = workers or math.ceil(thread.get_cpu_count() / 2) + 1
   for id=1, workers, 1 do
     table.insert(
       filename_channels,
-      thread.get_channel("projectsearch_fname"..tid..id)
+      thread.get_channel("projectsearch_fname"..tid..":"..id)
     )
     table.insert(
       result_channels,
-      thread.get_channel("projectsearch_results"..tid..id)
+      thread.get_channel("projectsearch_results"..tid..":"..id)
     )
-    table.insert(workers_list, thread.create(
+    stop_channels[id] = thread.get_channel("projectsearch_stop"..tid..":"..id)
+    local worker, err = thread.create(
       "pswrk"..tid..id, -- projectsearch worker
       worker_find_in_file,
       tid,
@@ -601,7 +606,14 @@ local function files_search_thread(tid, options)
       search_type,
       insensitive,
       whole
-    ))
+    )
+    if not worker then
+      finish_workers(true)
+      channel_status:clear()
+      channel_status:push({ error = err or "could not create search worker" })
+      return 1
+    end
+    workers_list[id] = worker
   end
 
   local stop = false
@@ -672,17 +684,9 @@ local function files_search_thread(tid, options)
     if stop then break end
   end
 
-  if not stop then
-    for id=1, workers, 1 do
-      filename_channels[id]:push("{{stop}}")
-    end
-    -- before sending the "finished" status we wait for threads to finish
-    workers_wait(workers_list)
-    channel_status:clear()
-    channel_status:push("finished")
-  else
-    channel_status:clear()
-  end
+  finish_workers(stop)
+  channel_status:clear()
+  channel_status:push(stop and "cancelled" or "finished")
 
   collectgarbage("collect")
 end
@@ -722,10 +726,12 @@ end
 ---Send stop signal to find files thread and find in file workers.
 ---@param files_stop_channel thread.Channel
 ---@param workers_stop_channel thread.Channel[]
-local function worker_threads_stop(files_stop_channel, workers_stop_channel)
+---@param filename_channels thread.Channel[]
+local function worker_threads_stop(files_stop_channel, workers_stop_channel, filename_channels)
   files_stop_channel:push("stop")
-  for _, channel_stop in ipairs(workers_stop_channel) do
+  for id, channel_stop in ipairs(workers_stop_channel) do
     channel_stop:push("stop")
+    filename_channels[id]:push("{{stop}}")
   end
 end
 
@@ -824,13 +830,21 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
   self.results_list.base_dir = multiple_projects and "" or base_dir
 
   threaded_search_id = threaded_search_id + 1
+  local tid = threaded_search_id
   core.add_thread(function()
-    local tid = threaded_search_id
     local workers = config.plugins.projectsearch.threading.workers
-    local search_thread = thread.create(
+    local result_channels, stop_channels, filename_channels = {}, {}, {}
+    for id = 1, workers do
+      result_channels[id] = thread.get_channel("projectsearch_results"..tid..":"..id)
+      stop_channels[id] = thread.get_channel("projectsearch_stop"..tid..":"..id)
+      filename_channels[id] = thread.get_channel("projectsearch_fname"..tid..":"..id)
+    end
+    local channel_status = thread.get_channel("projectsearch_status"..tid)
+    local channel_stop = thread.get_channel("projectsearch_stop"..tid)
+    local search_thread, err = thread.create(
       "pspool"..tid,
       files_search_thread,
-      threaded_search_id,
+      tid,
       {
         text = text,
         search_type = search_type,
@@ -846,38 +860,23 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
         excludes = parse_filters(self, self.excludes_text:get_text())
       }
     )
-    ---@type thread.Channel[]
-    local result_channels = {}
-    for id=1, workers, 1 do
-      table.insert(
-        result_channels,
-        thread.get_channel("projectsearch_results"..tid..id)
-      )
+    if not search_thread then
+      self.searching = false
+      self.end_time = system.get_time()
+      core.error("Could not start project search: %s", err)
+      return
     end
-    ---@type thread.Channel[]
-    local stop_channels = {}
-    for id=1, workers, 1 do
-      table.insert(
-        stop_channels,
-        thread.get_channel("projectsearch_stop"..tid..id)
-      )
-    end
-    local channel_status = thread.get_channel("projectsearch_status"..tid)
-    local channel_stop = thread.get_channel("projectsearch_stop"..tid)
     local status = channel_status:first()
-    local count = 1
-    while type(status) ~= "string" do
+    local stopping = false
+    while type(status) ~= "string" and type(status) ~= "table" do
       if type(status) == "number" then
         self.total_files = status
       end
       -- add some of the results found
-      worker_threads_add_results(self, result_channels)
-      count = count + 1
+      if not self.stop then worker_threads_add_results(self, result_channels) end
       coroutine.yield()
       core.redraw = true
-      if self.stop then
-        break
-      elseif not self.is_global then
+      if not self.stop and not self.is_global then
         local node = core.root_view:get_active_node_default()
         local found = false
         for _, view in ipairs(node.views) do
@@ -886,18 +885,22 @@ function ResultsView:begin_search(path, text, search_type, insensitive, whole_wo
             break
           end
         end
-        if not found then self.stop = true break end
+        if not found then self.stop = true end
+      end
+      if self.stop and not stopping then
+        worker_threads_stop(channel_stop, stop_channels, filename_channels)
+        stopping = true
       end
       status = channel_status:first()
     end
     channel_status:clear()
-    if not self.stop then
+    if type(status) == "table" then
+      core.error("Project search failed: %s", status.error)
+    elseif not self.stop then
       -- add any remaining results
       while worker_threads_add_results(self, result_channels) do end
-    else
-      worker_threads_stop(channel_stop, stop_channels)
     end
-    -- wait for thread manually to reduce thread leakage and stepping over
+    -- The coordinator reports completion only after joining its workers.
     search_thread:wait()
     -- the search was completed
     self.searching = false
@@ -923,8 +926,8 @@ end
 ---@param id integer
 ---@param replacement string
 local function files_replace_thread(tid, id, replacement, search_regex, case_sensitive)
-  local replace_channel = thread.get_channel("projectsearch_replace"..tid..id)
-  local status_channel = thread.get_channel("projectsearch_replace_status"..tid..id)
+  local replace_channel = thread.get_channel("projectsearch_replace"..tid..":"..id)
+  local status_channel = thread.get_channel("projectsearch_replace_status"..tid..":"..id)
   local replacement_len = #replacement
 
   if not replace_channel or not status_channel then
@@ -1038,11 +1041,11 @@ function ResultsView:begin_replace()
     for id=1, workers, 1 do
       table.insert(
         replace_channels,
-        thread.get_channel("projectsearch_replace"..tid..id)
+        thread.get_channel("projectsearch_replace"..tid..":"..id)
       )
       table.insert(
         status_channels,
-        thread.get_channel("projectsearch_replace_status"..tid..id)
+        thread.get_channel("projectsearch_replace_status"..tid..":"..id)
       )
       table.insert(replace_workers, thread.create(
         "psrpool"..tid..id, files_replace_thread,
