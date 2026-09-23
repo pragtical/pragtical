@@ -863,6 +863,40 @@ settings.add("Image Viewer",
   }
 )
 
+settings.add("Audio Player",
+  {
+    {
+      label = "Default Visualization",
+      description = "Show waveform and meters in new tabs.",
+      path = "audio_player.visualization",
+      type = settings.type.TOGGLE,
+      default = false
+    },
+    {
+      label = "Default Repeat",
+      description = "Repeat the playlist in new player tabs.",
+      path = "audio_player.repeat_all",
+      type = settings.type.TOGGLE,
+      default = false
+    },
+    {
+      label = "Default Shuffle",
+      description = "Play tracks in random order in new player tabs.",
+      path = "audio_player.shuffle",
+      type = settings.type.TOGGLE,
+      default = false
+    },
+    {
+      label = "Default Directory",
+      description = "Music folder to scan in new tabs. No autoplay.",
+      path = "audio_player.directory",
+      type = settings.type.DIRECTORY,
+      exists = true,
+      default = ""
+    }
+  }
+)
+
 settings.add("Markdown Preview",
   {
     {

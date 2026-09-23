@@ -60,6 +60,23 @@ config.markdown_preview_mode = "right"
 ---@type renderer.color
 config.images_background_color = { common.color "#ffffff" }
 
+---Defaults for new audio player tabs. Directory scans do not start playback.
+---@type table
+config.audio_player = {
+  ---Show the waveform and level meters.
+  ---@type boolean
+  visualization = false,
+  ---Repeat the playlist after the last track.
+  ---@type boolean
+  repeat_all = false,
+  ---Play tracks in random order.
+  ---@type boolean
+  shuffle = false,
+  ---Music directory to scan when opening an empty player.
+  ---@type string
+  directory = ""
+}
+
 ---Maximum number of log items that will be stored.
 ---When the number of log items exceed this value, old items will be discarded.
 ---

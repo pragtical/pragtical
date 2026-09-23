@@ -556,11 +556,7 @@ function TreeView:toggle_expand(toggle, item)
 end
 
 function TreeView:open_doc(filename)
-  if ImageView.is_supported(filename) then
-    core.open_image(filename)
-  else
-    core.root_view:open_doc(core.open_doc(filename))
-  end
+  return core.open_file(filename)
 end
 
 -- init
