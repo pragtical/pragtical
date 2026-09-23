@@ -117,6 +117,9 @@ typedef struct {
   char     **argv;
   int        has_restarted;
   int        core_run_step_ref;
+  bool       shutting_down;
+  bool       restart;
+  int        exit_status;
 } AppState;
 
 /* Lua init-code: loads and starts the core.  core.run() is now non-blocking
@@ -290,7 +293,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     return SDL_APP_FAILURE;
   }
 
-  AppState *app = SDL_malloc(sizeof(AppState));
+  AppState *app = SDL_calloc(1, sizeof(AppState));
   if (!app) {
     fprintf(stderr, "Out of memory\n");
     return SDL_APP_FAILURE;
@@ -317,7 +320,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
-  (void)appstate;
+  AppState *app = appstate;
+  if (app && app->shutting_down) {
+    if (event->type == SDL_EVENT_QUIT) app->restart = false;
+    return SDL_APP_CONTINUE;
+  }
   system_push_event(event);
   return SDL_APP_CONTINUE;
 }
@@ -325,6 +332,22 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
   AppState *app = appstate;
+
+  bool workers_finished = api_thread_poll(app->L);
+  if (app->shutting_down) {
+    if (!workers_finished) {
+      SDL_Delay(1);
+      return SDL_APP_CONTINUE;
+    }
+    if (!app->restart)
+      return app->exit_status == 0 ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
+    lua_close(app->L);
+    app->L = NULL;
+    app->has_restarted = 1;
+    app->shutting_down = false;
+    if (!init_lua_state(app)) return SDL_APP_FAILURE;
+    return SDL_APP_CONTINUE;
+  }
 
   /* Call core.run_step() — one frame of the main loop.
    * Returns true  → keep running
@@ -366,24 +389,17 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     /* Distinguish between quit and restart. */
     lua_getglobal(app->L, "core");
     lua_getfield(app->L, -1, "restart_request");
-    bool restart = lua_toboolean(app->L, -1);
+    app->restart = lua_toboolean(app->L, -1);
     lua_pop(app->L, 1);
 
     lua_getfield(app->L, -1, "exit_status");
-    int exit_status = (int)luaL_optinteger(app->L, -1, 0);
+    app->exit_status = (int)luaL_optinteger(app->L, -1, 0);
     lua_pop(app->L, 2);
 
-    if (restart) {
-      /* Re-initialize the Lua state in place — mirrors the goto in old main(). */
-      lua_close(app->L);
-      app->L = NULL;
-      app->has_restarted = 1;
-      if (!init_lua_state(app))
-        return SDL_APP_FAILURE;
-      return SDL_APP_CONTINUE;
-    }
-
-    return exit_status == 0 ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
+    app->shutting_down = true;
+    api_thread_shutdown(app->L);
+    SDL_Event event;
+    while (system_event_pop(&event)) {}
   }
 
   return SDL_APP_CONTINUE;

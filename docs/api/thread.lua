@@ -2,6 +2,15 @@
 
 ---
 ---Provides threading capabilities.
+---Workers have independent Lua states, but belong to the editor session that
+---created them, including workers created by other workers. Completed worker
+---states are closed even while their Thread handles are retained.
+---
+---Restart and normal exit request shutdown and wait for all workers to finish
+---before closing the editor state. Channel operations interrupt workers during
+---shutdown. Computation and native I/O must finish or reach a channel operation;
+---a worker that never does so can prevent restart. Cancellation is not a forced
+---termination of native code.
 ---@class thread
 thread = {}
 
@@ -28,6 +37,11 @@ function thread.create(name, callback, ...) end
 
 ---
 ---Creates a new channel or retrieve existing one.
+---Names are shared within an editor session and its descendant workers, not
+---across restarts. Keep a channel handle while sending or receiving: queued
+---values are discarded when the last handle is collected.
+---Channel operations raise a cancellation error when the session shuts down,
+---including blocked wait() and supply() calls. Workers should not suppress it.
 ---
 ---@param name string
 ---
@@ -59,6 +73,9 @@ function thread.Thread:get_name() end
 
 ---
 ---Wait for a thread to finish and get the return code.
+---Also waits for the worker's Lua state to close. Repeated calls return the
+---same status. Dropping a Thread handle does not cancel a running worker;
+---the session retains ownership and reclaims its native resources on completion.
 ---
 ---@return integer
 function thread.Thread:wait() end

@@ -1,6 +1,120 @@
 local test = require "core.test"
+local common = require "core.common"
+
+local shutdown_script = [=[
+local core = require "core"
+local root = assert(os.getenv("THREAD_TEST_ROOT"))
+local mode = os.getenv("THREAD_TEST_MODE")
+local phase_file = root .. "/phase"
+local file = io.open(phase_file)
+local phase = file and tonumber(file:read("*a")) or 0
+if file then file:close() end
+local names = {"wait", "supply", "nested", "parent", "finite"}
+for previous = 1, phase do
+  for _, name in ipairs(names) do
+    local marker = assert(io.open(root .. "/" .. previous .. "-" .. name))
+    assert(marker:read("*a") == "closed", "old worker state is still alive: " .. name)
+    marker:close()
+  end
+end
+if phase == 4 then
+  print("RESTART CLEANUP OK")
+  core.run_step = function() core.quit_request = true return false end
+  return
+end
+phase = phase + 1
+local ready = thread.get_channel("shutdown-ready")
+local empty = thread.get_channel("shutdown-wait")
+local supplied = thread.get_channel("shutdown-supply")
+assert(ready:first() == nil and empty:first() == nil and supplied:first() == nil)
+local function work(path, kind)
+  cleanup_file = assert(io.open(path, "w"))
+  cleanup_file:setvbuf("full", 4096)
+  cleanup_file:write("closed")
+  local channel = thread.get_channel("shutdown-" .. (kind == "supply" and "supply" or "wait"))
+  thread.get_channel("shutdown-ready"):push(kind)
+  if kind == "finite" then
+    system.sleep(0.05)
+  elseif kind == "supply" then
+    channel:supply("unread")
+  else
+    channel:wait()
+  end
+end
+local prefix = root .. "/" .. phase .. "-"
+assert(thread.create("shutdown-waiter", work, prefix .. "wait", "wait"))
+core.shutdown_test_worker = assert(thread.create("shutdown-supplier", work, prefix .. "supply", "supply"))
+assert(thread.create("shutdown-finite", work, prefix .. "finite", "finite"))
+assert(thread.create("shutdown-parent", function(prefix)
+  cleanup_file = assert(io.open(prefix .. "parent", "w"))
+  cleanup_file:setvbuf("full", 4096)
+  cleanup_file:write("closed")
+  local child = assert(thread.create("shutdown-nested", function(path)
+    cleanup_file = assert(io.open(path, "w"))
+    cleanup_file:setvbuf("full", 4096)
+    cleanup_file:write("closed")
+    local channel = thread.get_channel("shutdown-wait")
+    thread.get_channel("shutdown-ready"):push("nested")
+    channel:wait()
+  end, prefix .. "nested"))
+  return child:wait()
+end, prefix))
+for _ = 1, 4 do ready:wait() ready:pop() end
+collectgarbage("collect")
+file = assert(io.open(phase_file, "w"))
+file:write(phase)
+file:close()
+if mode == "sentinel" then os.exit(0, true) end
+core.run_step = function() core.restart_request = true return false end
+]=]
+
+local function run_shutdown_child(context, mode)
+  context.root = USERDIR .. "/thread-shutdown-" .. system.get_process_id()
+    .. "-" .. math.floor(system.get_time() * 1e6)
+  test.ok(common.mkdirp(context.root))
+  local script = context.root .. "/shutdown.lua"
+  local file = assert(io.open(script, "w"))
+  file:write(shutdown_script)
+  file:close()
+  context.child = process.start({EXEFILE, "run", "-n", script}, {
+    cwd = context.root,
+    env = {
+      PRAGTICAL_USERDIR = context.root .. "/user",
+      SDL_VIDEO_DRIVER = "dummy",
+      SDL_AUDIO_DRIVER = "dummy",
+      PRAGTICAL_RENDERER = "surface",
+      THREAD_TEST_ROOT = context.root,
+      THREAD_TEST_MODE = mode
+    },
+    stdout = process.REDIRECT_PIPE,
+    stderr = process.REDIRECT_STDOUT
+  })
+  local output = ""
+  local deadline = system.get_time() + 30
+  while context.child:running() and system.get_time() < deadline do
+    output = output .. (context.child:read_stdout() or "")
+    coroutine.yield(0.01)
+  end
+  output = output .. (context.child:read_stdout() or "")
+  test.not_ok(context.child:running(), "shutdown timed out: " .. output)
+  test.equal(context.child:returncode(), 0, output)
+  if mode == "restart" then test.contains(output, "RESTART CLEANUP OK") end
+  for _, name in ipairs({"wait", "supply", "nested", "parent", "finite"}) do
+    local marker = assert(io.open(context.root .. "/1-" .. name))
+    local contents = marker:read("*a")
+    marker:close()
+    test.equal(contents, "closed", name .. " worker state was not closed")
+  end
+end
 
 test.describe("thread", function()
+  test.after_each(function(context)
+    if context.child and context.child:running() then
+      context.child:kill()
+      context.child:wait(process.WAIT_INFINITE, 0.01)
+    end
+    if context.root then common.rm(context.root, true) end
+  end)
   test.test("exports the documented functions", function()
     for _, name in ipairs({"create", "get_channel", "get_cpu_count"}) do
       test.type(thread[name], "function", "missing thread." .. name)
@@ -260,6 +374,7 @@ test.describe("thread", function()
     -- Consume the channel value so the worker can finish
     test.equal(channel:wait(), "done")
     test.equal(worker:wait(), 99)
+    test.equal(worker:wait(), 99)
 
     -- After wait(), the SDL_Thread pointer is NULLed out.
     -- These should not crash; they return nil or safe values.
@@ -302,5 +417,67 @@ test.describe("thread", function()
 
     -- We should have received exactly 'count' values
     test.equal(#values, count)
+  end)
+
+  test.test("completed worker states close while handles are retained", function(context)
+    context.root = USERDIR .. "/thread-close-" .. system.get_process_id()
+    test.ok(common.mkdirp(context.root))
+    local path = context.root .. "/closed"
+    local worker = assert(thread.create("retained-state", function(filename)
+      cleanup_file = assert(io.open(filename, "w"))
+      cleanup_file:setvbuf("full", 4096)
+      cleanup_file:write("closed")
+      return 17
+    end, path))
+    test.equal(worker:wait(), 17)
+    local file = assert(io.open(path))
+    local contents = file:read("*a")
+    file:close()
+    test.equal(contents, "closed")
+  end)
+
+  test.test("discarded handles do not lose running workers", function()
+    local done = thread.get_channel("thread-discarded-done")
+    done:clear()
+    for i = 1, 40 do
+      assert(thread.create("discarded-handle", function()
+        thread.get_channel("thread-discarded-done"):push(true)
+      end))
+      collectgarbage("collect")
+    end
+    for _ = 1, 40 do done:wait() done:pop() end
+  end)
+
+  test.test("concurrent channel lookup and final release are safe", function()
+    local workers = {}
+    for i = 1, 4 do
+      workers[i] = assert(thread.create("channel-lookup", function()
+        for _ = 1, 200 do
+          local channel = thread.get_channel("thread-shared-ephemeral")
+          channel:push(true)
+          channel:pop()
+          channel = nil
+          collectgarbage("collect")
+        end
+      end))
+    end
+    for _, worker in ipairs(workers) do test.equal(worker:wait(), 0) end
+  end)
+
+  test.test("failed worker creation releases its state", function()
+    for _ = 1, 10 do
+      local worker, err = thread.create("missing-file", USERDIR .. "/missing-worker.lua")
+      test.is_nil(worker)
+      test.type(err, "string")
+      collectgarbage("collect")
+    end
+  end)
+
+  test.test("restart closes all worker states before the next session", function(context)
+    run_shutdown_child(context, "restart")
+  end)
+
+  test.test("state shutdown sentinel wakes and joins workers", function(context)
+    run_shutdown_child(context, "sentinel")
   end)
 end)

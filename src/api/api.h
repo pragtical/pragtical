@@ -1,6 +1,7 @@
 #ifndef API_H
 #define API_H
 
+#include <stdbool.h>
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
@@ -22,5 +23,7 @@
 #define API_CONSTANT_DEFINE(L, idx, key, n) (lua_pushnumber(L, n), lua_setfield(L, idx - 1, key))
 
 void api_load_libs(lua_State *L);
+void api_thread_shutdown(lua_State *L);
+bool api_thread_poll(lua_State *L);
 
 #endif

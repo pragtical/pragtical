@@ -27,12 +27,92 @@ typedef struct thread {
   lua_State *L;
   SDL_Thread *ptr;
   SDL_AtomicInt ref;
-  bool clean;
+  ThreadSession *session;
+  struct thread *next;
+  char *name;
+  SDL_ThreadID id;
+  int status;
+  bool joined;
+  bool waited;
 } LuaThread;
 
 typedef struct thread_container {
   LuaThread *thread;
 } ThreadContainer;
+
+typedef struct session_owner {
+  ThreadSession *session;
+  bool root;
+} SessionOwner;
+
+static char session_key;
+static char shutdown_error;
+
+static SessionOwner *get_session_owner(lua_State *L)
+{
+  lua_rawgetp(L, LUA_REGISTRYINDEX, &session_key);
+  SessionOwner *owner = lua_touserdata(L, -1);
+  lua_pop(L, 1);
+  return owner;
+}
+
+ThreadSession *thread_get_session(lua_State *L)
+{
+  SessionOwner *owner = get_session_owner(L);
+  return owner ? owner->session : NULL;
+}
+
+void thread_session_retain(ThreadSession *session)
+{
+  SDL_AtomicIncRef(&session->ref);
+}
+
+void thread_session_release(ThreadSession *session)
+{
+  if (SDL_AtomicDecRef(&session->ref)) {
+    SDL_assert(!session->workers && !session->channels);
+    SDL_DestroyCondition(session->changed);
+    SDL_DestroyMutex(session->mutex);
+    SDL_free(session);
+  }
+}
+
+int thread_shutdown_error(lua_State *L)
+{
+  lua_pushlightuserdata(L, &shutdown_error);
+  return lua_error(L);
+}
+
+static int session_gc(lua_State *L)
+{
+  SessionOwner *owner = lua_touserdata(L, 1);
+  if (!owner->session) return 0;
+  if (owner->root) {
+    api_thread_shutdown(L);
+    /* Normal editor shutdown drains asynchronously before lua_close. This
+     * fallback also covers direct state closure (for example CLI os.exit). */
+    while (!api_thread_poll(L)) SDL_Delay(1);
+  }
+  ThreadSession *session = owner->session;
+  owner->session = NULL;
+  thread_session_release(session);
+  return 0;
+}
+
+static void register_session(lua_State *L, ThreadSession *session, bool root)
+{
+  SessionOwner *owner = lua_newuserdata(L, sizeof(*owner));
+  owner->session = NULL;
+  owner->root = root;
+  if (luaL_newmetatable(L, "thread_session_gc")) {
+    lua_pushcfunction(L, session_gc);
+    lua_setfield(L, -2, "__gc");
+  }
+  lua_setmetatable(L, -2);
+  thread_session_retain(session);
+  owner->session = session;
+  lua_rawsetp(L, LUA_REGISTRYINDEX, &session_key);
+}
 
 typedef struct loadstate {
   struct {
@@ -86,24 +166,91 @@ static const char* reader(lua_State *L, LoadState *state, size_t *size)
 static void destroy(LuaThread *t)
 {
   if (SDL_AtomicDecRef(&t->ref)) {
-    lua_close(t->L);
+    /* L is non-NULL only when creation failed before starting the worker. */
+    if (t->L) lua_close(t->L);
+    thread_session_release(t->session);
+    SDL_free(t->name);
     SDL_free(t);
   }
 }
 
-static int callback(LuaThread *t)
+void api_thread_shutdown(lua_State *L)
 {
+  ThreadSession *session = thread_get_session(L);
+  if (!session) return;
+  SDL_LockMutex(session->mutex);
+  bool shutdown = !session->closing;
+  if (shutdown) {
+    session->closing = true;
+    session->shutdown_time = SDL_GetTicks();
+    SDL_BroadcastCondition(session->changed);
+  }
+  SDL_UnlockMutex(session->mutex);
+  if (shutdown) thread_channels_shutdown(session);
+}
+
+/* All joins are serialized by the session mutex. COMPLETE means that Lua
+ * finalizers have finished too, so joining here cannot wait for Lua work. */
+static void collect_workers(ThreadSession *session)
+{
+  LuaThread **entry = &session->workers;
+  while (*entry) {
+    LuaThread *worker = *entry;
+    if (SDL_GetThreadState(worker->ptr) == SDL_THREAD_COMPLETE) {
+      SDL_WaitThread(worker->ptr, &worker->status);
+      worker->ptr = NULL;
+      worker->joined = true;
+      *entry = worker->next;
+      destroy(worker);
+      SDL_BroadcastCondition(session->changed);
+    } else {
+      entry = &worker->next;
+    }
+  }
+}
+
+bool api_thread_poll(lua_State *L)
+{
+  ThreadSession *session = thread_get_session(L);
+  if (!session) return true;
+  SDL_LockMutex(session->mutex);
+  collect_workers(session);
+  bool finished = session->workers == NULL;
+  if (!finished && session->closing && !session->warned
+      && SDL_GetTicks() - session->shutdown_time >= 5000) {
+    session->warned = true;
+    for (LuaThread *worker = session->workers; worker; worker = worker->next)
+      SDL_LogWarn(SDL_LOG_CATEGORY_SYSTEM,
+                  "Waiting for worker '%s' before closing the editor session",
+                  worker->name);
+  }
+  SDL_UnlockMutex(session->mutex);
+  return finished;
+}
+
+static int SDLCALL callback(void *data)
+{
+  LuaThread *t = data;
   int ret = -1;
+  SDL_LockMutex(t->session->mutex);
+  bool closing = t->session->closing;
+  SDL_UnlockMutex(t->session->mutex);
 
-  SDL_AtomicIncRef(&t->ref);
-
-  if (lua_pcall(t->L, lua_gettop(t->L) - 1, 1, 0) != LUA_OK)
-    SDL_LogCritical(SDL_LOG_CATEGORY_SYSTEM, "%s", lua_tostring(t->L, -1));
-  else
+  if (!closing && lua_pcall(t->L, lua_gettop(t->L) - 1, 1, 0) != LUA_OK) {
+    if (lua_touserdata(t->L, -1) != &shutdown_error) {
+      const char *message = lua_tostring(t->L, -1);
+      SDL_LogCritical(SDL_LOG_CATEGORY_SYSTEM, "%s",
+                      message ? message : "worker raised a non-string error");
+    }
+  } else if (!closing) {
     ret = lua_tointeger(t->L, -1);
+  }
 
-  destroy(t);
-
+  lua_close(t->L);
+  t->L = NULL;
+  SDL_LockMutex(t->session->mutex);
+  SDL_BroadcastCondition(t->session->changed);
+  SDL_UnlockMutex(t->session->mutex);
   return ret;
 }
 
@@ -342,16 +489,32 @@ static void init_start(lua_State* L)
 static int f_thread_create(lua_State *L)
 {
   const char *name = luaL_checkstring(L, 1);
+  int optargc = lua_gettop(L);
+  ThreadSession *session = thread_get_session(L);
   int ret, iv;
-  LuaThread *thread;
+  if (!session) return thread_shutdown_error(L);
+  SDL_LockMutex(session->mutex);
+  bool closing = session->closing;
+  SDL_UnlockMutex(session->mutex);
+  if (closing) return thread_shutdown_error(L);
 
-  if ((thread = SDL_malloc(sizeof(LuaThread))) == NULL){
-    luaL_error(L, "could not allocate a new thread");
-    return 2;
-  }
-
-  SDL_memset(thread, 0, sizeof(LuaThread));
+  ThreadContainer *self = lua_newuserdata(L, sizeof(*self));
+  self->thread = NULL;
+  luaL_setmetatable(L, API_TYPE_THREAD);
+  LuaThread *thread = SDL_calloc(1, sizeof(*thread));
+  if (!thread) return luaL_error(L, "could not allocate a new thread");
+  thread->session = session;
+  thread_session_retain(session);
+  SDL_SetAtomicInt(&thread->ref, 1); /* Lua handle */
+  self->thread = thread;
+  thread->name = SDL_strdup(name);
   thread->L = luaL_newstate();
+  if (!thread->name || !thread->L) {
+    lua_pushnil(L);
+    lua_pushliteral(L, "could not allocate worker state");
+    goto failure;
+  }
+  register_session(thread->L, session, false);
   luaL_openlibs(thread->L);
 
   ret = threadDump(L, thread->L, 2);
@@ -360,7 +523,6 @@ static int f_thread_create(lua_State *L)
   if (ret == 2) goto failure;
 
   /* Iterate over the optional arguments to pass to the callback */
-  int optargc = lua_gettop(L);
   for (iv = 3; iv <= optargc; ++iv) {
     push_from_state(L, thread->L, iv);
   }
@@ -383,26 +545,35 @@ static int f_thread_create(lua_State *L)
   /* run core.start to initialize package path and cpath */
   init_start(thread->L);
 
-  /* ref count should be increased before registering the thread to
-   * prevent double free on _gc since the callback can execute really fast */
+  /* Reserve session ownership before execution can start, including when
+   * the caller drops the Lua handle before the worker gets scheduled. */
+  SDL_LockMutex(session->mutex);
+  if (session->closing) {
+    SDL_UnlockMutex(session->mutex);
+    self->thread = NULL;
+    destroy(thread);
+    return thread_shutdown_error(L);
+  }
   SDL_AtomicIncRef(&thread->ref);
-
-  thread->ptr = SDL_CreateThread((SDL_ThreadFunction)callback, name, thread);
+  thread->ptr = SDL_CreateThread(callback, name, thread);
   if (thread->ptr == NULL) {
+    (void)SDL_AtomicDecRef(&thread->ref);
+    SDL_UnlockMutex(session->mutex);
     lua_pushnil(L);
     lua_pushstring(L, SDL_GetError());
     goto failure;
   }
+  thread->id = SDL_GetThreadID(thread->ptr);
+  thread->next = session->workers;
+  session->workers = thread;
+  SDL_UnlockMutex(session->mutex);
 
-  ThreadContainer* self = lua_newuserdata(L, sizeof(ThreadContainer));
-  luaL_setmetatable(L, API_TYPE_THREAD);
-  self->thread = thread;
-
+  lua_settop(L, optargc + 1);
   return 1;
 
 failure:
-  lua_close(thread->L);
-  SDL_free(thread);
+  self->thread = NULL;
+  destroy(thread);
 
   return 2;
 }
@@ -437,12 +608,12 @@ static int m_thread_get_id(lua_State *L)
     L, 1, API_TYPE_THREAD
   ))->thread;
 
-  if (self->ptr == NULL) {
+  if (self->waited) {
     lua_pushnil(L);
     return 1;
   }
 
-  lua_pushinteger(L, SDL_GetThreadID(self->ptr));
+  lua_pushinteger(L, self->id);
 
   return 1;
 }
@@ -459,12 +630,12 @@ static int m_thread_get_name(lua_State *L)
     L, 1, API_TYPE_THREAD
   ))->thread;
 
-  if (self->ptr == NULL) {
+  if (self->waited) {
     lua_pushnil(L);
     return 1;
   }
 
-  lua_pushstring(L, SDL_GetThreadName(self->ptr));
+  lua_pushstring(L, self->name);
 
   return 1;
 }
@@ -480,13 +651,16 @@ static int m_thread_wait(lua_State *L)
   LuaThread* self = ((ThreadContainer*)luaL_checkudata(
     L, 1, API_TYPE_THREAD
   ))->thread;
-  int status;
-
-  SDL_WaitThread(self->ptr, &status);
-  self->ptr = NULL;
-  self->clean = true;
-
-  lua_pushinteger(L, status);
+  ThreadSession *session = self->session;
+  SDL_LockMutex(session->mutex);
+  while (!self->joined) {
+    collect_workers(session);
+    if (!self->joined)
+      SDL_WaitConditionTimeout(session->changed, session->mutex, 10);
+  }
+  SDL_UnlockMutex(session->mutex);
+  self->waited = true;
+  lua_pushinteger(L, self->status);
 
   return 1;
 }
@@ -518,20 +692,14 @@ static int mm_thread_eq(lua_State *L)
  */
 static int mm_thread_gc(lua_State *L)
 {
-  LuaThread* self = ((ThreadContainer*)luaL_checkudata(
+  ThreadContainer* self = luaL_checkudata(
     L, 1, API_TYPE_THREAD
-  ))->thread;
-
-  /* allow self clean */
-  if (!self->clean) {
-    self->clean = true;
-    SDL_DetachThread(self->ptr);
-    self->ptr = NULL;
+  );
+  if (self->thread) {
+    LuaThread *worker = self->thread;
+    self->thread = NULL;
+    destroy(worker);
   }
-
-  /* this can take place before or after the thread callback ends
-   * which is why ref counting is needed */
-  destroy(self);
 
   return 0;
 }
@@ -545,10 +713,10 @@ static int mm_thread_tostring(lua_State *L)
     L, 1, API_TYPE_THREAD
   ))->thread;
 
-  if (self->ptr == NULL)
+  if (self->waited)
     lua_pushstring(L, "thread <finished>");
   else
-    lua_pushfstring(L, "thread %d", SDL_GetThreadID(self->ptr));
+    lua_pushfstring(L, "thread %d", self->id);
 
   return 1;
 }
@@ -593,8 +761,20 @@ static const struct luaL_Reg channel_object[] = {
 
 
 int luaopen_thread(lua_State *L) {
-  if (!ChannelsListMutex) {
-    ChannelsListMutex = SDL_CreateMutex();
+  SessionOwner *owner = get_session_owner(L);
+  if (owner && !owner->session) return thread_shutdown_error(L);
+  if (!thread_get_session(L)) {
+    ThreadSession *session = SDL_calloc(1, sizeof(*session));
+    if (!session) return luaL_error(L, "could not allocate thread session");
+    session->mutex = SDL_CreateMutex();
+    session->changed = SDL_CreateCondition();
+    if (!session->mutex || !session->changed) {
+      SDL_DestroyMutex(session->mutex);
+      SDL_DestroyCondition(session->changed);
+      SDL_free(session);
+      return luaL_error(L, "could not initialize thread session");
+    }
+    register_session(L, session, true);
   }
 
   luaL_newmetatable(L, API_TYPE_THREAD);
