@@ -1,5 +1,93 @@
 # Changes Log
 
+## [3.13.0] - 2026-09-24
+
+### New Features
+
+* Add audio support and built-in player
+  ([#601](https://github.com/pragtical/pragtical/pull/601))
+
+* Add persistent renderer selection in settings
+  ([#608](https://github.com/pragtical/pragtical/pull/608))
+
+* Add WidgetList support to settings UI
+  ([#591](https://github.com/pragtical/pragtical/pull/591))
+
+* Add codefold toggle support by language
+  ([#592](https://github.com/pragtical/pragtical/pull/592))
+
+* Add extension hints for new files
+  ([#596](https://github.com/pragtical/pragtical/pull/596))
+
+* Open project search results in splits
+  ([#594](https://github.com/pragtical/pragtical/pull/594))
+
+* Add first-line-only tokenizer rules
+  ([#606](https://github.com/pragtical/pragtical/pull/606))
+
+### Enhancements
+
+* Improve thread cleanup and file searches
+  ([#611](https://github.com/pragtical/pragtical/pull/611))
+
+* Improve multi-cursor performance
+  ([#597](https://github.com/pragtical/pragtical/pull/597))
+
+* Support wrapping in diff views
+  ([#593](https://github.com/pragtical/pragtical/pull/593))
+
+* Support more Markdown syntax and code block languages
+  ([#605](https://github.com/pragtical/pragtical/pull/605))
+
+* Add Windows EXE version information
+  ([#604](https://github.com/pragtical/pragtical/pull/604))
+
+### Fixes
+
+* Fix repeated prompts when changing projects
+  ([#612](https://github.com/pragtical/pragtical/pull/612))
+
+* Fix repeated autoreload prompts after declining
+  ([#610](https://github.com/pragtical/pragtical/pull/610))
+
+* Fix SDL GPU crashes on collapsed polygons
+  ([#603](https://github.com/pragtical/pragtical/pull/603))
+
+* Fix overlapping trailing whitespace markers
+  ([#599](https://github.com/pragtical/pragtical/pull/599))
+
+* Fix Windows surface frame pacing
+  ([#589](https://github.com/pragtical/pragtical/pull/589))
+
+* Fix conditional context menu dividers
+  ([#586](https://github.com/pragtical/pragtical/pull/586))
+
+* Fix SDL GPU and SDLRenderer fractional scaling
+  ([#584](https://github.com/pragtical/pragtical/pull/584))
+
+* Fix PGO training cleanup and locked-node failure
+  ([#600](https://github.com/pragtical/pragtical/pull/600))
+
+### Build System
+
+* Update mbedTLS subproject to v4.1.1
+  ([#595](https://github.com/pragtical/pragtical/pull/595))
+
+* Update widgets to include WidgetList support
+  ([#590](https://github.com/pragtical/pragtical/pull/590))
+
+* Update widget scaling fix
+  ([d3f9e11a](https://github.com/pragtical/pragtical/commit/d3f9e11a))
+
+* Fix SDL_image optional codec include paths
+  ([#598](https://github.com/pragtical/pragtical/pull/598))
+
+* Fix Clang PGO profile collection in CI
+  ([e86b40f9](https://github.com/pragtical/pragtical/commit/e86b40f9))
+
+* Update plugins subproject
+  ([854a9489](https://github.com/pragtical/plugins/commit/854a9489))
+
 ## [3.12.5] - 2026-08-20
 
 ### Enhancements
@@ -3650,6 +3738,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.13.0]: https://github.com/pragtical/pragtical/releases/tag/v3.13.0
 [3.12.5]: https://github.com/pragtical/pragtical/releases/tag/v3.12.5
 [3.12.4]: https://github.com/pragtical/pragtical/releases/tag/v3.12.4
 [3.12.3]: https://github.com/pragtical/pragtical/releases/tag/v3.12.3

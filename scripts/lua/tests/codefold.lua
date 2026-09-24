@@ -834,6 +834,7 @@ test.describe("codefold - virtual line mapping", function()
   test.test("smooth caret visibility uses visible offsets", function()
     local config = require "core.config"
     require "plugins.codefold"
+    local previous_update, previous_draw = DocView.update, DocView.draw_caret
     dofile_from_source("subprojects/plugins/plugins/smoothcaret.lua")
 
     local previous_enabled = config.plugins.smoothcaret.enabled
@@ -866,13 +867,29 @@ test.describe("codefold - virtual line mapping", function()
     view.cf_invalidated = nil
     core.active_view = view
 
-    view:update()
+    local previous_focus = system.window_has_focus
+    system.window_has_focus = function() return true end
+    local ok, err = pcall(function()
+      view:update()
 
-    test.equal(#view.cf_fold_map, 53)
-    test.equal(#view.visible_carets, 1)
+      test.equal(#view.cf_fold_map, 53)
+      if view.smoothcaret_state then
+        local count = 0
+        for _, caret in pairs(view.smoothcaret_state.carets) do
+          test.equal(caret.line, 55)
+          count = count + 1
+        end
+        test.equal(count, 1)
+      else
+        test.equal(#view.visible_carets, 1)
+      end
+    end)
 
+    system.window_has_focus = previous_focus
+    DocView.update, DocView.draw_caret = previous_update, previous_draw
     config.plugins.smoothcaret.enabled = previous_enabled
     core.active_view = previous_active_view
+    if not ok then error(err, 0) end
   end)
 
   test.test("fold gutter width adds marker space without changing padding", function()
