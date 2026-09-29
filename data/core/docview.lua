@@ -358,6 +358,12 @@ end
 ---Rebuild the composed visual-line model.
 ---@param from_line? integer First document line that may have changed
 function DocView:rebuild_visual_lines(from_line)
+  -- Reload replaces the line table; no part of the old layout can be reused.
+  if self.visual_lines_doc_lines ~= self.doc.lines then
+    from_line = nil
+    if self.visual_lines_doc_lines then self.last_x_offset = {} end
+    self.visual_lines_doc_lines = self.doc.lines
+  end
   local hidden = self:get_hidden_lines() or {}
   if not next(hidden) and not self:has_variable_visual_lines() then
     self.visual_lines = {
@@ -467,7 +473,9 @@ end
 
 
 function DocView:get_visual_lines()
-  if self.visual_lines_dirty or not self.visual_lines then
+  if self.visual_lines_dirty or not self.visual_lines
+    or self.visual_lines_doc_lines ~= self.doc.lines
+  then
     self:rebuild_visual_lines(self.visual_lines_invalid_from)
   end
   return self.visual_lines

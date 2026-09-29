@@ -471,6 +471,17 @@ end
 
 local open_files = setmetatable({ }, { __mode = "k" })
 
+local old_doc_load = Doc.load
+function Doc:load(...)
+  local result = old_doc_load(self, ...)
+  for _, docview in ipairs(open_files[self] or {}) do
+    if docview.wrapping_enabled then
+      LineWrapping.reconstruct_breaks(docview, docview:get_font(), get_wrap_width(docview))
+    end
+  end
+  return result
+end
+
 local old_doc_insert = Doc.raw_insert
 function Doc:raw_insert(line, col, text, undo_stack, time)
   local old_lines = #self.lines

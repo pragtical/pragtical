@@ -43,15 +43,16 @@ end
 
 
 function Doc:reset()
+  for key in pairs(self.cache) do self.cache[key] = {} end
   self.lines = { "\n" }
   self.selections = { 1, 1, 1, 1 }
   self.search_selections = {}
   self.last_selection = 1
   self.undo_stack = { idx = 1 }
   self.redo_stack = { idx = 1 }
-  self.clean_change_id = 1
-  self.change_id = 1
-  self.next_change_id = 1
+  self.next_change_id = (self.next_change_id or 0) + 1
+  self.change_id = self.next_change_id
+  self.clean_change_id = self.change_id
   self.edit_depth = 0
   self.edit_start = nil
   self.replaying, self.replay_change_id = nil, nil
@@ -62,7 +63,7 @@ end
 
 
 function Doc:clear_undo_redo()
-  self.clean_change_id = 1
+  self.clean_change_id = self:get_change_id()
   self.undo_stack = { idx = 1 }
   self.redo_stack = { idx = 1 }
 end
