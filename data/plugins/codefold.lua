@@ -994,11 +994,12 @@ end
 ---@param self core.docview
 ---@param regions table[]
 local function apply_detected_regions(self, regions)
-  local previous_folds = make_state_folds(
+  local previous_folds = self.cf_reload_folds or make_state_folds(
     self.doc,
     self.cf_regions or {},
     self.cf_folded_regions or {}
   )
+  self.cf_reload_folds = nil
   local previous_signature = self.cf_visibility_signature
     or folded_visibility_signature(
       self.cf_regions or {},
@@ -1107,6 +1108,11 @@ local function init_fold_state(self)
   self.cf_unfold_map = {}
   self.cf_invalidated = false
   self.cf_invalidated_at = nil
+  self.cf_invalidated_from = nil
+  self.cf_mapping_dirty = nil
+  self.cf_mapping_line_count = nil
+  self.cf_visibility_signature = nil
+  self.cf_reload_folds = nil
   self.cf_state_loaded = false
 end
 
@@ -1534,6 +1540,34 @@ end
 ---------------------------------------------------------------------
 -- Method overrides: Doc (incremental invalidation)
 ---------------------------------------------------------------------
+
+local doc_load = Doc.load
+function Doc:load(...)
+  local states = {}
+  local views = core.root_view and core.get_views_referencing_doc(self) or {}
+  for _, view in ipairs(views) do
+    if view.cf_regions then
+      -- Capture headers before load replaces the text beneath the old regions.
+      states[#states + 1] = {
+        view = view,
+        loaded = view.cf_state_loaded,
+        folds = view.cf_reload_folds
+          or make_state_folds(self, view.cf_regions, view.cf_folded_regions)
+      }
+    end
+  end
+  local result = doc_load(self, ...)
+  for _, state in ipairs(states) do
+    local view = state.view
+    replace_recalculation_thread(view)
+    init_fold_state(view)
+    view.cf_state_loaded = state.loaded
+    view.cf_reload_folds = state.folds
+    view.cf_first_update = true
+    view:invalidate_visual_lines()
+  end
+  return result
+end
 
 local doc_raw_insert = Doc.raw_insert
 function Doc:raw_insert(line, col, text, undo_stack, time)
