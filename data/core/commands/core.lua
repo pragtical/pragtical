@@ -6,10 +6,6 @@ local keymap = require "core.keymap"
 local LogView = require "core.logview"
 
 
-local previous_win_mode = "normal"
-local previous_win_pos = core.window_size
-local restore_title_view = false
-
 local function new_doc_extension()
   local fallback = config.new_file_extension
   if type(fallback) == "string" then
@@ -217,22 +213,12 @@ command.add(nil, {
   end,
 
   ["core:toggle-fullscreen"] = function()
-    local current_mode = system.get_window_mode(core.window)
-    local fullscreen = current_mode == "fullscreen"
-    if current_mode ~= "fullscreen" then
-      previous_win_mode = current_mode
-      if current_mode == "normal" then
-        previous_win_pos = table.pack(system.get_window_size(core.window))
-      end
-    end
-    if not fullscreen then
-      restore_title_view = core.title_view.visible
-    end
-    system.set_window_mode(core.window, fullscreen and previous_win_mode or "fullscreen")
-    core.show_title_bar(fullscreen and restore_title_view)
-    core.title_view:configure_hit_test(fullscreen and restore_title_view)
-    if fullscreen and previous_win_mode == "normal" then
-      system.set_window_size(core.window, table.unpack(previous_win_pos))
+    local fullscreen = core.update_window_state() == "fullscreen"
+    system.set_window_mode(core.window, fullscreen and core.prev_window_mode or "fullscreen")
+    core.show_title_bar(fullscreen and config.borderless)
+    core.title_view:configure_hit_test(fullscreen and config.borderless)
+    if fullscreen and core.prev_window_mode == "normal" then
+      system.set_window_size(core.window, table.unpack(core.window_size))
     end
   end,
 

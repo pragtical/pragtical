@@ -52,6 +52,8 @@ system = {}
 --- * "minimized"
 --- * "maximized"
 --- * "restored"
+--- * "enterfullscreen"
+--- * "leavefullscreen"
 --- * "focuslost"
 ---
 ---File events:
