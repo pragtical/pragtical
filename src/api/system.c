@@ -234,6 +234,14 @@ top:
       lua_pushstring(L, "restored");
       return 1;
 
+    case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
+      lua_pushstring(L, "enterfullscreen");
+      return 1;
+
+    case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
+      lua_pushstring(L, "leavefullscreen");
+      return 1;
+
     case SDL_EVENT_WINDOW_MOUSE_LEAVE:
       lua_pushstring(L, "mouseleft");
       return 1;

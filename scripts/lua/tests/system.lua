@@ -28,6 +28,8 @@ test.describe("system", function()
   end)
 
   test.after_each(function(context)
+    if context.on_event then require("core").on_event = context.on_event end
+    if context.window then system.set_window_mode(context.window, "normal") end
     if context.env_key then system.setenv(context.env_key) end
     if context.original_cwd then
       system.chdir(context.original_cwd)
@@ -188,5 +190,37 @@ test.describe("system", function()
     local resized_width, resized_height = renwindow.get_size(window)
     test.ok(resized_width > 0)
     test.ok(resized_height > 0)
+  end)
+
+  test.test("delivers fullscreen transitions through the native event queue", function(context)
+    local core = require "core"
+    local window = renwindow.create("system-fullscreen-events", 320, 240)
+    context.window, context.on_event = window, core.on_event
+    local seen = {}
+    core.on_event = function(event, ...)
+      if event == "enterfullscreen" or event == "leavefullscreen" then
+        seen[event] = true
+      end
+      return context.on_event(event, ...)
+    end
+    renderer.begin_frame(window)
+    renderer.draw_rect(0, 0, 320, 240, {30, 30, 30, 255})
+    renderer.end_frame()
+    coroutine.yield(0.05)
+
+    for _, transition in ipairs {
+      {"fullscreen", "enterfullscreen"}, {"normal", "leavefullscreen"}
+    } do
+      system.set_window_mode(window, transition[1])
+      local deadline = system.get_time() + 2
+      while not seen[transition[2]] and system.get_time() < deadline do
+        coroutine.yield(0.01)
+      end
+      if transition[1] == "fullscreen" then
+        test.skip_if(system.get_window_mode(window) ~= "fullscreen",
+          "video driver did not enter fullscreen")
+      end
+      test.ok(seen[transition[2]], "missing native event: " .. transition[2])
+    end
   end)
 end)

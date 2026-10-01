@@ -33,15 +33,31 @@ local function load_session()
 end
 
 
+---Refresh the native mode without losing the windowed restore state.
+---@return system.windowmode
+function core.update_window_state()
+  local mode = system.get_window_mode(core.window)
+  core.window_mode = mode
+  if mode == "normal" or mode == "maximized" then
+    core.prev_window_mode = mode
+  end
+  if mode == "normal" then
+    core.window_size = table.pack(system.get_window_size(core.window))
+  end
+  return mode
+end
+
+
 local function save_session()
+  core.update_window_state()
   local fp = io.open(USERDIR .. PATHSEP .. "session.lua", "w")
   if fp then
     local session = {
       recents = core.recent_projects,
-      window = core.window_mode ~= "fullscreen"
+      -- macOS restores maximized windows by size rather than maximizing again.
+      window = PLATFORM == "Mac OS X" and core.window_mode == "maximized"
         and table.pack(system.get_window_size(core.window)) or core.window_size,
-      window_mode = core.window_mode ~= "fullscreen"
-        and core.window_mode or core.prev_window_mode,
+      window_mode = core.prev_window_mode,
       previous_find = core.previous_find,
       previous_replace = core.previous_replace
     }
@@ -419,9 +435,12 @@ end
 
 
 function core.configure_borderless_window()
-  system.set_window_bordered(core.window, not config.borderless)
-  core.title_view:configure_hit_test(config.borderless)
-  core.title_view.visible = config.borderless
+  local fullscreen = system.get_window_mode(core.window) == "fullscreen"
+  if not fullscreen then
+    system.set_window_bordered(core.window, not config.borderless)
+  end
+  core.title_view.visible = config.borderless and not fullscreen
+  core.title_view:configure_hit_test(core.title_view.visible)
 end
 
 
@@ -467,7 +486,7 @@ function core.init()
   core.recent_projects = session.recents or {}
   core.previous_find = session.previous_find or {}
   core.previous_replace = session.previous_replace or {}
-  core.window_mode = session.window_mode or "normal"
+  core.window_mode = session.window_mode == "maximized" and "maximized" or "normal"
   core.prev_window_mode = core.window_mode
   core.window_size = session.window or {800, 600, 0, 0}
 
@@ -616,7 +635,9 @@ function core.init()
     end
   end
 
-  core.window = core.window or renwindow._restore() or renwindow.create("", table.unpack(session.window or {}))
+  core.window = core.window or renwindow._restore()
+  local restored_window = core.window ~= nil
+  core.window = core.window or renwindow.create("", table.unpack(session.window or {}))
 
   -- Maximizing the window makes it lose the hidden attribute on Windows
   -- so we delay this to keep window hidden until args parsed. Also, on
@@ -624,10 +645,11 @@ function core.init()
   -- so we delay it on all platforms, except macOS. On macOS setting the
   -- mode to maximized seems to cause issues resetting its size so setting
   -- the size is all we need on that platform.
-  if session.window then
+  if session.window and not restored_window then
     system.set_window_size(core.window, table.unpack(session.window))
   end
-  if session.window_mode == "maximized" and PLATFORM ~= "Mac OS X" then
+  core.update_window_state()
+  if not restored_window and session.window_mode == "maximized" and PLATFORM ~= "Mac OS X" then
     core.add_thread(function()
       system.set_window_mode(core.window, "maximized")
     end)
@@ -1607,19 +1629,13 @@ function core.on_event(type, ...)
     core.root_view:on_touch_released(...)
   elseif type == "touchmoved" then
     core.root_view:on_touch_moved(...)
-  elseif type == "resized" then
-    local window_mode = system.get_window_mode(core.window)
-    if window_mode ~= "fullscreen" and window_mode ~= "maximized" then
-      core.window_size = table.pack(system.get_window_size(core.window))
-    -- check needed because fullscreen can be triggered twice
-    elseif core.window_mode ~= "fullscreen" then
-      core.prev_window_mode = core.window_mode
-    end
-    core.window_mode = window_mode
-  elseif type == "minimized" or type == "maximized" or type == "restored" then
-    core.window_mode = type == "restored" and "normal" or type
-    if core.window_mode == "normal" then
-      core.window_size = table.pack(system.get_window_size(core.window))
+  elseif type == "resized" or type == "minimized" or type == "maximized"
+    or type == "restored" or type == "enterfullscreen" or type == "leavefullscreen"
+  then
+    -- Queued restore/minimize events do not necessarily describe the current mode.
+    core.update_window_state()
+    if type == "enterfullscreen" or type == "leavefullscreen" then
+      core.configure_borderless_window()
     end
   elseif type == "filedropped" then
     core.root_view:on_file_dropped(...)
