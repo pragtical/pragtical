@@ -8,6 +8,10 @@ Various scripts and configurations used to configure, build, and package Pragtic
 - **build-packages.sh**: In root directory, as all in one script; relies to the
   ones in this directory.
 
+Windows MinGW builds use the MSYS2 **UCRT64** shell and
+`mingw-w64-ucrt-x86_64-*` packages. The dependency installer uses the active
+shell's `MINGW_PACKAGE_PREFIX`. MSYS2 is [deprecating MINGW64][5].
+
 ### Package
 
 - **appdmg.sh**:    Create a macOS DMG image using [AppDMG][1].
@@ -34,3 +38,4 @@ updated `config.json` as `scripts/fontello-config.json`.
 [2]: https://docs.appimage.org/
 [3]: https://jrsoftware.org/isinfo.php
 [4]: https://fontello.com/
+[5]: https://www.msys2.org/news/#2026-03-15-deprecating-the-mingw64-environment
