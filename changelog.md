@@ -1,5 +1,29 @@
 # Changes Log
 
+## [3.13.1] - 2026-10-02
+
+### Fixes
+
+* Fix native tokenizer start-character optimization
+  ([#620](https://github.com/pragtical/pragtical/pull/620))
+
+* Fix workspace session saving and restoration
+  ([#618](https://github.com/pragtical/pragtical/pull/618))
+
+* Fix window state restoration after fullscreen
+  ([#616](https://github.com/pragtical/pragtical/pull/616))
+
+* Fix stale document layouts after reload
+  ([#613](https://github.com/pragtical/pragtical/pull/613))
+
+### Build System
+
+* Update SDL3, SDL3_image, mbedTLS and plugins subprojects
+  ([#621](https://github.com/pragtical/pragtical/pull/621))
+
+* Fix SDL_net build with newer MinGW headers
+  ([#614](https://github.com/pragtical/pragtical/pull/614))
+
 ## [3.13.0] - 2026-09-24
 
 ### New Features
@@ -3738,6 +3762,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.13.1]: https://github.com/pragtical/pragtical/releases/tag/v3.13.1
 [3.13.0]: https://github.com/pragtical/pragtical/releases/tag/v3.13.0
 [3.12.5]: https://github.com/pragtical/pragtical/releases/tag/v3.12.5
 [3.12.4]: https://github.com/pragtical/pragtical/releases/tag/v3.12.4
