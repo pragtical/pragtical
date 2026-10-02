@@ -1,7 +1,7 @@
 project(
   'mbedtls',
   'c',
-  version: '4.1.0',
+  version: '4.2.0',
   default_options: ['c_std=c99', 'warning_level=1'],
   meson_version: '>=0.56.0'
 )
@@ -74,7 +74,6 @@ tfpsacrypto_sources = files(
   'tf-psa-crypto/drivers/builtin/src/ecjpake.c',
   'tf-psa-crypto/drivers/builtin/src/ecp.c',
   'tf-psa-crypto/drivers/builtin/src/ecp_curves.c',
-  'tf-psa-crypto/drivers/builtin/src/ecp_curves_new.c',
   'tf-psa-crypto/drivers/builtin/src/entropy.c',
   'tf-psa-crypto/drivers/builtin/src/entropy_poll.c',
   'tf-psa-crypto/drivers/builtin/src/gcm.c',
