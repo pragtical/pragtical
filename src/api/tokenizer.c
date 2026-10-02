@@ -1240,7 +1240,8 @@ static void tokenizer_compute_regex_starters(
     TokenizerStarterSet atom = {0};
     size_t atom_start = i;
     if (!tokenizer_regex_atom_starter(code, code_len, &i, &atom)) {
-      if (!set->any && !set->maybe_non_ascii) set->unknown = true;
+      /* Earlier atoms are optional, so their starters alone are insufficient. */
+      set->unknown = true;
       return;
     }
 

@@ -618,3 +618,83 @@ for _, native in ipairs { false, true } do
     end)
   end)
 end
+
+test.describe("regex starter fallback", function()
+  test.before_each(function(context)
+    context.native = tokenizer.is_using_native()
+  end)
+
+  test.after_each(function(context)
+    tokenizer.set_use_native(context.native)
+  end)
+
+  test.test("Janet decimal expressions agree across backends", function()
+    local expressions = {
+      [[[-+]?(?:\d[\d_]*\.?[\d_]*|\.[\d_]+)(?:[eE&][-+]?\d+)?(?![\w.&])]],
+      [[(?:[-+]?)(?:\d[\d_]*\.?[\d_]*|\.[\d_]+)(?:[eE&][-+]?\d+)?(?![\w.&])]],
+    }
+    for _, native in ipairs { false, true } do
+      tokenizer.set_use_native(native)
+      for _, expression in ipairs(expressions) do
+        -- Also exercise per-pattern filtering when another rule can start here.
+        for _, fallback in ipairs { false, true } do
+          local syn = { patterns = {
+            { regex = expression, type = "number" },
+          }, symbols = {} }
+          if fallback then
+            table.insert(syn.patterns, { pattern = "[%w_.&]+", type = "normal" })
+          end
+          for _, text in ipairs {
+            "123", "1_000", "123.45", ".45", "-123", "+.45",
+            "123e10", "1.5e-3", ".5e3", "123&10", "1.e5",
+          } do
+            local tokens, state = tokenizer.tokenize(syn, text)
+            test.same(tokens, { "number", text })
+            test.equal(state, string.char(0))
+            test.same(tokenizer.tokenize(syn, "(" .. text .. ")"),
+              { "normal", "(", "number", text, "normal", ")" })
+          end
+          for _, text in ipairs { "123abc", "123.foo", "123&" } do
+            test.same(tokenizer.tokenize(syn, text), { "normal", text })
+          end
+          if native then
+            local stats = tokenizer.get_syntax_stats(syn)
+            test.equal(stats.pattern_stats[1].unknown_starter, true)
+            test.equal(stats.has_unknown_starters, true)
+          end
+        end
+      end
+    end
+  end)
+
+  test.test("optional prefixes cannot restrict unknown following atoms", function()
+    for _, native in ipairs { false, true } do
+      tokenizer.set_use_native(native)
+      for _, prefix in ipairs { "[-+]?", "[-+]*", "[-+]{0,1}" } do
+        for _, tail in ipairs { [[(?:\d+)]], [[.\d+]], "[^x]+" } do
+          local syn = { patterns = {
+            { regex = prefix .. tail, type = "number" },
+          }, symbols = {} }
+          for _, text in ipairs { "123", "-123" } do
+            test.same(tokenizer.tokenize(syn, text), { "number", text })
+          end
+          if native then
+            test.equal(tokenizer.get_syntax_stats(syn).pattern_stats[1].unknown_starter, true)
+          end
+        end
+      end
+    end
+  end)
+
+  test.test("supported optional prefixes retain starter filtering", function()
+    tokenizer.set_use_native(true)
+    local syn = { patterns = {
+      { regex = [[[-+]?\d+]], type = "number" },
+    }, symbols = {} }
+    test.same(tokenizer.tokenize(syn, "(123)"),
+      { "normal", "(", "number", "123", "normal", ")" })
+    local stats = tokenizer.get_syntax_stats(syn)
+    test.equal(stats.pattern_stats[1].unknown_starter, false)
+    test.equal(stats.has_unknown_starters, false)
+  end)
+end)
