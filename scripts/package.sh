@@ -252,18 +252,18 @@ main() {
     if [[ $platform == "windows" ]]; then
       exe_file="${exe_file}.exe"
       if command -v ntldd >/dev/null 2>&1; then
-        # Copy MinGW libraries dependencies.
+        # Copy MinGW runtime dependencies, including UCRT and Clang environments.
         # MSYS2 ldd command seems to be only 64bit, so use ntldd
         # see https://github.com/msys2/MINGW-packages/issues/4164
         ntldd -R "${exe_file}" \
-          | grep mingw \
+          | grep -Ei '[/\\](mingw32|mingw64|ucrt64|clang32|clang64|clangarm64)[/\\]' \
           | awk '{print $3}' \
           | sed 's#\\#/#g' \
           | xargs -I '{}' cp -v '{}' "$(pwd)/${dest_dir}/"
         # Copy ppm dependencies too
         if [[ -d "${data_dir}/plugins/plugin_manager" ]]; then
           ntldd -R "${data_dir}/plugins/plugin_manager"/ppm.* \
-            | grep mingw \
+            | grep -Ei '[/\\](mingw32|mingw64|ucrt64|clang32|clang64|clangarm64)[/\\]' \
             | awk '{print $3}' \
             | sed 's#\\#/#g' \
             | xargs -I '{}' cp -v '{}' "${data_dir}/plugins/plugin_manager/"
