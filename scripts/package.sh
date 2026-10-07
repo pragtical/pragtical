@@ -93,7 +93,6 @@ package_plugin_manager() {
     fi
     chmod 0755 "$file"
   fi
-  cp -av "subprojects/ppm/libraries" "${data_dir}/"
   cp -av "subprojects/ppm/plugins/plugin_manager" "${data_dir}/plugins/"
   cp "$file" "${data_dir}/plugins/plugin_manager/"
 }

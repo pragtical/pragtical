@@ -313,7 +313,6 @@ main() {
   fi
 
   cp "AppRun.$arch" Pragtical.AppDir/AppRun
-  cp -av "subprojects/ppm/libraries" Pragtical.AppDir/usr/share/pragtical/
   cp -av "subprojects/ppm/plugins/plugin_manager" Pragtical.AppDir/usr/share/pragtical/plugins/
   cp "$ppm_file" Pragtical.AppDir/usr/share/pragtical/plugins/plugin_manager/
 
