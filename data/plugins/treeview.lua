@@ -26,6 +26,8 @@ local DirWatch = require "core.dirwatch"
 ---@field scroll_to_focused_file boolean
 ---Smoothly scroll to focused file.
 ---@field animate_scroll_to_focused_file boolean
+---Show file counts aside directories.
+---@field show_file_count boolean
 ---Show hidden files and directories.
 ---@field show_hidden boolean
 ---Show ignored files and directories.
@@ -37,6 +39,7 @@ config.plugins.treeview = common.merge({
   expand_dirs_to_focused_file = false,
   scroll_to_focused_file = false,
   animate_scroll_to_focused_file = true,
+  show_file_count = false,
   show_hidden = false,
   show_ignored = false
 }, config.plugins.treeview)
@@ -80,6 +83,7 @@ function TreeView:new()
   self.show_hidden = config.plugins.treeview.show_hidden
   self.show_ignored = config.plugins.treeview.show_ignored
   self.cache = {}
+  self.file_count_cache = {}
   self.expanded = {}
   self.tooltip = { x = 0, y = 0, begin = 0, alpha = 0 }
   self.last_scroll_y = 0
@@ -89,6 +93,42 @@ function TreeView:new()
   self.watches = { }
 end
 
+function TreeView:get_recursive_file_count(project, path)
+  local cached = self.file_count_cache[path]
+  if cached ~= nil then
+    return cached
+  end
+
+  -- watch project update
+  if self.watches[project] then
+    self.watches[project]:watch(path)
+  end
+
+  local count = 0
+  for _, name in ipairs(system.list_dir(path) or {}) do
+    if self.show_hidden or not name:find("^%.") then
+      local child_path = path .. PATHSEP .. name
+      local info
+
+      if self.show_ignored then
+        info = system.get_file_info(child_path)
+      else
+        info = project:get_file_info(child_path)
+      end
+
+      if info then
+        if info.type == "file" then
+          count = count + 1
+        elseif info.type == "dir" then
+          count = count + self:get_recursive_file_count(project, child_path)
+        end
+      end
+    end
+  end
+
+  self.file_count_cache[path] = count
+  return count
+end
 
 function TreeView:set_target_size(axis, value)
   if axis == "x" then
@@ -121,7 +161,6 @@ function TreeView:get_cached(project, path)
       filename = basename,
       depth = get_depth(truncated),
       abs_filename = path,
-      project = project,
       name = basename,
       type = info.type,
       project = project
@@ -148,6 +187,19 @@ function TreeView:get_cached(project, path)
       self.cache[l] = nil
     end
     table.sort(t.files, function(a, b) return system.path_compare(a.name, a.type, b.name, b.type) end)
+
+    t.has_subdirs = false
+    for _, file in ipairs(t.files) do
+      if file.type == "dir" and (self.show_hidden or not file.name:find("^%.")) then
+        t.has_subdirs = true
+        break
+      end
+    end
+  end
+
+  -- show file count
+  if config.plugins.treeview.show_file_count and t.type == "dir" then
+    t.file_count = self:get_recursive_file_count(project, path)
   end
   return t
 end
@@ -302,6 +354,10 @@ function TreeView:on_mouse_left()
   self.hovered_item = nil
 end
 
+function TreeView:invalidate_cache()
+  self.cache = {}
+  self.file_count_cache = {}
+end
 
 function TreeView:update()
   -- update width
@@ -433,6 +489,32 @@ function TreeView:draw_item_body(item, active, hovered, x, y, w, h)
     return self:draw_item_text(item, active, hovered, x, y, w, h)
 end
 
+function TreeView:draw_file_count(item, y, h)
+  if
+    not config.plugins.treeview.show_file_count
+    or item.type ~= "dir"
+    or item.file_count == nil
+    or item.file_count == 0
+  then
+    return
+  end
+
+  -- do not show file count of parent dir when sub dir is expanded
+  if item.expanded and item.has_subdirs then
+    return
+  end
+
+  common.draw_text(
+    style.font,
+    style.dim or style.text,
+    tostring(item.file_count),
+    "right",
+    self.position.x + style.padding.x,
+    y,
+    self.size.x - 2 * style.padding.x,
+    h
+  )
+end
 
 function TreeView:draw_item_chevron(item, active, hovered, x, y, w, h)
   if item.type == "dir" then
@@ -461,7 +543,9 @@ function TreeView:draw_item(item, active, hovered, x, y, w, h)
   x = x + item.depth * style.padding.x + style.padding.x
   x = x + self:draw_item_chevron(item, active, hovered, x, y, w, h)
 
-  return self:draw_item_body(item, active, hovered, x, y, w, h)
+  local text_width = self:draw_item_body(item, active, hovered, x, y, w, h)
+  self:draw_file_count(item, y, h)
+  return text_width
 end
 
 
@@ -550,7 +634,9 @@ function TreeView:toggle_expand(toggle, item)
     end
     self.expanded[item.abs_filename] = item.expanded
     if self.watches[item.project] then
-      self.watches[item.project]:watch(item.abs_filename, item.expanded)
+      -- always watch
+      -- self.watches[item.project]:watch(item.abs_filename, item.expanded)
+      self.watches[item.project]:watch(item.abs_filename, true)
     end
   end
 end
@@ -565,7 +651,7 @@ local node = core.root_view:get_active_node()
 view.node = node:split("left", view, {x = true}, true)
 
 -- The toolbarview plugin is special because it is plugged inside
--- a treeview pane which is itelf provided in a plugin.
+-- a treeview pane which is itself provided in a plugin.
 -- We therefore break the usual plugin's logic that would require each
 -- plugin to be independent of each other. In addition it is not the
 -- plugin module that plug itself in the active node but it is plugged here
@@ -595,8 +681,8 @@ end
 core.add_thread(function()
   while true do
     for k,v in pairs(view.watches) do
-      v:check(function(directory)
-        view.cache[directory] = nil
+      v:check(function()
+        view:invalidate_cache()
       end)
     end
     coroutine.yield(0.1)
@@ -715,12 +801,12 @@ command.add(nil, {
 
   ["treeview:toggle-hidden"] = function()
     view.show_hidden = not view.show_hidden
-    view.cache = {}
+    view:invalidate_cache()
   end,
 
   ["treeview:toggle-ignored"] = function()
     view.show_ignored = not view.show_ignored
-    view.cache = {}
+    view:invalidate_cache()
   end,
 
   ["treeview:toggle-focus"] = function()
@@ -1142,6 +1228,16 @@ config.plugins.treeview.config_spec = {
     end
   },
   {
+    label = "Show File Count",
+    description = "Show file count aside directories.",
+    path = "show_file_count",
+    type = "toggle",
+    default = false,
+    on_apply = function(value)
+      view.show_file_count = value
+    end,
+  },
+  {
     label = "Show Hidden",
     description = "Show hidden files and directories.",
     path = "show_hidden",
@@ -1149,7 +1245,7 @@ config.plugins.treeview.config_spec = {
     default = false,
     on_apply = function(value)
       view.show_hidden = value
-      view.cache = {}
+      view:invalidate_cache()
     end
   },
   {
@@ -1160,7 +1256,7 @@ config.plugins.treeview.config_spec = {
     default = false,
     on_apply = function(value)
       view.show_ignored = value
-      view.cache = {}
+      view:invalidate_cache()
     end
   },
   {
