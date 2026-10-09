@@ -1,4 +1,5 @@
 local command = require "core.command"
+local common = require "core.common"
 local config = require "core.config"
 local core = require "core"
 local Doc = require "core.doc"
@@ -201,5 +202,110 @@ test.describe("core.doc", function()
 
     test.is_nil(restored.doc.suggested_extension)
     test.equal(restored.doc:get_name(), "unsaved")
+  end)
+end)
+
+test.describe("document saving", function()
+  test.before_each(function(context)
+    context.active_view = core.active_view
+    context.last_active_view = core.last_active_view
+    context.next_active_view = core.next_active_view
+    context.enter = core.command_view.enter
+    context.get_views = core.get_views_referencing_doc
+    context.path = core.temp_filename(".txt")
+    context.save_as_path = core.temp_filename(".txt")
+    local file = assert(io.open(context.path, "wb"))
+    file:write("original\n")
+    file:close()
+    context.doc = Doc(context.path, context.path)
+    context.doc:insert(1, 1, "edited ")
+    core.command_view.enter = function(_, label, options)
+      context.prompt, context.options = label, options
+    end
+  end)
+
+  test.after_each(function(context)
+    core.command_view.enter = context.enter
+    core.get_views_referencing_doc = context.get_views
+    core.active_view = context.active_view
+    core.last_active_view = context.last_active_view
+    core.next_active_view = context.next_active_view
+    context.doc:on_close()
+    os.remove(context.path)
+    os.remove(context.save_as_path)
+  end)
+
+  local function read_file(path)
+    local file = assert(io.open(path, "rb"))
+    local text = file:read("*a")
+    file:close()
+    return text
+  end
+
+  for _, class in ipairs { DocView, DocView:extend() } do
+    for _, option in ipairs {
+      { label = "unset" },
+      { label = "false", value = false },
+      { label = "true", value = true }
+    } do
+      local name = class == DocView and "DocView" or "derived DocView"
+      test.test(name .. " saving with disable_save " .. option.label, function(context)
+        local view = class(context.doc)
+        view.disable_save = option.value
+        core.active_view = view
+
+        if option.value then
+          for _, named in ipairs { true, false } do
+            if not named then context.doc:set_filename(nil, nil) end
+            for _, cmd in ipairs { "doc:save", "doc:save-as" } do
+              test.not_ok(command.is_valid(cmd))
+              test.not_ok(command.perform(cmd))
+              test.is_nil(context.prompt)
+              test.equal(core.active_view, view)
+              test.equal(read_file(context.path), "original\n")
+              test.ok(context.doc:is_dirty())
+            end
+          end
+        else
+          test.ok(command.perform("doc:save"))
+          test.is_nil(context.prompt)
+          test.equal(read_file(context.path), "edited original\n")
+          test.not_ok(context.doc:is_dirty())
+
+          test.ok(command.perform("doc:save-as"))
+          test.equal(context.prompt, "Save As")
+          context.options.submit(context.save_as_path)
+          test.equal(read_file(context.save_as_path), "edited original\n")
+          test.equal(
+            common.normalize_path(context.doc.abs_filename),
+            common.normalize_path(context.save_as_path)
+          )
+        end
+      end)
+    end
+  end
+
+  test.test("disable_save leaves direct document saving available", function(context)
+    local view = DocView(context.doc)
+    view.disable_save = true
+    core.active_view = view
+    context.doc:save()
+    test.equal(read_file(context.path), "edited original\n")
+    test.not_ok(context.doc:is_dirty())
+  end)
+
+  test.test("disable_save leaves Save And Close available", function(context)
+    local view = DocView(context.doc)
+    view.disable_save = true
+    core.active_view = view
+    core.get_views_referencing_doc = function() return { view } end
+    local closed = false
+    view:try_close(function() closed = true end)
+    test.equal(context.prompt, "Unsaved Changes; Confirm Close")
+    test.not_ok(closed)
+    context.options.submit("", { text = "Save And Close" })
+    test.ok(closed)
+    test.equal(read_file(context.path), "edited original\n")
+    test.not_ok(context.doc:is_dirty())
   end)
 end)

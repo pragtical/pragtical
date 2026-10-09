@@ -8,6 +8,7 @@ local DocView = require "core.docview"
 local Project = require "core.project"
 local projectsearch = require "plugins.projectsearch"
 local SearchReplaceList = require "widget.searchreplacelist"
+local Doc = require "core.doc"
 
 local split_click_modifier = PLATFORM == "Mac OS X" and "cmd" or "ctrl"
 
@@ -111,6 +112,64 @@ local function get_open_doc_view(path)
     end
   end
 end
+
+test.describe("projectsearch saving", function()
+  test.before_each(function(context)
+    context.active_view = core.active_view
+    context.last_active_view = core.last_active_view
+    context.next_active_view = core.next_active_view
+    context.enter = core.command_view.enter
+    context.modkeys = keymap.modkeys
+    context.path = core.temp_filename(".txt")
+    write_file(context.path, "original\n")
+    context.doc = Doc(context.path, context.path)
+    context.doc:insert(1, 1, "edited ")
+    core.set_active_view(DocView(context.doc))
+    context.view = projectsearch.ResultsView(nil, "needle", "plain", nil, nil, "replacement")
+    context.view.filters_toggle:set_toggle(true)
+    context.view:show()
+    core.command_view.enter = function() context.prompted = true end
+    keymap.modkeys = { [PLATFORM == "Mac OS X" and "cmd" or "ctrl"] = true }
+  end)
+
+  test.after_each(function(context)
+    if context.view then
+      context.view:swap_active_child()
+      context.view:hide()
+    end
+    core.command_view.enter = context.enter
+    keymap.modkeys = context.modkeys
+    core.active_view = context.active_view
+    core.last_active_view = context.last_active_view
+    core.next_active_view = context.next_active_view
+    context.doc:on_close()
+    os.remove(context.path)
+  end)
+
+  for _, field in ipairs { "find_text", "replace_text", "includes_text", "excludes_text" } do
+    test.test("Save and Save As ignore " .. field, function(context)
+      local input = context.view[field]
+      input:set_text("needle")
+      context.view:swap_active_child(input)
+      test.equal(core.active_view, input.textview)
+
+      for _, save_as in ipairs { false, true } do
+        keymap.modkeys.shift = save_as
+        test.not_ok(keymap.on_key_pressed("s"))
+        test.not_ok(command.perform(save_as and "doc:save-as" or "doc:save"))
+        test.is_nil(context.prompted)
+        test.equal(core.active_view, input.textview)
+        test.is_nil(input.textview.doc.filename)
+        test.equal(input:get_text(), "needle")
+        test.ok(context.doc:is_dirty())
+        local file = assert(io.open(context.path, "rb"))
+        local text = file:read("*a")
+        file:close()
+        test.equal(text, "original\n")
+      end
+    end)
+  end
+end)
 
 test.describe("projectsearch", function()
   test.before_each(function(context)

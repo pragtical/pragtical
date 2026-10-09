@@ -29,6 +29,7 @@ local IME_STATE = {line1 = 0, col1 = 0, line2 = 0, col2 = 0, w = 0, h = 0}
 ---@overload fun(doc: core.doc):core.docview
 ---@field super core.view
 ---@field doc core.doc
+---@field disable_save boolean? Disable the Save and Save As commands when true.
 ---@field font string
 ---@field last_x_offset core.docview.position
 ---@field ime_selection core.docview.ime_selection
