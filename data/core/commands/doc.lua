@@ -14,6 +14,12 @@ local function doc()
 end
 
 
+local function can_save()
+  local view = core.active_view
+  return view:extends(DocView) and not view.disable_save, view
+end
+
+
 local function doc_multiline_selections(sort)
   local iter, state, idx, line1, col1, line2, col2 = doc():get_selections(sort)
   return function()
@@ -624,38 +630,6 @@ local commands = {
     core.blink_reset() -- to show the cursor has changed edit modes
   end,
 
-  ["doc:save-as"] = function(dv)
-    local last_doc = core.last_active_view and core.last_active_view.doc
-    local text
-    if dv.doc.filename then
-      text = dv.doc.filename
-    elseif last_doc and last_doc.filename then
-      local dirname, filename = core.last_active_view.doc.abs_filename:match("(.*)[/\\](.+)$")
-      text = core.normalize_to_project_dir(dirname) .. PATHSEP
-      if text == core.root_project().path then text = "" end
-    end
-    if not dv.doc.filename and dv.doc.suggested_extension then
-      text = (text or "") .. dv.doc:get_name()
-    end
-    core.command_view:enter("Save As", {
-      text = text,
-      submit = function(filename)
-        save(common.home_expand(filename))
-      end,
-      suggest = function (text)
-        return common.home_encode_list(common.path_suggest(common.home_expand(text)))
-      end
-    })
-  end,
-
-  ["doc:save"] = function(dv)
-    if dv.doc.filename then
-      save()
-    else
-      command.perform("doc:save-as")
-    end
-  end,
-
   ["doc:reload"] = function(dv)
     dv.doc:reload()
   end,
@@ -827,3 +801,37 @@ commands["doc:move-to-next-char"] = function(dv)
 end
 
 command.add("core.docview", commands)
+
+command.add(can_save, {
+  ["doc:save-as"] = function(dv)
+    local last_doc = core.last_active_view and core.last_active_view.doc
+    local text
+    if dv.doc.filename then
+      text = dv.doc.filename
+    elseif last_doc and last_doc.filename then
+      local dirname, filename = core.last_active_view.doc.abs_filename:match("(.*)[/\\](.+)$")
+      text = core.normalize_to_project_dir(dirname) .. PATHSEP
+      if text == core.root_project().path then text = "" end
+    end
+    if not dv.doc.filename and dv.doc.suggested_extension then
+      text = (text or "") .. dv.doc:get_name()
+    end
+    core.command_view:enter("Save As", {
+      text = text,
+      submit = function(filename)
+        save(common.home_expand(filename))
+      end,
+      suggest = function (text)
+        return common.home_encode_list(common.path_suggest(common.home_expand(text)))
+      end
+    })
+  end,
+
+  ["doc:save"] = function(dv)
+    if dv.doc.filename then
+      save()
+    else
+      command.perform("doc:save-as")
+    end
+  end,
+})
