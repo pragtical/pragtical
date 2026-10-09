@@ -298,13 +298,15 @@ end
 function RootView:on_mouse_released(button, x, y, ...)
   if self.grab then
     if self.grab.button == button then
-      local grabbed_view = self.grab.view
+      local grab = self.grab
+      local grabbed_view = grab.view
       grabbed_view:on_mouse_released(button, x, y, ...)
-      self:ungrab_mouse(button)
+      -- The release callback may clear or replace this grab.
+      if self.grab == grab then self:ungrab_mouse(button) end
 
       -- If the mouse was released over a different view, send it the mouse position
       local hovered_view = self.root_node:get_child_overlapping_point(x, y)
-      if grabbed_view ~= hovered_view then
+      if not self.grab and grabbed_view ~= hovered_view then
         self:on_mouse_moved(x, y, 0, 0)
       end
     end

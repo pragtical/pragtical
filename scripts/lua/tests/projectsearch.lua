@@ -171,6 +171,65 @@ test.describe("projectsearch saving", function()
   end
 end)
 
+test.describe("projectsearch mouse selection", function()
+  test.before_each(function(context)
+    context.active_view = core.active_view
+    context.last_active_view = core.last_active_view
+    context.next_active_view = core.next_active_view
+    context.modkeys = keymap.modkeys
+    context.transitions = config.transitions
+    keymap.modkeys = {}
+    config.transitions = false
+    context.view = projectsearch.ResultsView(nil, "", "plain", nil, nil, "")
+    context.view.filters_toggle:set_toggle(true)
+    context.view:show()
+    context.node = core.root_view:get_primary_node()
+    context.node:add_view(context.view)
+    for _ = 1, 3 do core.root_view:update() end
+  end)
+
+  test.after_each(function(context)
+    context.view:hide()
+    context.view:destroy_childs()
+    context.node:remove_view(core.root_view.root_node, context.view)
+    keymap.modkeys = context.modkeys
+    config.transitions = context.transitions
+    core.active_view = context.active_view
+    core.last_active_view = context.last_active_view
+    core.next_active_view = context.next_active_view
+  end)
+
+  for _, field in ipairs { "find_text", "replace_text", "includes_text", "excludes_text" } do
+    test.test(field .. " retains captured edge selection through root events", function(context)
+      local input = context.view[field]
+      local view = input.textview
+      test.ok(input:is_visible())
+      input:set_text(string.rep("aé界 long input ", 80))
+      view.doc:set_selection(1, 1)
+      view.scroll.x, view.scroll.to.x = 0, 0
+      input:update()
+      local x, y = view:get_line_screen_position(1, 2)
+      y = y + view:get_line_height() / 2
+      core.on_event("mousepressed", "left", x, y, 1)
+      test.equal(core.active_view, view)
+      local right = input.position.x + input.size.x + 40
+      core.on_event("mousemoved", right, y, right - x, 0)
+      for _ = 1, 8 do input:update() end
+      local _, col, _, anchor = view.doc:get_selection()
+      test.ok(col > 2)
+      test.equal(anchor, 2)
+      test.ok(view.scroll.x > 0)
+      core.on_event("mousereleased", "left", right, y)
+      test.is_nil(core.root_view.grab)
+      test.is_nil(context.view.captured_widget)
+      test.not_ok(context.view.mouse_is_pressed)
+      test.equal(core.active_view, view)
+      test.not_ok(command.perform("doc:save"))
+      test.not_ok(command.perform("doc:save-as"))
+    end)
+  end
+end)
+
 test.describe("projectsearch", function()
   test.before_each(function(context)
     context.old_projects = core.projects
