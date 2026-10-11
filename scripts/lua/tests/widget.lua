@@ -74,6 +74,58 @@ test.describe("widget mouse events", function()
     end)
   end
 
+  test.test("leave reaches nested controls once when switching containers or leaving the view", function(context)
+    local root = root_widget(context)
+    local first_container = child_widget(root)
+    first_container:set_size(250, 180)
+    local second_container = child_widget(root, 320)
+    second_container:set_size(250, 180)
+    local buttons = { Button(first_container, "First"), Button(second_container, "Second") }
+    local leaves = { 0, 0 }
+    for index, button in ipairs(buttons) do
+      button:set_position(10, 10)
+      button.on_mouse_leave = function(self, ...)
+        leaves[index] = leaves[index] + 1
+        Button.on_mouse_leave(self, ...)
+      end
+    end
+    root:update()
+    root:on_mouse_moved(buttons[1].position.x + 5, buttons[1].position.y + 5, 0, 0)
+    test.ok(buttons[1].mouse_is_hovering)
+    root:on_mouse_moved(buttons[2].position.x + 5, buttons[2].position.y + 5, 0, 0)
+    test.equal(leaves[1], 1)
+    test.not_ok(buttons[1].mouse_is_hovering)
+    test.ok(buttons[2].mouse_is_hovering)
+    root:on_mouse_left()
+    test.equal(leaves[1], 1)
+    test.equal(leaves[2], 1)
+    test.not_ok(buttons[2].mouse_is_hovering)
+    root:on_mouse_left()
+    test.equal(leaves[2], 1)
+  end)
+
+  test.test("a pressed nested button leaves once across an outside release", function(context)
+    local root = root_widget(context, true)
+    local container = child_widget(root)
+    container:set_size(250, 180)
+    local button = Button(container, "Click")
+    local leaves = 0
+    button.on_mouse_leave = function(self, ...)
+      leaves = leaves + 1
+      Button.on_mouse_leave(self, ...)
+    end
+    root:update()
+    local x, y = button.position.x + 5, button.position.y + 5
+    core.on_event("mousemoved", x, y, 0, 0)
+    core.on_event("mousepressed", "left", x, y, 1)
+    core.on_event("mousemoved", 900, 700, 0, 0)
+    test.equal(leaves, 1)
+    core.on_event("mousereleased", "left", 900, 700)
+    test.equal(leaves, 1)
+    test.not_ok(button.mouse_is_hovering)
+    test.is_nil(core.root_view.grab)
+  end)
+
   test.test("release goes to the pressed button outside its bounds and clears the chain", function(context)
     local root = root_widget(context)
     local container = child_widget(root)
@@ -279,6 +331,73 @@ test.describe("widget mouse events", function()
     test.ok(list.scroll.to.y > 0)
     core.on_event("mousereleased", "left", 900, 700)
     test.not_ok(list.v_scrollbar.dragging)
+    test.is_nil(root.captured_widget)
+  end)
+
+  for _, direction in ipairs { "v", "h" } do
+    for _, alignment in ipairs { "s", "e" } do
+      test.test(direction .. " " .. alignment .. " child scrollbar takes over after hovering its parent", function(context)
+        local root = root_widget(context)
+        root.scrollable = true
+        local container = child_widget(root)
+        container:set_size(560, 360)
+        local child = Widget(container)
+        child:set_size(560, 360)
+        child.scrollable = true
+        local size_method = direction == "v" and "get_scrollable_size" or "get_h_scrollable_size"
+        root[size_method] = function() return 1200 end
+        child[size_method] = function() return 1200 end
+        local parent_bar = direction == "v" and root.v_scrollbar or root.h_scrollbar
+        local child_bar = direction == "v" and child.v_scrollbar or child.h_scrollbar
+        for _, bar in ipairs { parent_bar, child_bar } do
+          bar.alignment = alignment
+          bar.contracted_size, bar.expanded_size = 4, 12
+          bar.contracted_margin, bar.expanded_margin = 8, 12
+        end
+        root:update()
+        local px, py, pw, ph = parent_bar:get_thumb_rect()
+        root:on_mouse_moved(px + pw / 2, py + ph / 2, 0, 0)
+        root:update()
+        test.ok(parent_bar.hovering.thumb)
+        test.equal(parent_bar.expand_percent, 1)
+        local x, y, w, h = child_bar:get_thumb_rect()
+        x, y = x + w / 2, y + h / 2
+        root:on_mouse_moved(x, y, 0, 0)
+        test.not_ok(parent_bar.hovering.track)
+        test.ok(child_bar.hovering.thumb)
+        root:on_mouse_pressed("left", x, y, 1)
+        test.ok(child_bar.dragging)
+        test.not_ok(parent_bar.dragging)
+        test.equal(root.captured_widget, child)
+        local dx, dy = direction == "h" and 80 or 0, direction == "v" and 80 or 0
+        root:on_mouse_moved(x + dx, y + dy, dx, dy)
+        test.ok(child.scroll.to[direction == "v" and "y" or "x"] > 0)
+        test.equal(root.scroll.to.x, 0)
+        test.equal(root.scroll.to.y, 0)
+        root:on_mouse_released("left", 900, 700)
+        test.not_ok(child_bar.dragging)
+        test.is_nil(root.captured_widget)
+      end)
+    end
+  end
+
+  test.test("a parent's visible scrollbar stays clickable over child bounds", function(context)
+    local root = root_widget(context)
+    root.scrollable = true
+    root.get_scrollable_size = function() return 1200 end
+    local child = Widget(root)
+    child:set_size(600, 400)
+    root.v_scrollbar:set_forced_status("expanded")
+    root:update()
+    local x, y, w, h = root.v_scrollbar:get_thumb_rect()
+    x, y = x + w / 2, y + h / 2
+    test.ok(child:mouse_on_top(x, y))
+    root:on_mouse_pressed("left", x, y, 1)
+    test.ok(root.v_scrollbar.dragging)
+    test.equal(core.root_view.grab.view, root)
+    test.equal(root.captured_button, "left")
+    root:on_mouse_released("left", 900, 700)
+    test.not_ok(root.v_scrollbar.dragging)
     test.is_nil(root.captured_widget)
   end)
 

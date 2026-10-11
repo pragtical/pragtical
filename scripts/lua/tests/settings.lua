@@ -23,6 +23,121 @@ local function find_child(view, class)
   end
 end
 
+test.describe("installed plugin layout", function()
+  test.before_each(function(context)
+    context.transitions = config.transitions
+    config.transitions = false
+    context.view = SettingsView()
+    context.view:show()
+    context.view:set_position(40, 40)
+    context.view:set_size(800, 600)
+    context.view.notebook:set_pane("plugins")
+    context.view.plugin_sections:toggle_pane("enable_disable", true)
+    for _ = 1, 20 do context.view:update() end
+  end)
+
+  test.after_each(function(context)
+    context.view:destroy()
+    config.transitions = context.transitions
+  end)
+
+  for _, status in ipairs { "expanded", "automatic" } do
+    test.it("clears child hover when moving to the " .. status .. " parent scrollbar", function(context)
+      local view = context.view
+      local pane = view.plugin_sections:get_pane("enable_disable")
+      local list = find_child(pane.container, WidgetList)
+      local parent_bar, child_bar = view.plugins.v_scrollbar, list.v_scrollbar
+      parent_bar:set_forced_status(status == "expanded" and status or false)
+      view:update()
+      local x, y, w, h = child_bar:get_thumb_rect()
+      view:on_mouse_moved(x + w / 2, y + h / 2, 0, 0)
+      view:update()
+      test.ok(child_bar.hovering.thumb)
+      test.equal(child_bar.expand_percent, 1)
+      x, y, w, h = parent_bar:get_thumb_rect()
+      view:on_mouse_moved(x + w / 2, y + h / 2, 0, 0)
+      test.ok(parent_bar.hovering.thumb)
+      test.not_ok(child_bar.hovering.track)
+      test.not_ok(child_bar.hovering.thumb)
+      test.not_ok(list.mouse_is_hovering)
+      view:update()
+      test.equal(child_bar.expand_percent, status == "expanded" and 1 or 0)
+      x, y, w, h = child_bar:get_thumb_rect()
+      view:on_mouse_moved(x + w / 2, y + h / 2, 0, 0)
+      view:update()
+      test.ok(child_bar.hovering.thumb)
+      test.equal(child_bar.expand_percent, 1)
+      view:on_mouse_left()
+      view:update()
+      test.not_ok(child_bar.hovering.track)
+      test.equal(child_bar.expand_percent, status == "expanded" and 1 or 0)
+    end)
+
+    test.it("keeps Installed toggles clear of " .. status .. " scrollbars", function(context)
+      local view = context.view
+      local pane = view.plugin_sections:get_pane("enable_disable")
+      local list = find_child(pane.container, WidgetList)
+      test.not_nil(list)
+      test.ok(list.content_height > list.size.y)
+      list.v_scrollbar:set_forced_status(status == "expanded" and status or false)
+      view:update()
+      if status == "automatic" then
+        local x, y, w = list.v_scrollbar:get_track_rect()
+        list.v_scrollbar:on_mouse_moved(x + w / 2, y + 10, 0, 0)
+        view:update()
+      end
+      local x = list.v_scrollbar:get_track_rect()
+      for _, entry in ipairs(list.items) do
+        if entry.row.visible then
+          local toggle = find_child(entry.row, Toggle)
+          test.not_nil(toggle)
+          test.ok(toggle.position.x + toggle:get_width() < x)
+          test.is_nil(list.v_scrollbar:overlaps(
+            toggle.position.x + toggle:get_width() - 1,
+            toggle.position.y + toggle:get_height() / 2
+          ))
+          test.equal(toggle.render_background, false)
+        end
+      end
+      list:filter(function(_, index) return index == 1 end)
+      view:update()
+      test.equal(list.items[1].row:get_width(), list.size.x)
+      test.equal(select(3, list.v_scrollbar:get_track_rect()), 0)
+    end)
+
+    test.it("drags the Installed scrollbar after hovering the " .. status .. " parent", function(context)
+      local view = context.view
+      local pane = view.plugin_sections:get_pane("enable_disable")
+      local list = find_child(pane.container, WidgetList)
+      local parent_bar, child_bar = view.plugins.v_scrollbar, list.v_scrollbar
+      parent_bar:set_forced_status(status == "expanded" and status or false)
+      view:update()
+      local x, y, w, h = parent_bar:get_thumb_rect()
+      test.ok(w > 0 and h > 0)
+      view:on_mouse_moved(x + w / 2, y + h / 2, 0, 0)
+      view:update()
+      test.ok(parent_bar.hovering.thumb)
+      test.equal(parent_bar.expand_percent, 1)
+      x, y, w, h = child_bar:get_thumb_rect()
+      x, y = x + w - 1, y + h / 2
+      view:on_mouse_moved(x, y, 0, 0)
+      test.not_ok(parent_bar.hovering.track)
+      test.ok(child_bar.hovering.thumb)
+      local parent_scroll = view.plugins.scroll.to.y
+      view:on_mouse_pressed("left", x, y, 1)
+      test.equal(view.captured_widget, list)
+      test.ok(child_bar.dragging)
+      test.not_ok(parent_bar.dragging)
+      view:on_mouse_moved(x, y + 60, 0, 60)
+      test.ok(list.scroll.to.y > 0)
+      test.equal(view.plugins.scroll.to.y, parent_scroll)
+      view:on_mouse_released("left", 900, 700)
+      test.not_ok(child_bar.dragging)
+      test.is_nil(view.captured_widget)
+    end)
+  end
+end)
+
 test.describe("settings renderer preference", function()
   local option
   for _, candidate in ipairs(settings.core.Graphics) do
