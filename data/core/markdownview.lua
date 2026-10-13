@@ -4726,6 +4726,12 @@ function MarkdownView:on_mouse_moved(x, y, dx, dy)
   self.cursor = url and "hand" or "ibeam"
 end
 
+---Cancel selection without triggering a release action.
+function MarkdownView:on_mouse_capture_lost()
+  self.selecting = false
+  MarkdownView.super.on_mouse_capture_lost(self)
+end
+
 ---Clears hover state when the mouse leaves the preview.
 function MarkdownView:on_mouse_left()
   MarkdownView.super.on_mouse_left(self)

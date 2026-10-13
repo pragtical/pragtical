@@ -602,12 +602,10 @@ test.describe("projectsearch", function()
     )
     test.is_nil(get_open_doc_view(path))
 
-    test.ok(view:on_mouse_moved(
-      menu.position.x + 1, menu.position.y + 1, 0, 0
-    ))
+    core.on_event("mousemoved", menu.position.x + 1, menu.position.y + 1, 0, 0)
     test.equal(menu.selected, 1)
-    test.ok(view:on_mouse_moved(-1, -1, 0, 0))
-    test.ok(view:on_mouse_pressed("left", -1, -1, 1))
+    core.on_event("mousemoved", -1, -1, 0, 0)
+    core.on_event("mousepressed", "left", -1, -1, 1)
     test.equal(menu.show_context_menu, false)
     test.is_nil(get_open_doc_view(path))
   end)

@@ -10,6 +10,12 @@ local config = {}
 ---@type "default" | "surface" | "sdlgpu" | "sdlrenderer"
 config.renderer = "default"
 
+---Visibility of the responsive application menu bar.
+---
+---Defaults to false.
+---@type boolean
+config.show_menubar = false
+
 ---Keep the maximum FPS locked to current display refresh rate.
 ---
 ---Defaults to true.
@@ -191,6 +197,14 @@ config.max_tabs = 8
 ---@type integer
 config.max_visible_commands = 10
 
+---Placement of command prompts and the command palette.
+---Changes apply the next time a prompt opens. Bottom and top reserve an input
+---bar; center floats the input and suggestions without resizing editor panes.
+---
+---The default is "bottom".
+---@type "bottom" | "top" | "center"
+config.commandview_position = "bottom"
+
 ---The maximum amount of recent files to keep on history.
 ---
 ---The default is 5.
@@ -303,6 +317,8 @@ config.transitions = true
 ---Enable/disable individual transitions.
 ---These values are overriden by `config.transitions`.
 config.disabled_transitions = {
+  ---Disables floating view slides.
+  floating = false,
   ---Disables scrolling transitions.
   scroll = false,
   ---Disables transitions for CommandView's suggestions list.
@@ -311,6 +327,8 @@ config.disabled_transitions = {
   contextmenu = false,
   ---Disables transitions when clicking on log items in LogView.
   logview = false,
+  ---Disables transitions for showing/hiding the menu bar.
+  menubar = false,
   ---Disables transitions for showing/hiding the Nagbar.
   nagbar = false,
   ---Disables transitions when scrolling the tab bar.

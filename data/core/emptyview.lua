@@ -284,7 +284,6 @@ function EmptyView:draw()
   if not EmptyView.super.draw(self) then return end
   local _, oy = self:get_content_offset()
   draw_text(self, self.text_x, self.text_y + oy)
-  EmptyView.recent_projects_menu:draw()
   self:draw_scrollbar()
 end
 
@@ -300,14 +299,8 @@ function EmptyView:on_mouse_pressed(button, x, y, clicks)
   return handled or processed
 end
 
-function EmptyView:on_mouse_moved(x, y, dx, dy)
-  if EmptyView.recent_projects_menu:on_mouse_moved(x, y) then return true end
-  return EmptyView.super.on_mouse_moved(self, x, y, dx, dy)
-end
-
 function EmptyView:update()
   if not EmptyView.super.update(self) then return end
-  EmptyView.recent_projects_menu:update()
 
   self.background_color = style.background
 
@@ -430,14 +423,26 @@ command.add(recent_projects_predicate, {
 })
 
 EmptyView.recent_projects_menu:register(recent_project_predicate, {
-  { text = "Open in New Instance", command = "welcome:open-recent-project-new-instance" },
-  { text = "Add to Current Instance", command = "welcome:add-recent-project-current-instance" },
+  {
+    text = "Open in New Instance",
+    command = "welcome:open-recent-project-new-instance"
+  },
+  {
+    text = "Add to Current Instance",
+    command = "welcome:add-recent-project-current-instance"
+  },
   ContextMenu.DIVIDER,
-  { text = "Remove", command = "welcome:remove-recent-project" }
+  {
+    text = "Remove",
+    command = "welcome:remove-recent-project"
+  }
 })
 
 EmptyView.recent_projects_menu:register(recent_projects_predicate, {
-  { text = "Remove All", command = "welcome:remove-all-recent-projects" }
+  {
+    text = "Remove All",
+    command = "welcome:remove-all-recent-projects"
+  }
 })
 
 return EmptyView

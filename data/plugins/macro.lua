@@ -68,3 +68,21 @@ keymap.add {
   ["ctrl+shift+;"] = "macro:toggle-record",
   ["ctrl+;"] = "macro:play",
 }
+
+core.menu_view:register({ "tools" }, {
+  {
+    id = "macros",
+    text = "Macros",
+    items = {
+      {
+        id = "record",
+        text = "Record Macro",
+        command = "macro:toggle-record",
+        ---Reflect macro recording state when opening or visiting this entry.
+        ---@return boolean checked Whether a macro is being recorded
+        checked = function() return state == "recording" end
+      },
+      { id = "play", text = "Play Macro", command = "macro:play" }
+    }
+  }
+}, "macro")

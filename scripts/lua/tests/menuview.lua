@@ -1,0 +1,475 @@
+local core = require "core"
+local common = require "core.common"
+local config = require "core.config"
+local command = require "core.command"
+local keymap = require "core.keymap"
+local View = require "core.view"
+local RootView = require "core.rootview"
+local MenuView = require "core.menuview"
+local ContextMenu = require "core.contextmenu"
+local test = require "core.test"
+
+local menu_modifier = PLATFORM == "Mac OS X" and "left option" or "left alt"
+
+test.describe("application menu", function()
+  test.before_each(function(context)
+    context.root, context.active, context.last, context.next, context.bar = core.root_view, core.active_view, core.last_active_view, core.next_active_view, core.menu_view
+    context.transitions, context.enabled = config.transitions, config.show_menubar
+    context.fps, context.config_fps = core.fps, config.fps
+    context.animation_type, context.animation_rate = config.animation_type, config.animation_rate
+    context.menu_transition = config.disabled_transitions.menubar
+    context.draw_text = common.draw_text
+    context.open_in_system = common.open_in_system
+    context.modkeys = keymap.modkeys
+    keymap.modkeys = {}
+    core.root_view = RootView(); core.root_view.root_node.is_primary_node = true
+    core.root_view.size.x, core.root_view.size.y = 900, 600
+    config.transitions, config.show_menubar = false, true
+    core.menu_view = MenuView()
+    core.root_view.root_node:split("up", core.menu_view, { y = true })
+    context.view = View()
+    core.root_view:get_primary_node():add_view(context.view)
+    core.root_view:update()
+    core.root_view:update()
+    context.handles = {}
+    context.commands = {}
+  end)
+  test.after_each(function(context)
+    core.menu_view.menu:hide()
+    for _, handle in ipairs(context.handles) do core.menu_view:unregister(handle) end
+    for _, entry in ipairs(context.commands) do command.map[entry.name] = entry.previous end
+    core.root_view, core.active_view, core.last_active_view, core.next_active_view, core.menu_view = context.root, context.active, context.last, context.next, context.bar
+    config.transitions, config.show_menubar = context.transitions, context.enabled
+    core.fps, config.fps = context.fps, context.config_fps
+    config.animation_type, config.animation_rate = context.animation_type, context.animation_rate
+    config.disabled_transitions.menubar = context.menu_transition
+    common.draw_text = context.draw_text
+    common.open_in_system = context.open_in_system
+    keymap.modkeys = context.modkeys
+    if context.opener_binding then
+      local binding = context.opener_binding
+      keymap.map[binding.stroke] = binding.commands
+      keymap.reverse_map["menu-bar:open"] = binding.shortcuts
+    end
+  end)
+
+  test.test("falls back to one button when all labels no longer fit", function()
+    test.not_ok(core.menu_view.compact)
+    core.root_view.size.x = 80; core.root_view:update(); core.root_view:update()
+    test.ok(core.menu_view.compact)
+    local count = 0
+    for _, text in core.menu_view:each_label() do count = count + 1; test.equal(text, "Menu") end
+    test.equal(count, 1)
+    core.menu_view:open()
+    test.equal(#core.menu_view.menu.items, #core.menu_view.items)
+  end)
+
+  test.test("bar clicks keep document command focus", function(context)
+    core.on_event("mousepressed", "left", 10, 10, 1)
+    core.on_event("mousereleased", "left", 10, 10)
+    test.equal(core.active_view, context.view)
+    test.equal(core.menu_view.menu.items[1].command, "core:new-doc")
+  end)
+
+  test.test("top-level arrows leave entries unselected until Down", function(context)
+    core.on_event("keypressed", menu_modifier)
+    core.on_event("keypressed", "m")
+    core.on_event("keyreleased", "m")
+    core.on_event("keyreleased", menu_modifier)
+    local bar, menu = core.menu_view, core.menu_view.menu
+    test.ok(menu.show_context_menu)
+    test.equal(bar:entries()[bar.active_menu].id, "file")
+    test.equal(menu.selected, -1)
+    for _, id in ipairs { "edit", "search", "view", "tools", "help", "file" } do
+      core.on_event("keypressed", "right")
+      core.root_view:update()
+      test.equal(bar:entries()[bar.active_menu].id, id)
+      test.equal(menu.selected, -1)
+      test.is_nil(menu.child_menu)
+    end
+    for _, id in ipairs { "help", "tools", "view" } do
+      core.on_event("keypressed", "left")
+      test.equal(bar:entries()[bar.active_menu].id, id)
+      test.equal(menu.selected, -1)
+      test.is_nil(menu.child_menu)
+    end
+    core.on_event("keypressed", "down")
+    test.equal(menu:get_item_selected().id, "split")
+    core.on_event("keypressed", "right")
+    test.equal(bar:entries()[bar.active_menu].id, "view")
+    test.ok(menu.child_menu.show_context_menu)
+    test.equal(core.active_view, context.view)
+  end)
+
+  test.test("the menu shortcut closes a shown application menu", function(context)
+    core.on_event("keypressed", menu_modifier)
+    core.on_event("keypressed", "m")
+    test.ok(core.menu_view.menu.show_context_menu)
+    core.on_event("keypressed", "m")
+    test.not_ok(core.menu_view.menu.show_context_menu)
+    core.on_event("keyreleased", "m")
+    core.on_event("keyreleased", menu_modifier)
+    test.equal(core.active_view, context.view)
+  end)
+
+  test.test("a configured opener closes the application menu", function(context)
+    local stroke = "f9"
+    context.opener_binding = {
+      stroke = stroke,
+      commands = keymap.map[stroke],
+      shortcuts = keymap.reverse_map["menu-bar:open"]
+    }
+    keymap.map[stroke] = nil
+    keymap.reverse_map["menu-bar:open"] = {
+      table.unpack(context.opener_binding.shortcuts or {})
+    }
+    keymap.add { [stroke] = "menu-bar:open" }
+    core.on_event("keypressed", stroke)
+    test.ok(core.menu_view.menu.show_context_menu)
+    core.on_event("keypressed", stroke)
+    test.not_ok(core.menu_view.menu.show_context_menu)
+    test.equal(core.active_view, context.view)
+  end)
+
+  test.test("Option-modified bindings dismiss menus and continue to command dispatch", function()
+    core.menu_view:open()
+    test.not_ok(core.menu_view.menu:on_key_pressed("option+shift+m"))
+    test.not_ok(core.menu_view.menu.show_context_menu)
+  end)
+
+  test.test("uses live command predicates and bindings", function(context)
+    local name, stroke = "appmenu-test:run", "ctrl+alt+9"
+    local previous, previous_binding = command.map[name], keymap.map[stroke]
+    local previous_reverse = keymap.reverse_map[name]
+    local enabled, performed = false, 0
+    command.add(function() return enabled and core.active_view == context.view end, {
+      [name] = function() performed = performed + 1 end
+    })
+    keymap.add { [stroke] = name }
+    local menu = core.menu_view.menu
+    menu:show_items({ { id = "run", text = "Run", command = name } }, 0, 30, { disabled = true })
+    test.equal(menu.items[1].enabled, false)
+    test.equal(menu.items[1].info, keymap.get_binding(name))
+    menu:focus_next(); test.equal(menu.selected, -1)
+    enabled = true; menu:update(); menu:focus_next()
+    test.equal(menu.selected, 1)
+    core.on_event("keypressed", "return")
+    test.equal(performed, 1); test.equal(core.active_view, context.view)
+    command.map[name], keymap.map[stroke], keymap.reverse_map[name] = previous, previous_binding, previous_reverse
+  end)
+
+  test.test("registers nested plugin entries and removes only their contribution", function(context)
+    local entries = {
+      { id = "plugin-test", text = "Plugin Test", items = {
+        { id = "deep", text = "Deeper", items = { { id = "action", text = "Action", command = function() end } } }
+      } }, MenuView.DIVIDER
+    }
+    local handle = core.menu_view:register({ "tools" }, entries)
+    context.handles[#context.handles + 1] = handle
+    local tools = core.menu_view.items[5].items
+    test.equal(tools[#tools - 1].id, "plugin-test")
+    local length = #tools
+    core.menu_view:unregister(handle); core.menu_view:unregister(handle)
+    test.equal(#tools, length - 2)
+  end)
+
+  test.test("invalid menu fields identify their nested registration path", function()
+    for _, entry in ipairs {
+      { id = "bad", text = "Bad", command = 42 },
+      { id = "bad", text = "Bad", items = true },
+      { id = "bad", text = "Bad", checked = "yes" },
+      { id = "bad", text = "Bad", visible = 1 },
+      { id = "bad", text = false },
+      { id = "bad", text = "Bad", command = function() end, items = {} }
+    } do
+      test.error(function()
+        core.menu_view:register({ "tools" }, {
+          { id = "plugin", text = "Plugin", items = { entry } }
+        })
+      end, "tools/plugin/bad")
+    end
+    test.error(function() core.menu_view:register("tools", {}) end, "path")
+    test.error(function() core.menu_view:register({ false }, {}) end, "path IDs")
+    test.error(function() core.menu_view:register({ "tools" }, { false }) end, "tools[1]")
+  end)
+
+  test.test("invalid named replacements preserve entries and registry revision", function(context)
+    local handle = core.menu_view:register({ "tools" }, {
+      { id = "replacement", text = "Original", command = function() end }
+    }, "validation-test")
+    context.handles[#context.handles + 1] = handle
+    local revision = core.menu_view.revision
+    test.error(function()
+      core.menu_view:register({ "tools" }, {
+        { id = "replacement", text = "Invalid", items = false }
+      }, "validation-test")
+    end, "submenu")
+    test.equal(core.menu_view.revision, revision)
+    test.equal(core.menu_view.registrations["validation-test"], handle)
+    test.equal(handle.target[#handle.target], handle.entries[1])
+  end)
+
+  test.test("core menus open without plugin registrations", function(context)
+    for i, group in ipairs(core.menu_view.items) do
+      core.menu_view:open(i)
+      test.ok(core.menu_view.menu.show_context_menu)
+      local function check(items)
+        for _, item in ipairs(items) do
+          if item.items then check(item.items) end
+          if type(item.command) == "string" then
+            test.not_nil(command.map[item.command], "Unknown core command: " .. item.command)
+            test.not_ok(item.command == "core:find-file")
+            local plugin_commands = {
+              treeview = true, toolbar = true, scale = true,
+              ["project-search"] = true, ["plugin-manager"] = true, ui = true
+            }
+            test.not_ok(plugin_commands[item.command:match("^(.-):")])
+          end
+        end
+      end
+      check(group.items)
+    end
+    test.same(core.menu_view.registrations, {})
+  end)
+
+  test.test("Help community links dispatch direct actions and preserve editor focus", function(context)
+    local opened = {}
+    common.open_in_system = function(url) opened[#opened + 1] = url end
+    for index, link in ipairs {
+      { id = "discord", url = "https://discord.gg/8V2yJtn3Fc" },
+      { id = "github", url = "https://github.com/pragtical" }
+    } do
+      core.menu_view:open(6)
+      core.root_view:update()
+      local menu, clicked = core.menu_view.menu, false
+      for _, item, x, y, w, h in menu:each_item() do
+        if item.id == link.id then
+          test.type(item.command, "function")
+          test.ok(item.enabled)
+          core.on_event("mousemoved", x + w / 2, y + h / 2, 0, 0)
+          core.on_event("mousepressed", "left", x + w / 2, y + h / 2, 1)
+          core.on_event("mousereleased", "left", x + w / 2, y + h / 2)
+          clicked = true
+          break
+        end
+      end
+      test.ok(clicked, "Missing Help link: " .. link.id)
+      test.equal(#opened, index)
+      test.equal(opened[index], link.url)
+      test.equal(core.active_view, context.view)
+      test.not_ok(menu.show_context_menu)
+    end
+  end)
+
+  test.test("keeps registrations and cached entries local to each view", function(context)
+    local bar, other = core.menu_view, MenuView()
+    local cached, other_cached = bar:entries(), other:entries()
+    local name = "appmenu-instance-test"
+    local function entries(text)
+      return { { id = name, text = text, items = {} } }
+    end
+    local handle = bar:register({}, entries("First"), name)
+    context.handles[#context.handles + 1] = handle
+    test.not_equal(bar:entries(), cached)
+    test.equal(other:entries(), other_cached)
+    test.equal(#other.items, #bar.items - 1)
+    test.is_nil(other.registrations[name])
+    local other_handle = other:register({}, entries("Second"), name)
+    test.not_equal(other:entries(), other_cached)
+    test.equal(bar.registrations[name], handle)
+    test.equal(other.registrations[name], other_handle)
+    other:unregister(other_handle)
+    test.equal(bar.registrations[name], handle)
+    test.equal(bar.items[#bar.items].text, "First")
+    test.not_equal(bar.items[1].items, other.items[1].items)
+  end)
+
+  test.test("loaded plugins register their own commands", function(context)
+    for _, name in ipairs {
+      "findfile", "projectsearch", "treeview", "scale", "settings",
+      "linewrapping", "detectindent", "codefold", "macro",
+      "plugin_manager", "trimwhitespace", "quote", "drawwhitespace"
+    } do
+      local handle = context.bar.registrations[name]
+      if package.loaded["plugins." .. name] then
+        test.not_nil(handle, "Missing menu registration for " .. name)
+        local function check(items)
+          for _, item in ipairs(items) do
+            if item.items then check(item.items) end
+            if item.command then test.not_nil(command.map[item.command]) end
+          end
+        end
+        check(handle.entries)
+      else
+        test.is_nil(handle, "Unloaded plugin contributed entries: " .. name)
+      end
+    end
+  end)
+
+  test.test("replaces named registrations without disturbing other plugins", function(context)
+    local name = "appmenu-reload-test"
+    local first = core.menu_view:register({ "tools" }, {
+      { id = "reload-test", text = "Original", command = function() end }
+    }, name)
+    local other = core.menu_view:register({ "tools" }, {
+      { id = "other-test", text = "Other Plugin", command = function() end }
+    })
+    context.handles[#context.handles + 1] = first
+    context.handles[#context.handles + 1] = other
+    local tools = first.target
+    local length, position = #tools, #tools - 1
+    test.error(function()
+      core.menu_view:register({ "tools" }, {
+        { id = "other-test", text = "Conflict", command = function() end }
+      }, name)
+    end, "Duplicate menu entry")
+    test.equal(core.menu_view.registrations[name], first)
+    test.equal(tools[position], first.entries[1])
+    local replacement = core.menu_view:register({ "tools" }, {
+      { id = "reload-test", text = "Reloaded", command = function() end }
+    }, name)
+    context.handles[#context.handles + 1] = replacement
+    test.equal(#tools, length)
+    test.equal(tools[position], replacement.entries[1])
+    test.equal(tools[position + 1], other.entries[1])
+    core.menu_view:unregister(first)
+    test.equal(core.menu_view.registrations[name], replacement)
+    core.menu_view:unregister(replacement)
+    test.is_nil(core.menu_view.registrations[name])
+    test.equal(tools[#tools], other.entries[1])
+  end)
+
+  test.test("nested keyboard navigation closes one submenu at a time", function(context)
+    local menu = core.menu_view.menu
+    menu:show_items({ { id = "a", text = "A", items = {
+      { id = "b", text = "B", items = { { id = "c", text = "C", command = function() end } } }
+    } } }, 0, 30, { disabled = true })
+    menu:focus_next(); core.on_event("keypressed", "right")
+    local child = menu.child_menu
+    test.ok(child.show_context_menu)
+    core.on_event("keypressed", "right")
+    test.ok(child.child_menu.show_context_menu)
+    core.on_event("keypressed", "escape")
+    test.is_nil(child.child_menu); test.ok(child.show_context_menu)
+    core.on_event("keypressed", "escape")
+    test.is_nil(menu.child_menu); test.ok(menu.show_context_menu)
+    core.on_event("keypressed", "escape")
+    test.not_ok(menu.show_context_menu)
+    test.equal(core.active_view, context.view)
+  end)
+
+  test.test("Alt+Shift+M toggles layout space and hidden menus remain accessible", function(context)
+    local function toggle()
+      core.on_event("keypressed", menu_modifier)
+      core.on_event("keypressed", "left shift")
+      core.on_event("keypressed", "m")
+      core.on_event("keyreleased", "m")
+      core.on_event("keyreleased", "left shift")
+      core.on_event("keyreleased", menu_modifier)
+    end
+    core.menu_view:open()
+    toggle()
+    core.root_view:update(); core.root_view:update()
+    test.not_ok(config.show_menubar)
+    test.equal(core.menu_view.size.y, 0)
+    test.not_ok(core.menu_view.menu.show_context_menu)
+    command.perform("menu-bar:open")
+    test.ok(core.menu_view.menu.show_context_menu)
+    test.equal(core.menu_view.active_menu, 0)
+    toggle()
+    core.root_view:update()
+    test.ok(config.show_menubar)
+    test.ok(core.menu_view.size.y > 0)
+    test.not_ok(core.menu_view.menu.show_context_menu)
+    test.equal(core.active_view, context.view)
+  end)
+
+  test.test("does not reevaluate plugin callbacks while drawing nested menus", function(context)
+    local name = "appmenu-test:cached"
+    context.commands[#context.commands + 1] = { name = name, previous = command.map[name] }
+    local predicates, visibility, checked, top_visibility = 0, 0, 0, 0
+    command.add(function() predicates = predicates + 1; return true end, { [name] = function() end })
+    local handle = core.menu_view:register({}, {
+      { id = "cached-test", text = "Cached Test",
+        visible = function() top_visibility = top_visibility + 1; return true end,
+        items = {
+          { id = "submenu", text = "Submenu",
+            visible = function() visibility = visibility + 1; return true end,
+            items = {
+              { id = "action", text = "Action", command = name,
+                checked = function() checked = checked + 1; return true end }
+            } }
+        } }
+    })
+    context.handles[#context.handles + 1] = handle
+    core.root_view:update()
+    core.menu_view:open(#core.menu_view:entries())
+    core.menu_view.menu:focus_next()
+    core.on_event("keypressed", "right")
+    test.ok(core.menu_view.menu.child_menu.show_context_menu)
+    local counts = { predicates, visibility, checked, top_visibility }
+    renderer.begin_frame(core.window)
+    local ok, err = pcall(function()
+      for _ = 1, 30 do core.root_view:update(); core.root_view:draw() end
+    end)
+    renderer.end_frame()
+    test.ok(ok, err)
+    test.same({ predicates, visibility, checked, top_visibility }, counts)
+  end)
+
+  for _, animation in ipairs { "lerp", "constant" } do
+    test.test("slides the bar open and closed with " .. animation .. " transitions", function(context)
+      config.transitions, config.animation_type, config.animation_rate = true, animation, 1
+      config.disabled_transitions.menubar = false
+      core.fps, config.fps = 60, 60
+      local bar = core.menu_view
+      local height, top = bar.size.y, context.view.position.y
+      bar:open()
+      bar:hide()
+      test.not_ok(bar.menu.show_context_menu)
+      core.root_view:update()
+      test.ok(bar.size.y > 0 and bar.size.y < height)
+      test.ok(context.view.position.y < top)
+      test.is_nil(bar:label_at(10, 1))
+      local labels = 0
+      common.draw_text = function(...)
+        labels = labels + 1
+        return context.draw_text(...)
+      end
+      renderer.begin_frame(core.window)
+      local ok, err = pcall(core.root_view.draw, core.root_view)
+      renderer.end_frame()
+      test.ok(ok, err)
+      test.ok(labels > 0)
+      local shrinking = bar.size.y
+      bar:show()
+      core.root_view:update()
+      test.ok(bar.size.y > shrinking and bar.size.y < height)
+      for _ = 1, 60 do core.root_view:update() end
+      test.equal(bar.size.y, height)
+      test.equal(context.view.position.y, top)
+      bar:hide()
+      for _ = 1, 60 do core.root_view:update() end
+      test.equal(bar.size.y, 0)
+      test.equal(core.root_view:get_primary_node().position.y, core.root_view.position.y)
+      bar:show()
+      core.root_view:update()
+      test.ok(bar.size.y > 0 and bar.size.y < height)
+      for _ = 1, 60 do core.root_view:update() end
+      test.equal(bar.size.y, height)
+      test.equal(core.active_view, context.view)
+    end)
+  end
+
+  test.test("the menu bar transition can be disabled independently", function()
+    config.transitions = true
+    config.disabled_transitions.menubar = true
+    local height = core.menu_view.size.y
+    core.menu_view:hide()
+    core.root_view:update()
+    test.equal(core.menu_view.size.y, 0)
+    core.menu_view:show()
+    core.root_view:update()
+    test.equal(core.menu_view.size.y, height)
+  end)
+end)

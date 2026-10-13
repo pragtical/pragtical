@@ -1,4 +1,5 @@
 -- mod-version:3
+local core = require "core"
 local common = require "core.common"
 local config = require "core.config"
 local command = require "core.command"
@@ -100,6 +101,21 @@ command.add("core.docview", {
     trimwhitespace.trim_empty_end_lines(dv.doc)
   end,
 })
+
+-- Add manual cleanup actions to Edit using the commands' document predicates.
+core.menu_view:register({ "edit" }, {
+  core.menu_view.DIVIDER,
+  {
+    id = "trim-trailing-whitespace",
+    text = "Trim Trailing Whitespace",
+    command = "trim-whitespace:trim-trailing-whitespace"
+  },
+  {
+    id = "trim-empty-end-lines",
+    text = "Trim Empty End Lines",
+    command = "trim-whitespace:trim-empty-end-lines"
+  }
+}, "trimwhitespace")
 
 
 local doc_save = Doc.save

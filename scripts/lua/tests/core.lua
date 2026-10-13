@@ -37,6 +37,7 @@ test.describe("core project switching", function()
     core.collect_garbage = false
     local permanent_view = { context = "application" }
     core.root_view = setmetatable({
+      floating_views = {},
       root_node = setmetatable({
         type = "leaf", views = { permanent_view }, active_view = permanent_view
       }, Node)

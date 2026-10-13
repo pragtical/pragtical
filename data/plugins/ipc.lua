@@ -11,7 +11,11 @@ local common = require "core.common"
 local command = require "core.command"
 local Object = require "core.object"
 local RootView = require "core.rootview"
-local settings_found, settings = pcall(require, "plugins.settings")
+
+local settings
+if config.plugins.settings ~= false then
+  settings = require "plugins.settings"
+end
 
 ---The maximum amount of seconds a message will be broadcasted.
 ---@type integer
@@ -864,7 +868,7 @@ end
 local system_get_time = system.get_time
 
 system.get_time = function()
-  if settings_found and settings and not settings.ui then
+  if settings and not settings.ui then
     return system_get_time()
   end
 

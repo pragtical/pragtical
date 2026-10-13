@@ -215,6 +215,13 @@ function keymap.on_key_pressed(k, ...)
     end
   else
     local stroke = key_to_stroke(k)
+    if
+      core.root_view
+      and not k:find("click") and not k:find("wheel")
+      and core.root_view:on_key_pressed(stroke, ...)
+    then
+      return true
+    end
     local commands, performed = keymap.map[stroke], false
     if commands then
       for _, cmd in ipairs(commands) do

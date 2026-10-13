@@ -688,7 +688,8 @@ test.describe("audio", function()
     local group = assert(mix:group("effects"))
     local voice = keep(group:play(tone(), { loops = -1 }))
     mix = nil
-    collectgarbage("collect")
+    -- This assertion needs a complete cycle; "collect" only performs a bounded step.
+    collectgarbage("forcecollect")
     test.equal(voice:get_state(), "stopped")
     failure(group:resume())
     test.ok(voice:stop())

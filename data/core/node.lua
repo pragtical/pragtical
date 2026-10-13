@@ -233,6 +233,11 @@ end
 ---@param view core.view View to add
 ---@param idx? integer Optional position to insert (default: end)
 function Node:add_view(view, idx)
+  assert(
+    not view.floating_visible,
+    "Hide the floating view before adding it to a node"
+  )
+  if view.floating then view:set_floating(false) end
   assert(self.type == "leaf", "Tried to add view to non-leaf node")
   assert(not self.locked, "Tried to add view to locked node")
   if self.views[1] and self.views[1]:is(EmptyView) then

@@ -13,29 +13,56 @@ local function gmatch_to_array(text, ptn)
 end
 
 
+---Split a line on a literal separator, retaining empty non-whitespace fields.
+---@param line string Line contents without the newline
+---@param separator string Single-byte column separator
+---@return string[] columns Fields in their original order
+local function split_columns(line, separator)
+  local columns = {}
+  local keep_empty = not separator:match("%s")
+  local start = 1
+  repeat
+    local stop = line:find(separator, start, true)
+    local column = line:sub(start, stop and stop - 1 or #line)
+    if column ~= "" or keep_empty then
+      columns[#columns + 1] = column
+    end
+    start = stop and stop + 1
+  until not start
+  return columns
+end
+
+
+---Align delimited lines while preserving their newlines and empty columns.
+---@param lines string[] Lines to update in place, including any newline suffix
+---@param delim string First byte separates columns; the full string rejoins them
 local function tabularize_lines(lines, delim)
   local rows = {}
   local cols = {}
+  local endings = {}
+  local separator = delim:sub(1, 1)
 
   -- split lines at delimiters and get maximum width of columns
-  local ptn = "[^" .. delim:sub(1,1):gsub("%W", "%%%1") .. "]+"
   for i, line in ipairs(lines) do
-    rows[i] = gmatch_to_array(line, ptn)
-    for j, col in ipairs(rows[i]) do
-      cols[j] = math.max(#col, cols[j] or 0)
+    local body, ending = line:match("^(.-)(\n?)$")
+    if body:find(separator, 1, true) then
+      rows[i] = split_columns(body, separator)
+      endings[i] = ending
+      for j, col in ipairs(rows[i]) do
+        cols[j] = math.max(#col, cols[j] or 0)
+      end
     end
   end
 
-  -- pad columns with space
-  for _, row in ipairs(rows) do
-    for i = 1, #row - 1 do
-      row[i] = row[i] .. string.rep(" ", cols[i] - #row[i])
+  -- pad columns and reattach line endings; leave non-delimited lines unchanged
+  for i in ipairs(lines) do
+    local row = rows[i]
+    if row then
+      for j = 1, #row - 1 do
+        row[j] = row[j] .. string.rep(" ", cols[j] - #row[j])
+      end
+      lines[i] = table.concat(row, delim) .. endings[i]
     end
-  end
-
-  -- write columns back to lines array
-  for i, line in ipairs(lines) do
-    lines[i] = table.concat(rows[i], delim)
   end
 end
 
@@ -61,3 +88,13 @@ command.add("core.docview", {
     })
   end,
 })
+
+
+core.menu_view:register({ "edit" }, {
+  core.menu_view.DIVIDER,
+  {
+    id = "tabularize",
+    text = "Tabularize…",
+    command = "tabularize:tabularize"
+  }
+}, "tabularize")

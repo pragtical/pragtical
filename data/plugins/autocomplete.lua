@@ -9,6 +9,7 @@ local Doc = require "core.doc"
 local DocView = require "core.docview"
 local MarkdownView = require "core.markdownview"
 local RootView = require "core.rootview"
+local View = require "core.view"
 
 ---@class plugins.autocomplete.symbolinfo
 ---Text value of the symbol displayed on the autocomplete box.
@@ -395,9 +396,9 @@ local suggestions_idx = 1
 local suggestions = {}
 local last_line, last_col
 local desc_view
+local popup, sync_popup
 local desc_view_text
 local desc_view_font
-local desc_rect
 local desc_font_size = config.plugins.autocomplete.desc_font_size
 local previous_scale = SCALE
 local desc_font = style.code_font:copy(desc_font_size * SCALE)
@@ -407,7 +408,8 @@ local function reset_suggestions(skip_close)
   suggestions_offset = 1
   suggestions_idx = 1
   suggestions = {}
-  desc_rect = nil
+  if desc_view then desc_view:hide_floating() end
+  if popup then popup:hide_floating() end
   desc_view = nil
   desc_view_text = nil
   desc_view_font = nil
@@ -415,7 +417,8 @@ local function reset_suggestions(skip_close)
   triggered_manually = false
 
   if not skip_close then
-    local doc = core.active_view.doc
+    local owner = popup and popup.floating_options.owner
+    local doc = owner and owner.doc or core.active_view.doc
     if autocomplete.on_close then
       autocomplete.on_close(doc, suggestions[suggestions_idx])
       autocomplete.on_close = nil
@@ -591,20 +594,21 @@ local function get_suggestions_rect(av)
     x = style.padding.x * 2
   end
 
-  return
-    x - style.padding.x,
-    y - style.padding.y,
-    max_width + style.padding.x * 2,
-    max_items * (th + style.padding.y) + style.padding.y,
-    has_icons
+  local width = max_width + style.padding.x * 2
+  local height = max_items * (th + style.padding.y) + style.padding.y
+  x, y = x - style.padding.x, y - style.padding.y
+  if y + height > core.root_view.position.y + core.root_view.size.y then
+    local _, caret_y = av:get_line_screen_position(line, col)
+    y = caret_y - height
+  end
+  x, y, width, height = core.root_view:clamp_floating_bounds(x, y, width, height)
+  return x, y, width, height, has_icons
 end
 
-local function point_over_rect(x, y, rect)
-  return rect
-    and x >= rect.x and y >= rect.y
-    and x <= rect.x + rect.w and y <= rect.y + rect.h
-end
-
+---Reuse or recreate the floating Markdown companion for completion documentation.
+---Rebuilds when text, font size, or display scale changes.
+---@param text string Markdown documentation
+---@return core.markdownview view Documentation popup owned by the results popup
 local function get_description_view(text)
   local font_size = config.plugins.autocomplete.desc_font_size
   if previous_scale ~= SCALE or desc_font_size ~= font_size then
@@ -618,18 +622,48 @@ local function get_description_view(text)
     or desc_view_text ~= text
     or desc_view_font ~= desc_font
   then
+    if desc_view then desc_view:hide_floating() end
     desc_view = MarkdownView({
       text = text,
       title = "Completion Documentation",
       font = desc_font
     })
+    desc_view:set_floating(true, { owner = popup, focus = "none" })
+    ---Render completion documentation at its floating bounds, including its border.
+    ---@param view core.markdownview Documentation popup
+    desc_view.draw = function(view)
+      view:draw_at(
+        view.position.x, view.position.y,
+        view.size.x, view.size.y,
+        style.background3,
+        true
+      )
+    end
+    ---Scroll completion documentation, treating Shift+wheel as horizontal movement.
+    ---@param view core.markdownview Documentation popup
+    ---@param y number Vertical wheel delta
+    ---@param x? number Horizontal wheel delta
+    ---@return boolean consumed Always true
+    desc_view.on_mouse_wheel = function(view, y, x)
+      if keymap.modkeys.shift then x, y = y, 0 end
+      view.scroll.to.y = view.scroll.to.y - (y or 0) * config.mouse_wheel_scroll
+      view.scroll.to.x = view.scroll.to.x - (x or 0) * config.mouse_wheel_scroll
+      core.redraw = true
+      return true
+    end
     desc_view_text = text
     desc_view_font = desc_font
   end
   return desc_view
 end
 
-local function draw_description_box(text, sx, sy, sw, sh)
+---Place documentation beside or below the results, measure its content, and show it.
+---@param text string Markdown documentation
+---@param sx number Suggestions screen x coordinate
+---@param sy number Suggestions screen y coordinate
+---@param sw number Suggestions width
+---@param sh number Suggestions height
+local function position_description_box(text, sx, sy, sw, sh)
   local ww, wh = system.get_window_size(core.window)
   local gap = style.padding.x / 4
   local max_width = math.max(260 * SCALE, ww * 0.35)
@@ -654,10 +688,12 @@ local function draw_description_box(text, sx, sy, sw, sh)
   local _, content_height = view:get_rendered_size(width)
   local max_height = math.max(120 * SCALE, wh * 0.55)
   local available_height = wh - y - style.padding.y
-  local height = math.min(content_height, max_height, math.max(available_height, 1))
+  local height = math.min(
+    content_height, max_height, math.max(available_height, 1)
+  )
 
-  view:draw_at(x, y, width, height, style.background3, true)
-  desc_rect = { x = x, y = y, w = width, h = height }
+  view:set_floating_bounds(x, y, width, height)
+  if not view.floating_visible then view:show_floating() end
 end
 
 local function draw_suggestions_box(av)
@@ -670,7 +706,7 @@ local function draw_suggestions_box(av)
   -- draw background rect
   local rx, ry, rw, rh, has_icons = get_suggestions_rect(av)
   renderer.draw_rect(rx, ry, rw, rh, style.background3)
-  desc_rect = nil
+  core.push_clip_rect(rx, ry, rw, rh)
 
   -- draw text
   local font = av:get_font()
@@ -686,6 +722,9 @@ local function draw_suggestions_box(av)
       break
     end
     local s = suggestions[i]
+    if i == suggestions_idx then
+      renderer.draw_rect(rx, y, rw, lh, style.selection)
+    end
 
     local icon_l_padding, icon_r_padding = 0, 0
 
@@ -751,9 +790,6 @@ local function draw_suggestions_box(av)
         s.onhover(suggestions_idx, s)
         s.onhover = nil
       end
-      if s.desc and #s.desc > 0 then
-        draw_description_box(s.desc, rx, ry, rw, rh)
-      end
     end
   end
 
@@ -773,6 +809,7 @@ local function draw_suggestions_box(av)
     "right",
     rx, y, rw - style.padding.x, lh
   )
+  core.pop_clip_rect()
 end
 
 ---@param forced? boolean Bypass the min_len requirement (manual on-demand trigger)
@@ -799,6 +836,8 @@ local function show_autocomplete(forced)
       reset_suggestions()
     end
 
+    if sync_popup then sync_popup() end
+
     -- scroll if rect is out of bounds of view
     local _, y, _, h = get_suggestions_rect(av)
     local limit = av.position.y + av.size.y
@@ -814,68 +853,11 @@ end
 local on_text_input = RootView.on_text_input
 local on_text_remove = Doc.remove
 local on_doc_close = Doc.on_close
-local on_mouse_pressed = RootView.on_mouse_pressed
-local on_mouse_released = RootView.on_mouse_released
-local on_mouse_moved = RootView.on_mouse_moved
-local on_mouse_wheel = RootView.on_mouse_wheel
-local update = RootView.update
-local draw = RootView.draw
 
 RootView.on_text_input = function(...)
-  on_text_input(...)
-  show_autocomplete()
-end
-
-RootView.on_mouse_pressed = function(self, button, x, y, clicks)
-  if desc_view and point_over_rect(x, y, desc_rect) then
-    if desc_view:on_mouse_pressed(button, x, y, clicks) then
-      return true
-    end
-  end
-  return on_mouse_pressed(self, button, x, y, clicks)
-end
-
-RootView.on_mouse_released = function(self, button, x, y)
-  if desc_view then
-    desc_view:on_mouse_released(button, x, y)
-  end
-  return on_mouse_released(self, button, x, y)
-end
-
-RootView.on_mouse_moved = function(self, x, y, dx, dy)
-  if desc_view and (point_over_rect(x, y, desc_rect) or desc_view:scrollbar_dragging()) then
-    local handled = desc_view:on_mouse_moved(x, y, dx, dy)
-    if handled then
-      core.request_cursor(desc_view.cursor)
-      core.redraw = true
-      return true
-    end
-    local result = on_mouse_moved(self, x, y, dx, dy)
-    core.request_cursor(desc_view.cursor)
-    core.redraw = true
-    return result
-  elseif desc_view then
-    desc_view:on_mouse_left()
-  end
-  return on_mouse_moved(self, x, y, dx, dy)
-end
-
-RootView.on_mouse_wheel = function(self, y, x)
-  if desc_view and point_over_rect(core.root_view.mouse.x, core.root_view.mouse.y, desc_rect) then
-    if keymap.modkeys["shift"] then
-      x = y
-      y = 0
-    end
-    if y and y ~= 0 then
-      desc_view.scroll.to.y = desc_view.scroll.to.y + y * -config.mouse_wheel_scroll
-    end
-    if x and x ~= 0 then
-      desc_view.scroll.to.x = desc_view.scroll.to.x + x * -config.mouse_wheel_scroll
-    end
-    core.redraw = true
-    return true
-  end
-  return on_mouse_wheel(self, y, x)
+  local handled = on_text_input(...)
+  if not handled then show_autocomplete() end
+  return handled
 end
 
 Doc.remove = function(self, line1, col1, line2, col2)
@@ -895,37 +877,157 @@ Doc.on_close = function(self)
   if cache[self] then cache[self] = nil end
 end
 
-RootView.update = function(...)
-  update(...)
+popup = View()
 
-  if desc_view then
-    desc_view:update()
-  end
+popup:set_floating(true, { focus = "none" })
 
+---Clear completion state when RootView removes its popup, including owner tab changes.
+---@param _ core.view Completion popup
+---@param visible boolean Whether the popup remains shown
+popup.on_floating_visibility_changed = function(_, visible)
+  if not visible and #suggestions > 0 then reset_suggestions() end
+end
+
+---Ignore placement writes because the companion computes its bounds from its owner.
+popup.set_floating_bounds = function() end
+
+---Compute the completion rectangle from the active editor and current result window.
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
+---@return number w Results viewport width
+---@return number h Results viewport height
+---@return boolean? has_icons Whether rows reserve an icon column
+popup.get_floating_bounds = function()
   local av = get_active_view()
-  if av then
-    -- reset suggestions if caret was moved
-    local line, col = av.doc:get_selection()
+  if av then return get_suggestions_rect(av) end
+  return 0, 0, 0, 0
+end
 
-    if not triggered_manually then
-      if line ~= last_line or col ~= last_col then
-        reset_suggestions()
-      end
-    else
-      if line ~= last_line or col < last_col then
-        reset_suggestions()
-      end
-    end
+---Draw completion results for the active editor in the floating layer.
+popup.draw = function()
+  local av = get_active_view()
+  if av then draw_suggestions_box(av) end
+end
+
+---Find a visible result by screen point, excluding outer padding and absent rows.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return integer? index Result index in the full suggestions array
+local function suggestion_at(x, y)
+  local av = get_active_view()
+  if not av or not popup:hit_test(x, y) then return end
+  local _, ry = get_suggestions_rect(av)
+  local row = math.floor(
+    (y - ry - style.padding.y / 2)
+    /
+    (av:get_font():get_height() + style.padding.y)
+  )
+  local count = math.min(#suggestions, config.plugins.autocomplete.max_height)
+  if row >= 0 and row < count then return suggestions_offset + row end
+end
+
+---Select a hovered completion result without accepting it.
+---@param _ core.view Completion popup
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean consumed Always true
+popup.on_mouse_moved = function(_, x, y)
+  local index = suggestion_at(x, y)
+  if index and suggestions[index] and index ~= suggestions_idx then
+    suggestions_idx = index
+    core.redraw = true
+  end
+  return true
+end
+
+---Remember the result pressed with the left button for matching release validation.
+---@param view core.view Completion popup
+---@param button core.view.mousebutton Pressed button
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean consumed Always true
+popup.on_mouse_pressed = function(view, button, x, y)
+  if button == "left" then
+    view.pressed_item = suggestions[suggestion_at(x, y)]
+  end
+  return true
+end
+
+---Accept a result only when it matches the pressed item, using autocomplete:complete.
+---@param view core.view Completion popup
+---@param button core.view.mousebutton Released button
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean consumed Always true
+popup.on_mouse_released = function(view, button, x, y)
+  local item = suggestions[suggestion_at(x, y)]
+  if button == "left" and item and item == view.pressed_item then
+    suggestions_idx = suggestion_at(x, y)
+    command.perform("autocomplete:complete")
+  end
+  view.pressed_item = nil
+  return true
+end
+
+---Clear the pressed completion so canceled capture cannot accept a result.
+---@param view core.view Completion popup
+popup.on_mouse_capture_lost = function(view)
+  view.pressed_item = nil
+  View.on_mouse_capture_lost(view)
+end
+
+---Move the visible result window and keep selection within that window.
+---@param _ core.view Completion popup
+---@param y number Vertical wheel delta in rows
+---@return boolean consumed Always true
+popup.on_mouse_wheel = function(_, y)
+  local count = math.min(#suggestions, config.plugins.autocomplete.max_height)
+  local delta = y > 0 and math.floor(y) or math.ceil(y)
+  suggestions_offset = common.clamp(
+    suggestions_offset - delta,
+    1,
+    math.max(1, #suggestions - count + 1)
+  )
+  suggestions_idx = common.clamp(
+    suggestions_idx,
+    suggestions_offset,
+    suggestions_offset + count - 1
+  )
+  core.redraw = true
+  return true
+end
+
+---Close stale results after editor or caret changes and update selected documentation.
+popup.update = function()
+  local av = get_active_view()
+  if not av or #suggestions == 0 then reset_suggestions(); return end
+  local line, col = av.doc:get_selection()
+  if
+    line ~= last_line or (not triggered_manually and col ~= last_col)
+    or (triggered_manually and col < last_col)
+  then
+    reset_suggestions()
+    return
+  end
+  local selected = suggestions[suggestions_idx]
+  if selected and selected.desc and #selected.desc > 0 then
+    local x, y, w, h = get_suggestions_rect(av)
+    position_description_box(selected.desc, x, y, w, h)
+  elseif desc_view then
+    desc_view:hide_floating()
   end
 end
 
-RootView.draw = function(...)
-  draw(...)
-
-  local av = get_active_view()
-  if av then
-    -- draw suggestions box after everything else
-    core.root_view:defer_draw(draw_suggestions_box, av)
+---Show or hide the results popup to match suggestions and assign its editor owner.
+sync_popup = function()
+  if #suggestions > 0 then
+    popup.floating_options.owner = get_active_view()
+    if not popup.floating_visible then
+      popup:show_floating()
+    end
+    popup:update()
+  else
+    popup:hide_floating()
   end
 end
 
@@ -955,6 +1057,7 @@ function autocomplete.open(on_close)
     partial = autocomplete.get_partial_symbol()
     last_line, last_col = av.doc:get_selection()
     update_suggestions()
+    sync_popup()
   end
 end
 

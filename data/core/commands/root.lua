@@ -8,28 +8,6 @@ local Node = require "core.node"
 
 
 local t = {
-  ["root:close"] = function(node)
-    node:close_active_view(core.root_view.root_node)
-  end,
-
-  ["root:close-or-quit"] = function(node)
-    if node and (not node:is_empty() or not node.is_primary_node) then
-      node:close_active_view(core.root_view.root_node)
-    else
-      core.quit()
-    end
-  end,
-
-  ["root:close-all"] = function()
-    core.confirm_close_docs(core.docs, core.root_view.close_all_docviews, core.root_view)
-  end,
-
-  ["root:close-all-others"] = function()
-    local active_doc, docs = core.active_view and core.active_view.doc, {}
-    for i, v in ipairs(core.docs) do if v ~= active_doc then table.insert(docs, v) end end
-    core.confirm_close_docs(docs, core.root_view.close_all_docviews, core.root_view, true)
-  end,
-
   ["root:move-tab-left"] = function(node)
     local idx = node:get_view_idx(core.active_view)
     if idx > 1 then
@@ -97,10 +75,62 @@ for _, dir in ipairs { "left", "right", "up", "down" } do
 end
 
 command.add(function()
-  local node = core.root_view:get_active_node()
+  local node = core.root_view.root_node:get_node_for_view(core.active_view)
+  if not node then return false end
   local sx, sy = node:get_locked_size()
   return not sx and not sy, node
 end, t)
+
+command.add(function()
+  local root = core.root_view
+  local floating = root:get_floating_view_for_view(core.active_view)
+  if floating then return true, floating end
+  local node = root:get_active_node()
+  local sx, sy = node:get_locked_size()
+  return not sx and not sy, node.active_view
+end, {
+  ["root:close"] = function(view)
+    core.root_view:close_view(view)
+  end,
+
+  ["root:close-or-quit"] = function(view)
+    local root = core.root_view
+    local node = root.root_node:get_node_for_view(view)
+    if
+      view.floating_visible or node and (
+        not node:is_empty()
+        or not node.is_primary_node
+      )
+    then
+      root:close_view(view)
+    else
+      core.quit()
+    end
+  end,
+
+  ["root:close-all"] = function()
+    core.confirm_close_docs(
+      core.docs,
+      core.root_view.close_all_docviews,
+      core.root_view
+    )
+  end,
+
+  ["root:close-all-others"] = function()
+    local active_doc, docs = core.active_view and core.active_view.doc, {}
+    for i, v in ipairs(core.docs) do
+      if v ~= active_doc then
+        table.insert(docs, v)
+      end
+    end
+    core.confirm_close_docs(
+      docs,
+      core.root_view.close_all_docviews,
+      core.root_view,
+      true
+    )
+  end
+})
 
 command.add(nil, {
   ["root:scroll"] = function(delta)
@@ -124,7 +154,7 @@ command.add(nil, {
 command.add(function(node)
     if not Node:is_extended_by(node) then node = nil end
     -- No node was specified, use the active one
-    node = node or core.root_view:get_active_node()
+    node = node or core.root_view.root_node:get_node_for_view(core.active_view)
     if not node then return false end
     return true, node
   end,

@@ -1330,11 +1330,6 @@ function ResultsView:on_mouse_pressed(button, x, y, clicks)
   return ResultsView.super.on_mouse_pressed(self, button, x, y, clicks)
 end
 
-function ResultsView:on_mouse_moved(x, y, dx, dy)
-  if self.context_menu:on_mouse_moved(x, y) then return true end
-  return ResultsView.super.on_mouse_moved(self, x, y, dx, dy)
-end
-
 function ResultsView:on_scale_change(new_scale, prev_scale)
   ResultsView.super.on_scale_change(self, new_scale, prev_scale)
   if self.is_global then
@@ -1347,7 +1342,6 @@ end
 
 function ResultsView:update()
   if not ResultsView.super.update(self) then return false end
-  self.context_menu:update()
   self:move_towards("brightness", 0, 0.1)
 
   local px = style.padding.x
@@ -1443,7 +1437,6 @@ end
 
 function ResultsView:draw()
   if self.queue_skip_draw or not ResultsView.super.draw(self) then return false end
-  self.context_menu:draw()
   if not self.total_files_processed then return true end
 
   -- status
@@ -1956,5 +1949,13 @@ keymap.add {
   ["return"]             = "project-search:open-selected",
   ["ctrl+lclick"]        = "project-search:open-selected-split"
 }
+
+core.menu_view:register({ "search" }, {
+  {
+    id = "projectsearch",
+    text = "Find in Files…",
+    command = "project-search:find"
+  }
+}, "projectsearch")
 
 return projectsearch

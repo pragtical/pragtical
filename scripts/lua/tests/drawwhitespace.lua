@@ -5,6 +5,7 @@ local config = require "core.config"
 local style = require "core.style"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local MenuView = require "core.menuview"
 
 local path = debug.getinfo(1, "S").source:gsub("^@", "")
 local root = common.dirname(common.dirname(common.dirname(common.dirname(path))))
@@ -48,6 +49,8 @@ test.describe("drawwhitespace", function()
   test.before_each(function(c)
     c.options = common.merge(config.plugins.drawwhitespace)
     c.active_view = core.active_view
+    c.menu_view = core.menu_view
+    core.menu_view = MenuView()
     c.update, c.draw_line_text = DocView.update, DocView.draw_line_text
     c.draw_text = renderer.draw_text
     c.docs, c.calls = {}, {}
@@ -67,6 +70,7 @@ test.describe("drawwhitespace", function()
   test.after_each(function(c)
     clear_options()
     config.plugins.drawwhitespace, core.active_view = c.options, c.active_view
+    core.menu_view = c.menu_view
     DocView.update, DocView.draw_line_text = c.update, c.draw_line_text
     renderer.draw_text = c.draw_text
     for _, doc in ipairs(c.docs) do doc:on_close() end

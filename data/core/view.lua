@@ -28,11 +28,68 @@ local Scrollbar = require "core.scrollbar"
 ---@field w core.view.thumbtrackwidth
 ---@field h core.view.thumbtrack
 
----@alias core.view.cursor "'arrow'" | "'ibeam'" | "'sizeh'" | "'sizev'" | "'hand'"
+---@alias core.view.cursor "'arrow'" | "'ibeam'" | "'sizeh'" | "'sizev'" | "'sizenwse'" | "'sizenesw'" | "'hand'"
 
 ---@alias core.view.mousebutton "'left'" | "'right'"
 
 ---@alias core.view.context "'application'" | "'session'"
+
+---Placement ownership and input policy for a floating view.
+---@class core.view.floating_options
+---@field owner? core.view|false Hides the popup with its owner; false clears ownership
+---@field focus? "click"|"show"|"none" When to focus get_focus_target(); defaults to click
+---@field interactive? boolean Receive pointer and keyboard events; defaults to true
+---@field modal? boolean Restrict input and focus to this popup and its descendants
+---@field dismiss_on_escape? boolean Request dismissal when Escape is unhandled
+---@field dismiss_on_outside_click? boolean Request dismissal for clicks outside the popup
+---@field dismiss_on_owner_click? boolean Treat clicks on the owner as outside the popup
+---@field outside_click_event? "press"|"release" Dismissal phase; defaults to press
+---@field consume_outside_click? boolean Consume dismissal clicks; defaults to true
+---@field pass_through_unhandled? boolean Forward unhandled pointer events to docked views
+---@field draggable? boolean Enable dragging within get_floating_drag_region()
+---@field resizable? boolean Enable dragging the outer edges to resize
+---@field min_size? core.view.position Minimum resize width (x) and height (y); defaults to 1
+---@field anchor? core.view.floating_anchor|false Follow an anchor, or false to clear one
+
+---Rectangle or view followed during floating placement.
+---@class core.view.floating_anchor
+---@field target core.view|core.view.floating_rectangle|fun():core.view.floating_rectangle? Anchor bounds or callback evaluated during placement
+---@field side? "top"|"bottom"|"left"|"right" Preferred side; defaults to bottom, flips to fit
+---@field align? "start"|"center"|"end" Alignment on the other axis; defaults to start
+---@field gap? number Distance from the anchor in pixels; defaults to 0
+
+---Outer popup or anchor bounds in screen coordinates.
+---@class core.view.floating_rectangle
+---@field x number
+---@field y number
+---@field w number
+---@field h number
+
+---Optional slide and completion callback passed to show_floating() or hide_floating().
+---@class core.view.floating_transition
+---@field from? "top"|"bottom"|"left"|"right" Opening slide's starting viewport edge
+---@field to? "top"|"bottom"|"left"|"right" Closing slide's destination viewport edge
+---@field rate? number Animation rate passed to move_towards(); greater than 0 and at most 1
+---@field name? string disabled_transitions setting to honor; defaults to floating
+---@field on_complete? fun(view: core.view) Called after showing or removing the popup
+
+---Edges grabbed during a floating resize; absent fields mean the edge is inactive.
+---@class core.view.floating_resize_edges
+---@field left? boolean
+---@field right? boolean
+---@field top? boolean
+---@field bottom? boolean
+
+---Initial pointer and bounds retained during a floating drag or resize.
+---@class core.view.floating_gesture
+---@field x number Initial pointer x coordinate
+---@field y number Initial pointer y coordinate
+---@field bx number Initial outer x coordinate
+---@field by number Initial outer y coordinate
+---@field w number Initial outer width
+---@field h number Initial outer height
+---@field edges core.view.floating_resize_edges Grabbed resize edges
+---@field resize? boolean Whether the gesture resizes instead of moving
 
 ---Base view.
 ---@class core.view : core.object
@@ -47,6 +104,16 @@ local Scrollbar = require "core.scrollbar"
 ---@field v_scrollbar core.scrollbar
 ---@field h_scrollbar core.scrollbar
 ---@field current_scale number
+---@field floating boolean Whether the view uses floating placement
+---@field floating_options? core.view.floating_options Placement ownership and input policy
+---@field floating_visible? boolean Whether the view is registered, including closing slides
+---@field floating_closing? boolean Whether input is disabled while a closing slide runs
+---@field floating_previous_focus? core.view Focus target to restore when hiding
+---@field floating_transition? core.view.floating_transition Active slide and callback
+---@field floating_destination? core.view.position Settled position retained during a slide
+---@field floating_position? core.view.position Persistent interpolation state for a slide
+---@field floating_gesture? core.view.floating_gesture Active pointer drag or resize
+---@field capture_text_input? boolean Receive text input while floating without taking focus
 local View = Object:extend()
 
 function View:__tostring() return "View" end
@@ -55,6 +122,7 @@ function View:__tostring() return "View" end
 -- with context "session" will be closed when a project session is
 -- terminated. The context "application" is for functional UI elements.
 View.context = "application"
+View.floating = false
 
 ---Constructor - initializes a new view instance.
 ---Override this in subclasses and always call super constructor first:
@@ -273,6 +341,474 @@ function View:scrollbar_hovering()
   return self.v_scrollbar.hovering.track or self.h_scrollbar.hovering.track
 end
 
+---Check a user-supplied coordinate, size, or animation rate for a finite number.
+---@param value any Value to check
+---@return boolean finite Whether arithmetic on the value is safe
+local function finite_number(value)
+  return type(value) == "number"
+    and value == value
+    and math.abs(value) < math.huge
+end
+
+---Validate a position/size table or anchor rectangle before changing popup state.
+---@param value table Coordinates supplied by a plugin
+---@param fields string[] Required numeric fields
+---@param label string Field path used in validation errors
+local function validate_coordinates(value, fields, label)
+  assert(type(value) == "table", label .. " must be a table")
+  for _, field in ipairs(fields) do
+    assert(
+      finite_number(value[field]),
+      label .. "." .. field .. " must be a finite number"
+    )
+  end
+end
+
+---Reject mistyped placement options before merging them into a view.
+---@param options? core.view.floating_options User-supplied options
+local function validate_floating_options(options)
+  if options == nil then return end
+  assert(type(options) == "table", "set_floating: options must be a table")
+  local booleans = {
+    interactive = true, modal = true, dismiss_on_escape = true,
+    dismiss_on_outside_click = true, dismiss_on_owner_click = true,
+    consume_outside_click = true, pass_through_unhandled = true,
+    draggable = true, resizable = true
+  }
+  for key, value in pairs(options) do
+    local label = "set_floating: " .. tostring(key)
+    if booleans[key] then
+      assert(type(value) == "boolean", label .. " must be a boolean")
+    elseif key == "focus" then
+      assert(
+        value == "click" or value == "show" or value == "none",
+        label .. " must be click, show or none"
+      )
+    elseif key == "outside_click_event" then
+      assert(
+        value == "press" or value == "release",
+        label .. " must be press or release"
+      )
+    elseif key == "owner" then
+      assert(
+        value == false or type(value) == "table"
+          and type(value.extends) == "function"
+          and value:extends(View),
+        label .. " must be a View or false"
+      )
+    elseif key == "min_size" then
+      validate_coordinates(value, { "x", "y" }, label)
+      assert(
+        value.x > 0 and value.y > 0,
+        label .. " dimensions must be positive"
+      )
+    elseif key == "anchor" and value ~= false then
+      assert(
+        type(value) == "table",
+        label .. " must be an anchor table or false"
+      )
+      local target = value.target
+      if
+        type(target) ~= "function"
+        and not (type(target) == "table"
+        and type(target.extends) == "function"
+        and target:extends(View))
+      then
+        validate_coordinates(target, { "x", "y", "w", "h" }, label .. ".target")
+        assert(
+          target.w >= 0 and target.h >= 0,
+          label .. ".target dimensions must be nonnegative"
+        )
+      end
+      assert(
+        value.side == nil or value.side == "top"
+          or value.side == "bottom"
+          or value.side == "left" or value.side == "right",
+        label .. ".side must be top, bottom, left or right"
+      )
+      assert(
+        value.align == nil or value.align == "start"
+          or value.align == "center"
+          or value.align == "end",
+        label .. ".align must be start, center or end"
+      )
+      assert(
+        value.gap == nil or finite_number(value.gap),
+        label .. ".gap must be a finite number"
+      )
+    else
+      assert(
+        key == "anchor" and value == false,
+        "Unknown set_floating option: " .. tostring(key)
+      )
+    end
+  end
+end
+
+---Validate a show/hide transition before registration, focus, or capture changes.
+---@param options? core.view.floating_transition User-supplied transition
+---@param method string Method name used in errors
+---@param edge_key "from"|"to" Edge option accepted by this method
+local function validate_floating_transition(options, method, edge_key)
+  if options == nil then return end
+  assert(type(options) == "table", method .. ": options must be a table")
+  for key, value in pairs(options) do
+    local label = method .. ": " .. tostring(key)
+    if key == edge_key then
+      assert(
+        value == "top" or value == "bottom" or value == "left" or value == "right",
+        label .. " must be top, bottom, left or right"
+      )
+    elseif key == "rate" then
+      assert(
+        finite_number(value) and value > 0 and value <= 1,
+        label .. " must be greater than 0 and at most 1"
+      )
+    elseif key == "name" then
+      assert(type(value) == "string", label .. " must be a string")
+    elseif key == "on_complete" then
+      assert(type(value) == "function", label .. " must be a function")
+    else
+      error(
+        "Unknown " .. method .. " option: " .. tostring(key)
+          .. "; configure placement with set_floating", 3
+      )
+    end
+  end
+end
+
+
+---Enable or disable floating placement and configure popup input and ownership.
+---Call show_floating() to show the view after enabling this mode.
+---Detach it from its node or parent container before showing. Disabling hides it.
+---@param enabled boolean Whether the view should use floating placement
+---@param options? core.view.floating_options Options merged with existing ones when enabling
+---@return core.view view This view, for chaining
+function View:set_floating(enabled, options)
+  assert(type(enabled) == "boolean", "set_floating: enabled must be a boolean")
+  if not enabled then
+    self:hide_floating()
+    self.floating = false
+    return self
+  end
+  validate_floating_options(options)
+  self.floating = true
+  self.floating_options = self.floating_options or {
+    focus = "click",
+    interactive = true,
+    consume_outside_click = true,
+    outside_click_event = "press",
+    min_size = { x = 1, y = 1 }
+  }
+  for k, v in pairs(options or {}) do
+    self.floating_options[k] = v
+  end
+  return self
+end
+
+
+---Get the popup's outer rectangle in screen coordinates, including borders.
+---Override together with set_floating_bounds() for composite views.
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
+---@return number w Outer width in pixels
+---@return number h Outer height in pixels
+function View:get_floating_bounds()
+  return self.position.x, self.position.y, self.size.x, self.size.y
+end
+
+
+---Set the popup's outer rectangle when RootView places, drags, or resizes it.
+---Override for composites that need to update child layout or account for borders.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param w number Outer width in pixels
+---@param h number Outer height in pixels
+function View:set_floating_bounds(x, y, w, h)
+  self.position.x, self.position.y = x, y
+  self.size.x, self.size.y = w, h
+end
+
+
+---Check whether a screen point lies inside the view's outer rectangle.
+---Override for custom shapes or composites with additional hit regions.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean inside Whether the view contains the point
+function View:hit_test(x, y)
+  local bx, by, w, h = self:get_floating_bounds()
+  return x >= bx and y >= by and x < bx + w and y < by + h
+end
+
+
+---Get the view that should receive focus when this view is shown or clicked.
+---Override for composites whose keyboard focus belongs to a descendant.
+---@return core.view? target View to focus, or nil to preserve the current focus
+function View:get_focus_target()
+  return self
+end
+
+
+---Check whether a view is this view or belongs to it through a container or owner.
+---Follows parent, subparent, and floating owner links while guarding against cycles.
+---@param view core.view? Candidate view
+---@return boolean owned Whether the candidate belongs to this view
+function View:owns_view(view)
+  local seen = {}
+  while view and not seen[view] do
+    if view == self then return true end
+    seen[view] = true
+    view = view.parent or view.subparent
+      or view.floating_options and view.floating_options.owner
+  end
+  return false
+end
+
+
+---Check whether floating popups owned by this view should remain visible.
+---Docked owners must be active in their node; container children follow their parent.
+---Override for composites with their own visibility rules.
+---@return boolean? visible Falsy when the owner is hidden or its tab is inactive
+function View:is_floating_owner_visible()
+  if self.floating then
+    return self.floating_visible
+  end
+  if self.visible == false then
+    return false
+  end
+  local root = core.root_view
+  local node = root and root.root_node:get_node_for_view(self)
+  if node then
+    return node.active_view == self
+  end
+  if self.parent then
+    return self.parent:is_floating_owner_visible()
+  end
+  return true
+end
+
+
+---Called when showing a floating view or completing its removal.
+---Override to synchronize widget visibility or clear popup controller state.
+---@param visible boolean True on show, false when removal completes
+function View:on_floating_visibility_changed(visible)
+end
+
+
+---Handle a dismissal requested by Escape, an outside click, or window focus loss.
+---The default implementation hides the view immediately; override for custom handling.
+---@param reason "escape"|"outside"|"focuslost" Event that requested dismissal
+function View:on_floating_dismiss(reason)
+  self:hide_floating()
+end
+
+
+---Handle a floating view's keyboard input before command dispatch.
+---Override and return true to consume the normalized key binding.
+---@param stroke string Normalized key binding, such as "ctrl+return"
+---@param ... any Additional arguments forwarded by the keyboard handler
+---@return boolean? consumed Whether the event was handled
+function View:on_key_pressed(stroke, ...)
+  return false
+end
+
+
+---Cancel pointer gestures when RootView releases mouse capture without a click.
+---Clears floating dragging, text selection, scrollbar dragging, and hover state.
+---Override to clear any additional subclass gesture state.
+function View:on_mouse_capture_lost()
+  self.floating_gesture = nil
+  self.mouse_selecting = nil
+  self.v_scrollbar:on_mouse_released("left", -math.huge, -math.huge)
+  self.h_scrollbar:on_mouse_released("left", -math.huge, -math.huge)
+  self:on_mouse_left()
+end
+
+
+---Raise a shown floating view and its owned popups above the other floating views.
+---@return core.view view This view, for chaining
+function View:bring_to_front()
+  if self.floating_visible and core.root_view then
+    core.root_view:add_floating_view(self)
+  end
+  return self
+end
+
+
+---Get a popup position just beyond the requested edge of the editor viewport.
+---@param root core.rootview Editor viewport
+---@param edge "left"|"right"|"top"|"bottom" Edge to slide from or to
+---@param x number Current screen x coordinate
+---@param y number Current screen y coordinate
+---@param w number Outer popup width
+---@param h number Outer popup height
+---@return number x Slide endpoint x coordinate
+---@return number y Slide endpoint y coordinate
+local function slide_position(root, edge, x, y, w, h)
+  if edge == "left" then
+    x = root.position.x - w
+  elseif edge == "right" then
+    x = root.position.x + root.size.x
+  elseif edge == "top" then
+    y = root.position.y - h
+  elseif edge == "bottom" then
+    y = root.position.y + root.size.y
+  else
+    error("Invalid floating slide edge: " .. tostring(edge))
+  end
+  return x, y
+end
+
+---Show or raise the view in RootView's floating layer and apply its focus policy.
+---Requires a view detached from its node and parent container.
+---Reopening cancels a pending close and its completion callback.
+---@param options? core.view.floating_transition Optional opening slide (from) and callback
+---@return core.view view This view, for chaining
+function View:show_floating(options)
+  validate_floating_transition(options, "show_floating", "from")
+  if not self.floating then
+    self:set_floating(true)
+  end
+  local root = assert(core.root_view, "Floating views require RootView")
+  assert(
+    not root.root_node:get_node_for_view(self),
+    "Detach the view from its node before enabling floating placement"
+  )
+  assert(
+    not self.parent,
+    "Detach the view from its parent before showing it as floating"
+  )
+  options = options or {}
+  local reopening = self.floating_visible
+  local destination = self.floating_destination
+  self.floating_transition, self.floating_position = nil, nil
+  self.floating_visible, self.floating_closing = true, false
+  self:on_floating_visibility_changed(true)
+  root:add_floating_view(self)
+  if destination then
+    local _, _, w, h = self:get_floating_bounds()
+    self:set_floating_bounds(destination.x, destination.y, w, h)
+  end
+  root:place_floating_view(self)
+  local sx, sy = self:get_floating_bounds()
+  self.floating_destination = nil
+  if options.from and not reopening then
+    local x, y, w, h = self:get_floating_bounds()
+    self.floating_destination = { x = x, y = y }
+    x, y = slide_position(root, options.from, x, y, w, h)
+    self:set_floating_bounds(x, y, w, h)
+  end
+  if options.from then
+    self.floating_destination = { x = sx, y = sy }
+    self.floating_transition = options
+  elseif options.on_complete then
+    core.try(options.on_complete, self)
+  end
+  if self.floating_options.modal then root:cancel_mouse_capture() end
+  if self.floating_options.focus == "show" then
+    local target = self:get_focus_target()
+    if target then
+      if target ~= core.active_view then
+        self.floating_previous_focus = core.active_view
+      end
+      core.set_active_view(target)
+    end
+  end
+  core.redraw = true
+  return self
+end
+
+
+---Hide the floating view, close owned popups, cancel input, and restore focus.
+---A closing slide delays removal while the view immediately stops receiving input.
+---@param options? core.view.floating_transition Optional closing slide (to) and callback
+---@return core.view view This view, for chaining
+function View:hide_floating(options)
+  validate_floating_transition(options, "hide_floating", "to")
+  if not self.floating_visible then return self end
+  options = options or {}
+  local root = core.root_view
+  if root then root:cancel_floating_input(self) end
+  if options.to and not self.floating_closing then
+    local x, y = self:get_floating_bounds()
+    self.floating_destination = self.floating_destination or { x = x, y = y }
+    self.floating_closing = true
+    self.floating_transition = options
+    self.floating_position = nil
+  else
+    if self.floating_destination then
+      local _, _, w, h = self:get_floating_bounds()
+      self:set_floating_bounds(
+        self.floating_destination.x,
+        self.floating_destination.y,
+        w, h
+      )
+    end
+    self.floating_visible = false
+    self.floating_closing = false
+    self.floating_transition = nil
+    self.floating_destination = nil
+    self.floating_position = nil
+    if root then root:remove_floating_view(self) end
+    self:on_floating_visibility_changed(false)
+    if options.on_complete then
+      core.try(options.on_complete, self)
+    end
+  end
+  core.redraw = true
+  return self
+end
+
+
+---Get the screen rectangle where a floating view can be dragged.
+---Override to restrict dragging to a header; defaults to the full popup bounds.
+---@return number? x Screen x coordinate, or nil to disable dragging
+---@return number? y Screen y coordinate
+---@return number? w Region width
+---@return number? h Region height
+function View:get_floating_drag_region()
+  return self:get_floating_bounds()
+end
+
+
+---Update anchor placement or advance an opening or closing slide.
+---RootView calls this before update() for each shown floating view.
+---Completes removal and invokes the transition callback when a slide finishes.
+function View:update_floating()
+  local root = core.root_view
+  local transition = self.floating_transition
+  if not transition then root:place_floating_view(self); return end
+  local x, y, w, h = self:get_floating_bounds()
+  local tx, ty
+  if self.floating_closing then
+    tx, ty = slide_position(root, transition.to, x, y, w, h)
+  else
+    local dest = self.floating_destination or { x = x, y = y }
+    tx, ty = root:clamp_floating_bounds(dest.x, dest.y, w, h)
+  end
+  local position = self.floating_position or { x = x, y = y }
+  self.floating_position = position
+  self:move_towards(
+    position, "x", tx, transition.rate, transition.name or "floating"
+  )
+  self:move_towards(
+    position, "y", ty, transition.rate, transition.name or "floating"
+  )
+  self:set_floating_bounds(position.x, position.y, w, h)
+  if position.x == tx and position.y == ty then
+    if self.floating_closing then
+      self:hide_floating()
+    else
+      self.floating_transition = nil
+      self.floating_destination = nil
+      self.floating_position = nil
+    end
+    if transition.on_complete then
+      core.try(transition.on_complete, self)
+    end
+  end
+end
+
 
 ---Handle mouse button press events.
 ---Override to handle clicks. Return true to consume event and prevent propagation.
@@ -465,14 +1001,22 @@ end
 ---Called automatically by update(). Rarely needs to be called manually.
 function View:update_scrollbar()
   local v_scrollable = self:get_scrollable_size()
-  self.v_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, v_scrollable)
+  self.v_scrollbar:set_size(
+    self.position.x, self.position.y,
+    self.size.x, self.size.y,
+    v_scrollable
+  )
   local v_percent = self.scroll.y/(v_scrollable - self.size.y)
   -- Avoid setting nan percent
   self.v_scrollbar:set_percent(v_percent == v_percent and v_percent or 0)
   self.v_scrollbar:update()
 
   local h_scrollable = self:get_h_scrollable_size()
-  self.h_scrollbar:set_size(self.position.x, self.position.y, self.size.x, self.size.y, h_scrollable)
+  self.h_scrollbar:set_size(
+    self.position.x, self.position.y,
+    self.size.x, self.size.y,
+    h_scrollable
+  )
   local h_percent = self.scroll.x/(h_scrollable - self.size.x)
   -- Avoid setting nan percent
   self.h_scrollbar:set_percent(h_percent == h_percent and h_percent or 0)

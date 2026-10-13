@@ -263,4 +263,15 @@ if user_scale then
 end
 
 
+core.menu_view:register({ "view" }, {
+  {
+    id = "zoom", text = "Zoom",
+    items = {
+      { id = "in", text = "Zoom In", command = "scale:increase" },
+      { id = "out", text = "Zoom Out", command = "scale:decrease" },
+      { id = "reset", text = "Reset Zoom", command = "scale:reset" }
+    }
+  }
+}, "scale")
+
 return scale

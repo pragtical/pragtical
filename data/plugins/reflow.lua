@@ -1,4 +1,5 @@
 -- mod-version:3
+local core = require "core"
 local config = require "core.config"
 local command = require "core.command"
 local keymap = require "core.keymap"
@@ -61,3 +62,13 @@ command.add("core.docview", {
 keymap.add_direct {
   ["ctrl+shift+q"] = "reflow:reflow"
 }
+
+
+core.menu_view:register({ "edit" }, {
+  core.menu_view.DIVIDER,
+  {
+    id = "reflow",
+    text = "Reflow Text",
+    command = "reflow:reflow"
+  }
+}, "reflow")

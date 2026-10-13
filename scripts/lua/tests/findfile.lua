@@ -29,6 +29,7 @@ local function setup(native)
     add_thread = function(fn)
       state.coroutines[#state.coroutines + 1] = coroutine.create(fn)
     end,
+    menu_view = { register = function() end },
     status_view = { add_item = function(_, item) state.items[item.name] = item end }
   }
   core.command_view = {

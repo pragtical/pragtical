@@ -287,8 +287,9 @@ test.describe("widget mouse events", function()
     root.on_click = function() clicks = clicks + 1 end
     core.on_event("mousepressed", "left", 70, 90, 1)
     core.on_event("mousemoved", 850, 650, 780, 560)
-    test.ok(root.position.x > 800)
-    test.ok(root.position.y > 600)
+    local bx, by, w, h = root:get_floating_bounds()
+    test.ok(bx >= 0 and bx + w <= core.root_view.size.x)
+    test.ok(by >= 0 and by + h <= core.root_view.size.y)
     core.on_event("mousereleased", "left", 850, 650)
     test.equal(clicks, 0)
     test.not_ok(root.mouse_is_pressed)
@@ -493,4 +494,19 @@ test.describe("widget mouse events", function()
     test.not_ok(tree.mouse_is_pressed)
     test.not_ok(root.mouse_is_pressed)
   end)
+  for _, class in ipairs { "widget.colorpickerdialog", "widget.fontdialog" } do
+    test.test(class .. " keeps its bordered bounds across floating updates", function(context)
+      local dialog = require(class)()
+      context.roots[#context.roots + 1] = dialog
+      dialog:show()
+      core.root_view:update(); core.root_view:update()
+      local x, y, w, h = dialog:get_floating_bounds()
+      for _ = 1, 30 do core.root_view:update() end
+      local bx, by, bw, bh = dialog:get_floating_bounds()
+      test.equal(bx, x); test.equal(by, y)
+      test.equal(bw, w); test.equal(bh, h)
+      test.ok(dialog.floating_visible)
+    end)
+  end
+
 end)

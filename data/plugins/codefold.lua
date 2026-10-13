@@ -1785,4 +1785,21 @@ codefold._test = {
   state_path_for_doc = state_path_for_doc,
 }
 
+core.menu_view:register({ "view" }, {
+  { id = "folding", text = "Folding", items = {
+    { id = "enabled", text = "Enable Folding", command = "code-folding:toggle",
+      ---Reflect the global folding setting when opening or visiting this entry.
+      ---@return boolean checked Whether code folding is enabled
+      checked = function() return config.plugins.codefold.enabled end
+    },
+    core.menu_view.DIVIDER,
+    { id = "toggle", text = "Toggle Fold", command = "code-folding:toggle-fold" },
+    { id = "fold-all", text = "Fold All", command = "code-folding:fold-all" },
+    { id = "unfold-all", text = "Unfold All", command = "code-folding:unfold-all" },
+    core.menu_view.DIVIDER,
+    { id = "next", text = "Next Fold", command = "code-folding:next-fold" },
+    { id = "previous", text = "Previous Fold", command = "code-folding:previous-fold" }
+  } }
+}, "codefold")
+
 return codefold

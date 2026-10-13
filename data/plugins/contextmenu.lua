@@ -9,30 +9,12 @@ local RootView = require "core.rootview"
 local config = require "core.config"
 
 local menu = ContextMenu()
+
 local on_view_mouse_pressed = RootView.on_view_mouse_pressed
-local on_mouse_moved = RootView.on_mouse_moved
-local root_view_update = RootView.update
-local root_view_draw = RootView.draw
-
-function RootView:on_mouse_moved(...)
-  if menu:on_mouse_moved(...) then return end
-  on_mouse_moved(self, ...)
-end
-
 function RootView.on_view_mouse_pressed(button, x, y, clicks)
   -- We give the priority to the menu to process mouse pressed events.
   local handled = menu:on_mouse_pressed(button, x, y, clicks)
   return handled or on_view_mouse_pressed(button, x, y, clicks)
-end
-
-function RootView:update(...)
-  root_view_update(self, ...)
-  menu:update()
-end
-
-function RootView:draw(...)
-  root_view_draw(self, ...)
-  menu:draw()
 end
 
 command.add(function()
@@ -62,11 +44,11 @@ command.add(function() return menu.show_context_menu == true end, {
     menu:call_selected_item()
   end,
 })
+
 keymap.add { ["return"] = "context:on-selected" }
 keymap.add { ["up"] = "context:focus-previous" }
 keymap.add { ["down"] = "context:focus-next" }
 keymap.add { ["escape"] = "context:hide" }
-
 
 local cmds = {
   { text = "Cut",     command = "doc:cut" },
@@ -79,7 +61,8 @@ local cmds = {
   { text = "Replace", command = "find-replace:replace" }
 }
 
-if config.plugins.scale ~= false and require("plugins.scale") then
+if config.plugins.scale ~= false then
+  require "plugins.scale"
   table.move(cmds, 4, #cmds, 7)
   cmds[4] = { text = "Font +",     command = "scale:increase" }
   cmds[5] = { text = "Font -",     command = "scale:decrease" }
