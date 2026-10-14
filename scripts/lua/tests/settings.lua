@@ -5,6 +5,7 @@ local command = require "core.command"
 local config = require "core.config"
 local keymap = require "core.keymap"
 local settings = require "plugins.settings"
+local tree = require "plugins.treeview"
 local Button = require "widget.button"
 local Label = require "widget.label"
 local SelectBox = require "widget.selectbox"
@@ -280,6 +281,8 @@ test.describe("settings", function()
   local old_plugin_sections
   local old_test_settings_module
   local old_disabled_transitions
+  local old_toolbar_position
+  local old_commandview_position
 
   test.before_each(function()
     old_test_settings = config.plugins.test_settings
@@ -288,6 +291,8 @@ test.describe("settings", function()
     old_plugin_sections = settings.plugin_sections
     old_test_settings_module = package.preload["plugins.test_settings"]
     old_disabled_transitions = config.disabled_transitions
+    old_toolbar_position = config.plugins.treeview.toolbar_position
+    old_commandview_position = config.commandview_position
     config.plugins.test_settings = {}
     settings.config = {}
     settings.plugins = {}
@@ -302,6 +307,8 @@ test.describe("settings", function()
     settings.plugin_sections = old_plugin_sections
     package.preload["plugins.test_settings"] = old_test_settings_module
     config.disabled_transitions = old_disabled_transitions
+    tree:set_toolbar_position(old_toolbar_position)
+    config.commandview_position = old_commandview_position
     os.remove(USERDIR .. "/user_settings.lua")
   end)
 
@@ -341,6 +348,50 @@ test.describe("settings", function()
 
     local saved = dofile(USERDIR .. "/user_settings.lua")
     test.equal(saved.config.plugins.test_settings.model, "custom-saved")
+  end)
+
+  test.it("applies and saves toolbar docking from its position selector", function()
+    local toolbar = tree.toolbar
+    local option
+    for _, candidate in ipairs(config.plugins.treeview.config_spec) do
+      if candidate.path == "toolbar_position" then option = candidate end
+    end
+    test.not_nil(option)
+    local view = settings.show_config("Treeview Settings", {
+      path_prefix = "plugins.treeview",
+      option
+    })
+    local selector = find_child(view, SelectBox)
+    test.not_nil(selector)
+    for index, position in ipairs { "left", "bottom", "top", "right" } do
+      selector:set_selected(index)
+      test.equal(tree.toolbar_position, position)
+      test.equal(toolbar.orientation, (position == "left" or position == "right") and "vertical" or "horizontal")
+      test.equal(core.active_view, view)
+      test.equal(config.plugins.treeview.toolbar_position, position)
+      test.equal(settings.config.plugins.treeview.toolbar_position, position)
+      local saved = dofile(USERDIR .. "/user_settings.lua")
+      test.equal(saved.config.plugins.treeview.toolbar_position, position)
+    end
+  end)
+
+  test.it("saves command palette placement from User Interface", function()
+    local option
+    for _, candidate in ipairs(settings.core["User Interface"]) do
+      if candidate.path == "commandview_position" then option = candidate end
+    end
+    test.not_nil(option)
+    test.equal(option.default, "bottom")
+    local view = settings.show_config("Palette Settings", { option })
+    local selector = find_child(view, SelectBox)
+    test.not_nil(selector)
+    for index, position in ipairs { "bottom", "top", "center" } do
+      selector:set_selected(index)
+      test.equal(config.commandview_position, position)
+      test.equal(settings.config.commandview_position, position)
+      local saved = dofile(USERDIR .. "/user_settings.lua")
+      test.equal(saved.config.commandview_position, position)
+    end
   end)
 
   test.it("shows standalone config views with named sections", function()
@@ -442,8 +493,8 @@ test.describe("settings", function()
     test.not_nil(option)
     test.equal(option.type, settings.type.LIST_WIDGETS)
     test.equal(option.filterable, false)
-    test.equal(option.visible_rows, 8)
-    test.equal(#option.items, 8)
+    test.equal(option.visible_rows, 9)
+    test.equal(#option.items, 9)
 
     config.disabled_transitions = {
       scroll = false,
@@ -458,7 +509,7 @@ test.describe("settings", function()
     local view = settings.show_config("Transition Settings", { option })
     local list = find_child(view, WidgetList)
     test.not_nil(list)
-    test.equal(#list.items, 8)
+    test.equal(#list.items, 9)
 
     local scroll_toggle
     for _, entry in ipairs(list.items) do

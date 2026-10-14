@@ -597,11 +597,11 @@ local commands = {
           last_token = tokens_count - 1
         end
         for tidx, type, text in dv.doc.highlighter:each_token(item.line) do
+          if tx >= x + w then break end
           color = style.syntax[type] or style.syntax["normal"]
           -- do not render newline, fixes issue #1164
           if tidx == last_token then text = text:sub(1, -2) end
           tx = renderer.draw_text(font, text, tx, y, color)
-          if tx > (x + w) - font:get_width(item.info) - style.padding.x * 2 then break end
         end
       end
     })
@@ -661,12 +661,25 @@ local commands = {
       core.error("Cannot remove unsaved doc")
       return
     end
-    for i,docview in ipairs(core.get_views_referencing_doc(dv.doc)) do
-      local node = core.root_view.root_node:get_node_for_view(docview)
-      node:close_view(core.root_view.root_node, docview)
+    local views = core.get_views_referencing_doc(dv.doc)
+    -- A cancelled close must also cancel deletion of the underlying file.
+    ---Close the next document reference, deleting the file after the last close.
+    local function close_next()
+      local view = table.remove(views, 1)
+      if view then
+        if not core.root_view:close_view(view, close_next) then
+          close_next()
+        end
+        return
+      end
+      local ok, err = os.remove(filename)
+      if not ok then
+        core.error("Cannot remove \"%s\": %s", filename, err)
+        return
+      end
+      core.log("Removed \"%s\"", filename)
     end
-    os.remove(filename)
-    core.log("Removed \"%s\"", filename)
+    close_next()
   end,
 
   ["doc:select-to-cursor"] = function(dv, x, y, clicks)

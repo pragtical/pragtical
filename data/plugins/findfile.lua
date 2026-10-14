@@ -558,6 +558,10 @@ keymap.add({
   [PLATFORM == "Mac OS X" and "cmd+p" or "ctrl+p"] = "core:find-file"
 })
 
+core.menu_view:register({ "search" }, {
+  { id = "findfile", text = "Find File…", command = "core:find-file" }
+}, "findfile")
+
 
 core.status_view:add_item({
   predicate = function()

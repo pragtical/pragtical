@@ -309,3 +309,14 @@ command.add(nil, {
     config.plugins.drawwhitespace.enabled = true
   end,
 })
+
+core.menu_view:register({ "view" }, {
+  {
+    id = "draw-whitespace",
+    text = "Draw Whitespace",
+    command = "draw-whitespace:toggle",
+    ---Reflect whitespace visibility when opening or visiting this entry.
+    ---@return boolean checked Whether whitespace markers are enabled
+    checked = function() return config.plugins.drawwhitespace.enabled end
+  }
+}, "drawwhitespace")

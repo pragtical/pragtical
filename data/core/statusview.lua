@@ -18,6 +18,10 @@ local Object = require "core.object"
 ---@alias core.statusview.position '"left"' | '"right"'
 
 
+---Floating status-item tooltip with a mutable current item.
+---@class core.statusview.tooltip_view : core.view
+---@field item core.statusview.item Current tooltip item read by stable drawing callbacks
+
 ---Status bar with customizable items displaying document info and system status.
 ---Access the global instance via `core.status_view`.
 ---@class core.statusview : core.view
@@ -29,6 +33,7 @@ local Object = require "core.object"
 ---@field message core.statusview.styledtext Current temporary message content
 ---@field tooltip_mode boolean Whether persistent tooltip is active
 ---@field tooltip core.statusview.styledtext Persistent tooltip content
+---@field tooltip_view? core.statusview.tooltip_view Reusable floating item tooltip companion
 ---@field left_width number Visible width of left panel
 ---@field right_width number Visible width of right panel
 ---@field r_left_width number Real (total) width of left panel content
@@ -733,34 +738,66 @@ end
 ---Draw a tooltip box above the status bar for an item.
 ---@param item core.statusview.item Item with tooltip text
 function StatusView:draw_item_tooltip(item)
-  core.root_view:defer_draw(function()
-    local text = item.tooltip
-    local w = style.font:get_width(text)
-    local h = style.font:get_height()
-    local x = self.pointer.x - (w / 2) - (style.padding.x * 2)
-
-    if x < 0 then x = 0 end
-    if (x + w + (style.padding.x * 3)) > self.size.x then
-      x = self.size.x - w - (style.padding.x * 3)
+  if not self.tooltip_view then
+    self.tooltip_view = View()
+    self.tooltip_view:set_floating(true, {
+      owner = self,
+      focus = "none",
+      interactive = false
+    })
+    ---Get the editor viewport bounds for a companion that draws outside its owner.
+    ---@return number x Viewport screen x coordinate
+    ---@return number y Viewport screen y coordinate
+    ---@return number w Viewport width
+    ---@return number h Viewport height
+    self.tooltip_view.get_floating_bounds = function()
+      local root = core.root_view
+      return root.position.x, root.position.y, root.size.x, root.size.y
     end
+    ---Ignore placement writes because the companion computes its bounds from its owner.
+    self.tooltip_view.set_floating_bounds = function() end
+    ---Remove the tooltip if its current item loses hover or the status bar hides.
+    ---@param view core.statusview.tooltip_view Reusable tooltip companion
+    self.tooltip_view.update = function(view)
+      if self.hovered_item ~= view.item or not self.visible then
+        view:hide_floating()
+      end
+    end
+    ---Draw the latest tooltip item above the status bar, constrained to the bar width.
+    ---@param view core.statusview.tooltip_view Reusable tooltip companion
+    self.tooltip_view.draw = function(view)
+      local text = view.item.tooltip
+      local w = style.font:get_width(text)
+      local h = style.font:get_height()
+      local x = self.pointer.x - (w / 2) - (style.padding.x * 2)
 
-    renderer.draw_rect(
-      x + style.padding.x,
-      self.position.y - h - (style.padding.y * 2),
-      w + (style.padding.x * 2),
-      h + (style.padding.y * 2),
-      style.background3
-    )
+      if x < 0 then x = 0 end
+      if (x + w + (style.padding.x * 3)) > self.size.x then
+        x = self.size.x - w - (style.padding.x * 3)
+      end
 
-    renderer.draw_text(
-      style.font,
-      text,
-      -- we round the coords to prevent jumpy text on fractional scales
-      common.round(x + (style.padding.x * 2)),
-      common.round(self.position.y - h - style.padding.y),
-      style.text
-    )
-  end)
+      renderer.draw_rect(
+        x + style.padding.x,
+        self.position.y - h - (style.padding.y * 2),
+        w + (style.padding.x * 2),
+        h + (style.padding.y * 2),
+        style.background3
+      )
+
+      renderer.draw_text(
+        style.font,
+        text,
+        -- we round the coords to prevent jumpy text on fractional scales
+        common.round(x + (style.padding.x * 2)),
+        common.round(self.position.y - h - style.padding.y),
+        style.text
+      )
+    end
+  end
+  self.tooltip_view.item = item
+  if not self.tooltip_view.floating_visible then
+    self.tooltip_view:show_floating()
+  end
 end
 
 

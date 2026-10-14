@@ -138,7 +138,18 @@ function DocView:draw_overlay(...)
 end
 
 command.add(nil, {
-  ["lineguide:toggle"] = function()
+  ["line-guide:toggle"] = function()
     config.plugins.lineguide.enabled = not config.plugins.lineguide.enabled
   end
 })
+
+core.menu_view:register({ "view" }, {
+  {
+    id = "line-guide",
+    text = "Line Guide",
+    command = "line-guide:toggle",
+    ---Reflect whitespace visibility when opening or visiting this entry.
+    ---@return boolean checked Whether whitespace markers are enabled
+    checked = function() return config.plugins.lineguide.enabled end
+  }
+}, "lineguide")

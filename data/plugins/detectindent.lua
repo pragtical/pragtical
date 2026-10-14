@@ -418,3 +418,30 @@ command.add(
     set_indent_type(core.active_view.doc, "soft")
   end
 })
+
+core.menu_view:register({ "edit" }, {
+  {
+    id = "indentation", text = "Indentation", items = {
+      {
+        id = "style",
+        text = "Indentation Style…",
+        command = "indent:set-file-indent-type"
+      },
+      {
+        id = "size",
+        text = "Indentation Size…",
+        command = "indent:set-file-indent-size"
+      },
+      {
+        id = "tabs",
+        text = "Use Tabs",
+        command = "indent:switch-file-to-tabs-indentation"
+      },
+      {
+        id = "spaces",
+        text = "Use Spaces",
+        command = "indent:switch-file-to-spaces-indentation"
+      }
+    }
+  }
+}, "detectindent")

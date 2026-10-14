@@ -5,6 +5,8 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local LogView = require "core.logview"
 
+-- Load the about dialog only on user request
+local AboutView
 
 local function new_doc_extension()
   local fallback = config.new_file_extension
@@ -369,5 +371,10 @@ command.add(nil, {
 
   ["core:view-website"] = function()
     common.open_in_system("https://pragtical.dev")
+  end,
+
+  ["core:view-about"] = function()
+    if not AboutView then AboutView = require "core.aboutview" end
+    AboutView.show_dialog()
   end,
 })

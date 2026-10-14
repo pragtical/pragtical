@@ -106,7 +106,7 @@ function system.has_pending_events() end
 ---
 ---Change the cursor type displayed on screen.
 ---
----@param type string | "arrow" | "ibeam" | "sizeh" | "sizev" | "hand"
+---@param type string | "arrow" | "ibeam" | "sizeh" | "sizev" | "sizenwse" | "sizenesw" | "hand"
 function system.set_cursor(type) end
 
 ---

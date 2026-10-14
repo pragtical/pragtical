@@ -854,4 +854,24 @@ keymap.add {
   ["f10"] = "line-wrapping:toggle",
 }
 
+core.menu_view:register({ "view" }, {
+  {
+    id = "word-wrap",
+    text = "Word Wrap",
+    command = "line-wrapping:toggle",
+    ---Reflect wrapping in the active document, requiring both panes for a diff view.
+    ---@return boolean? checked Whether wrapping is enabled for the active editor
+    checked = function()
+      local view = core.active_view
+      if not view or not view.doc then return false end
+      local parent = view.diff_view_parent
+      if parent then
+        return parent.doc_view_a.wrapping_enabled
+          and parent.doc_view_b.wrapping_enabled
+      end
+      return view.wrapping_enabled
+    end
+  }
+}, "linewrapping")
+
 return LineWrapping

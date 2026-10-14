@@ -4,32 +4,50 @@ local common = require "core.common"
 local command = require "core.command"
 local keymap = require "core.keymap"
 local style = require "core.style"
-local RootView = require "core.rootview"
+local View = require "core.view"
 
 local cx, cy, pick_color, mode, color = 0, 0, false, "rgb", {0, 0, 0, 255}
 
-local rootview_on_mouse_moved = RootView.on_mouse_moved
-function RootView:on_mouse_moved(x, y, dx, dy)
-  rootview_on_mouse_moved(self, x, y, dx, dy)
-  cx, cy = common.round(x), common.round(y)
+local picker = View()
+
+picker:set_floating(true, { focus = "none", pass_through_unhandled = true })
+
+---Get the editor viewport bounds for a companion that draws outside its owner.
+---@return number x Viewport screen x coordinate
+---@return number y Viewport screen y coordinate
+---@return number w Viewport width
+---@return number h Viewport height
+picker.get_floating_bounds = function()
+  local root = core.root_view
+  return root.position.x, root.position.y, root.size.x, root.size.y
 end
 
-local rootviewon_mouse_pressed = RootView.on_mouse_pressed
-function RootView:on_mouse_pressed(button, x, y, clicks)
-  if pick_color and button == "left" then
-    pick_color = false
-    local c = string.format(
-      mode == "rgb" and "rgb(%d,%d,%d)" or "#%02x%02x%02x",
-      color[1], color[2], color[3]
-    )
-    core.log("Color %s copied to clipboard", c)
-    system.set_clipboard(c)
-    return true
-  end
-  return rootviewon_mouse_pressed(self, button, x, y, clicks)
+---Ignore placement writes because the companion computes its bounds from its owner.
+picker.set_floating_bounds = function() end
+
+---Track the RootView pointer coordinates used to sample the editor color.
+picker.update = function()
+  cx, cy = common.round(core.root_view.mouse.x), common.round(core.root_view.mouse.y)
 end
 
-local function draw_color_box()
+---Copy the sampled color on left-click and end picking; other clicks pass through.
+---@param _ core.view Color picker companion
+---@param button core.view.mousebutton Pressed button
+---@return boolean consumed Whether a color was copied
+picker.on_mouse_pressed = function(_, button)
+  if button ~= "left" then return false end
+  pick_color = false
+  picker:hide_floating()
+  local value = string.format(
+    mode == "rgb" and "rgb(%d,%d,%d)" or "#%02x%02x%02x",
+    color[1], color[2], color[3]
+  )
+  core.log("Color %s copied to clipboard", value)
+  system.set_clipboard(value)
+  return true
+end
+
+picker.draw = function()
   local spacing = 30
   local size = spacing * SCALE
   local border = style.divider_size
@@ -64,23 +82,16 @@ local function draw_color_box()
   renderer.draw_rect(bx, by, size, size, color)
 end
 
-local rootview_draw = RootView.draw
-function RootView:draw()
-  rootview_draw(self)
-  if pick_color then
-    system.set_cursor("arrow")
-    core.root_view:defer_draw(draw_color_box)
-  end
-end
-
 command.add(nil, {
   ["root:pick-rgb-color"] = function()
     pick_color = true
+    picker:show_floating()
     mode = "rgb"
     core.log("RGB Color Picker activated")
   end,
   ["root:pick-hex-color"] = function()
     pick_color = true
+    picker:show_floating()
     mode = "hex"
     core.log("HEX Color Picker activated")
   end
@@ -89,6 +100,7 @@ command.add(nil, {
 command.add(function() return pick_color end, {
   ["root:pick-color-cancel"] = function()
     pick_color = false
+    picker:hide_floating()
   end
 })
 
@@ -97,3 +109,13 @@ keymap.add({
   ["ctrl+2"] = "root:pick-hex-color",
   ["escape"] = "root:pick-color-cancel",
 })
+
+core.menu_view:register({ "tools" }, {
+  {
+    id = "rootcolorpicker", text = "Root Color Picker",
+    items = {
+      { id = "rgb", text = "RGB Format", command = "root:pick-rgb-color" },
+      { id = "hex", text = "Hexadecimal Format", command = "root:pick-hex-color" }
+    }
+  }
+}, "rootpickcolor")

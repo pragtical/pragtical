@@ -6,6 +6,7 @@ local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
 local View = require "core.view"
+local Node = require "core.node"
 local ContextMenu = require "core.contextmenu"
 local RootView = require "core.rootview"
 local CommandView = require "core.commandview"
@@ -18,6 +19,8 @@ local DirWatch = require "core.dirwatch"
 ---@class config.plugins.treeview
 ---Default treeview width.
 ---@field size number
+---Placement of the treeview toolbar; defaults to right at the editor's far-right edge.
+---@field toolbar_position "left"|"bottom"|"top"|"right"
 ---Selects the file you are editing on the treeview.
 ---@field highlight_focused_file boolean
 ---Automatically expands directories to select focused file.
@@ -33,6 +36,7 @@ local DirWatch = require "core.dirwatch"
 config.plugins.treeview = common.merge({
   -- Default treeview width
   size = 200 * SCALE,
+  toolbar_position = "left",
   highlight_focused_file = true,
   expand_dirs_to_focused_file = false,
   scroll_to_focused_file = false,
@@ -65,7 +69,36 @@ local function replace_alpha(color, alpha)
   return { r, g, b, alpha }
 end
 
----@class plugins.treeview
+---File or directory cached by TreeView and retained as a context-command target.
+---@class plugins.treeview.item
+---@field filename string File or directory basename
+---@field abs_filename string Absolute path
+---@field name string Display name
+---@field type "file"|"dir" Entry kind
+---@field project core.project Owning project
+---@field depth integer Path depth relative to the project
+---@field expanded boolean Whether children are expanded
+---@field files? system.fileinfo[] Cached directory children
+
+---Nodes owned by TreeView for placing its toolbar around the tree/document split.
+---@class plugins.treeview.toolbar_layout
+---@field root core.rootview Root that owns these layout nodes
+---@field node core.node Outer split retained across docking changes
+---@field documents core.node Document branch retained when its child splits collapse
+---@field toolbar_node core.node Leaf containing the toolbar
+---@field group? core.node Intermediate split rebuilt for the current docking position
+
+---@class plugins.treeview : core.view
+---@overload fun():plugins.treeview
+---@field default_size number Scaled configured width used to detect manual resizing
+---@field scroll_width number Width of the currently drawn rows in content coordinates
+---@field toolbar? plugins.toolbarview Attached toolbar
+---@field toolbar_position "left"|"bottom"|"top"|"right" Docking position owned by TreeView
+---@field toolbar_layout? plugins.treeview.toolbar_layout Nodes created when attaching a toolbar
+---@field contextmenu? core.contextmenu Tree context menu
+---@field context_item? plugins.treeview.item Clicked target while its context menu is open
+---@field context_command_item? plugins.treeview.item Target retained through command dispatch
+---@field tooltip_view? core.view Floating path-tooltip companion
 local TreeView = View:extend()
 
 function TreeView:__tostring() return "TreeView" end
@@ -77,6 +110,8 @@ function TreeView:new()
   self.init_size = true
   self.scroll_width = 0
   self.target_size = config.plugins.treeview.size
+  self.default_size = self.target_size
+  self.toolbar_position = config.plugins.treeview.toolbar_position
   self.show_hidden = config.plugins.treeview.show_hidden
   self.show_ignored = config.plugins.treeview.show_ignored
   self.cache = {}
@@ -101,6 +136,7 @@ end
 function TreeView:on_scale_change(new_scale, prev_scale)
   self.target_size = self.target_size / prev_scale
   self.target_size = self.target_size * new_scale
+  self.default_size = self.default_size / prev_scale * new_scale
 end
 
 
@@ -126,7 +162,11 @@ function TreeView:get_cached(project, path)
       type = info.type,
       project = project
     }
-    if self.expanded[path] ~= nil then t.expanded = self.expanded[path] else t.expanded = (info.type == "dir" and #truncated <= 1) end
+    if self.expanded[path] ~= nil then
+      t.expanded = self.expanded[path]
+    else
+      t.expanded = (info.type == "dir" and #truncated <= 1)
+    end
     if t.expanded then self.watches[project]:watch(path) end
     self.cache[path] = t
   end
@@ -147,7 +187,12 @@ function TreeView:get_cached(project, path)
       end
       self.cache[l] = nil
     end
-    table.sort(t.files, function(a, b) return system.path_compare(a.name, a.type, b.name, b.type) end)
+    table.sort(
+      t.files,
+      function(a, b)
+        return system.path_compare(a.name, a.type, b.name, b.type)
+      end
+    )
   end
   return t
 end
@@ -170,7 +215,12 @@ function TreeView:get_items(project, path, x, y, w, h)
   if dir and dir.files and dir.expanded then
     for i, file in ipairs(dir.files) do
       if self.show_hidden or not file.name:find("^%.") then
-        count_lines = count_lines + self:get_items(project, path .. PATHSEP .. file.name, x, y + count_lines * h, w, h)
+        count_lines = count_lines + self:get_items(
+          project,
+          path .. PATHSEP .. file.name,
+          x, y + count_lines * h,
+          w, h
+        )
       end
     end
   end
@@ -184,7 +234,11 @@ function TreeView:each_item()
     local ox, oy = self:get_content_offset()
     local h = self:get_item_height()
     for k, project in ipairs(core.projects) do
-      count_lines = count_lines + self:get_items(project, project.path, ox, oy + style.padding.y + h * count_lines, self.size.x, h)
+      count_lines = count_lines + self:get_items(
+        project, project.path,
+        ox, oy + style.padding.y + h * count_lines,
+        self.size.x, h
+      )
     end
     self.count_lines = count_lines
   end)
@@ -204,7 +258,11 @@ function TreeView:set_selection(selection, selection_y, center, instant)
     end
     local _, y = self:get_content_offset()
     self.scroll.to.y = selection_y - y
-    self.scroll.to.y = common.clamp(self.scroll.to.y, 0, self:get_scrollable_size() - self.size.y)
+    self.scroll.to.y = common.clamp(
+      self.scroll.to.y,
+      0,
+      self:get_scrollable_size() - self.size.y
+    )
     if instant then
       self.scroll.y = self.scroll.to.y
     end
@@ -271,6 +329,8 @@ end
 
 function TreeView:on_mouse_moved(px, py, ...)
   if not self.visible then return end
+  -- Existing menu extensions use hovered_item as their command target.
+  if self.contextmenu and self.contextmenu.show_context_menu then return end
   if TreeView.super.on_mouse_moved(self, px, py, ...) then
     -- mouse movement handled by the View (scrollbar)
     self.hovered_item = nil
@@ -279,7 +339,7 @@ function TreeView:on_mouse_moved(px, py, ...)
 
   local item_changed, tooltip_changed
   for item, x,y,w,h in self:each_item() do
-    if px > x and py > y and px <= self.size.x and py <= y + h then
+    if px > x and py > y and px <= self.position.x + self.size.x and py <= y + h then
       item_changed = true
       self.hovered_item = item
 
@@ -299,13 +359,40 @@ end
 
 function TreeView:on_mouse_left()
   TreeView.super.on_mouse_left(self)
-  self.hovered_item = nil
+  self:hide_tooltip()
+  if not (self.contextmenu and self.contextmenu.show_context_menu) then
+    self.hovered_item = nil
+  end
+end
+
+
+---Cancel pending or shown path tooltips and hide their floating companion.
+function TreeView:hide_tooltip()
+  self.tooltip.alpha = 0
+  self.tooltip.x, self.tooltip.y = nil, nil
+  if self.tooltip_view then self.tooltip_view:hide_floating() end
+end
+
+
+---Get the clicked menu target while opening or dispatching a contextual action.
+---Otherwise falls back to the hovered or selected item.
+---@return plugins.treeview.item? item File or directory targeted by the action
+function TreeView:get_context_item()
+  return self.context_command_item
+    or (self.contextmenu and self.contextmenu.show_context_menu and self.context_item)
+    or self.hovered_item or self.selected_item
 end
 
 
 function TreeView:update()
   -- update width
-  local dest = self.visible and common.round(self.target_size) or 0
+  local width = self.target_size
+  if width == self.default_size and self.toolbar
+    and self.toolbar.orientation == "horizontal" and self.toolbar:is_visible()
+  then
+    width = math.max(width, self.toolbar:get_min_width())
+  end
+  local dest = self.visible and common.round(width) or 0
   if self.init_size then
     self.size.x = dest
     self.init_size = false
@@ -346,11 +433,14 @@ function TreeView:update()
       self.last_active_view = current_active_view
       if DocView:is_extended_by(current_active_view) then
         local abs_filename = current_active_view.doc
-                             and current_active_view.doc.abs_filename or ""
-        self:set_selection_to_path(abs_filename,
-                                   config.expand_dirs_to_focused_file,
-                                   config.scroll_to_focused_file,
-                                   not config.animate_scroll_to_focused_file)
+          and current_active_view.doc.abs_filename
+          or ""
+        self:set_selection_to_path(
+          abs_filename,
+          config.expand_dirs_to_focused_file,
+          config.scroll_to_focused_file,
+          not config.animate_scroll_to_focused_file
+        )
       end
     end
   end
@@ -360,7 +450,9 @@ end
 
 
 function TreeView:get_scrollable_size()
-  return self.count_lines and self:get_item_height() * (self.count_lines + 1) or math.huge
+  return self.count_lines
+    and self:get_item_height() * (self.count_lines + 1)
+    or math.huge
 end
 
 
@@ -385,9 +477,18 @@ function TreeView:draw_tooltip()
 
   local bx, by = x - tooltip_border, y - tooltip_border
   local bw, bh = w + 2 * tooltip_border, h + 2 * tooltip_border
-  renderer.draw_rect(bx, by, bw, bh, replace_alpha(style.text, self.tooltip.alpha))
-  renderer.draw_rect(x, y, w, h, replace_alpha(style.background2, self.tooltip.alpha))
-  common.draw_text(style.font, replace_alpha(style.text, self.tooltip.alpha), text, "center", x, y, w, h)
+  renderer.draw_rect(
+    bx, by, bw, bh, replace_alpha(style.text, self.tooltip.alpha)
+  )
+  renderer.draw_rect(
+    x, y, w, h, replace_alpha(style.background2, self.tooltip.alpha)
+  )
+  common.draw_text(
+    style.font,
+    replace_alpha(style.text, self.tooltip.alpha),
+    text, "center",
+    x, y, w, h
+  )
 end
 
 
@@ -470,7 +571,7 @@ function TreeView:draw()
   self:draw_background(style.background2)
   local _y, _h = self.position.y, self.size.y
 
-  local sw, ox = 0, math.abs(self:get_content_offset())
+  local sw, ox = 0, self:get_content_offset()
   for item, x,y,w,h in self:each_item() do
     if y + h >= _y and y < _y + _h then
       local w = self:draw_item(
@@ -478,17 +579,50 @@ function TreeView:draw()
         item == self.selected_item,
         item == self.hovered_item,
         x, y, w, h
-      ) + ox
+      ) - ox
       sw = math.max(w, sw)
     end
   end
-  if sw > self.scroll.x + self.size.x then
+  if self.scroll_width ~= sw then
     self.scroll_width = sw
+    core.redraw = true
   end
 
   self:draw_scrollbar()
   if self.hovered_item and self.tooltip.x and self.tooltip.alpha > 0 then
-    core.root_view:defer_draw(self.draw_tooltip, self)
+    if not self.tooltip_view then
+      local tooltip = View()
+      self.tooltip_view = tooltip
+      tooltip:set_floating(true, { owner = self, interactive = false, focus = "none" })
+      ---Get the editor viewport bounds for a companion that draws outside its owner.
+      ---@return number x Viewport screen x coordinate
+      ---@return number y Viewport screen y coordinate
+      ---@return number w Viewport width
+      ---@return number h Viewport height
+      tooltip.get_floating_bounds = function()
+        local root = core.root_view
+        return root.position.x, root.position.y, root.size.x, root.size.y
+      end
+      ---Ignore placement writes because the companion computes its bounds from its owner.
+      tooltip.set_floating_bounds = function() end
+      ---Draw the tree owner's current path tooltip in the floating layer.
+      tooltip.draw = function() self:draw_tooltip() end
+      ---Remove the tooltip companion once its owner no longer has a visible path tooltip.
+      tooltip.update = function()
+        if
+          not (
+            self.hovered_item
+            and self.tooltip.x
+            and self.tooltip.alpha > 0
+          )
+        then
+          tooltip:hide_floating()
+        end
+      end
+    end
+    if not self.tooltip_view.floating_visible then
+      self.tooltip_view:show_floating()
+    end
   end
 end
 
@@ -559,6 +693,112 @@ function TreeView:open_doc(filename)
   return core.open_file(filename)
 end
 
+
+---Apply TreeView's docking position while preserving the tree and document branches.
+---Cancel gestures and hover on moved panes, then set toolbar orientation and node locks.
+---@param tree plugins.treeview Owner whose toolbar layout is rebuilt, if attached
+local function update_toolbar_layout(tree)
+  local docking, toolbar = tree.toolbar_layout, tree.toolbar
+  if not docking then return end
+  local root, layout, group = docking.root, docking.node, docking.group
+  if
+    (
+      root.grab and (root.grab.view == toolbar or root.grab.view == tree)
+    )
+    or (
+      root.dragged_divider
+      and (
+        root.dragged_divider == layout or root.dragged_divider == group
+      )
+    )
+  then
+    root:cancel_mouse_capture()
+  end
+  if tree.contextmenu then tree.contextmenu:hide() end
+  if root.overlapping_view == toolbar or root.overlapping_view == tree then
+    root:set_hovered_view(nil)
+  end
+  tree:hide_tooltip()
+  toolbar:on_mouse_left()
+  toolbar.scroll.x, toolbar.scroll.y = 0, 0
+  toolbar.scroll.to.x, toolbar.scroll.to.y = 0, 0
+
+  local toolbar_node = docking.toolbar_node
+  if tree.toolbar_position == "left" or tree.toolbar_position == "right" then
+    group = Node("hsplit")
+    group.a, group.b = tree.node, docking.documents
+    if tree.toolbar_position == "left" then
+      layout.a, layout.b = toolbar_node, group
+    else
+      layout.a, layout.b = group, toolbar_node
+    end
+    toolbar_node.locked = { x = true }
+    toolbar:set_orientation("vertical")
+  else
+    group = Node("vsplit")
+    if tree.toolbar_position == "top" then
+      group.a, group.b = toolbar_node, tree.node
+    else
+      group.a, group.b = tree.node, toolbar_node
+    end
+    layout.a, layout.b = group, docking.documents
+    toolbar_node.locked = { y = true }
+    toolbar:set_orientation("horizontal")
+  end
+  docking.group = group
+  toolbar.init_size = true
+  toolbar:update()
+  root.root_node:update_layout()
+  core.redraw = true
+end
+
+
+---Set toolbar docking and update TreeView's placement setting.
+---Left and right use vertical icons; right places the toolbar beyond all document panes.
+---Top and bottom use horizontal icons above or below the tree.
+---May be called before attachment; changing placement preserves document and tree state.
+---Settings saves this preference to disk when its position selector is used.
+---@param position "left"|"bottom"|"top"|"right" Tree docking or the editor's far-right edge
+function TreeView:set_toolbar_position(position)
+  assert(
+    position == "left"
+      or position == "bottom"
+      or position == "top"
+      or position == "right",
+    "Invalid toolbar position"
+  )
+  config.plugins.treeview.toolbar_position = position
+  if self.toolbar_position == position then return end
+  self.toolbar_position = position
+  update_toolbar_layout(self)
+end
+
+
+---Attach a toolbar to this docked tree and apply its current placement preference.
+---Owns toolbar docking and effective visibility while preserving requested visibility.
+---@param toolbar plugins.toolbarview Toolbar to place and orient around the tree
+function TreeView:attach_toolbar(toolbar)
+  local root = core.root_view
+  local layout = self.node:get_parent_node(root.root_node)
+  local group = self.node
+  self.toolbar_layout = {
+    root = root, node = layout, documents = layout.b,
+    toolbar_node = group:split("down", toolbar, { y = true })
+  }
+  self.node, self.toolbar = group.a, toolbar
+  local tree = self
+  ---Check TreeView's docking visibility without changing the requested toolbar flag.
+  ---@return boolean visible Left and right docking stay visible when the tree is hidden
+  function toolbar:is_visible()
+    return self.visible and (
+      tree.toolbar_position == "left"
+      or tree.toolbar_position == "right"
+      or tree.visible
+    )
+  end
+  update_toolbar_layout(self)
+end
+
 -- init
 local view = TreeView()
 local node = core.root_view:get_active_node()
@@ -571,12 +811,11 @@ view.node = node:split("left", view, {x = true}, true)
 -- plugin module that plug itself in the active node but it is plugged here
 -- in the treeview node.
 local toolbar_view = nil
-local toolbar_plugin, ToolbarView = pcall(require, "plugins.toolbarview")
-if config.plugins.toolbarview ~= false and toolbar_plugin then
+if config.plugins.toolbarview ~= false then
+  local ToolbarView = require "plugins.toolbarview"
   toolbar_view = ToolbarView()
-  view.node:split("down", toolbar_view, {y = true})
-  local min_toolbar_width = toolbar_view:get_min_width()
-  view:set_target_size("x", math.max(config.plugins.treeview.size, min_toolbar_width))
+  toolbar_view.visible = config.plugins.treeview.show_toolbar ~= false
+  view:attach_toolbar(toolbar_view)
   command.add(nil, {
     ["toolbar:toggle"] = function()
       toolbar_view:toggle_visible()
@@ -607,34 +846,64 @@ end)
 -- Add a context menu to the treeview
 local menu = ContextMenu()
 
-local on_view_mouse_pressed = RootView.on_view_mouse_pressed
-local on_mouse_moved = RootView.on_mouse_moved
-local root_view_update = RootView.update
-local root_view_draw = RootView.draw
-
-function RootView:on_mouse_moved(...)
-  if menu:on_mouse_moved(...) then return end
-  on_mouse_moved(self, ...)
+---Restore physical tree hover after menu dismissal without retaining its clicked target.
+local function restore_hover()
+  view.hovered_item = nil
+  local root = core.root_view
+  local x, y = root.mouse.x, root.mouse.y
+  local node = root.root_node:get_child_overlapping_point(x, y)
+  if node and node.active_view == view and not root:get_floating_view_at(x, y) then
+    view:on_mouse_moved(x, y, 0, 0)
+  end
 end
 
+---Capture the clicked tree item before snapshotting contextual command predicates.
+---@param x number Opening screen x coordinate
+---@param y number Opening screen y coordinate
+---@return boolean shown Whether the active tree supplied a nonempty menu
+function menu:show(x, y)
+  if core.active_view ~= view then return false end
+  if not self.show_context_menu then view:on_mouse_moved(x, y, 0, 0) end
+  local hovered = view.hovered_item
+  view.context_item = view.hovered_item or view.selected_item
+  view.hovered_item = view.context_item
+  local shown = ContextMenu.show(self, x, y)
+  if not shown then view.context_item, view.hovered_item = nil, hovered end
+  return shown
+end
+
+---Hide tree tooltips while the menu is open and restore hover after dismissal.
+---@param visible boolean Whether the menu remains shown
+function menu:on_floating_visibility_changed(visible)
+  ContextMenu.on_floating_visibility_changed(self, visible)
+  if visible then
+    view:hide_tooltip()
+  else
+    view.context_item = nil
+    if not view.context_command_item then restore_hover() end
+  end
+end
+
+---Retain the clicked tree item through hide-before-dispatch and restore hover afterward.
+---@param selected? core.contextmenu.item Submenu leaf to dispatch through this root
+function menu:call_selected_item(selected)
+  -- ContextMenu hides before dispatch; keep its target through that command.
+  local previous = view.context_command_item
+  view.context_command_item = view.context_item
+  ContextMenu.call_selected_item(self, selected)
+  view.context_command_item = previous
+  if not self.show_context_menu then restore_hover() end
+end
+
+
+local on_view_mouse_pressed = RootView.on_view_mouse_pressed
 function RootView.on_view_mouse_pressed(button, x, y, clicks)
   -- We give the priority to the menu to process mouse pressed events.
   if button == "right" then
-    view.tooltip.alpha = 0
-    view.tooltip.x, view.tooltip.y = nil, nil
+    view:hide_tooltip()
   end
   local handled = menu:on_mouse_pressed(button, x, y, clicks)
   return handled or on_view_mouse_pressed(button, x, y, clicks)
-end
-
-function RootView:update(...)
-  root_view_update(self, ...)
-  menu:update()
-end
-
-function RootView:draw(...)
-  root_view_draw(self, ...)
-  menu:draw()
 end
 
 local on_quit_project = core.on_quit_project
@@ -642,6 +911,7 @@ function core.on_quit_project()
   view.cache = {}
   on_quit_project()
 end
+
 
 local function is_project_folder(item)
   return item.abs_filename == item.project.path
@@ -651,8 +921,7 @@ local function is_primary_project_folder(path)
   return core.root_project().path == path
 end
 
-
-local function treeitem() return view.hovered_item or view.selected_item end
+local function treeitem() return view:get_context_item() end
 
 
 menu:register(function() return core.active_view:is(TreeView) and treeitem() end, {
@@ -661,15 +930,18 @@ menu:register(function() return core.active_view:is(TreeView) and treeitem() end
   ContextMenu.DIVIDER
 })
 
-menu:register(function()
-  local item = treeitem()
-  return core.active_view:is(TreeView)
-    and item
-    and item.type == "file"
-    and MarkdownView.is_supported(item.abs_filename)
-end, {
-  { text = "Preview Markdown", command = "treeview:preview-markdown" }
-})
+menu:register(
+  function()
+    local item = treeitem()
+    return core.active_view:is(TreeView)
+      and item
+      and item.type == "file"
+      and MarkdownView.is_supported(item.abs_filename)
+  end,
+  {
+    { text = "Preview Markdown", command = "treeview:preview-markdown" }
+  }
+)
 
 menu:register(
   function()
@@ -1017,8 +1289,8 @@ command.add(
   end
 })
 
-local projectsearch = pcall(require, "plugins.projectsearch")
-if projectsearch then
+if config.plugins.projectsearch ~= false then
+  require "plugins.projectsearch"
   menu:register(function()
     local item = treeitem()
     return item and item.type == "dir"
@@ -1026,43 +1298,49 @@ if projectsearch then
     { text = "Find in directory", command = "treeview:search-in-directory" }
   })
   command.add(function()
-    return view.hovered_item and view.hovered_item.type == "dir"
+    local item = treeitem()
+    return item and item.type == "dir", item
   end, {
     ["treeview:search-in-directory"] = function(item)
-      command.perform("project-search:find", view.hovered_item.abs_filename)
+      command.perform("project-search:find", item.abs_filename)
     end
   })
 end
 
-command.add(function()
+command.add(
+  function()
     local item = treeitem()
     return item
       and not is_primary_project_folder(item.abs_filename)
       and is_project_folder(item), item
-  end, {
-  ["treeview:remove-project-directory"] = function(item)
-    core.remove_project(item.project)
   end,
-})
+  {
+    ["treeview:remove-project-directory"] = function(item)
+      core.remove_project(item.project)
+    end,
+  }
+)
 
 
 command.add(
   function()
     return menu.show_context_menu == true and core.active_view:is(TreeView)
-  end, {
-  ["treeview-context:focus-previous"] = function()
-    menu:focus_previous()
   end,
-  ["treeview-context:focus-next"] = function()
-    menu:focus_next()
-  end,
-  ["treeview-context:hide"] = function()
-    menu:hide()
-  end,
-  ["treeview-context:on-selected"] = function()
-    menu:call_selected_item()
-  end,
-})
+  {
+    ["treeview-context:focus-previous"] = function()
+      menu:focus_previous()
+    end,
+    ["treeview-context:focus-next"] = function()
+      menu:focus_next()
+    end,
+    ["treeview-context:hide"] = function()
+      menu:hide()
+    end,
+    ["treeview-context:on-selected"] = function()
+      menu:call_selected_item()
+    end,
+  }
+)
 
 
 keymap.add {
@@ -1099,12 +1377,8 @@ config.plugins.treeview.config_spec = {
     description = "Default treeview width.",
     path = "size",
     type = "number",
-    default = toolbar_view
-      and math.ceil(toolbar_view:get_min_width() / SCALE)
-      or 200,
-    min = toolbar_view
-      and math.ceil(toolbar_view:get_min_width() / SCALE)
-      or 200,
+    default = 200,
+    min = 200,
     get_value = function(value)
       return value / SCALE
     end,
@@ -1114,9 +1388,8 @@ config.plugins.treeview.config_spec = {
     on_apply = function(value)
       -- prevent on_scale_change if applied on non default scale
       if view.current_scale ~= SCALE then view.current_scale = SCALE end
-      view:set_target_size("x", math.max(
-        value, toolbar_view and toolbar_view:get_min_width() or 200 * SCALE
-      ))
+      view.default_size = value
+      view:set_target_size("x", value)
     end
   },
   {
@@ -1135,10 +1408,30 @@ config.plugins.treeview.config_spec = {
     path = "show_toolbar",
     type = "toggle",
     default = true,
-    on_apply = function (value)
-    	if toolbar_view.visible ~= value then
-    	  toolbar_view:toggle_visible()
-    	end
+    on_apply = function(value)
+      if toolbar_view and toolbar_view.visible ~= value then
+        toolbar_view:toggle_visible()
+      end
+    end
+  },
+  {
+    label = "Toolbar Position",
+    description = "Dock beside, above or below the treeview, or at the editor's right edge.",
+    path = "toolbar_position",
+    type = "selection",
+    default = "left",
+    values = {
+      { "Left", "left" },
+      { "Bottom", "bottom" },
+      { "Top", "top" },
+      { "Right", "right" }
+    },
+    ---Apply saved or edited docking to each attached tree toolbar in the current layout.
+    ---@param position "left"|"bottom"|"top"|"right" Toolbar docking position
+    on_apply = function(position)
+      for _, view in ipairs(core.root_view.root_node:get_children()) do
+        if view:extends(TreeView) and view.toolbar then view:set_toolbar_position(position) end
+      end
     end
   },
   {
@@ -1197,5 +1490,21 @@ config.plugins.treeview.config_spec = {
 -- user or plugin modifications
 view.toolbar = toolbar_view
 view.contextmenu = menu
+
+local entries = {{
+  id = "treeview", text = "Treeview", command = "treeview:toggle",
+  ---Reflect the tree's requested visibility when opening or visiting this entry.
+  ---@return boolean checked Whether TreeView is shown
+  checked = function() return view.visible end
+}}
+if toolbar_view then
+  entries[#entries + 1] = {
+    id = "toolbar", text = "Toolbar", command = "toolbar:toggle",
+    ---Reflect requested toolbar visibility, independent of hidden horizontal docking.
+    ---@return boolean checked Whether the user has enabled the toolbar
+    checked = function() return toolbar_view.visible end
+  }
+end
+core.menu_view:register({ "view" }, entries, "treeview")
 
 return view

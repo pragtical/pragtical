@@ -514,6 +514,8 @@ static const char *cursor_opts[] = {
   "ibeam",
   "sizeh",
   "sizev",
+  "sizenwse",
+  "sizenesw",
   "hand",
   NULL
 };
@@ -523,6 +525,8 @@ static const int cursor_enums[] = {
   SDL_SYSTEM_CURSOR_TEXT,
   SDL_SYSTEM_CURSOR_EW_RESIZE,
   SDL_SYSTEM_CURSOR_NS_RESIZE,
+  SDL_SYSTEM_CURSOR_NWSE_RESIZE,
+  SDL_SYSTEM_CURSOR_NESW_RESIZE,
   SDL_SYSTEM_CURSOR_POINTER
 };
 

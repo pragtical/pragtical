@@ -11,6 +11,7 @@ local ime
 local RootView
 local StatusView
 local TitleView
+local MenuView
 local CommandView
 local NagView
 local DocView
@@ -464,6 +465,7 @@ function core.init()
   RootView = require "core.rootview"
   StatusView = require "core.statusview"
   TitleView = require "core.titleview"
+  MenuView = require "core.menuview"
   CommandView = require "core.commandview"
   NagView = require "core.nagview"
   Project = require "core.project"
@@ -577,11 +579,15 @@ function core.init()
   core.nag_view = NagView()
   ---@type core.titleview
   core.title_view = TitleView()
+  ---@type core.menuview
+  core.menu_view = MenuView()
 
   -- Some plugins (eg: console) require the nodes to be initialized to defaults
   local cur_node = core.root_view.root_node
   cur_node.is_primary_node = true
   cur_node:split("up", core.title_view, {y = true})
+  cur_node = cur_node.b
+  cur_node:split("up", core.menu_view, {y = true})
   cur_node = cur_node.b
   cur_node:split("up", core.nag_view, {y = true})
   cur_node = cur_node.b
@@ -1244,15 +1250,28 @@ function core.set_visited(filename)
 end
 
 
+---Set keyboard focus, deferring requests blocked by a modal popup or force_focus.
+---Accepted requests reset IME state and update native text input for the target view.
+---@param view core.view Requested focus target
 function core.set_active_view(view)
   assert(view, "Tried to set active view to nil")
+  if core.root_view and not core.root_view:can_focus_view(view) then
+    core.next_active_view = view
+    return
+  end
+  if
+    view ~= core.active_view
+    and core.active_view
+    and core.active_view.force_focus
+  then
+    core.next_active_view = view
+    return
+  end
   -- Reset the IME even if the focus didn't change
   ime.stop()
   if view ~= core.active_view then
-    if core.window then system.text_input(core.window, view:supports_text_input()) end
-    if core.active_view and core.active_view.force_focus then
-      core.next_active_view = view
-      return
+    if core.window then
+      system.text_input(core.window, view:supports_text_input())
     end
     core.next_active_view = nil
     if view.doc and view.doc.abs_filename then
@@ -1374,10 +1393,17 @@ function core.open_doc(filename)
 end
 
 
+---Find docked and shown floating views retaining a document, including closing popups.
+---Floating views keep their documents alive until removal from RootView's registry.
+---@param doc core.doc Document to find
+---@return core.view[] views Views referencing the document
 function core.get_views_referencing_doc(doc)
   local res = {}
   local views = core.root_view.root_node:get_children()
   for _, view in ipairs(views) do
+    if view.doc == doc then table.insert(res, view) end
+  end
+  for _, view in ipairs(core.root_view.floating_views) do
     if view.doc == doc then table.insert(res, view) end
   end
   return res

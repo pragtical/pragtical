@@ -5,8 +5,7 @@ local style = require "core.style"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local View = require "core.view"
-local RootView = require "core.rootview"
-
+local Node = require "core.node"
 
 ---Single-line document that prevents newline insertion.
 ---Used internally by CommandView for single-line input.
@@ -37,6 +36,9 @@ end
 ---@field suggestions_offset number Scroll offset for suggestions list
 ---@field suggestions_first integer First visible suggestion index
 ---@field suggestions_last integer Last visible suggestion index
+---@field suggestions_view core.view Floating companion for suggestion input and scrolling
+---@field reset_suggestion_scroll? boolean Reset scrolling to the first result after new results
+---@field reveal_suggestion? boolean Reveal keyboard selection on the next companion update
 ---@field last_change_id integer Last document change ID (for detecting updates)
 ---@field last_text string Last input text (for typeahead)
 ---@field gutter_width number Width of label gutter
@@ -47,6 +49,9 @@ end
 ---@field label string Label text displayed in gutter
 ---@field mouse_position table Mouse coordinates {x, y}
 ---@field save_suggestion string? Saved suggestion for cycling
+---@field display_position "bottom"|"top"|"center" Placement retained for the current prompt
+---@field dock_node? core.node Detached input node reused when returning to a bar placement
+---@field center_height number Settled panel height used to keep the opening anchor stable
 local CommandView = DocView:extend()
 
 function CommandView:__tostring() return "CommandView" end
@@ -63,7 +68,7 @@ local noop = function() end
 ---@field cancel fun(explicit: boolean) Callback when command is cancelled
 ---@field validate fun(text: string, suggestion: table?): boolean Validate before submission
 ---@field text string Initial text to display
----@field draw_text? fun(item: table, font: renderer.font, color: renderer.color, x: number, y: number, w: number, h: number) Custom suggestion renderer
+---@field draw_text? fun(item: table, font: renderer.font, color: renderer.color, x: number, y: number, w: number, h: number) Custom suggestion renderer; w excludes info, spacing and scrollbar, and output is clipped
 ---@field select_text boolean Whether to select initial text
 ---@field show_suggestions boolean Whether to show suggestions box
 ---@field typeahead boolean Whether to enable typeahead completion
@@ -101,6 +106,368 @@ function CommandView:new()
   self.size.y = 0
   self.label = ""
   self.mouse_position = {x = 0, y = 0}
+  self.display_position = "bottom"
+  self.center_height = 0
+  self.suggestions_view = View()
+  local overlay = self.suggestions_view
+  overlay:set_floating(true, { owner = self, focus = "none" })
+  overlay.scrollable = true
+  ---Draw the command owner's suggestions in the floating layer.
+  overlay.draw = function()
+    local lh = self:get_suggestion_line_height()
+    local dh = style.divider_size
+    local x, _ = self:get_line_screen_position()
+    local rx, ry, rw, rh = self.suggestions_view:get_floating_bounds()
+
+    if #self.suggestions > 0 then
+      -- draw suggestions background
+      renderer.draw_rect(rx, ry, rw, rh, style.background3)
+      renderer.draw_rect(rx, ry - dh, rw, dh, style.divider)
+
+      -- draw suggestion text
+      local current = self.suggestion_idx
+      local scroll = self:get_suggestion_scroll(rh)
+      local first, last = self:get_suggestion_range(scroll, rh)
+      core.push_clip_rect(rx, ry, rw, rh)
+      local draw_text = self.state.draw_text
+      local font = self:get_font()
+      local text_height = font:get_height()
+      local gutter = #self.suggestions * lh > rh
+        and style.expanded_scrollbar_size + SCALE
+        or 0
+      local w = math.max(0, rx + rw - x - style.padding.x - gutter)
+      for i=first, last do
+        local item = self.suggestions[i]
+        local color = (i == current) and style.accent or style.text
+        local y = ry + self:get_suggestion_row(i) - scroll
+        if i == current then
+          renderer.draw_rect(rx, y, rw, lh, style.line_highlight)
+        end
+        local info_width = item.info and font:get_width(item.info) or 0
+        local text_width = info_width > 0 and math.max(0, w - info_width - style.padding.x) or w
+        if text_width > 0 then
+          core.push_clip_rect(x, y, text_width, lh)
+          if not draw_text then
+            common.draw_text(font, color, item.text, nil, x, y, 0, lh)
+          else
+            draw_text(item, font, color, x, y, text_width, lh)
+          end
+          core.pop_clip_rect()
+        end
+        if info_width > 0 and w > 0 then
+          local info_x = x + math.max(0, w - info_width)
+          core.push_clip_rect(info_x, y, x + w - info_x, lh)
+          renderer.draw_text(font, item.info, x + w - info_width,
+            common.round(y + (lh - text_height) / 2), style.dim)
+          core.pop_clip_rect()
+        end
+      end
+      self.suggestions_view:draw_scrollbar()
+      core.pop_clip_rect()
+    end
+  end
+  ---Get the animated suggestions rectangle on the current side of the input.
+  ---@return number x Screen x coordinate
+  ---@return number y Screen y coordinate
+  ---@return number w Suggestions viewport width
+  ---@return number h Animated viewport height
+  overlay.get_floating_bounds = function()
+    return self:get_suggestions_bounds()
+  end
+  ---Get the full suggestion-list height before clipping to its animated viewport.
+  ---@return number height Total suggestion height
+  overlay.get_scrollable_size = function()
+    return #self.suggestions * self:get_suggestion_line_height()
+  end
+  ---Disable horizontal scrolling in the suggestions companion.
+  ---@return number width Always zero
+  overlay.get_h_scrollable_size = function()
+    return 0
+  end
+  local previous_height = 0
+  ---Keep the first results anchored during height changes and reveal keyboard selection.
+  ---Updates the owner's visible range after applying scrollbar interpolation.
+  ---@param view core.view Suggestions companion
+  overlay.update = function(view)
+    local lh = self:get_suggestion_line_height()
+    local bottom = self.display_position == "bottom"
+    if self.reset_suggestion_scroll then
+      view.scroll.to.y = bottom and math.max(
+        0, view:get_scrollable_size() - view.size.y
+      ) or 0
+      view.scroll.y = view.scroll.to.y
+      self.reset_suggestion_scroll = false
+    elseif bottom and previous_height ~= view.size.y then
+      -- Suggestions are ordered from the bottom; resizing must keep that anchor.
+      local delta = previous_height - view.size.y
+      local max = math.max(0, view:get_scrollable_size() - view.size.y)
+      view.scroll.y = common.clamp(view.scroll.y + delta, 0, max)
+      view.scroll.to.y = common.clamp(view.scroll.to.y + delta, 0, max)
+    end
+    previous_height = view.size.y
+    if self.reveal_suggestion then
+      local top = self:get_suggestion_row(self.suggestion_idx)
+      view.scroll.to.y = common.clamp(
+        view.scroll.to.y,
+        top + lh - view.size.y,
+        top
+      )
+      self.reveal_suggestion = false
+    end
+    View.update(view)
+    self.suggestions_first, self.suggestions_last, self.suggestions_offset =
+      self:get_suggestion_range(view.scroll.y, view.size.y)
+  end
+  ---Handle scrollbar dragging first, then forward hover to suggestion selection.
+  ---@param view core.view Suggestions companion
+  ---@param x number Screen x coordinate
+  ---@param y number Screen y coordinate
+  ---@param ... number Pointer movement deltas
+  ---@return boolean? consumed Whether scrolling or suggestion hover handled the event
+  overlay.on_mouse_moved = function(view, x, y, ...)
+    self.mouse_position.x, self.mouse_position.y = x, y
+    if View.on_mouse_moved(view, x, y, ...) then
+      return true
+    end
+    return self:on_mouse_moved(x, y, ...)
+  end
+  ---Give the suggestions scrollbar priority, then submit a clicked suggestion.
+  ---@param view core.view Suggestions companion
+  ---@param button core.view.mousebutton Pressed button
+  ---@param x number Screen x coordinate
+  ---@param y number Screen y coordinate
+  ---@param clicks integer Consecutive click count
+  ---@return boolean? consumed Whether the press was handled
+  overlay.on_mouse_pressed = function(view, button, x, y, clicks)
+    if View.on_mouse_pressed(view, button, x, y, clicks) then
+      return true
+    end
+    self:on_mouse_moved(x, y, 0, 0)
+    return self:on_mouse_pressed(button, x, y, clicks)
+  end
+  ---Release suggestions scrollbar dragging without forwarding another suggestion action.
+  ---@param view core.view Suggestions companion
+  ---@param ... any Mouse button and screen coordinates
+  ---@return boolean consumed Always true
+  overlay.on_mouse_released = function(view, ...)
+    View.on_mouse_released(view, ...)
+    return true
+  end
+  ---Scroll suggestions without submitting the current selection.
+  ---@param view core.view Suggestions companion
+  ---@param y number Vertical wheel delta
+  ---@return boolean consumed Always true
+  overlay.on_mouse_wheel = function(view, y)
+    view.scroll.to.y = view.scroll.to.y - y * config.mouse_wheel_scroll
+    core.redraw = true
+    return true
+  end
+end
+
+
+---Replace a layout branch without consuming nodes retained by plugins.
+---@param root core.rootview Root whose layout owns the branch
+---@param node core.node Branch to replace
+---@param replacement core.node Branch to install in its place
+local function replace_node(root, node, replacement)
+  local parent = node:get_parent_node(root.root_node)
+  if parent then
+    parent[parent.a == node and "a" or "b"] = replacement
+  else
+    root.root_node = replacement
+  end
+end
+
+
+---Apply the configured placement once before opening a prompt.
+---Reparent only the input node, preserving document panes and their divider state.
+function CommandView:apply_position()
+  local position = config.commandview_position
+  assert(position == "bottom" or position == "top" or position == "center",
+    "Invalid commandview position")
+  if self.display_position == position then return end
+  local root = core.root_view
+  root:cancel_floating_input(self)
+  self:hide_floating()
+  local node = root.root_node:get_node_for_view(self)
+  if node then
+    local parent = node:get_parent_node(root.root_node)
+    self.dock_node = node
+    replace_node(root, parent, parent.a == node and parent.b or parent.a)
+  end
+  self.display_position = position
+  self.size.y, self.suggestions_height = 0, 0
+  if position == "center" then
+    self:set_floating(true, { focus = "show" })
+  else
+    self:set_floating(false)
+    local anchor = position == "top" and core.menu_view or core.status_view
+    local target = root.root_node:get_node_for_view(anchor)
+    local before = position == "top" or target ~= nil
+    if target and position == "top" then
+      local parent = target:get_parent_node(root.root_node)
+      target = parent.a == target and parent.b or parent.a
+    end
+    target = target or root.root_node
+    local parent = Node("vsplit")
+    replace_node(root, target, parent)
+    if before then
+      parent.a, parent.b = self.dock_node, target
+    else
+      parent.a, parent.b = target, self.dock_node
+    end
+  end
+  root.root_node:update_layout()
+end
+
+
+---Get the settled suggestions height before clipping to the available viewport.
+---@return number height Requested height in pixels
+function CommandView:get_suggestions_height()
+  return self.state.show_suggestions
+    and math.min(#self.suggestions, config.max_visible_commands) * self:get_suggestion_line_height()
+    or 0
+end
+
+
+---Get the animated suggestions rectangle, clipped to the editor viewport.
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
+---@return number w Suggestions viewport width
+---@return number h Animated viewport height
+function CommandView:get_suggestions_bounds()
+  local root = core.root_view
+  local dh = style.divider_size
+  local bottom = self.display_position == "bottom"
+  local y = bottom and self.position.y - dh or self.position.y + self.size.y + dh
+  local available = bottom and y - root.position.y or root.position.y + root.size.y - y
+  if self.display_position == "center" then
+    available = math.min(available, self.center_height - self.size.y - dh * 3)
+  end
+  local height = #self.suggestions > 0 and self.state.show_suggestions
+    and math.min(math.ceil(self.suggestions_height), math.max(0, available)) or 0
+  return self.position.x, bottom and y - height or y, self.size.x, height
+end
+
+
+---Get a result's top offset in the scrollable list in its visual ordering.
+---@param index integer Suggestion index
+---@return number y Top offset in pixels before scrolling
+function CommandView:get_suggestion_row(index)
+  local row = self.display_position == "bottom"
+    and #self.suggestions - index
+    or index - 1
+  return row * self:get_suggestion_line_height()
+end
+
+
+---Get the current list's scroll offset, including a pending reset for new results.
+---Drawing and input may run before a reopened companion receives its next update.
+---@param height number Current suggestions viewport height
+---@return number scroll Effective vertical scroll offset in pixels
+function CommandView:get_suggestion_scroll(height)
+  local maximum = math.max(
+    0, #self.suggestions * self:get_suggestion_line_height() - height
+  )
+  if self.reset_suggestion_scroll then
+    return self.display_position == "bottom" and maximum or 0
+  end
+  return common.clamp(self.suggestions_view.scroll.y, 0, maximum)
+end
+
+
+---Find visible indexes from the current results instead of a previous prompt's cache.
+---@param scroll number Effective vertical scroll offset in pixels
+---@param height number Current suggestions viewport height
+---@return integer first First visible suggestion index
+---@return integer last Last visible suggestion index, less than first for an empty range
+---@return number offset Visible range's fractional starting offset
+function CommandView:get_suggestion_range(scroll, height)
+  local lh = self:get_suggestion_line_height()
+  local offset = scroll / lh
+  if self.display_position == "bottom" then
+    offset = #self.suggestions - height / lh - offset
+  end
+  return math.max(1, math.floor(offset) + 1),
+    math.min(#self.suggestions, math.ceil(offset + height / lh)), offset
+end
+
+
+---Include suggestions in the centered popup's outer bounds for shared placement.
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
+---@return number w Panel width
+---@return number h Combined input and suggestions height, including the border
+function CommandView:get_floating_bounds()
+  if self.display_position ~= "center" then
+    return CommandView.super.get_floating_bounds(self)
+  end
+  local _, _, _, height = self:get_suggestions_bounds()
+  local border = style.divider_size
+  return self.position.x - border,
+    self.position.y - border,
+    self.size.x + 2 * border,
+    self.size.y + 2 * border + (height > 0 and height + border or 0)
+end
+
+
+---Apply composite popup placement without assigning the list's height to the input.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param w number Outer panel width
+---@param h number Outer panel height
+function CommandView:set_floating_bounds(x, y, w, h)
+  local border = style.divider_size
+  self.position.x, self.position.y = x + border, y + border
+  self.size.x = math.max(0, w - 2 * border)
+  self.size.y = math.min(self.size.y, math.max(0, h - 2 * border))
+end
+
+
+---Center the panel using its settled height so opening rows keep a stable anchor.
+---Recompute scale and window limits while retaining the closing panel's anchor.
+function CommandView:update_floating()
+  local root = core.root_view
+  local width = math.max(0, root.size.x - 2 * style.padding.x)
+  local height = math.max(0, root.size.y - 2 * style.padding.y)
+  local border = style.divider_size
+  local input = math.min(self:get_font():get_height() + style.padding.y * 2,
+    math.max(0, height - 2 * border))
+  if self.state ~= default_state then
+    local suggestions = self:get_suggestions_height()
+    self.center_height = math.min(
+      height,
+      input + 2 * border + (suggestions > 0 and suggestions + border or 0)
+    )
+  end
+  local outer_width = math.min(800 * SCALE, width)
+  self.size.x = math.max(0, outer_width - 2 * border)
+  self.size.y = math.min(self.size.y, input)
+  self.position.x = root.position.x + (root.size.x - outer_width) / 2 + border
+  self.position.y = root.position.y
+    + (root.size.y - math.min(self.center_height, height)) / 2
+    + border
+  CommandView.super.update_floating(self)
+end
+
+
+---Cancel a prompt removed through the floating lifecycle, including owner dismissal.
+---@param visible boolean Whether the centered prompt is shown
+function CommandView:on_floating_visibility_changed(visible)
+  if not visible and self.state ~= default_state then
+    self:exit(false, true)
+  end
+end
+
+
+---Close a prompt without treating its temporary input as an unsaved document.
+---Run cancellation after removal so its callback can open a replacement prompt.
+---@param do_close fun() Continuation that removes the floating prompt
+function CommandView:try_close(do_close)
+  local cancel = self.state.cancel
+  self:exit(true)
+  do_close()
+  cancel(true)
 end
 
 
@@ -181,7 +548,7 @@ end
 
 ---Move suggestion selection by offset (for arrow keys/wheel).
 ---Handles wrapping, history cycling, and updates the input text.
----@param dir integer Direction to move (-1 for up/previous, 1 for down/next)
+---@param dir integer Direction to move (1 for Up, -1 for Down)
 function CommandView:move_suggestion_idx(dir)
   local function overflow_suggestion_idx(n, count)
     if count == 0 then return 0 end
@@ -193,8 +560,10 @@ function CommandView:move_suggestion_idx(dir)
   end
 
   if self.state.show_suggestions then
+    if self.display_position ~= "bottom" then dir = -dir end
     local n = self.suggestion_idx + dir
     self.suggestion_idx = overflow_suggestion_idx(n, #self.suggestions)
+    self.reveal_suggestion = true
     self:complete()
     self.last_change_id = self.doc:get_change_id()
   else
@@ -249,6 +618,7 @@ function CommandView:enter(label, ...)
   if self.state ~= default_state then
     return
   end
+  self:apply_position()
   local options = select(1, ...)
 
   if type(options) ~= "table" then
@@ -278,10 +648,15 @@ function CommandView:enter(label, ...)
     self:set_text(text, self.state.select_text)
   end
 
-  core.set_active_view(self)
   self:update_suggestions()
   self.gutter_text_brightness = 100
   self.label = label .. ": "
+  if self.floating then
+    self:update_floating()
+    self:show_floating()
+  else
+    core.set_active_view(self)
+  end
 end
 
 
@@ -297,9 +672,14 @@ function CommandView:exit(submitted, inexplicit)
   self.state = default_state
   self.doc:reset()
   self.suggestions = {}
-  if not submitted then cancel(not inexplicit) end
   self.save_suggestion = nil
   self.last_text = ""
+  self.suggestions_view:hide_floating()
+  if self.floating_visible then
+    self.floating_closing = true
+    core.root_view:cancel_floating_input(self)
+  end
+  if not submitted then cancel(not inexplicit) end
 end
 
 
@@ -337,6 +717,7 @@ function CommandView:update_suggestions()
   end
   self.suggestions = res
   self.suggestion_idx = 1
+  self.reset_suggestion_scroll = true
 end
 
 
@@ -377,8 +758,7 @@ function CommandView:update()
   end
 
   -- update suggestions box height
-  local lh = self:get_suggestion_line_height()
-  local dest = self.state.show_suggestions and math.min(#self.suggestions, config.max_visible_commands) * lh or 0
+  local dest = self:get_suggestions_height()
   self:move_towards("suggestions_height", dest, nil, "commandview")
 
   -- update suggestion cursor offset
@@ -391,6 +771,39 @@ function CommandView:update()
     dest = style.font:get_height() + style.padding.y * 2
   end
   self:move_towards(self.size, "y", dest, nil, "commandview")
+  if self.floating then
+    self:update_floating()
+    if self.state == default_state and self.size.y == 0 then
+      self:hide_floating()
+    end
+  end
+  if
+    self.suggestions_height > 0
+    and #self.suggestions > 0
+    and self.state.show_suggestions
+  then
+    if not self.suggestions_view.floating_visible then
+      self.suggestions_view:show_floating()
+    end
+  else
+    self.suggestions_view:hide_floating()
+  end
+end
+
+
+---Draw the clipped prompt input and a border enclosing the floating palette.
+function CommandView:draw()
+  if self.floating then
+    local x, y, w, h = self:get_floating_bounds()
+    local border = style.divider_size
+    renderer.draw_rect(x, y, w, border, style.dim)
+    renderer.draw_rect(x, y + h - border, w, border, style.dim)
+    renderer.draw_rect(x, y, border, h, style.dim)
+    renderer.draw_rect(x + w - border, y, border, h, style.dim)
+  end
+  core.push_clip_rect(self.position.x, self.position.y, self.size.x, self.size.y)
+  CommandView.super.draw(self)
+  core.pop_clip_rect()
 end
 
 
@@ -422,87 +835,12 @@ end
 function CommandView:is_mouse_on_suggestions()
   if self.state.show_suggestions and #self.suggestions > 0 then
     local mx, my = self.mouse_position.x, self.mouse_position.y
-    local dh = style.divider_size
-    local sh = math.ceil(self.suggestions_height)
-    local x, y, w, h = self.position.x, self.position.y - sh - dh, self.size.x, sh
+    local x, y, w, h = self.suggestions_view:get_floating_bounds()
     if mx >= x and mx <= x+w and my >= y and my <= y+h then
       return true
     end
   end
   return false
-end
-
-
----Draw the suggestions dropdown box.
----Renders background, divider, and suggestion items with highlighting.
----@param self core.commandview
-local function draw_suggestions_box(self)
-  local lh = self:get_suggestion_line_height()
-  local dh = style.divider_size
-  local x, _ = self:get_line_screen_position()
-  local h = math.ceil(self.suggestions_height)
-  local rx, ry, rw, rh = self.position.x, self.position.y - h - dh, self.size.x, h
-
-  if #self.suggestions > 0 then
-    -- draw suggestions background
-    renderer.draw_rect(rx, ry, rw, rh, style.background3)
-    renderer.draw_rect(rx, ry - dh, rw, dh, style.divider)
-
-    -- draw suggestion text
-    local current = self.suggestion_idx
-    local offset = math.max(current - config.max_visible_commands, 0)
-    if self.suggestions_first-1 == current then
-      offset = math.max(self.suggestions_first - 2, 0)
-    end
-    local first = 1 + offset
-    local last = math.min(offset + config.max_visible_commands, #self.suggestions)
-    if
-      current < self.suggestions_first
-      or
-      current > self.suggestions_last
-      or
-      self.suggestions_last - self.suggestions_first < last - first
-    then
-      self.suggestions_first = first
-      self.suggestions_last = last
-      self.suggestions_offset = offset
-    else
-      offset = self.suggestions_offset
-      first = self.suggestions_first
-      last = math.min(self.suggestions_last, #self.suggestions)
-    end
-    core.push_clip_rect(rx, ry, rw, rh)
-    local draw_text = self.state.draw_text
-    local font = self:get_font()
-    for i=first, last do
-      local item = self.suggestions[i]
-      local color = (i == current) and style.accent or style.text
-      local y = self.position.y - (i - offset) * lh - dh
-      if i == current then
-        renderer.draw_rect(rx, y, rw, lh, style.line_highlight)
-      end
-      local w = self.size.x - x - style.padding.x
-      if not draw_text then
-        common.draw_text(font, color, item.text, nil, x, y, 0, lh)
-      else
-        draw_text(item, font, color, x, y, w, lh)
-      end
-      if item.info then
-        common.draw_text(self:get_font(), style.dim, item.info, "right", x, y, w, lh)
-      end
-    end
-    core.pop_clip_rect()
-  end
-end
-
-
----Draw the command view.
----Renders input text and defers suggestions box drawing.
-function CommandView:draw()
-  CommandView.super.draw(self)
-  if self.state.show_suggestions then
-    core.root_view:defer_draw(draw_suggestions_box, self)
-  end
 end
 
 
@@ -518,19 +856,13 @@ function CommandView:on_mouse_moved(x, y, ...)
     core.request_cursor("arrow")
 
     local lh = self:get_suggestion_line_height()
-    local dh = style.divider_size
-    local offset = self.suggestions_offset
-    local first = self.suggestions_first
-    local last = self.suggestions_last
-
-    for i=first, last do
-      local sy = self.position.y - (i - offset) * lh - dh
-      if y >= sy then
-        self.suggestion_idx=i
-        self:complete()
-        self.last_change_id = self.doc:get_change_id()
-        break
-      end
+    local _, top, _, height = self:get_suggestions_bounds()
+    local row = math.floor((y - top + self:get_suggestion_scroll(height)) / lh)
+    local index = self.display_position == "bottom" and #self.suggestions - row or row + 1
+    if index >= 1 and index <= #self.suggestions then
+      self.suggestion_idx = index
+      self:complete()
+      self.last_change_id = self.doc:get_change_id()
     end
     return true
   end
@@ -585,57 +917,6 @@ function CommandView:on_mouse_released(...)
   end
   CommandView.super.on_mouse_released(self, ...)
   return false
-end
-
-
---------------------------------------------------------------------------------
--- Transmit mouse events to the suggestions box
--- TODO: Remove these overrides once FloatingView is implemented
---------------------------------------------------------------------------------
--- These monkey-patches intercept RootView mouse events to allow the
--- CommandView suggestions box (which renders outside CommandView bounds)
--- to receive mouse events. This is a temporary solution until FloatingView
--- is implemented to properly handle overlay UI elements.
-
-local root_view_on_mouse_moved = RootView.on_mouse_moved
-local root_view_on_mouse_wheel = RootView.on_mouse_wheel
-local root_view_on_mouse_pressed = RootView.on_mouse_pressed
-local root_view_on_mouse_released = RootView.on_mouse_released
-
-
----Intercept mouse movement to check CommandView suggestions first.
-function RootView:on_mouse_moved(...)
-  if core.active_view:is(CommandView) then
-    if core.active_view:on_mouse_moved(...) then return true end
-  end
-  return root_view_on_mouse_moved(self, ...)
-end
-
-
----Intercept mouse wheel to check CommandView suggestions first.
-function RootView:on_mouse_wheel(...)
-  if core.active_view:is(CommandView) then
-    if core.active_view:on_mouse_wheel(...) then return true end
-  end
-  return root_view_on_mouse_wheel(self, ...)
-end
-
-
----Intercept mouse press to check CommandView suggestions first.
-function RootView:on_mouse_pressed(...)
-  if core.active_view:is(CommandView) then
-    if core.active_view:on_mouse_pressed(...) then return true end
-  end
-  return root_view_on_mouse_pressed(self, ...)
-end
-
-
----Intercept mouse release to check CommandView suggestions first.
-function RootView:on_mouse_released(...)
-  if core.active_view:is(CommandView) then
-    if core.active_view:on_mouse_released(...) then return true end
-  end
-  return root_view_on_mouse_released(self, ...)
 end
 
 

@@ -42,6 +42,7 @@ local DocView = require "core.docview"
 ---@field defer_open_docs table[]
 ---@field first_dnd_processed boolean
 ---@field first_update_done boolean
+---@field floating_views core.view[] Shown views in drawing order
 local RootView = View:extend()
 
 function RootView:__tostring() return "RootView" end
@@ -67,6 +68,330 @@ function RootView:new()
   self.defer_open_docs = {}
   self.first_dnd_processed = false
   self.first_update_done = false
+  self.floating_views = {}
+end
+
+---Register or raise a shown floating view in drawing order.
+---Its owned popups remain above it and retain their relative order.
+---Use View:show_floating() to also initialize visibility, placement, and focus.
+---@param view core.view Floating view to register or raise
+function RootView:add_floating_view(view)
+  local children = {}
+  for i = #self.floating_views, 1, -1 do
+    local other = self.floating_views[i]
+    if view:owns_view(other) then
+      table.remove(self.floating_views, i)
+      if other ~= view then table.insert(children, 1, other) end
+    end
+  end
+  table.insert(self.floating_views, view)
+  for _, child in ipairs(children) do table.insert(self.floating_views, child) end
+end
+
+---Copy the floating registry so callbacks can safely show or hide views while iterating.
+---@return core.view[] views Shown views in drawing order, including closing views
+function RootView:floating_snapshot()
+  return { table.unpack(self.floating_views) }
+end
+
+---Cancel mouse capture, divider dragging, and tab dragging without emitting a click.
+---Notifies the captured view through on_mouse_capture_lost() and clears drag overlays.
+function RootView:cancel_mouse_capture()
+  local grab = self.grab
+  self.grab = nil
+  self.dragged_divider, self.dragged_node, self.touched_view = nil, nil, nil
+  self:set_show_overlay(self.drag_overlay, false)
+  self:set_show_overlay(self.drag_overlay_tab, false)
+  if grab then
+    if self.overlapping_view == grab.view then self.overlapping_view = nil end
+    grab.view:on_mouse_capture_lost()
+  end
+end
+
+---Stop a popup's input, close its descendants, and restore focus when it owns focus.
+---Called when hiding starts, including before a closing slide finishes.
+---@param view core.view Floating view whose input and owned popups should be cleared
+function RootView:cancel_floating_input(view)
+  if self.grab and view:owns_view(self.grab.view) then self:cancel_mouse_capture() end
+  if self.overlapping_view and view:owns_view(self.overlapping_view) then
+    local hovered = self.overlapping_view
+    self.overlapping_view = nil
+    hovered:on_mouse_left()
+  end
+  for _, child in ipairs(self:floating_snapshot()) do
+    if child ~= view and view:owns_view(child) then child:hide_floating() end
+  end
+  if view:owns_view(core.active_view) then
+    local target = core.next_active_view or view.floating_previous_focus
+    local node = target and self.root_node:get_node_for_view(target)
+    if not target or not node and not target.floating_visible then
+      target = self:get_primary_node().active_view
+    end
+    local closing = view.floating_closing
+    view.floating_closing = true
+    if target then core.set_active_view(target) end
+    view.floating_closing = closing
+  end
+end
+
+---Remove a view from the floating registry without changing its visibility or focus.
+---Use View:hide_floating() to perform the complete closing lifecycle.
+---@param view core.view Floating view to remove
+function RootView:remove_floating_view(view)
+  for i, other in ipairs(self.floating_views) do
+    if other == view then table.remove(self.floating_views, i); break end
+  end
+end
+
+---Fit an outer popup rectangle inside the editor viewport, reducing its size if needed.
+---Returns the supplied rectangle unchanged while the viewport has no positive size.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param w number Outer width in pixels
+---@param h number Outer height in pixels
+---@return number x Clamped screen x coordinate
+---@return number y Clamped screen y coordinate
+---@return number w Width limited to the viewport
+---@return number h Height limited to the viewport
+function RootView:clamp_floating_bounds(x, y, w, h)
+  if self.size.x <= 0 or self.size.y <= 0 then return x, y, w, h end
+  w, h = math.min(w, self.size.x), math.min(h, self.size.y)
+  return common.clamp(x, self.position.x, self.position.x + self.size.x - w),
+    common.clamp(y, self.position.y, self.position.y + self.size.y - h), w, h
+end
+
+---Apply a popup's anchor and clamp its outer bounds to the viewport.
+---Flips the anchor side when necessary; leaves active slides and pointer gestures alone.
+---@param view core.view Floating view to position
+function RootView:place_floating_view(view)
+  if view.floating_transition or view.floating_gesture then return end
+  local x, y, w, h = view:get_floating_bounds()
+  local anchor = view.floating_options.anchor
+  if anchor then
+    local rect = anchor.target
+    if type(rect) == "function" then rect = rect() end
+    if rect and rect.get_floating_bounds then
+      local ax, ay, aw, ah = rect:get_floating_bounds()
+      rect = { x = ax, y = ay, w = aw, h = ah }
+    end
+    if rect then
+      local side, gap, align = anchor.side or "bottom", anchor.gap or 0, anchor.align or "start"
+      local vertical = side == "bottom" or side == "top"
+      if vertical then
+        x = rect.x + (align == "end" and rect.w - w or align == "center" and (rect.w - w) / 2 or 0)
+        y = side == "bottom" and rect.y + rect.h + gap or rect.y - h - gap
+        if y + h > self.position.y + self.size.y then y = rect.y - h - gap
+        elseif y < self.position.y then y = rect.y + rect.h + gap end
+      else
+        y = rect.y + (align == "end" and rect.h - h or align == "center" and (rect.h - h) / 2 or 0)
+        x = side == "right" and rect.x + rect.w + gap or rect.x - w - gap
+        if x + w > self.position.x + self.size.x then x = rect.x - w - gap
+        elseif x < self.position.x then x = rect.x + rect.w + gap end
+      end
+    end
+  end
+  x, y, w, h = self:clamp_floating_bounds(x, y, math.max(w, 0), math.max(h, 0))
+  view:set_floating_bounds(x, y, w, h)
+end
+
+---Find the topmost shown modal popup that is not closing.
+---@return core.view? view Modal popup, or nil when input is unrestricted
+function RootView:get_modal_view()
+  for i = #self.floating_views, 1, -1 do
+    local view = self.floating_views[i]
+    if view.floating_visible and not view.floating_closing and view.floating_options.modal then return view end
+  end
+end
+
+---Check whether the current modal popup permits a focus change.
+---Only the modal view, its descendants, and its direct owner may receive focus.
+---@param view core.view Proposed focus target
+---@return boolean allowed Whether the view may receive focus
+function RootView:can_focus_view(view)
+  local modal = self:get_modal_view()
+  return not modal or modal:owns_view(view)
+    or modal.floating_options.owner == view
+end
+
+---Find the topmost interactive popup at a screen point, respecting modal ownership.
+---A modal popup receives points outside its bounds; points outside RootView return nil.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return core.view? view Input target, or nil when no floating view receives the point
+function RootView:get_floating_view_at(x, y)
+  if x < self.position.x or y < self.position.y
+    or x >= self.position.x + self.size.x or y >= self.position.y + self.size.y then return end
+  local modal = self:get_modal_view()
+  for i = #self.floating_views, 1, -1 do
+    local view = self.floating_views[i]
+    if view.floating_visible and not view.floating_closing
+      and view.floating_options.interactive
+      and (not modal or modal:owns_view(view)) and view:hit_test(x, y) then return view end
+  end
+  return modal
+end
+
+---Find the topmost shown floating view containing a keyboard focus target.
+---Includes container descendants; excludes popups whose closing slide has started.
+---@param target core.view? Focused view or one of its container descendants
+---@return core.view? view Floating container, or nil for a docked target
+function RootView:get_floating_view_for_view(target)
+  for i = #self.floating_views, 1, -1 do
+    local view = self.floating_views[i]
+    if not view.floating_closing and view:owns_view(target) then return view end
+  end
+end
+
+---Close a docked or shown floating view through its unsaved-changes guard.
+---Rechecks placement after confirmation, since the view may have moved meanwhile.
+---@param view core.view View to close
+---@param on_close? fun(view:core.view) Called only after the view has closed
+---@return boolean requested Whether the view had a placement to close
+function RootView:close_view(view, on_close)
+  if not self.root_node:get_node_for_view(view) and not view.floating_visible then return false end
+  view:try_close(function()
+    local node = self.root_node:get_node_for_view(view)
+    if node then node:remove_view(self.root_node, view)
+    else view:hide_floating() end
+    if on_close then on_close(view) end
+  end)
+  return true
+end
+
+---Change the hovered view and notify the previous view when the pointer leaves it.
+---@param view core.view? New hover target, or nil to clear hover
+function RootView:set_hovered_view(view)
+  local previous = self.overlapping_view
+  self.overlapping_view = view
+  if previous and previous ~= view then previous:on_mouse_left() end
+end
+
+---Dismiss the topmost popup configured for this outside-click event.
+---Owned popups count as inside; the owner does too unless dismiss_on_owner_click is set.
+---@param event "press"|"release" Mouse event phase
+---@param button core.view.mousebutton Mouse button; only left and right dismiss
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean? consumed Whether the outside click should stop propagating
+function RootView:dismiss_floating_outside(event, button, x, y)
+  if button ~= "left" and button ~= "right" then return false end
+  local views = self:floating_snapshot()
+  for i = #views, 1, -1 do
+    local view = views[i]
+    local opts = view.floating_options
+    if view.floating_visible and not view.floating_closing and opts.dismiss_on_outside_click
+      and opts.outside_click_event == event then
+      local inside = view:hit_test(x, y)
+      local owner = opts.owner
+      if owner and not opts.dismiss_on_owner_click and owner:hit_test(x, y) then inside = true end
+      for _, other in ipairs(views) do
+        if view:owns_view(other) and other:hit_test(x, y) then inside = true end
+      end
+      if not inside then
+        view:on_floating_dismiss("outside")
+        return opts.consume_outside_click
+      end
+      return false
+    end
+  end
+  return false
+end
+
+---Route a normalized key binding to interactive floating views before commands run.
+---Tries views from top to bottom, restricts modal input, and handles Escape dismissal.
+---@param stroke string Normalized binding, such as "ctrl+return"
+---@param ... any Additional keyboard event arguments
+---@return boolean consumed Whether a popup handled the binding or was dismissed
+function RootView:on_key_pressed(stroke, ...)
+  local modal = self:get_modal_view()
+  local views = self:floating_snapshot()
+  for i = #views, 1, -1 do
+    local view = views[i]
+    if view.floating_visible and not view.floating_closing and view.floating_options.interactive
+      and (not modal or modal:owns_view(view)) then
+      if view:on_key_pressed(stroke, ...) then return true end
+      if stroke == "escape" and view.floating_options.dismiss_on_escape then
+        view:on_floating_dismiss("escape")
+        return true
+      end
+    end
+  end
+  return false
+end
+
+---Identify resize edges within four scaled pixels of a popup's outer bounds.
+---@param view core.view Floating view whose resizable option is checked
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return core.view.floating_resize_edges edges Empty when resizing is disabled
+local function floating_resize_edges(view, x, y)
+  local bx, by, w, h = view:get_floating_bounds()
+  local margin = 4 * SCALE
+  return view.floating_options and view.floating_options.resizable and {
+    left = x < bx + margin, right = x >= bx + w - margin,
+    top = y < by + margin, bottom = y >= by + h - margin
+  } or {}
+end
+
+---Get a resize cursor for a popup edge or use the view's ordinary cursor.
+---During a gesture, keeps the cursor associated with the originally grabbed edges.
+---@param view core.view Floating pointer target
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return core.view.cursor cursor Cursor to display
+function RootView:get_floating_cursor(view, x, y)
+  local edges = view.floating_gesture and view.floating_gesture.edges or floating_resize_edges(view, x, y)
+  if edges.left and edges.top or edges.right and edges.bottom then return "sizenwse" end
+  if edges.left and edges.bottom or edges.right and edges.top then return "sizenesw" end
+  if edges.left or edges.right then return "sizeh" end
+  if edges.top or edges.bottom then return "sizev" end
+  return view.cursor
+end
+
+---Start dragging or resizing a floating view and capture its left-button input.
+---Resizing takes precedence over dragging; a successful gesture clears the anchor.
+---@param view core.view Floating pointer target
+---@param button core.view.mousebutton Pressed button
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@param resize_only? boolean Only start a resize, allowing content to handle other presses
+---@return boolean started Whether a gesture started and the mouse was captured
+function RootView:begin_floating_gesture(view, button, x, y, resize_only)
+  if button ~= "left" then return false end
+  local opts = view.floating_options
+  local bx, by, w, h = view:get_floating_bounds()
+  local edges = floating_resize_edges(view, x, y)
+  local resize = edges.left or edges.right or edges.top or edges.bottom
+  if resize_only and not resize then return false end
+  local dx, dy, dw, dh = view:get_floating_drag_region()
+  if not resize and not (opts.draggable and dx and x >= dx and y >= dy and x < dx + dw and y < dy + dh) then return false end
+  view.floating_gesture = { x = x, y = y, bx = bx, by = by, w = w, h = h, edges = edges, resize = resize }
+  opts.anchor = nil
+  self:grab_mouse(button, view)
+  return true
+end
+
+---Advance a captured floating drag or resize using its initial bounds and pointer offset.
+---Resizing honors min_size; the resulting bounds are clamped to the viewport.
+---@param view core.view Floating view with an active gesture
+---@param x number Current screen x coordinate
+---@param y number Current screen y coordinate
+---@return boolean handled Whether the view had a gesture to update
+function RootView:move_floating_gesture(view, x, y)
+  local gesture = view.floating_gesture
+  if not gesture then return false end
+  local dx, dy = x - gesture.x, y - gesture.y
+  local bx, by, w, h = gesture.bx, gesture.by, gesture.w, gesture.h
+  local edges, minimum = gesture.edges, view.floating_options.min_size
+  if gesture.resize then
+    if edges.right then w = math.max(minimum.x, w + dx) end
+    if edges.bottom then h = math.max(minimum.y, h + dy) end
+    if edges.left then w = math.max(minimum.x, w - dx); bx = gesture.bx + gesture.w - w end
+    if edges.top then h = math.max(minimum.y, h - dy); by = gesture.by + gesture.h - h end
+  else bx, by = bx + dx, by + dy end
+  view:set_floating_bounds(self:clamp_floating_bounds(bx, by, w, h))
+  core.redraw = true
+  return true
 end
 
 
@@ -173,11 +498,15 @@ function RootView:open_doc(doc)
 end
 
 
----Close all document views in the node tree.
+---Close docked document views and remove session-scoped floating views.
 ---Used when closing a project or switching workspaces.
----@param keep_active boolean If true, keeps the currently active view open
+---@param keep_active boolean Keep the currently active view open
 function RootView:close_all_docviews(keep_active)
+  local active = core.active_view
   self.root_node:close_all_docviews(keep_active)
+  for _, view in ipairs(self:floating_snapshot()) do
+    if view.context == "session" and (not keep_active or view ~= active) then view:hide_floating() end
+  end
 end
 
 
@@ -228,8 +557,31 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   if self.grab then
     self:on_mouse_released(self.grab.button, x, y)
   end
+  self.mouse.x, self.mouse.y = x, y
+  if self:dismiss_floating_outside("press", button, x, y) then return true end
+  local floating = self:get_floating_view_at(x, y)
+  if floating then
+    self:set_hovered_view(floating)
+    floating:bring_to_front()
+    local opts = floating.floating_options
+    if opts.focus == "click" then
+      local target = floating:get_focus_target()
+      if target and target ~= core.active_view then
+        floating.floating_previous_focus = core.active_view
+        core.set_active_view(target)
+      end
+    end
+    if opts.resizable and self:begin_floating_gesture(floating, button, x, y, true) then return true end
+    local handled = floating:on_mouse_pressed(button, x, y, clicks)
+    if not handled and opts.draggable and self:begin_floating_gesture(floating, button, x, y) then return true end
+    if handled or not opts.pass_through_unhandled then
+      if not self.grab and floating.floating_visible then self:grab_mouse(button, floating) end
+      return true
+    end
+  end
   local div = self.root_node:get_divider_overlapping_point(x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
+  if not node then return false end
   if div and (node and not node.active_view:scrollbar_overlaps_point(x, y)) then
     self.dragged_divider = div
     return true
@@ -251,7 +603,8 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
       return true
     end
   elseif not self.dragged_node then -- avoid sending on_mouse_pressed events when dragging tabs
-    core.set_active_view(node.active_view)
+    local target = node.active_view:get_focus_target()
+    if target then core.set_active_view(target) end
     self:grab_mouse(button, node.active_view)
     return self.on_view_mouse_pressed(button, x, y, clicks) or node.active_view:on_mouse_pressed(button, x, y, clicks)
   end
@@ -296,16 +649,22 @@ end
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
 function RootView:on_mouse_released(button, x, y, ...)
+  self:dismiss_floating_outside("release", button, x, y)
   if self.grab then
     if self.grab.button == button then
       local grab = self.grab
       local grabbed_view = grab.view
-      grabbed_view:on_mouse_released(button, x, y, ...)
+      if grabbed_view.floating_gesture then
+        grabbed_view.floating_gesture = nil
+      else
+        grabbed_view:on_mouse_released(button, x, y, ...)
+      end
       -- The release callback may clear or replace this grab.
       if self.grab == grab then self:ungrab_mouse(button) end
 
       -- If the mouse was released over a different view, send it the mouse position
-      local hovered_view = self.root_node:get_child_overlapping_point(x, y)
+      local node = self.root_node:get_child_overlapping_point(x, y)
+      local hovered_view = self:get_floating_view_at(x, y) or node and node.active_view
       if not self.grab and grabbed_view ~= hovered_view then
         self:on_mouse_moved(x, y, 0, 0)
       end
@@ -337,7 +696,9 @@ function RootView:on_mouse_released(button, x, y, ...)
             node:add_view(view)
             self.root_node:get_node_for_view(view):set_active_view(view)
           elseif split_type == "tab" then -- move besides other tabs
-            local tab_index = node:get_drag_overlay_tab_position(self.mouse.x, self.mouse.y, dragged_node, self.dragged_node.idx)
+            local tab_index = node:get_drag_overlay_tab_position(
+              self.mouse.x, self.mouse.y, dragged_node, self.dragged_node.idx
+            )
             dragged_node:remove_view(self.root_node, view)
             node:add_view(view, tab_index)
             self.root_node:get_node_for_view(view):set_active_view(view)
@@ -385,15 +746,24 @@ function RootView:on_mouse_moved(x, y, dx, dy)
   self.mouse.x, self.mouse.y = x, y
 
   if self.grab then
-    self.grab.view:on_mouse_moved(x, y, dx, dy)
-    core.request_cursor(self.grab.view.cursor)
+    if not self:move_floating_gesture(self.grab.view, x, y) then
+      self.grab.view:on_mouse_moved(x, y, dx, dy)
+      if self.grab and self.grab.view.floating_visible then
+        self:place_floating_view(self.grab.view)
+      end
+    end
+    if self.grab then core.request_cursor(self:get_floating_cursor(self.grab.view, x, y)) end
     return
   end
 
-  if core.active_view == core.nag_view then
-    core.request_cursor("arrow")
-    core.active_view:on_mouse_moved(x, y, dx, dy)
-    return
+  local floating = self:get_floating_view_at(x, y)
+  if floating then
+    self:set_hovered_view(floating)
+    local handled = floating:on_mouse_moved(x, y, dx, dy)
+    if handled or not floating.floating_options.pass_through_unhandled then
+      core.request_cursor(self:get_floating_cursor(floating, x, y))
+      return true
+    end
   end
 
   if self.dragged_divider then
@@ -448,9 +818,7 @@ end
 ---Called when mouse leaves the root view area.
 ---Notifies the currently overlapping view to clear hover states.
 function RootView:on_mouse_left()
-  if self.overlapping_view then
-    self.overlapping_view:on_mouse_left()
-  end
+  self:set_hovered_view(nil)
 end
 
 
@@ -462,6 +830,11 @@ end
 ---@param y number Screen y where dropped
 ---@return boolean handled True if event was handled
 function RootView:on_file_dropped(filename, x, y)
+  local floating = self:get_floating_view_at(x, y)
+  if floating then
+    local result = floating:on_file_dropped(filename, x, y)
+    if result or self:get_modal_view() then return true end
+  end
   local node = self.root_node:get_child_overlapping_point(x, y)
   local result = node and node.active_view:on_file_dropped(filename, x, y)
   if result then return result end
@@ -531,13 +904,35 @@ end
 function RootView:on_mouse_wheel(...)
   local x, y = self.mouse.x, self.mouse.y
   local node = self.root_node:get_child_overlapping_point(x, y)
-  return node.active_view:on_mouse_wheel(...)
+  local floating = self:get_floating_view_at(x, y)
+  if floating then
+    local handled = floating:on_mouse_wheel(...)
+    if handled or not floating.floating_options.pass_through_unhandled then
+      return true
+    end
+  end
+  return node and node.active_view:on_mouse_wheel(...)
 end
 
 
----Forward text input events to the currently active view.
+---Offer typed text to an explicit popup capture, then the active view exactly once.
+---Focused popup descendants receive text directly, without container forwarding.
+---@param ... string Typed text forwarded to the target handler
+---@return boolean? consumed True when a floating handler consumes the text
 function RootView:on_text_input(...)
-  core.active_view:on_text_input(...)
+  for i = #self.floating_views, 1, -1 do
+    local view = self.floating_views[i]
+    if
+      not view.floating_closing and view.floating_options.interactive
+      and view.capture_text_input and not view:owns_view(core.active_view)
+    then
+      if view:on_text_input(...) then
+        return true
+      end
+      break
+    end
+  end
+  return core.active_view:on_text_input(...)
 end
 
 
@@ -545,7 +940,8 @@ end
 ---Tracks which view is being touched for subsequent touch events.
 function RootView:on_touch_pressed(x, y, ...)
   local touched_node = self.root_node:get_child_overlapping_point(x, y)
-  self.touched_view = touched_node and touched_node.active_view
+  self.touched_view = self:get_floating_view_at(x, y)
+    or touched_node and touched_node.active_view
 end
 
 
@@ -594,16 +990,34 @@ function RootView:on_touch_moved(x, y, dx, dy, ...)
 end
 
 
----Forward IME text editing events to the active view.
----Called during IME composition for text input.
+---Forward IME composition to the active view unless an open popup captures text.
+---@param ... any Composition text, start offset, and selection length
+---@return boolean? consumed True when a popup blocks composition beneath it
 function RootView:on_ime_text_editing(...)
+  for i = #self.floating_views, 1, -1 do
+    local view = self.floating_views[i]
+    if
+      not view.floating_closing and view.floating_options.interactive
+      and view.capture_text_input and not view:owns_view(core.active_view)
+    then
+      return true
+    end
+  end
   core.active_view:on_ime_text_editing(...)
 end
 
 
----Handle window focus lost events.
----Forces redraw so cursors can be hidden when window is inactive.
+---Cancel capture and hover, then dismiss popups configured for outside-click dismissal.
+---Requests a redraw so document cursors disappear while the window is inactive.
+---@param ... any Window focus event arguments, unused
 function RootView:on_focus_lost(...)
+  self:cancel_mouse_capture()
+  self:on_mouse_left()
+  for _, view in ipairs(self:floating_snapshot()) do
+    if view.floating_options.dismiss_on_outside_click then
+      view:on_floating_dismiss("focuslost")
+    end
+  end
   -- We force a redraw so documents can redraw without the cursor.
   core.redraw = true
 end
@@ -623,9 +1037,8 @@ function RootView:interpolate_drag_overlay(overlay)
 end
 
 
----Update the entire UI tree each frame.
----Manages: node layout, drag overlays, deferred file drops.
----Called automatically by core every frame.
+---Update node layout, drag overlays, deferred file drops, and floating views.
+---Hides popups with unavailable owners, then places and updates the remaining popups.
 function RootView:update()
   Node.copy_position_and_size(self.root_node, self)
   self.root_node:update()
@@ -635,6 +1048,23 @@ function RootView:update()
   self:interpolate_drag_overlay(self.drag_overlay)
   self:interpolate_drag_overlay(self.drag_overlay_tab)
   self:process_defer_open_docs()
+  for _, view in ipairs(self:floating_snapshot()) do
+    if view.floating_visible then
+      local owner = view.floating_options.owner
+      if
+        owner and not owner:is_floating_owner_visible()
+        and not view.floating_closing
+      then
+        view:hide_floating()
+      else
+        view:update_floating()
+        if view.floating_visible then
+          view:update()
+          view._core_step_first_update = true
+        end
+      end
+    end
+  end
   self.first_update_done = true
 end
 
@@ -751,7 +1181,7 @@ end
 
 
 ---Render the entire UI each frame.
----Draw order: 1) node tree, 2) deferred draws, 3) drag overlays, 4) cursor update
+---Draw the node tree, deferred content, floating views, and drag overlays.
 function RootView:draw()
   self.root_node:draw()
   while #self.deferred_draws > 0 do
@@ -759,6 +1189,20 @@ function RootView:draw()
     t.fn(table.unpack(t))
   end
 
+  for _, view in ipairs(self:floating_snapshot()) do
+    if view.floating_visible and view._core_step_first_update then
+      core.push_clip_rect(
+        self.position.x, self.position.y,
+        self.size.x, self.size.y
+      )
+      view:draw()
+      while #self.deferred_draws > 0 do
+        local draw = table.remove(self.deferred_draws)
+        draw.fn(table.unpack(draw))
+      end
+      core.pop_clip_rect()
+    end
+  end
   self:draw_drag_overlay(self.drag_overlay)
   self:draw_drag_overlay(self.drag_overlay_tab)
   if self.dragged_node and self.dragged_node.dragging then

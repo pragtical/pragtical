@@ -32,8 +32,7 @@ local noop = function() end
 ---@field force_focus boolean Whether to force focus on this view
 ---@field queue core.nagview.queue_item[] Queued dialogs waiting to show
 ---@field target_height number Target height for current message
----@field on_mouse_pressed_root function? Saved RootView.on_mouse_pressed for restoration
----@field new_on_mouse_pressed_root function? New RootView.on_mouse_pressed for validation
+---@field overlay core.view Modal floating companion
 ---@field dim_alpha number Alpha for background dimming [0-1]
 ---@field visible boolean Whether dialog is currently visible
 ---@field title string? Current dialog title
@@ -43,6 +42,7 @@ local noop = function() end
 ---@field hovered_item integer? Index of currently hovered button
 ---@field underline_progress number Animation progress for hover underline [0-1]
 local NagView = View:extend()
+local draw_nagview_message
 
 function NagView:__tostring() return "NagView" end
 
@@ -52,10 +52,73 @@ function NagView:new()
   self.size.y = 0
   self.show_height = 0
   self.force_focus = false
+  self.overlay = View()
+  self.overlay:set_floating(true, {
+    owner = self,
+    modal = true,
+    focus = "none"
+  })
+  ---Draw the dialog and background dimming above the node tree.
+  self.overlay.draw = function() draw_nagview_message(self) end
+  ---Get the editor viewport bounds for a companion that draws outside its owner.
+  ---@return number x Viewport screen x coordinate
+  ---@return number y Viewport screen y coordinate
+  ---@return number w Viewport width
+  ---@return number h Viewport height
+  self.overlay.get_floating_bounds = function()
+    local root = core.root_view
+    return root.position.x, root.position.y, root.size.x, root.size.y
+  end
+  ---Ignore placement writes because the companion computes its bounds from its owner.
+  self.overlay.set_floating_bounds = function() end
+  ---Leave animation and dialog layout updates to the docked NagView owner.
+  self.overlay.update = function() end
+  ---Forward modal presses to the dialog buttons and message scrollbar.
+  ---@param _ core.view Modal companion
+  ---@param ... any Mouse button, screen coordinates, and click count
+  ---@return boolean consumed Whether NagView handled the press
+  self.overlay.on_mouse_pressed = function(_, ...)
+    return self:on_mouse_pressed(...)
+  end
+  ---Forward modal motion to dialog hover and scrollbar dragging.
+  ---@param _ core.view Modal companion
+  ---@param ... number Screen coordinates and pointer movement deltas
+  ---@return boolean? consumed Result of NagView's motion handler
+  self.overlay.on_mouse_moved = function(_, ...)
+    return self:on_mouse_moved(...)
+  end
+  ---Release the dialog owner's scrollbar gesture.
+  ---@param _ core.view Modal companion
+  ---@param ... any Mouse button and screen coordinates
+  self.overlay.on_mouse_released = function(_, ...)
+    return self:on_mouse_released(...)
+  end
+  ---Clear the dialog owner's hover and scrollbar state when modal hover ends.
+  self.overlay.on_mouse_left = function()
+    self:on_mouse_left()
+  end
+  ---Cancel the dialog owner's scrollbar capture without activating a button.
+  self.overlay.on_mouse_capture_lost = function()
+    self:on_mouse_capture_lost()
+  end
+  ---Scroll the dialog message through its owner's scroll state.
+  ---@param _ core.view Modal companion
+  ---@param y number Vertical wheel delta
+  ---@return boolean consumed Always true
+  self.overlay.on_mouse_wheel = function(_, y)
+    self.scroll.to.y = self.scroll.to.y - y * config.mouse_wheel_scroll
+    core.redraw = true
+    return true
+  end
+  ---Forward modal touch scrolling to the dialog owner.
+  ---@param _ core.view Modal companion
+  ---@param ... number Screen coordinates, movement deltas, and touch index
+  self.overlay.on_touch_moved = function(_, ...)
+    return self:on_touch_moved(...)
+  end
   self.queue = {}
   self.scrollable = true
   self.target_height = 0
-  self.on_mouse_pressed_root = nil
   self.dim_alpha = 0
   self.visible = false
 end
@@ -121,11 +184,9 @@ function NagView:dim_window_content()
   local ox, oy = self:get_content_offset()
   oy = oy + self.show_height
   local w, h = core.root_view.size.x, core.root_view.size.y - oy
-  core.root_view:defer_draw(function()
-    local dim_color = { table.unpack(style.nagbar_dim) }
-    dim_color[4] = style.nagbar_dim[4] * self.dim_alpha
-    renderer.draw_rect(ox, oy, w, h, dim_color)
-  end)
+  local dim_color = { table.unpack(style.nagbar_dim) }
+  dim_color[4] = style.nagbar_dim[4] * self.dim_alpha
+  renderer.draw_rect(ox, oy, w, h, dim_color)
 end
 
 
@@ -143,7 +204,7 @@ end
 
 ---Iterate over dialog option buttons with their positions.
 ---Buttons are yielded right-to-left.
----@return fun(): integer, core.nagview.option, number, number, number, number iterator Iterator yielding: index, option, x, y, width, height
+---@return fun():integer,core.nagview.option,number,number,number,number iterator Iterator yielding: index, option, x, y, width, height
 function NagView:each_option()
   return coroutine.wrap(function()
     if not self.options then return end
@@ -180,70 +241,31 @@ function NagView:on_mouse_moved(mx, my, ...)
 end
 
 
----Register mouse press hook to intercept clicks globally.
----Ensures dialog captures clicks even outside its bounds.
----@param self core.nagview
-local function register_mouse_pressed(self)
-  if self.on_mouse_pressed_root then return end
-  -- RootView is loaded locally to avoid NagView and RootView being
-  -- mutually recursive
-  local RootView = require "core.rootview"
-  self.on_mouse_pressed_root = RootView.on_mouse_pressed
-  local this = self
-  function RootView:on_mouse_pressed(button, x, y, clicks)
-    if
-      not this:on_mouse_pressed(button, x, y, clicks)
-    then
-      return this.on_mouse_pressed_root(self, button, x, y, clicks)
-    else
-      return true
-    end
-  end
-  self.new_on_mouse_pressed_root = RootView.on_mouse_pressed
-end
-
-
----Unregister mouse press hook and restore original handler.
----Validates hook hasn't been overwritten by other code before restoring.
----@param self core.nagview
-local function unregister_mouse_pressed(self)
-  local RootView = require "core.rootview"
-  if
-    self.on_mouse_pressed_root
-    and
-    -- just in case prevent overwriting what something else may
-    -- have overwrote after us, but after testing with various
-    -- plugins this doesn't seems to happen, but just in case
-    self.new_on_mouse_pressed_root == RootView.on_mouse_pressed
-  then
-    RootView.on_mouse_pressed = self.on_mouse_pressed_root
-    self.on_mouse_pressed_root = nil
-    self.new_on_mouse_pressed_root = nil
-  end
-end
-
-
----Handle mouse press events on dialog buttons.
----@param button core.view.mousebutton
+---Handle modal presses on dialog buttons or the message scrollbar.
+---Consumes clicks elsewhere in the modal layer while the dialog is visible.
+---@param button core.view.mousebutton Pressed button
 ---@param mx number Screen x coordinate
 ---@param my number Screen y coordinate
----@param clicks integer Number of clicks
----@return boolean handled True if event was handled
+---@param clicks integer Consecutive click count
+---@return boolean consumed Whether the visible dialog handled the press
 function NagView:on_mouse_pressed(button, mx, my, clicks)
   if not self.visible then return false end
-  if NagView.super.on_mouse_pressed(self, button, mx, my, clicks) then return true end
-  for i, _, x,y,w,h in self:each_option() do
+  if NagView.super.on_mouse_pressed(self, button, mx, my, clicks) then
+    return true
+  end
+  for i, _, x, y, w, h in self:each_option() do
     if mx >= x and my >= y and mx < x + w and my < y + h then
       self:change_hovered(i)
       command.perform "dialog:select"
+      break
     end
   end
   return true
 end
 
-
----Handle text input for keyboard shortcuts (Y/N).
----@param text string Input text
+---Handle the dialog's Y/N shortcuts without editing the underlying document.
+---@param text string Typed text
+---@return boolean? consumed True while the dialog is visible
 function NagView:on_text_input(text)
   if not self.visible then return end
   if text:lower() == "y" then
@@ -251,10 +273,9 @@ function NagView:on_text_input(text)
   elseif text:lower() == "n" then
     command.perform "dialog:select-no"
   end
+  return true
 end
 
-
----Update the nagview each frame.
 ---Handles animations for show/hide, dimming, and button hover underline.
 function NagView:update()
   if not self.visible and self.show_height <= 0 then return end
@@ -271,6 +292,7 @@ function NagView:update()
     self:move_towards(self, "dim_alpha", 0, nil, "nagbar")
     if self.show_height <= 0 then
       self.size.y = 0
+      self.overlay:hide_floating()
       self.title = nil
       self.message = nil
       self.options = nil
@@ -281,9 +303,12 @@ end
 
 
 ---Draw the nagview message, buttons, and background dimming.
----Internal rendering function called via defer_draw.
+---Internal rendering function called by the floating overlay.
 ---@param self core.nagview
-local function draw_nagview_message(self)
+draw_nagview_message = function(self)
+  if (not self.visible and self.show_height <= 0) or not self.title then
+    return
+  end
   self:dim_window_content()
 
   -- draw message's background
@@ -297,7 +322,11 @@ local function draw_nagview_message(self)
   -- if there are other items, show it
   if #self.queue > 0 then
     local str = string.format("[%d]", #self.queue)
-    ox = common.draw_text(style.font, style.nagbar_text, str, "left", ox, oy, self.size.x, self.show_height)
+    ox = common.draw_text(
+      style.font, style.nagbar_text,
+      str, "left",
+      ox, oy, self.size.x, self.show_height
+    )
     ox = ox + style.padding.x
   end
 
@@ -328,22 +357,14 @@ local function draw_nagview_message(self)
       renderer.draw_rect(lx,ly,uw,UNDERLINE_WIDTH, style.nagbar_text)
     end
 
-    common.draw_text(style.font, style.nagbar_text, opt.text, "center", fx, fy, fw, fh)
+    common.draw_text(
+      style.font, style.nagbar_text, opt.text, "center", fx, fy, fw, fh
+    )
   end
 
   self:draw_scrollbar()
 
   core.pop_clip_rect()
-end
-
-
----Draw the nagview.
----Defers actual rendering to draw_nagview_message.
-function NagView:draw()
-  if (not self.visible and self.show_height <= 0) or not self.title then
-    return
-  end
-  core.root_view:defer_draw(draw_nagview_message, self)
 end
 
 
@@ -391,14 +412,13 @@ function NagView:next()
     self:change_hovered(common.find_index(self.options, "default_yes"))
 
     self.force_focus = true
+    self.overlay:show_floating()
     core.set_active_view(self)
-    -- We add a hook to manage all the mouse_pressed events.
-    register_mouse_pressed(self)
   else
     self.force_focus = false
+    self.overlay.floating_closing = true
     core.set_active_view(core.next_active_view or core.last_active_view)
     self.visible = false
-    unregister_mouse_pressed(self)
   end
 end
 
