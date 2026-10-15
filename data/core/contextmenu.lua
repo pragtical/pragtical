@@ -6,13 +6,15 @@ local keymap = require "core.keymap"
 local style = require "core.style"
 local View = require "core.view"
 
+---@alias core.contextmenu.source core.contextmenu.item[]|fun():core.contextmenu.item[]
+
 ---Menu entry or submenu definition; use ContextMenu.DIVIDER for separators.
 ---@class core.contextmenu.item
 ---@field id? string Stable application-menu registration ID, independent of text
 ---@field text string Display label
 ---@field info? string Right-aligned hint; a command's assigned binding takes precedence
 ---@field command? string|fun() Command name or action to run when selected
----@field items? core.contextmenu.item[] Submenu entries, mutually exclusive with command
+---@field items? core.contextmenu.source Submenu entries or a provider called once on opening, mutually exclusive with command
 ---@field checked? boolean|fun():boolean Checked state evaluated when opening or navigating
 ---@field visible? boolean|fun():boolean Visibility evaluated when the menu opens
 ---@field divider? boolean Separator stored by application-menu registrations
@@ -37,12 +39,12 @@ local View = require "core.view"
 ---@field show_context_menu boolean Whether a menu opening is active
 ---@field selected integer Selected row index, or -1 when no row is selected
 ---@field items? core.contextmenu.items Measured snapshot of the current opening
----@field source_items? core.contextmenu.item[] Original entry definitions
+---@field source_items? core.contextmenu.source Original entry definitions or provider
 ---@field application_menu? boolean Keep unavailable entries and refresh visited rows
 ---@field source_view? core.view Active view when the menu opened
 ---@field items_font? renderer.font Font used to measure the current snapshot
 ---@field child_menu? core.contextmenu Open submenu
----@field child_item? core.contextmenu.item[] Definitions used by the open submenu
+---@field child_item? core.contextmenu.source Definitions used by the open submenu
 ---@field parent_menu? core.contextmenu Immediate parent when this is a submenu
 ---@field root_menu? core.contextmenu Menu that dispatches submenu leaf actions
 ---@field pressed_row? integer Application-menu row pressed for release validation
@@ -157,10 +159,12 @@ end
 
 ---Snapshot visible entries, availability, checked states, and current command bindings.
 ---Evaluates callbacks once for this opening and removes redundant separators.
----@param source core.contextmenu.item[] Entry definitions
+---@param source core.contextmenu.source Entry definitions or an opening-time provider
 ---@param disabled? boolean Keep unavailable commands as disabled rows
 ---@return core.contextmenu.items items Measured entries for the opening
 function ContextMenu:build_items(source, disabled)
+  source = resolve(source)
+  if type(source) ~= "table" then source = {} end
   local items = {}
   for _, original in ipairs(source) do
     if original == self.DIVIDER or original.divider then
@@ -203,7 +207,7 @@ end
 
 ---Show an explicit menu tree. Context registrations retain predicate filtering.
 ---Builds a new snapshot for this opening and leaves the rows unselected.
----@param source core.contextmenu.item[] Entry definitions
+---@param source core.contextmenu.source Entry definitions or an opening-time provider
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
 ---@param options? core.contextmenu.show_options Placement and unavailable-entry policy

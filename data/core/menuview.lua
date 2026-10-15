@@ -60,6 +60,7 @@ local function find(items, path)
       if item.id == id then found = item; break end
     end
     assert(found and found.items, "Unknown application menu: " .. id)
+    assert(type(found.items) == "table", "Cannot register inside a dynamic application menu: " .. id)
     items = found.items
   end
   return items
@@ -112,7 +113,7 @@ local function validate(items, seen, path)
         label .. ": A menu entry cannot have both items and command"
       )
       if item.items ~= nil then
-        validate(item.items, seen, label)
+        if type(item.items) ~= "function" then validate(item.items, seen, label) end
       end
     end
   end
@@ -121,6 +122,7 @@ end
 
 ---Register application entries under stable IDs, independent of display labels.
 ---Validates before replacing a named contribution and preserves its position on reload.
+---A submenu's items may be a function returning a fresh snapshot on opening.
 ---@param path string[] Empty to register top-level menus.
 ---@param entries core.contextmenu.item[]
 ---@param name? string Replace this plugin's previous registration when reloading.
@@ -192,7 +194,7 @@ end
 ---Create a submenu group containing command entries or further submenus.
 ---@param id string Stable group ID
 ---@param text string Display label
----@param items core.contextmenu.item[] Child entries
+---@param items core.contextmenu.source Child entries or a provider evaluated when opened
 ---@return core.contextmenu.item item Group definition
 function MenuView:group(id, text, items)
   return { id = id, text = text, items = items }

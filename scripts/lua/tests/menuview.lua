@@ -71,6 +71,38 @@ test.describe("application menu", function()
     test.equal(core.menu_view.menu.items[1].command, "core:new-doc")
   end)
 
+  test.test("dynamic submenus are populated once per opening and refreshed on reopening", function(context)
+    local calls, label = 0, "First session"
+    local handle = core.menu_view:register({ "file" }, {
+      { id = "dynamic", text = "Sessions", items = function()
+        calls = calls + 1
+        return { { id = "session", text = label, command = "core:new-doc" } }
+      end }
+    }, "dynamic-test")
+    context.handles[#context.handles + 1] = handle
+    core.root_view:update(); core.root_view:update()
+    test.equal(calls, 0)
+    core.menu_view:open(1)
+    local menu = core.menu_view.menu
+    for i, item in ipairs(menu.items) do if item.id == "dynamic" then menu.selected = i end end
+    test.equal(calls, 0)
+    menu:open_submenu()
+    test.equal(calls, 1)
+    test.equal(menu.child_menu.items[1].text, "First session")
+    label = "Second session"
+    for _ = 1, 10 do
+      core.root_view:update()
+      menu:open_submenu()
+      renderer.begin_frame(core.window); core.root_view:draw(); renderer.end_frame()
+    end
+    test.equal(calls, 1)
+    test.equal(menu.child_menu.items[1].text, "First session")
+    menu.child_menu:hide()
+    menu:open_submenu()
+    test.equal(calls, 2)
+    test.equal(menu.child_menu.items[1].text, "Second session")
+  end)
+
   test.test("top-level arrows leave entries unselected until Down", function(context)
     core.on_event("keypressed", menu_modifier)
     core.on_event("keypressed", "m")

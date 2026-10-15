@@ -46,6 +46,21 @@ test.describe("nagview floating overlay", function()
     test.equal(#core.root_view.floating_views, 0)
   end)
 
+  test.test("dialogs without an affirmative default animate before a button is hovered", function(context)
+    core.nag_view:show("Remove Session", "Remove the selected saved session?", {
+      { text = "Remove" }, { text = "Cancel", default_no = true }
+    }, function(option) table.insert(context.selected, option.text) end)
+    test.is_nil(core.nag_view.hovered_item)
+    for _ = 1, 5 do core.root_view:update() end
+    renderer.begin_frame(core.window)
+    core.root_view:draw()
+    renderer.end_frame()
+    test.equal(type(core.nag_view.underline_progress), "number")
+    core.on_event("textinput", "n")
+    test.equal(context.selected[1], "Cancel")
+    test.equal(core.active_view, context.view)
+  end)
+
   test.test("button presses select the queued dialog and restore focus", function(context)
     context.show("First"); context.show("Second")
     for _, option, x, y, w, h in core.nag_view:each_option() do
