@@ -9,6 +9,13 @@ local DocView = require "core.docview"
 local tokenizer = require "core.tokenizer"
 
 
+-- Remember only the last Go To Line context without keeping its document alive.
+local go_to_line_doc = setmetatable({}, { __mode = "v" })
+---@type core.commandview.snapshot?
+local go_to_line_state
+local go_to_line_change_id
+
+
 local function doc()
   return core.active_view.doc
 end
@@ -559,18 +566,34 @@ local commands = {
   end,
 
   ["doc:go-to-line"] = function(dv)
+    if dv == core.command_view then return end
+    local source = dv.doc
+    local change_id = source:get_change_id()
+    local restore
+    if go_to_line_doc[1] == source and go_to_line_state then
+      if go_to_line_change_id == change_id then
+        restore = go_to_line_state
+      else
+        restore = { text = go_to_line_state.query, query = go_to_line_state.query }
+      end
+    end
     local items
     local function init_items()
       if items then return end
       items = {}
       local mt = { __tostring = function(x) return x.text end }
-      for i, line in ipairs(dv.doc.lines) do
+      for i, line in ipairs(source.lines) do
         local item = { text = line:sub(1, -2), line = i, info = "line: " .. i }
         table.insert(items, setmetatable(item, mt))
       end
     end
 
     core.command_view:enter("Go To Line", {
+      restore_state = restore,
+      on_save_state = function(snapshot)
+        go_to_line_doc[1] = source
+        go_to_line_state, go_to_line_change_id = snapshot, change_id
+      end,
       submit = function(text, item)
         local line = item and item.line or tonumber(text)
         if not line then
@@ -582,6 +605,9 @@ local commands = {
         dv:scroll_to_line(line, true)
       end,
       suggest = function(text)
+        if source:get_change_id() ~= change_id then
+          items, change_id = nil, source:get_change_id()
+        end
         if not text:find("^%d*$") then
           init_items()
           return common.fuzzy_match(items, text)
@@ -615,14 +641,14 @@ local commands = {
     encodings.select_encoding("Select Output Encoding", function(charset)
       set_encoding(dv.doc, charset)
       save_existing(dv.doc)
-    end)
+    end, dv.doc.encoding or "UTF-8")
   end,
 
   ["doc:reload-with-encoding"] = function(dv)
     encodings.select_encoding("Reload With Encoding", function(charset)
       set_encoding(dv.doc, charset)
       dv.doc:reload()
-    end)
+    end, dv.doc.encoding or "UTF-8")
   end,
 
   ["doc:toggle-overwrite"] = function(dv)

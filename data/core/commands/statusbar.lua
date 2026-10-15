@@ -2,6 +2,7 @@ local core = require "core"
 local command = require "core.command"
 local common = require "core.common"
 local StatusView = require "core.statusview"
+local hide_state, show_state
 
 local function status_view_item_names()
   local items = core.status_view:get_items_list()
@@ -50,6 +51,12 @@ command.add(nil, {
   end,
   ["status-bar:hide-item"] = function()
     core.command_view:enter("Status bar item to hide", {
+      restore_state = hide_state,
+      on_save_state = function(snapshot, submitted)
+        hide_state = submitted and { text = snapshot.query } or snapshot
+      end,
+      get_suggestion_id = function(item) return item.name end,
+      validate = function(_, item) return item ~= nil end,
       submit = function(text, item)
         core.status_view:hide_items(item.name)
       end,
@@ -58,6 +65,12 @@ command.add(nil, {
   end,
   ["status-bar:show-item"] = function()
     core.command_view:enter("Status bar item to show", {
+      restore_state = show_state,
+      on_save_state = function(snapshot, submitted)
+        show_state = submitted and { text = snapshot.query } or snapshot
+      end,
+      get_suggestion_id = function(item) return item.name end,
+      validate = function(_, item) return item ~= nil end,
       submit = function(text, item)
         core.status_view:show_items(item.name)
       end,

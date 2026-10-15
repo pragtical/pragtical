@@ -33,6 +33,9 @@ local function setup(native)
     status_view = { add_item = function(_, item) state.items[item.name] = item end }
   }
   core.command_view = {
+    is_open = function() return state.prompt_open or false end,
+    save_state = function() return { text = "", query = "" } end,
+    restore_state = function(self) self:update_suggestions() end,
     enter = function(self, label, options)
       self.label = label .. ": "
       state.options = options
@@ -143,6 +146,39 @@ test.describe("findfile", function()
       for _, channel in pairs(context.state.channels) do channel:clear() end
     end
     if context.root then common.rm(context.root, true) end
+  end)
+
+  test.test("recall separates project sets and clears after submission", function()
+    local state = setup()
+    state:start()
+    local snapshot = { text = "two", query = "two", suggestion_idx = 2 }
+    state.options.on_save_state(snapshot, false)
+    state:start()
+    test.equal(state.options.restore_state, snapshot)
+    test.equal(state.options.get_suggestion_id { text = "two.txt" }, "two.txt")
+    local options = state.options
+    state.prompt_open = true
+    state:start()
+    test.equal(state.options, options)
+    state.prompt_open = false
+    state.options.on_save_state(snapshot, true)
+    state:start()
+    test.is_nil(state.options.restore_state)
+    state.options.on_save_state(snapshot, false)
+    local root = "findfile-tests" .. PATHSEP .. "other"
+    state.directories[root] = { "another.txt" }
+    state.core.projects = { { path = root } }
+    state:start()
+    test.is_nil(state.options.restore_state)
+  end)
+
+  test.test("custom file selectors do not inherit the normal picker's state", function()
+    local state = setup()
+    state:start()
+    state.options.on_save_state({ text = "unfinished", query = "unfinished" }, false)
+    state.commands["core:find-file"](nil, function() error("must not submit") end)
+    test.is_nil(state.options.restore_state)
+    test.is_nil(state.options.on_save_state)
   end)
 
   test.test("failed creation clears indexing state and allows a cached retry", function()

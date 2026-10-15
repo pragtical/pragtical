@@ -13,6 +13,31 @@ local TreeView = getmetatable(require "plugins.treeview")
 local ToolbarView = require "plugins.toolbarview"
 local common = require "core.common"
 local ContextMenu = require "core.contextmenu"
+local encodings = require "core.doc.encodings"
+local projectsearch = require "plugins.projectsearch"
+
+---Replace a test dependency and restore it after the prompt has closed.
+---@param context table Test fixture
+---@param target table Table containing the dependency
+---@param key string Dependency name
+---@param value any Temporary value
+local function patch(context, target, key, value)
+  context.restores[#context.restores + 1] = { target, key, target[key] }
+  target[key] = value
+end
+
+---Activate a document whose contents and lifetime belong to this test.
+---@param context table Test fixture
+---@param text string Initial document contents
+---@return core.doc doc Source document
+local function open_document(context, text)
+  local doc = Doc()
+  context.docs[#context.docs + 1] = doc
+  doc:insert(1, 1, text)
+  doc:set_selection(1, 1)
+  core.root_view:get_primary_node():add_view(DocView(doc))
+  return doc
+end
 
 ---Save exact metrics so scaling tests do not leave rounding changes behind.
 ---@param context table Test fixture restored by after_each
@@ -58,6 +83,7 @@ test.describe("commandview floating suggestions", function()
     context.path_suggest = common.path_suggest
     context.font_get_width = renderer.font.get_width
     context.floating_views, context.docs, context.paths = {}, {}, {}
+    context.restores = {}
     config.transitions = false
     config.commandview_position = "bottom"
     core.root_view = RootView(); core.root_view.root_node.is_primary_node = true
@@ -82,6 +108,10 @@ test.describe("commandview floating suggestions", function()
     core.command_view:exit()
     core.command_view:hide_floating()
     core.command_view.suggestions_view:hide_floating()
+    for i = #context.restores, 1, -1 do
+      local saved = context.restores[i]
+      saved[1][saved[2]] = saved[3]
+    end
     if context.tree then context.tree:hide_tooltip() end
     for _, view in ipairs(context.floating_views) do view:hide_floating() end
     for _, doc in ipairs(context.docs) do doc:on_close() end
@@ -793,6 +823,899 @@ test.describe("commandview floating suggestions", function()
     capture_palette()
     for _, count in pairs(measured) do test.equal(count, 1) end
     test.equal(suggestions, 0)
+  end)
+
+  test.test("closed prompts have no snapshot and cannot restore one", function()
+    local view = core.command_view
+    test.is_nil(view:save_state())
+    test.not_ok(view:restore_state { text = "ignored" })
+    test.equal(view:get_text(), "")
+  end)
+
+  test.test("snapshots copy selections and preserve query, completion and both scroll offsets", function()
+    local view, items, calls = core.command_view, {}, {}
+    for i = 1, 80 do items[i] = string.format("item %02d", i) end
+    local function suggest(query) calls[#calls + 1] = query; return items end
+    view:enter("Pick", { text = "it", suggest = suggest, typeahead = false })
+    core.root_view:update(); core.root_view:update()
+    view.suggestion_idx = 12
+    view:complete()
+    view.doc:set_selection(1, 2, 1, 4)
+    view.doc:add_selection(1, 6)
+    local popup, lh = view.suggestions_view, view:get_suggestion_line_height()
+    local maximum = popup:get_scrollable_size() - popup.size.y
+    popup.scroll.y, popup.scroll.to.y = maximum - 4.25 * lh, maximum - 6.5 * lh
+    local saved = view:save_state()
+    test.equal(saved.query, "it"); test.equal(saved.text, "item 12")
+    test.equal(saved.suggestion_idx, 12)
+    test.near(saved.suggestions_offset, 4.25, 0.001)
+    test.near(saved.suggestions_target_offset, 6.5, 0.001)
+    test.same(saved.selections, view.doc.selections)
+    test.equal(saved.last_selection, 2)
+    view.doc:set_selection(1, 1)
+    test.equal(#saved.selections, 8)
+    view:exit()
+    calls = {}
+    view:enter("Restored", { suggest = suggest, restore_state = saved })
+    test.same(calls, { "it" })
+    test.equal(view:get_text(), "item 12")
+    test.equal(view.suggestion_idx, 12)
+    test.same(view.doc.selections, saved.selections)
+    test.equal(view.doc.last_selection, 2)
+    test.near(view:save_state().suggestions_offset, 4.25, 0.001)
+    core.root_view:update(); core.root_view:update()
+    test.same(calls, { "it" })
+    test.equal(view.suggestion_idx, 12)
+    test.near(view:save_state().suggestions_offset, 6.5, 0.001)
+    view.doc.selections[2] = 1
+    test.equal(saved.selections[2], 2)
+    for key, value in pairs(saved) do
+      test.ok(type(value) == "string" or type(value) == "number" or key == "selections")
+    end
+  end)
+
+  test.test("restoring typeahead preserves its typed prefix and selected suffix", function()
+    local view, calls = core.command_view, {}
+    local function suggest(query)
+      calls[#calls + 1] = query
+      return query == "ab" and { "abacus" } or { "alpha", "alpine" }
+    end
+    view:enter("Pick", { suggest = suggest })
+    core.root_view:update()
+    view.doc:text_input("a")
+    core.root_view:update()
+    test.equal(view:get_text(), "alpha")
+    local saved = view:save_state()
+    test.equal(saved.query, "a"); test.equal(saved.last_text, "a")
+    test.same(saved.selections, { 1, 2, 1, 6 })
+    view:exit()
+    calls = {}
+    view:enter("Pick", { suggest = suggest, restore_state = saved })
+    core.root_view:update(); core.root_view:update()
+    test.same(calls, { "a" })
+    test.same(view.doc.selections, saved.selections)
+    view.doc:text_input("b")
+    core.root_view:update()
+    test.equal(view:get_text(), "abacus")
+    test.equal(view:save_state().last_text, "ab")
+    test.equal(saved.text, "alpha")
+  end)
+
+  test.test("pending numeric input is captured without an extra suggestion call", function()
+    local view, calls, saved = core.command_view, 0
+    local function suggest() calls = calls + 1; return {} end
+    view:enter("Number", { suggest = suggest, on_save_state = function(snapshot) saved = snapshot end })
+    test.equal(calls, 1)
+    view.doc:text_input("42")
+    view:exit()
+    test.equal(calls, 1)
+    test.equal(saved.text, "42"); test.equal(saved.query, "42")
+    view:enter("Number", { suggest = suggest, restore_state = saved })
+    core.root_view:update(); core.root_view:update()
+    test.equal(calls, 2)
+    test.equal(view:get_text(), "42")
+  end)
+
+  test.test("restoration uses the new provider and clamps regenerated results", function()
+    local view, calls = core.command_view, 0
+    view:enter("First", { suggest = function() return { "old one", "old two", "old three" } end })
+    core.root_view:update()
+    view.suggestion_idx = 3; view:complete()
+    local saved = view:save_state()
+    saved.suggestions_offset, saved.suggestions_target_offset = 900, 1000
+    view:exit()
+    view:enter("Second", {
+      restore_state = saved,
+      suggest = function(query) calls = calls + 1; return { "new item" } end
+    })
+    core.root_view:update(); core.root_view:update()
+    test.equal(calls, 1)
+    test.equal(view:get_text(), "old three")
+    test.equal(view.suggestion_idx, 1)
+    test.equal(view.suggestions[1].text, "new item")
+    test.near(view:save_state().suggestions_offset, 0, 0.001)
+    test.ok(view:restore_state { text = "empty", query = "none", selections = { 1, 100, 1, 200 } })
+    test.same(view.doc.selections, { 1, 6, 1, 6 })
+  end)
+
+  for _, position in ipairs { "bottom", "top", "center" } do
+    test.test(position .. " restores hidden history and its original input", function()
+      config.commandview_position = position
+      local view = core.command_view
+      local options = { text = "original", show_suggestions = false,
+        suggest = function() return { "first", "second" } end }
+      view:enter("History", options)
+      core.root_view:update(); core.root_view:update()
+      view:move_suggestion_idx(1); view:move_suggestion_idx(1)
+      local saved = view:save_state()
+      test.equal(saved.text, "second"); test.equal(saved.save_suggestion, "original")
+      view:exit()
+      options.restore_state = saved
+      view:enter("History", options)
+      core.root_view:update(); core.root_view:update()
+      test.equal(view.suggestion_idx, 2)
+      test.not_ok(view.suggestions_view.floating_visible)
+      view:move_suggestion_idx(-1); view:move_suggestion_idx(-1)
+      test.equal(view:get_text(), "original")
+    end)
+
+    for _, destination in ipairs { "bottom", "top", "center" } do
+      test.test(position .. " snapshot keeps logical scrolling in " .. destination .. " placement", function()
+        local view, items, calls = core.command_view, {}, 0
+        for i = 1, 80 do items[i] = "result " .. i end
+        local function suggest() calls = calls + 1; return items end
+        config.commandview_position = position
+        view:enter("Pick", { suggest = suggest })
+        core.root_view:update(); core.root_view:update()
+        local popup, lh = view.suggestions_view, view:get_suggestion_line_height()
+        local maximum = popup:get_scrollable_size() - popup.size.y
+        local offset = 12.5 * lh
+        popup.scroll.y = position == "bottom" and maximum - offset or offset
+        popup.scroll.to.y = popup.scroll.y
+        view.suggestion_idx = 15; view:complete()
+        local saved = view:save_state()
+        view:exit()
+        core.root_view:update(); core.root_view:update()
+        config.commandview_position = destination
+        calls = 0
+        view:enter("Pick", { suggest = suggest, restore_state = saved })
+        core.root_view:update(); core.root_view:update()
+        test.equal(calls, 1)
+        test.equal(view.suggestion_idx, 15)
+        test.near(view:save_state().suggestions_offset, 12.5, 0.001)
+        test.equal(view:get_text(), "result 15")
+      end)
+    end
+  end
+
+  for _, action in ipairs { "submit", "escape", "focus loss", "floating dismissal", "floating close" } do
+    test.test(action .. " captures once before cleanup and notifies before the session callback", function(context)
+      local view, saved, cancelled, submitted, notifications = core.command_view, nil, nil, false, 0
+      if action:find("floating") then config.commandview_position = "center" end
+      view:enter("Remember", {
+        text = "remember me",
+        on_save_state = function(snapshot)
+          notifications = notifications + 1; saved = snapshot
+          test.is_nil(view:save_state())
+          test.equal(view:get_text(), "")
+        end,
+        cancel = function(explicit) test.not_nil(saved); cancelled = explicit end,
+        submit = function() test.not_nil(saved); submitted = true end,
+      })
+      core.root_view:update(); core.root_view:update()
+      if action == "submit" then view:submit()
+      elseif action == "escape" then command.perform("command:escape")
+      elseif action == "focus loss" then core.set_active_view(context.view); core.root_view:update()
+      elseif action == "floating dismissal" then view:hide_floating()
+      else command.perform("root:close") end
+      core.root_view:update(); core.root_view:update()
+      test.equal(notifications, 1)
+      test.equal(saved.text, "remember me")
+      test.equal(submitted, action == "submit")
+      if action ~= "submit" then
+        test.equal(cancelled, action == "escape" or action == "floating close")
+      end
+      view:exit()
+      test.equal(notifications, 1)
+    end)
+
+    test.test(action .. " allows the save callback to open a replacement prompt", function(context)
+      local view, saved = core.command_view
+      if action:find("floating") then config.commandview_position = "center" end
+      view:enter("First", {
+        text = "first input",
+        on_save_state = function(snapshot)
+          saved = snapshot
+          view:enter("Replacement", { text = "second input" })
+        end
+      })
+      core.root_view:update(); core.root_view:update()
+      if action == "submit" then view:submit()
+      elseif action == "escape" then view:exit()
+      elseif action == "focus loss" then core.set_active_view(context.view); core.root_view:update()
+      elseif action == "floating dismissal" then view:hide_floating()
+      else command.perform("root:close") end
+      core.root_view:update(); core.root_view:update()
+      test.equal(saved.text, "first input")
+      test.equal(view:get_text(), "second input")
+      test.equal(core.active_view, view)
+      if action:find("floating") then test.ok(view.floating_visible) end
+    end)
+  end
+
+  test.test("restoration preserves row offsets across scale and viewport changes", function(context)
+    save_scale_metrics(context)
+    local view, items = core.command_view, {}
+    for i = 1, 80 do items[i] = "item " .. i end
+    config.commandview_position = "center"
+    view:enter("Pick", { suggest = function() return items end })
+    core.root_view:update(); core.root_view:update()
+    local lh = view:get_suggestion_line_height()
+    view.suggestions_view.scroll.y, view.suggestions_view.scroll.to.y = 7.25 * lh, 7.25 * lh
+    local saved = view:save_state()
+    view:exit(); core.root_view:update(); core.root_view:update()
+    scale.set(1.5)
+    core.root_view.size.x, core.root_view.size.y = 350, 250
+    local calls = 0
+    view:enter("Pick", { restore_state = saved, suggest = function() calls = calls + 1; return items end })
+    core.root_view:update(); core.root_view:update()
+    test.equal(calls, 1)
+    test.near(view:save_state().suggestions_offset, 7.25, 0.001)
+    test.near(view.suggestions_view.scroll.y, 7.25 * view:get_suggestion_line_height(), 0.001)
+  end)
+
+  test.test("restored rows stay anchored throughout an animated opening", function()
+    local view, items = core.command_view, {}
+    for i = 1, 80 do items[i] = "item " .. i end
+    view:enter("Pick", { suggest = function() return items end })
+    core.root_view:update(); core.root_view:update()
+    local popup, lh = view.suggestions_view, view:get_suggestion_line_height()
+    popup.scroll.y = popup:get_scrollable_size() - popup.size.y - 8.5 * lh
+    popup.scroll.to.y = popup.scroll.y
+    local saved = view:save_state()
+    view:exit(); core.root_view:update(); core.root_view:update()
+    config.transitions = true
+    config.disabled_transitions.commandview, config.disabled_transitions.scroll = false, false
+    core.fps, config.fps = 60, 60
+    local calls = 0
+    view:enter("Pick", { restore_state = saved, suggest = function() calls = calls + 1; return items end })
+    for _ = 1, 35 do
+      core.root_view:update()
+      test.near(view:save_state().suggestions_offset, 8.5, 0.001)
+    end
+    test.equal(calls, 1)
+  end)
+
+  test.test("Go To Line restores the same document across views and refreshes after edits", function(context)
+    local doc, lines = Doc(), {}
+    context.docs[#context.docs + 1] = doc
+    for i = 1, 80 do lines[i] = "target value " .. i end
+    doc:insert(1, 1, table.concat(lines, "\n"))
+    local editor = DocView(doc)
+    core.root_view:get_primary_node():add_view(editor)
+    command.perform("doc:go-to-line")
+    local view = core.command_view
+    view:set_text("target")
+    core.root_view:update(); core.root_view:update()
+    view.suggestion_idx = 12; view:complete()
+    view.doc:set_selection(1, 3, 1, 7)
+    local saved = view:save_state()
+    view:exit()
+    -- Another DocView of the same Doc must reuse its snapshot.
+    local alternate = DocView(doc)
+    core.root_view:get_primary_node():add_view(alternate)
+    command.perform("doc:go-to-line")
+    core.root_view:update(); core.root_view:update()
+    test.equal(view:get_text(), saved.text)
+    test.equal(view.suggestion_idx, 12)
+    test.same(view.doc.selections, saved.selections)
+    view:exit()
+    doc:insert(1, 1, "changed ")
+    command.perform("doc:go-to-line")
+    core.root_view:update(); core.root_view:update()
+    test.equal(view:get_text(), "target")
+    test.equal(view.suggestion_idx, 1)
+    test.near(view:save_state().suggestions_offset, 0, 0.001)
+    local changed = false
+    for _, item in ipairs(view.suggestions) do if item.text:find("changed", 1, true) then changed = true end end
+    test.ok(changed)
+  end)
+
+  test.test("Go To Line remembers numeric input after submission and ignores reentry", function(context)
+    local doc = Doc()
+    context.docs[#context.docs + 1] = doc
+    doc:insert(1, 1, string.rep("line\n", 60))
+    core.root_view:get_primary_node():add_view(DocView(doc))
+    command.perform("doc:go-to-line")
+    local view = core.command_view
+    view.doc:text_input("42")
+    test.ok(command.perform("doc:go-to-line"))
+    test.equal(view:get_text(), "42")
+    view:submit()
+    test.equal(doc:get_selection(), 42)
+    command.perform("doc:go-to-line")
+    core.root_view:update(); core.root_view:update()
+    test.equal(view:get_text(), "42")
+    test.equal(#view.suggestions, 0)
+    test.equal(view:save_state().query, "42")
+  end)
+
+  test.test("Go To Line replaces its remembered context for document A then B then A", function(context)
+    local first, second = Doc(), Doc()
+    context.docs[#context.docs + 1], context.docs[#context.docs + 2] = first, second
+    local node = core.root_view:get_primary_node()
+    local first_view, second_view = DocView(first), DocView(second)
+    node:add_view(first_view)
+    command.perform("doc:go-to-line")
+    core.command_view:set_text("first document"); core.command_view:exit()
+    node:add_view(second_view)
+    command.perform("doc:go-to-line")
+    test.equal(core.command_view:get_text(), "")
+    core.command_view:set_text("second document"); core.command_view:exit()
+    core.set_active_view(first_view)
+    command.perform("doc:go-to-line")
+    test.equal(core.command_view:get_text(), "")
+  end)
+
+  test.test("Go To Line snapshots do not retain a closed source document", function(context)
+    local weak = setmetatable({}, { __mode = "v" })
+    local function close_source()
+      local doc = Doc()
+      local editor = DocView(doc)
+      doc:insert(1, 1, "local remembered_symbol = true\n")
+      weak[1] = doc
+      local node = core.root_view:get_primary_node()
+      node:add_view(editor)
+      command.perform("doc:go-to-line")
+      core.command_view:set_text("remembered_symbol")
+      core.root_view:update(); core.root_view:update()
+      core.command_view:complete(); core.command_view:exit()
+      node:remove_view(core.root_view.root_node, editor)
+      doc:on_close()
+      core.active_view, core.last_active_view, core.next_active_view = context.view, context.view, nil
+    end
+    close_source()
+    -- Let the editor release temporary references from the closing frame.
+    coroutine.yield(0)
+    -- Core makes normal collection incremental; LuaJIT also finalizes view/doc proxies.
+    for _ = 1, 3 do collectgarbage("forcecollect") end
+    test.is_nil(weak[1])
+  end)
+
+  test.test("stable identities follow reordered results and reveal the selection", function()
+    local view, items, calls = core.command_view, {}, 0
+    for i = 1, 40 do items[i] = { text = "result " .. i, key = i } end
+    local options = {
+      text = "result", typeahead = false,
+      suggest = function() calls = calls + 1; return items end,
+      get_suggestion_id = function(item) return item.key end,
+    }
+    view:enter("Pick", options)
+    core.root_view:update(); core.root_view:update()
+    view.suggestion_idx = 2; view:complete()
+    local saved = view:save_state()
+    test.equal(saved.suggestion_id, 2)
+    view:exit()
+    items[2], items[40] = items[40], items[2]
+    calls = 0
+    options.restore_state = saved
+    view:enter("Pick", options)
+    core.root_view:update(); core.root_view:update()
+    test.equal(calls, 1)
+    test.equal(view.suggestion_idx, 40)
+    test.equal(view.suggestions[view.suggestion_idx].key, 2)
+    test.ok(view.suggestion_idx >= view.suggestions_first and view.suggestion_idx <= view.suggestions_last)
+    test.equal(saved.suggestion_idx, 2)
+  end)
+
+  test.test("removed result identities discard stale completion and scrolling", function()
+    local view = core.command_view
+    local options = {
+      text = "item", suggest = function() return { "item one", "item two" } end,
+      get_suggestion_id = function(item) return item.text end,
+    }
+    view:enter("Pick", options)
+    core.root_view:update()
+    view.suggestion_idx = 2; view:complete()
+    local saved = view:save_state()
+    saved.suggestions_offset = 20
+    view:exit()
+    options.restore_state = saved
+    options.suggest = function() return { "item three" } end
+    view:enter("Pick", options)
+    test.equal(view:get_text(), "item")
+    test.equal(view.suggestion_idx, 1)
+    test.equal(view:save_state().suggestions_offset, 0)
+    test.equal(saved.text, "item two")
+  end)
+
+  test.test("save callbacks distinguish cancellation from validated submission", function()
+    local view, exits = core.command_view, {}
+    local options = {
+      on_save_state = function(_, submitted) exits[#exits + 1] = submitted end,
+      validate = function(text) return text ~= "invalid" end,
+    }
+    test.not_ok(view:is_open())
+    view:enter("Pick", options)
+    test.ok(view:is_open())
+    view:set_text("invalid"); view:submit()
+    test.ok(view:is_open()); test.equal(#exits, 0)
+    view:exit()
+    view:enter("Pick", options); view:submit()
+    test.same(exits, { false, true })
+    test.not_ok(view:is_open())
+  end)
+
+  test.test("command palette resumes cancellation and refreshes valid results", function(context)
+    local enabled, performed = true, 0
+    for _, name in ipairs { "recall-test:alpha", "recall-test:beta" } do
+      patch(context, command.map, name, nil)
+    end
+    command.add(nil, { ["recall-test:alpha"] = function() performed = performed + 1 end })
+    command.add(function() return enabled end, { ["recall-test:beta"] = function() end })
+    command.perform("core:find-command")
+    local view = core.command_view
+    view:set_text("recall-test"); core.root_view:update()
+    for i, item in ipairs(view.suggestions) do
+      if item.command == "recall-test:beta" then view.suggestion_idx = i end
+    end
+    view:complete(); view:exit()
+    enabled = false
+    command.perform("core:find-command")
+    test.equal(view:get_text(), "recall-test")
+    test.equal(view.suggestions[view.suggestion_idx].command, "recall-test:alpha")
+    view:submit()
+    test.equal(performed, 1)
+    command.perform("core:find-command")
+    test.equal(view:get_text(), command.prettify_name("recall-test:alpha"))
+    test.equal(view.suggestions[view.suggestion_idx].command, "recall-test:alpha")
+    test.same(view.doc.selections, { 1, #view:get_text() + 1, 1, 1 })
+    view.doc:text_input("another search"); core.root_view:update()
+    test.equal(view:get_text(), "another search")
+  end)
+
+  test.test("command palette keeps valid choices across editor contexts and selects input", function(context)
+    patch(context, command.map, "recall-context:pick", nil)
+    command.add(nil, { ["recall-context:pick"] = function() end })
+    command.perform("core:find-command")
+    local view = core.command_view
+    view:set_text("recall-context"); core.root_view:update()
+    view:submit()
+    open_document(context, "other document")
+    command.perform("core:find-command")
+    test.equal(view:get_text(), command.prettify_name("recall-context:pick"))
+    test.equal(view.suggestion_idx, 1)
+    test.same(view.doc.selections, { 1, #view:get_text() + 1, 1, 1 })
+  end)
+
+  test.test("remembered commands respect predicates on reopening and execution", function(context)
+    local allowed, performed = true, 0
+    patch(context, command.map, "recall-predicate:pick", nil)
+    command.add(function() return allowed end, {
+      ["recall-predicate:pick"] = function() performed = performed + 1 end
+    })
+    command.perform("core:find-command")
+    local view = core.command_view
+    view:set_text("recall-predicate"); core.root_view:update(); view:submit()
+    test.equal(performed, 1)
+    allowed = false
+    command.perform("core:find-command")
+    test.equal(view:get_text(), "recall-predicate")
+    test.same(view.doc.selections, { 1, #view:get_text() + 1, 1, 1 })
+    test.equal(#view.suggestions, 0)
+    view:exit()
+    allowed = true
+    command.perform("core:find-command")
+    test.equal(view.suggestions[view.suggestion_idx].command, "recall-predicate:pick")
+    allowed = false
+    view:submit()
+    test.equal(performed, 1)
+  end)
+
+  test.test("module picker remembers cancellation and repeated reloads", function(context)
+    patch(context, core.status_view, "show_message", function() end)
+    patch(context, package.loaded, "recall_module_alpha", {})
+    patch(context, package.loaded, "recall_module_beta", {})
+    local reloaded
+    patch(context, core, "reload_module", function(name) reloaded = name end)
+    command.perform("core:reload-module")
+    local view = core.command_view
+    view:set_text("recall_module"); core.root_view:update()
+    for i, item in ipairs(view.suggestions) do
+      if item.text == "recall_module_beta" then view.suggestion_idx = i end
+    end
+    view:complete(); view:exit()
+    package.loaded.recall_module_alpha = nil
+    command.perform("core:reload-module")
+    test.equal(view.suggestions[view.suggestion_idx].text, "recall_module_beta")
+    local saved = view:save_state()
+    view:submit()
+    test.equal(reloaded, "recall_module_beta")
+    command.perform("core:reload-module")
+    test.equal(view:get_text(), "recall_module_beta")
+    test.equal(view:save_state().query, saved.query)
+    test.same(view.doc.selections, saved.selections)
+    test.equal(view.suggestions[view.suggestion_idx].text, "recall_module_beta")
+    reloaded = nil
+    view:submit()
+    test.equal(reloaded, "recall_module_beta")
+  end)
+
+  test.test("module picker retains state when a reload fails", function(context)
+    patch(context, package.loaded, "recall_broken_module", {})
+    patch(context, core, "reload_module", function() error("injected reload failure") end)
+    command.perform("core:reload-module")
+    local view = core.command_view
+    view:set_text("recall_broken_module"); core.root_view:update()
+    local ok, err = pcall(view.submit, view)
+    test.not_ok(ok)
+    test.contains(err, "injected reload failure")
+    command.perform("core:reload-module")
+    test.equal(view:get_text(), "recall_broken_module")
+    test.equal(view.suggestions[view.suggestion_idx].text, "recall_broken_module")
+  end)
+
+  test.test("file picker resumes its directory context without affecting custom callers", function(context)
+    patch(context, config, "use_system_file_picker", false)
+    local files = { "alpha.txt", "beta.txt" }
+    patch(context, common, "path_suggest", function() return files end)
+    command.perform("core:open-file-commandview")
+    local view, original = core.command_view, core.command_view:get_text()
+    view:set_text("filter"); core.root_view:update()
+    view.suggestion_idx = 2; view:complete(); view:exit()
+    files = { "beta.txt", "alpha.txt" }
+    command.perform("core:open-file-commandview")
+    test.equal(view:get_text(), "beta.txt")
+    test.equal(view.suggestion_idx, 1)
+    view:exit()
+    local project = core.root_project()
+    patch(context, core, "projects", { { path = project.path .. PATHSEP .. "other", absolute_path = project.absolute_path } })
+    command.perform("core:open-file-commandview")
+    test.equal(view:get_text(), original)
+    view:exit()
+    command.perform("core:open-file", "Custom", function() error("must not submit") end)
+    test.equal(view:get_text(), original)
+  end)
+
+  test.test("successful file opening clears interrupted picker state", function(context)
+    local filename = common.normalize_path(core.temp_filename(".txt"))
+    context.paths[#context.paths + 1] = filename
+    local file = assert(io.open(filename, "wb")); file:write("test"); file:close()
+    local opened
+    patch(context, core, "open_file", function(path) opened = path end)
+    patch(context, core, "error", function(...) test.fail(string.format(...)) end)
+    command.perform("core:open-file-commandview")
+    local view, initial = core.command_view, core.command_view:get_text()
+    view:set_text(filename); view:submit()
+    test.equal(common.normalize_path(opened), common.normalize_path(filename))
+    command.perform("core:open-file-commandview")
+    test.equal(view:get_text(), initial)
+  end)
+
+  test.test("directory pickers separate operations and clear state on submission", function(context)
+    command.perform("core:add-directory-commandview")
+    local view, initial = core.command_view, core.command_view:get_text()
+    view:set_text("unfinished directory"); view:exit()
+    command.perform("core:open-project-folder-commandview")
+    test.equal(view:get_text(), initial)
+    view:exit()
+    command.perform("core:add-directory-commandview")
+    test.equal(view:get_text(), "unfinished directory")
+    local added
+    patch(context, core, "add_project", function(path) added = path end)
+    view:set_text(USERDIR); view:submit()
+    test.equal(common.normalize_path(added), common.normalize_path(system.absolute_path(USERDIR)))
+    command.perform("core:add-directory-commandview")
+    test.equal(view:get_text(), initial)
+  end)
+
+  test.test("project search recalls each mode and path while selected text takes precedence", function(context)
+    local doc = open_document(context, "selected")
+    local view = core.command_view
+    command.perform("project-search:find-plain")
+    view:set_text("plain unfinished"); view:exit()
+    command.perform("project-search:find-regex")
+    test.equal(view:get_text(), "")
+    view:set_text("regex unfinished"); view:exit()
+    command.perform("project-search:find-plain")
+    test.equal(view:get_text(), "plain unfinished")
+    view:exit()
+    doc:set_selection(1, 1, 1, 9)
+    command.perform("project-search:find-regex")
+    test.equal(view:get_text(), "selected")
+    view:exit()
+    doc:set_selection(1, 1)
+    command.perform("project-search:find-plain", core.root_project().path .. PATHSEP .. "data")
+    test.equal(view:get_text(), "")
+    view:set_text("scoped unfinished"); view:exit()
+    command.perform("project-search:find-plain")
+    test.equal(view:get_text(), "")
+  end)
+
+  test.test("project search refreshes its callback and clears recall after submission", function(context)
+    local query
+    patch(context, projectsearch, "search_plain", function(text) query = text end)
+    command.perform("project-search:find-plain")
+    local view = core.command_view
+    view:set_text("pending search"); view:exit()
+    command.perform("project-search:find-plain")
+    test.equal(view:get_text(), "pending search")
+    view:submit()
+    test.equal(query, "pending search")
+    command.perform("project-search:find-plain")
+    test.equal(view:get_text(), "")
+  end)
+
+  test.test("Tabularize remembers and selects its delimiter across documents", function(context)
+    require "plugins.tabularize"
+    open_document(context, "a,b\nlong,tail")
+    command.perform("tabularize:tabularize")
+    core.command_view:set_text(","); core.command_view:submit()
+    open_document(context, "a,b")
+    command.perform("tabularize:tabularize")
+    test.equal(core.command_view:get_text(), ",")
+    test.same(core.command_view.doc.selections, { 1, 2, 1, 1 })
+  end)
+
+  test.test("status bar pickers keep separate filters for repeated operations", function(context)
+    patch(context, core.status_view, "get_items_list", function() return { { name = "recall-alpha" }, { name = "recall-beta" } } end)
+    patch(context, core.status_view, "get_item", function(_, name) return { name = name } end)
+    local hidden
+    patch(context, core.status_view, "hide_items", function(_, name) hidden = name end)
+    command.perform("status-bar:hide-item")
+    local view = core.command_view
+    view:set_text("recall-alpha"); core.root_view:update(); view:submit()
+    test.equal(hidden, "recall-alpha")
+    command.perform("status-bar:show-item")
+    test.equal(view:get_text(), "")
+    view:exit()
+    command.perform("status-bar:hide-item")
+    test.equal(view:get_text(), "recall-alpha")
+  end)
+
+  test.test("indentation prompts initialize from each document's current settings", function(context)
+    require "plugins.detectindent"
+    local doc = open_document(context, "line")
+    patch(context, doc, "get_indent_info", function() return "hard", 7, true end)
+    command.perform("indent:set-file-indent-type")
+    test.equal(core.command_view:get_text(), "")
+    test.equal(#core.command_view.suggestions, 2)
+    test.equal(core.command_view.suggestions[core.command_view.suggestion_idx].text, "tabs")
+    core.command_view:exit()
+    command.perform("indent:set-file-indent-size")
+    test.equal(core.command_view:get_text(), "")
+    test.equal(#core.command_view.suggestions, 10)
+    test.equal(core.command_view.suggestions[core.command_view.suggestion_idx].text, "7")
+    core.command_view:exit()
+    patch(context, doc, "get_indent_info", function() return "soft", 3, true end)
+    command.perform("indent:set-file-indent-type")
+    test.equal(core.command_view:get_text(), "")
+    test.equal(#core.command_view.suggestions, 2)
+    test.equal(core.command_view.suggestions[core.command_view.suggestion_idx].text, "spaces")
+  end)
+
+  test.test("indentation pickers submit highlighted values and accept custom sizes", function(context)
+    require "plugins.detectindent"
+    local doc = open_document(context, "line")
+    doc.indent_info = { type = "hard", size = 7, confirmed = true }
+    command.perform("indent:set-file-indent-type")
+    local view = core.command_view
+    view:submit()
+    test.equal(doc.indent_info.type, "hard")
+    command.perform("indent:set-file-indent-type")
+    view:set_text("spaces"); core.root_view:update(); view:submit()
+    test.equal(doc.indent_info.type, "soft")
+    command.perform("indent:set-file-indent-size")
+    view:submit()
+    test.equal(doc.indent_info.size, 7)
+    command.perform("indent:set-file-indent-size")
+    view:set_text("24"); core.root_view:update(); view:submit()
+    test.equal(doc.indent_info.size, 24)
+    command.perform("indent:set-file-indent-size")
+    test.equal(view:get_text(), "")
+    test.equal(#view.suggestions, 11)
+    test.equal(view.suggestions[view.suggestion_idx].text, "24")
+    view:set_text("invalid"); core.root_view:update(); view:submit()
+    test.ok(view:is_open())
+    view:set_text("0"); core.root_view:update(); view:submit()
+    test.ok(view:is_open())
+    test.equal(doc.indent_info.size, 24)
+  end)
+
+  for _, position in ipairs { "bottom", "top", "center" } do
+    test.test(position .. " indentation size picker reveals current value without filtering", function(context)
+      config.commandview_position = position
+      patch(context, config, "max_visible_commands", 4)
+      local doc = open_document(context, "line")
+      doc.indent_info = { type = "soft", size = 24, confirmed = true }
+      command.perform("indent:set-file-indent-size")
+      core.root_view:update(); core.root_view:update()
+      local view = core.command_view
+      test.equal(view:get_text(), "")
+      test.equal(#view.suggestions, 11)
+      test.equal(view.suggestions[view.suggestion_idx].text, "24")
+      test.ok(view.suggestion_idx >= view.suggestions_first and view.suggestion_idx <= view.suggestions_last)
+      test.ok(view.suggestions_last > view.suggestions_first)
+      view:set_text("2"); core.root_view:update()
+      test.equal(#view.suggestions, 2)
+      view:set_text(""); core.root_view:update()
+      test.equal(#view.suggestions, 11)
+    end)
+  end
+
+  test.test("encoding prompts select current charset and reject empty results", function(context)
+    local doc = open_document(context, "line")
+    doc.encoding = "UTF-16LE"
+    command.perform("doc:change-encoding")
+    local view = core.command_view
+    test.equal(view:get_text(), "")
+    test.equal(#view.suggestions, #encodings.get_all())
+    test.equal(view.suggestions[view.suggestion_idx].charset, "UTF-16LE")
+    view:exit()
+    doc.encoding = "ISO-8859-1"
+    command.perform("doc:reload-with-encoding")
+    test.equal(view:get_text(), "")
+    test.equal(#view.suggestions, #encodings.get_all())
+    test.equal(view.suggestions[view.suggestion_idx].charset, "ISO-8859-1")
+    view:exit()
+    doc.encoding = "ASCII"
+    command.perform("doc:change-encoding")
+    test.equal(view:get_text(), "")
+    test.equal(#view.suggestions, #encodings.get_all() + 1)
+    test.equal(view.suggestions[view.suggestion_idx].charset, "ASCII")
+    view:exit()
+    local selected
+    encodings.select_encoding("Choose", function(charset) selected = charset end, "UTF-8")
+    view:submit()
+    test.equal(selected, "UTF-8")
+    selected = nil
+    encodings.select_encoding("Choose", function(charset) selected = charset end, "UTF-8")
+    view:set_text("nonexistent encoding"); core.root_view:update(); view:submit()
+    test.ok(view:is_open()); test.is_nil(selected)
+  end)
+
+  for _, position in ipairs { "bottom", "top", "center" } do
+    test.test(position .. " encoding picker reveals the current charset in the full list", function(context)
+      config.commandview_position = position
+      local doc = open_document(context, "line")
+      doc.encoding = "UTF-16LE"
+      command.perform("doc:change-encoding")
+      core.root_view:update(); core.root_view:update()
+      local view = core.command_view
+      local count = #encodings.get_all()
+      test.equal(view:get_text(), "")
+      test.equal(#view.suggestions, count)
+      test.equal(view.suggestions[view.suggestion_idx].charset, "UTF-16LE")
+      test.ok(view.suggestion_idx > config.max_visible_commands)
+      test.ok(view.suggestion_idx >= view.suggestions_first and view.suggestion_idx <= view.suggestions_last)
+      test.ok(view.suggestions_last > view.suggestions_first)
+      test.equal(doc.encoding, "UTF-16LE")
+      local selected = view.suggestion_idx
+      view:move_suggestion_idx(position == "bottom" and 1 or -1)
+      core.root_view:update()
+      test.equal(view.suggestion_idx, selected + 1)
+      test.equal(#view.suggestions, count)
+      view:set_text("Western"); core.root_view:update()
+      test.ok(#view.suggestions > 1 and #view.suggestions < count)
+      view:set_text(""); core.root_view:update()
+      test.equal(#view.suggestions, count)
+    end)
+  end
+
+  test.test("core Find resumes input and recomputes preview after document edits", function(context)
+    patch(context, config.plugins.search_ui, "replace_core_find", false)
+    patch(context, core.status_view, "show_tooltip", function() end)
+    patch(context, core.status_view, "remove_tooltip", function() end)
+    patch(context, core, "previous_find", {})
+    local doc = open_document(context, "needle\nother needle")
+    command.perform("find-replace:find")
+    local view = core.command_view
+    view:set_text("needle"); core.root_view:update()
+    view.doc:set_selection(1, 2, 1, 4)
+    view:exit()
+    doc:insert(1, 1, "new first line\n")
+    doc:set_selection(1, 1)
+    command.perform("find-replace:find")
+    test.equal(view:get_text(), "needle")
+    test.same(view.doc.selections, { 1, 2, 1, 4 })
+    test.equal(doc:get_selection(), 2)
+    view:exit()
+    doc:set_selection(3, 1, 3, 6)
+    command.perform("find-replace:find")
+    test.equal(view:get_text(), "other")
+  end)
+
+  test.test("core Find recall is scoped to the document and search mode", function(context)
+    patch(context, config.plugins.search_ui, "replace_core_find", false)
+    patch(context, core.status_view, "show_tooltip", function() end)
+    patch(context, core.status_view, "remove_tooltip", function() end)
+    local first = open_document(context, "first needle")
+    local first_view = core.active_view
+    command.perform("find-replace:find")
+    local view = core.command_view
+    view:set_text("remembered"); view:exit()
+    open_document(context, "second needle")
+    command.perform("find-replace:find")
+    test.equal(view:get_text(), "")
+    view:exit()
+    core.set_active_view(first_view); first:set_selection(1, 1)
+    command.perform("find-replace:find")
+    test.equal(view:get_text(), "")
+    view:set_text("remembered")
+    command.perform("find-replace:toggle-sensitivity")
+    view:exit()
+    command.perform("find-replace:find")
+    test.equal(view:get_text(), "remembered")
+    command.perform("find-replace:toggle-sensitivity")
+    view:exit()
+  end)
+
+  test.test("Find restores reordered hidden history and previews its displayed text", function(context)
+    patch(context, config.plugins.search_ui, "replace_core_find", false)
+    patch(context, core.status_view, "show_tooltip", function() end)
+    patch(context, core.status_view, "remove_tooltip", function() end)
+    patch(context, core, "previous_find", { "needle", "other" })
+    local doc = open_document(context, "needle other")
+    command.perform("find-replace:find")
+    local view = core.command_view
+    view.doc:text_input("need"); core.root_view:update()
+    view:move_suggestion_idx(1)
+    test.equal(view:get_text(), "other")
+    view:exit()
+    core.previous_find = { "other", "needle" }
+    command.perform("find-replace:find")
+    test.equal(view:get_text(), "other")
+    test.equal(view.suggestion_idx, 1)
+    test.equal(doc:get_text(doc:get_selection()), "other")
+    view:exit()
+    core.previous_find = { "needle" }
+    command.perform("find-replace:find")
+    test.equal(view:get_text(), "need")
+    test.equal(doc:get_text(doc:get_selection()), "need")
+  end)
+
+  test.test("Replace resumes either interrupted stage and clears state after replacing", function(context)
+    patch(context, core.status_view, "show_message", function() end)
+    patch(context, config.plugins.search_ui, "replace_core_find", false)
+    patch(context, core.status_view, "show_tooltip", function() end)
+    patch(context, core.status_view, "remove_tooltip", function() end)
+    patch(context, core, "previous_find", {})
+    patch(context, core, "previous_replace", {})
+    local doc = open_document(context, "needle needle")
+    local view = core.command_view
+    command.perform("find-replace:replace")
+    view:set_text("needle"); view:exit()
+    command.perform("find-replace:replace")
+    test.equal(view:get_text(), "needle")
+    view:submit()
+    test.equal(view.label, 'Replace Text "needle" With: ')
+    view:set_text("replacement"); view.doc:set_selection(1, 3, 1, 5); view:exit()
+    command.perform("find-replace:replace")
+    test.equal(view.label, 'Replace Text "needle" With: ')
+    test.equal(view:get_text(), "replacement")
+    test.same(view.doc.selections, { 1, 3, 1, 5 })
+    view:submit()
+    test.equal(doc.lines[1], "replacement replacement\n")
+    doc:set_selection(1, 1)
+    command.perform("find-replace:replace")
+    test.equal(view.label, "Find To Replace Text: ")
+    test.equal(view:get_text(), "")
+  end)
+
+  test.test("new selected text overrides an interrupted replacement stage", function(context)
+    patch(context, config.plugins.search_ui, "replace_core_find", false)
+    patch(context, core.status_view, "show_tooltip", function() end)
+    patch(context, core.status_view, "remove_tooltip", function() end)
+    patch(context, core, "previous_find", {})
+    local doc = open_document(context, "needle other")
+    command.perform("find-replace:replace")
+    local view = core.command_view
+    view:set_text("needle"); view:submit()
+    view:set_text("pending replacement"); view:exit()
+    doc:set_selection(1, 8, 1, 13)
+    command.perform("find-replace:replace")
+    test.equal(view.label, "Find To Replace Text: ")
+    test.equal(view:get_text(), "other")
   end)
 
 end)

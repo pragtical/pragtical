@@ -8,6 +8,11 @@ local LogView = require "core.logview"
 -- Load the about dialog only on user request
 local AboutView
 
+local file_state, file_context
+local directory_states = {}
+local command_state
+local reload_state
+
 local function new_doc_extension()
   local fallback = config.new_file_extension
   if type(fallback) == "string" then
@@ -48,6 +53,7 @@ local function check_directory_path(path)
 end
 
 local function open_file(use_dialog, label, selection_callback, allow_directories)
+  if core.command_view:is_open() then return end
   local view = core.active_view
   local default_text, root_dir, filename = "", core.root_project().path, ""
   if view.doc and view.doc.abs_filename then
@@ -63,6 +69,7 @@ local function open_file(use_dialog, label, selection_callback, allow_directorie
   if use_dialog and not allow_directories then
     core.open_file_dialog(core.window, function(status, result)
       if status == "accept" then
+        if not selection_callback then file_state = nil end
       	for _, filename in ipairs(result --[[ @as string[] ]]) do
           if not selection_callback then
             core.open_file(filename)
@@ -80,8 +87,16 @@ local function open_file(use_dialog, label, selection_callback, allow_directorie
   	return
   end
 
+  local context = root_dir .. "\0" .. default_text .. "\0" .. (label or "Open File")
+  if context ~= file_context then file_state = nil end
+  file_context = context
   core.command_view:enter(label or "Open File", {
     text = default_text,
+    restore_state = not selection_callback and file_state or nil,
+    on_save_state = not selection_callback and function(snapshot, submitted)
+      file_state = not submitted and snapshot or nil
+    end or nil,
+    get_suggestion_id = function(item) return item.text end,
     submit = function(text)
       if not selection_callback then
         core.open_file(filename)
@@ -130,6 +145,7 @@ local function open_file(use_dialog, label, selection_callback, allow_directorie
 end
 
 local function open_directory(label, use_dialog, allow_many, callback)
+  if core.command_view:is_open() then return end
   local dirname = common.dirname(core.root_project().path)
   local text
   if dirname then
@@ -139,6 +155,7 @@ local function open_directory(label, use_dialog, allow_many, callback)
   if use_dialog then
     core.open_directory_dialog(core.window, function(status, result)
       if status == "accept" then
+        directory_states[label] = nil
         callback(result)
       elseif status == "error" then
         core.error("Error while opening dialog: %s", result or "")
@@ -151,8 +168,15 @@ local function open_directory(label, use_dialog, allow_many, callback)
   	return
   end
 
+  local context = core.root_project().path
+  local saved = directory_states[label]
   core.command_view:enter(label, {
     text = text,
+    restore_state = saved and saved.context == context and saved.snapshot or nil,
+    on_save_state = function(snapshot, submitted)
+      directory_states[label] = not submitted and { context = context, snapshot = snapshot } or nil
+    end,
+    get_suggestion_id = function(item) return item.text end,
     submit = function(text)
       local path = common.home_expand(text)
       local abs_path = check_directory_path(path)
@@ -225,7 +249,11 @@ command.add(nil, {
   end,
 
   ["core:reload-module"] = function()
+    if core.command_view:is_open() then return end
     core.command_view:enter("Reload Module", {
+      restore_state = reload_state,
+      on_save_state = function(snapshot) reload_state = snapshot end,
+      get_suggestion_id = function(item) return item.text end,
       submit = function(text, item)
         text = item and item.text or text
         core.reload_module(text)
@@ -242,10 +270,17 @@ command.add(nil, {
   end,
 
   ["core:find-command"] = function()
+    if core.command_view:is_open() then return end
     local commands = command.get_all_valid()
     core.command_view:enter("Do Command", {
+      restore_state = command_state,
+      on_save_state = function(snapshot) command_state = snapshot end,
+      get_suggestion_id = function(item) return item.command end,
       submit = function(text, item)
         if item then
+          command_state.text = item.text
+          command_state.last_text = item.text
+          command_state.suggestion_id = item.command
           command.perform(item.command)
         end
       end,
@@ -262,6 +297,7 @@ command.add(nil, {
         return res
       end
     })
+    core.command_view.doc:set_selection(1, math.huge, 1, 1)
   end,
 
   ["core:new-doc"] = function()
