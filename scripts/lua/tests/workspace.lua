@@ -8,9 +8,18 @@ end
 
 local function setup(platform, path, saved, defer_load)
   local state = { saved = saved or {}, writes = {}, cleared = {}, threads = {}, errors = {} }
-  local root = { type = "leaf", views = {} }
-  function root:add_view(view) self.views[#self.views + 1] = view end
-  function root:set_active_view(view) self.active_view = view end
+  local methods = {}
+  local root = setmetatable({ type = "leaf", views = {} }, { __index = methods })
+  function methods:add_view(view) self.views[#self.views + 1] = view end
+  function methods:set_active_view(view) self.active_view = view end
+  function methods:consume(node)
+    for k in pairs(self) do self[k] = nil end
+    for k, v in pairs(node) do self[k] = v end
+  end
+  function methods:update_layout() end
+  local function new_node()
+    return setmetatable({ type = "leaf", views = {} }, { __index = methods })
+  end
   local View = {}
   function View:get_state() return self.state end
   function View:get_module() return "core.docview" end
@@ -23,6 +32,18 @@ local function setup(platform, path, saved, defer_load)
     root_view = { root_node = root }, run = function() end,
     exit = function(quit_fn, force) if force then quit_fn() end end
   }
+  core.menu_view = { DIVIDER = {} }
+  function core.menu_view:register(path, entries, name)
+    state.menu_path, state.menu_entries, state.menu_name = path, entries, name
+  end
+  core.command_view = {}
+  function core.command_view:enter(label, options) state.prompt = { label = label, options = options } end
+  core.nag_view = {}
+  function core.nag_view:show(title, text, options, callback)
+    state.confirm = { title = title, text = text, options = options, callback = callback }
+  end
+  function core.root_view:get_primary_node() return root end
+  function core.log(...) state.log = { ... } end
   function core.try(fn, ...)
     local ok, result = pcall(fn, ...)
     if not ok then state.errors[#state.errors + 1] = result end
@@ -56,20 +77,35 @@ local function setup(platform, path, saved, defer_load)
   end
   function storage.load(_, key) return state.saved[actual_key(key)] end
   function storage.save(_, key, value)
+    if state.fail_save then return false end
     state.writes[#state.writes + 1] = key
     state.saved[actual_key(key) or key] = value
+    return true
   end
   function storage.clear(_, key)
     state.cleared[#state.cleared + 1] = key
     state.saved[assert(actual_key(key))] = nil
   end
-  local modules = { core = core, ["core.storage"] = storage, ["core.docview"] = View }
+  local command = { map = {} }
+  function command.add(predicate, commands)
+    for name, perform in pairs(commands) do command.map[name] = { predicate = predicate, perform = perform } end
+  end
+  function command.perform(name, ...)
+    local entry = command.map[name]
+    if entry and entry.predicate(...) then entry.perform(...); return true end
+    return false
+  end
+  local modules = {
+    core = core, ["core.storage"] = storage, ["core.docview"] = View,
+    ["core.command"] = command, ["core.node"] = new_node
+  }
   local env = setmetatable({
     PLATFORM = platform, PATHSEP = platform == "Windows" and "\\" or "/",
     require = function(name) return modules[name] or require(name) end
   }, { __index = _G })
   modules["core.common"] = load_module("core/common.lua", env)
-  load_module("plugins/workspace.lua", env)
+  state.workspace = load_module("plugins/workspace.lua", env)
+  state.command = command
 
   function state.flush()
     local threads = state.threads
@@ -314,5 +350,302 @@ test.describe("workspace", function()
     test.same(state.cleared, {})
     state.save()
     test.same(state.writes, {"pragtical-2"})
+  end)
+
+  test.test("lists remaining sessions by numeric ID and full project path", function()
+    local path = "C:\\Projects\\Pragtical"
+    local state = setup("Windows", path, {
+      ["Pragtical-1"] = workspace(path, "auto.lua"),
+      ["Pragtical-10"] = workspace(path, "ten.lua"),
+      ["pragtical-2"] = workspace("c:/projects/pragtical", "two.lua"),
+      ["Pragtical-3"] = workspace("D:\\Other\\Pragtical", "other.lua"),
+      ["Pragtical-4.bak"] = workspace(path, "backup.lua")
+    })
+    local sessions = state.workspace.get_sessions()
+    test.equal(#sessions, 2)
+    test.equal(sessions[1].key, "pragtical-2")
+    test.equal(sessions[2].key, "Pragtical-10")
+    test.equal(sessions[1].name, "Session 2")
+    test.equal(sessions[1].count, 1)
+    test.same(state.writes, {})
+    test.same(state.cleared, { "Pragtical-1" })
+  end)
+
+  test.test("manual loading backs up the outgoing layout and consumes the selected session", function()
+    local path = "/projects/editor"
+    local state = setup("Linux", path)
+    state.open("current.lua")
+    state.saved["editor-2"] = workspace(path, "selected.lua")
+    test.ok(state.workspace.load_session("editor-2"))
+    test.equal(#state.root.views, 1)
+    test.equal(state.core.active_view.state.filename, "selected.lua")
+    test.equal(state.saved["editor-1"].documents.views[1].state.filename, "current.lua")
+    test.equal(type(state.saved["editor-1"].saved_at), "number")
+    test.is_nil(state.saved["editor-2"])
+    test.same(state.cleared, { "editor-2" })
+  end)
+
+  test.test("failed backups and failed restores preserve the selected and active sessions", function()
+    for _, failure in ipairs { "fail_save", "fail_restore" } do
+      local path = "/projects/editor"
+      local state = setup("Linux", path)
+      local active = state.open("current.lua")
+      local selected = workspace(path, "selected.lua")
+      state.saved["editor-2"] = selected
+      state[failure] = true
+      test.not_ok(state.workspace.load_session("editor-2"))
+      test.equal(state.core.active_view, active)
+      test.equal(state.root.views[1], active)
+      test.equal(state.saved["editor-2"], selected)
+      test.same(state.cleared, {})
+    end
+  end)
+
+  test.test("manual session operations reject foreign paths and traversal keys", function()
+    local path = "/projects/editor"
+    local state = setup("Linux", path, {
+      ["editor-1"] = workspace("/other/editor", "other.lua")
+    })
+    state.open("current.lua")
+    for _, key in ipairs { "editor-1", "../editor-1", "missing-2" } do
+      test.not_ok(state.workspace.load_session(key))
+      test.not_ok(state.workspace.remove_session(key))
+    end
+    test.same(state.writes, {})
+    test.same(state.cleared, {})
+  end)
+
+  test.test("clearing sessions preserves same-basename projects and the open layout", function()
+    local path = "C:\\Projects\\Editor"
+    local state = setup("Windows", path, {
+      ["Editor-1"] = workspace("D:\\Other\\editor", "other.lua")
+    })
+    local active = state.open("current.lua")
+    state.saved["Editor-2"] = workspace(path, "two.lua")
+    state.saved["editor-3"] = workspace("c:/projects/editor", "three.lua")
+    test.ok(state.workspace.remove_session("Editor-2"))
+    test.equal(state.workspace.clear_sessions(), 1)
+    test.equal(state.core.active_view, active)
+    test.not_nil(state.saved["Editor-1"])
+    test.is_nil(state.saved["Editor-2"])
+    test.is_nil(state.saved["editor-3"])
+    state.save()
+    test.equal(state.saved["Editor-2"].documents.views[1].state.filename, "current.lua")
+  end)
+
+  test.test("pickers filter a snapshot without reading storage while typing", function()
+    local path = "/projects/editor"
+    local state = setup("Linux", path)
+    state.saved["editor-2"] = workspace(path, "two.lua")
+    state.saved["editor-10"] = workspace(path, "ten.lua")
+    state.command.perform("workspace:load-session")
+    test.equal(state.prompt.label, "Load Session")
+    local options = state.prompt.options
+    test.equal(#options.suggest(""), 2)
+    local items = options.suggest("10")
+    test.equal(#items, 1)
+    test.equal(items[1].key, "editor-10")
+    test.equal(items[1].info, "1 tab")
+    test.not_ok(options.validate("", nil))
+    test.ok(options.validate("", items[1]))
+    state.core.set_project("/different/editor")
+    test.not_ok(options.validate("", items[1]))
+    options.submit("", items[1])
+    test.same(state.cleared, {})
+  end)
+
+  test.test("removal requires confirmation and clearing rechecks the selected project", function()
+    local path = "/projects/editor"
+    local state = setup("Linux", path)
+    local selected = workspace(path, "saved.lua")
+    state.saved["editor-2"] = selected
+    state.command.perform("workspace:remove-session")
+    local options = state.prompt.options
+    options.submit("", options.suggest("")[1])
+    test.equal(state.confirm.title, "Remove Session")
+    state.confirm.callback({ text = "Cancel" })
+    test.equal(state.saved["editor-2"], selected)
+    state.command.perform("workspace:clear-sessions")
+    state.core.set_project("/different/editor")
+    state.confirm.callback({ text = "Clear Sessions" })
+    test.equal(state.saved["editor-2"], selected)
+  end)
+
+  test.test("File Sessions builds current entries when opened", function()
+    local path = "/projects/editor"
+    local state = setup("Linux", path)
+    test.same(state.menu_path, { "file" })
+    test.equal(state.menu_name, "workspace")
+    local provider = state.menu_entries[1].items
+    test.equal(#provider(), 3)
+    state.open("current.lua")
+    state.saved["editor-2"] = workspace(path, "selected.lua")
+    local entries = provider()
+    test.equal(#entries, 5)
+    test.equal(entries[5].text, "Session 2")
+    entries[5].command()
+    test.equal(state.core.active_view.state.filename, "selected.lua")
+    test.equal(provider()[5].text, "Session 1")
+  end)
+end)
+
+local core = require "core"
+local common = require "core.common"
+local config = require "core.config"
+local storage = require "core.storage"
+local RootView = require "core.rootview"
+local View = require "core.view"
+local DocView = require "core.docview"
+local CommandView = require "core.commandview"
+local NagView = require "core.nagview"
+local command = require "core.command"
+local Project = require "core.project"
+local workspace_plugin = require "plugins.workspace"
+
+test.describe("workspace session switching", function()
+  test.before_each(function(context)
+    context.root, context.docs, context.projects = core.root_view, core.docs, core.projects
+    context.active, context.last, context.next = core.active_view, core.last_active_view, core.next_active_view
+    context.visited, context.transitions = core.visited_files, config.transitions
+    context.command, context.nag = core.command_view, core.nag_view
+    context.cwd = system.getcwd() or core.root_project().path
+    context.keys = {}
+    for _, key in ipairs(storage.keys("ws")) do context.keys[key] = true end
+    context.directory = common.normalize_path(core.temp_filename("-workspace-project"))
+    test.ok(common.mkdirp(context.directory))
+    context.filename = context.directory .. PATHSEP .. "example.txt"
+    local file = assert(io.open(context.filename, "wb"))
+    file:write("saved on disk\n"); file:close()
+    core.projects = { Project(context.directory) }
+    core.docs, core.visited_files = {}, {}
+    config.transitions = false
+    core.root_view = RootView()
+    core.root_view.root_node.is_primary_node = true
+    core.root_view.size.x, core.root_view.size.y = 1200, 800
+    core.set_active_view(core.root_view.root_node.active_view)
+  end)
+
+  test.after_each(function(context)
+    if core.command_view ~= context.command then core.command_view:exit(false) end
+    if core.nag_view ~= context.nag then
+      core.nag_view.force_focus = false
+      core.nag_view.overlay:hide_floating()
+    end
+    for _, key in ipairs(storage.keys("ws")) do
+      if not context.keys[key] then storage.clear("ws", key) end
+    end
+    for _, doc in ipairs(core.docs) do doc:on_close() end
+    core.root_view, core.docs, core.projects = context.root, context.docs, context.projects
+    core.visited_files, config.transitions = context.visited, context.transitions
+    core.command_view, core.nag_view = context.command, context.nag
+    core.active_view, core.last_active_view, core.next_active_view = context.active, context.last, context.next
+    system.chdir(context.cwd)
+    test.ok(common.rm(context.directory, true))
+  end)
+
+  test.test("switching restores splits and unsaved file and untitled buffers from its backup", function(context)
+    local source = core.open_file(context.filename)
+    local baseline = source.doc:get_text(1, 1, math.huge, math.huge)
+    source.doc:set_selection(1, 4)
+    local original = assert(workspace_plugin.save_session())
+    source.doc:insert(1, 1, "unsaved edit: ")
+    local modified = source.doc:get_text(1, 1, math.huge, math.huge)
+    local untitled = core.open_doc()
+    untitled:insert(1, 1, "untitled changes\n")
+    untitled:set_suggested_extension("lua")
+    core.root_view.root_node:split("right", DocView(untitled))
+    core.root_view.root_node.divider = 0.63
+    local extra = context.directory .. PATHSEP .. "extra"
+    test.ok(common.mkdirp(extra))
+    core.add_project(extra)
+
+    test.ok(workspace_plugin.load_session(original))
+    test.equal(core.root_view.root_node.type, "leaf")
+    test.not_equal(core.active_view.doc, source.doc)
+    test.equal(core.active_view.doc:get_text(1, 1, math.huge, math.huge), baseline)
+    test.not_ok(core.active_view.doc:is_dirty())
+    test.equal(select(2, core.active_view.doc:get_selection()), 4)
+    test.equal(#core.projects, 1)
+    test.is_nil(storage.load("ws", original))
+
+    local sessions = workspace_plugin.get_sessions()
+    test.equal(#sessions, 1)
+    test.equal(sessions[1].count, 2)
+    test.ok(workspace_plugin.load_session(sessions[1].key))
+    local root = core.root_view.root_node
+    test.equal(root.type, "hsplit")
+    test.equal(root.divider, 0.63)
+    test.equal(root.a.active_view.doc:get_text(1, 1, math.huge, math.huge), modified)
+    test.ok(root.a.active_view.doc:is_dirty())
+    test.equal(root.b.active_view.doc:get_text(1, 1, math.huge, math.huge), "untitled changes\n")
+    test.equal(root.b.active_view.doc.suggested_extension, "lua")
+    test.equal(core.active_view, root.b.active_view)
+    test.equal(#core.projects, 2)
+    test.equal(core.projects[2].path, common.normalize_volume(extra))
+    local file = assert(io.open(context.filename, "rb"))
+    test.equal(file:read("*a"), "saved on disk\n"); file:close()
+  end)
+
+  test.test("loading leaves locked panels attached and keeps a primary editor pane", function(context)
+    local source = core.open_file(context.filename)
+    local panel = View()
+    core.root_view.root_node:split("left", panel, { x = true })
+    local panel_node = core.root_view.root_node:get_node_for_view(panel)
+    local original = assert(workspace_plugin.save_session())
+    local document_node = core.root_view.root_node:get_node_for_view(source)
+    document_node:split("down", DocView(core.open_doc()))
+    test.ok(workspace_plugin.load_session(original))
+    test.equal(core.root_view.root_node:get_node_for_view(panel), panel_node)
+    test.equal(core.root_view:get_primary_node().active_view, core.active_view)
+    test.not_nil(core.active_view.doc)
+    test.equal(common.normalize_path(core.active_view.doc.abs_filename), context.filename)
+  end)
+
+  test.test("session deletion and clearing run through the real picker and confirmation dialog", function(context)
+    core.command_view, core.nag_view = CommandView(), NagView()
+    core.root_view.root_node:split("down", core.command_view, { y = true })
+    core.root_view:get_primary_node():split("up", core.nag_view, { y = true })
+    local source = core.open_file(context.filename)
+    local key = assert(workspace_plugin.save_session())
+    test.ok(command.perform("workspace:remove-session"))
+    core.root_view:update(); core.root_view:update()
+    core.command_view:submit()
+    test.ok(core.nag_view.visible)
+    for _ = 1, 5 do core.root_view:update() end
+    core.on_event("textinput", "n")
+    test.not_nil(storage.load("ws", key))
+    test.equal(core.active_view, source)
+
+    test.ok(command.perform("workspace:remove-session"))
+    core.root_view:update(); core.root_view:update()
+    core.command_view:submit()
+    core.root_view:update(); core.root_view:update()
+    for _, option, x, y, w, h in core.nag_view:each_option() do
+      if option.text == "Remove" then
+        core.on_event("mousepressed", "left", x + w / 2, y + h / 2, 1)
+        core.on_event("mousereleased", "left", x + w / 2, y + h / 2)
+        break
+      end
+    end
+    test.is_nil(storage.load("ws", key))
+    test.equal(core.active_view, source)
+
+    assert(workspace_plugin.save_session())
+    assert(workspace_plugin.save_session())
+    test.ok(command.perform("workspace:clear-sessions"))
+    core.root_view:update(); core.root_view:update()
+    core.on_event("textinput", "n")
+    test.equal(#workspace_plugin.get_sessions(), 2)
+    test.ok(command.perform("workspace:clear-sessions"))
+    core.root_view:update(); core.root_view:update()
+    for _, option, x, y, w, h in core.nag_view:each_option() do
+      if option.text == "Clear Sessions" then
+        core.on_event("mousepressed", "left", x + w / 2, y + h / 2, 1)
+        core.on_event("mousereleased", "left", x + w / 2, y + h / 2)
+        break
+      end
+    end
+    test.equal(#workspace_plugin.get_sessions(), 0)
+    test.equal(core.active_view, source)
   end)
 end)

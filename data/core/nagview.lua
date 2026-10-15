@@ -120,6 +120,7 @@ function NagView:new()
   self.scrollable = true
   self.target_height = 0
   self.dim_alpha = 0
+  self.underline_progress = 0
   self.visible = false
 end
 
