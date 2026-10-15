@@ -9,6 +9,21 @@ local Project = require "core.project"
 local projectsearch = require "plugins.projectsearch"
 local SearchReplaceList = require "widget.searchreplacelist"
 local Doc = require "core.doc"
+local treeview = require "plugins.treeview"
+local scale = require "plugins.scale"
+local style = require "core.style"
+
+---Wait for global search's deferred focus and settle its widget layout.
+---@param view plugins.projectsearch.resultsview Shown global search
+---@param target core.view Expected keyboard target
+local function settle_focus(view, target)
+  for _ = 1, 20 do
+    core.root_view:update()
+    if core.active_view == target then return end
+    coroutine.yield(0)
+  end
+  test.equal(core.active_view, target)
+end
 
 local split_click_modifier = PLATFORM == "Mac OS X" and "cmd" or "ctrl"
 
@@ -232,6 +247,15 @@ end)
 
 test.describe("projectsearch", function()
   test.before_each(function(context)
+    context.old_position = config.plugins.projectsearch.position
+    context.old_live_search = config.plugins.projectsearch.live_search
+    context.old_workers = config.plugins.projectsearch.threading.workers
+    context.old_transitions = config.transitions
+    context.old_tree_visible = treeview.visible
+    context.old_toolbar_position = treeview.toolbar_position
+    context.root_size = { x = core.root_view.size.x, y = core.root_view.size.y }
+    context.old_active = core.active_view
+    config.transitions = false
     context.old_projects = core.projects
     context.old_cwd = system.getcwd() or core.root_project().path
     context.temp_root = join_path(
@@ -253,21 +277,48 @@ test.describe("projectsearch", function()
     project_b.name = "beta"
     core.projects = { project_a, project_b }
     context.old_split_direction = config.plugins.projectsearch.split_direction
-    context.old_ctrl = keymap.modkeys["ctrl"]
-    context.old_split_click_modifier = keymap.modkeys[split_click_modifier]
+    context.modkeys = keymap.modkeys
+    keymap.modkeys = {}
     context.locked_nodes = {}
     context.old_thread_create = thread.create
   end)
 
   test.after_each(function(context)
+    local global = projectsearch._test.get_global_project_search()
+    if global then
+      if global.searching then
+        global:stop_search()
+        for _ = 1, 200 do
+          if not global.searching then break end
+          coroutine.yield(0.01)
+        end
+      end
+      if context.old_begin_search then global.begin_search = context.old_begin_search end
+      projectsearch.hide()
+    end
+    config.plugins.projectsearch.live_search = context.old_live_search
+    config.plugins.projectsearch.threading.workers = context.old_workers
+    if context.old_scale then
+      scale.set(context.old_scale)
+      for _, saved in ipairs(context.scale_values) do saved[1][saved[2]] = saved[3] end
+      for font, size in pairs(context.font_sizes) do font:set_size(size) end
+      system.setenv("PRAGTICAL_SCALE", context.scale_env)
+    end
+    projectsearch.set_position(context.old_position)
+    treeview:set_toolbar_position(context.old_toolbar_position)
+    treeview.visible = context.old_tree_visible
+    core.root_view.size.x, core.root_view.size.y = context.root_size.x, context.root_size.y
+    config.transitions = context.old_transitions
     thread.create = context.old_thread_create
-    keymap.modkeys["ctrl"] = context.old_ctrl
-    keymap.modkeys[split_click_modifier] = context.old_split_click_modifier
+    keymap.modkeys = context.modkeys
     config.plugins.projectsearch.split_direction = context.old_split_direction
     for _, node in ipairs(context.locked_nodes) do
       node.locked = nil
     end
     close_test_views_and_docs(context)
+    if context.old_active and core.root_view.root_node:get_node_for_view(context.old_active) then
+      core.set_active_view(context.old_active)
+    end
     core.projects = context.old_projects
     system.chdir(context.old_cwd)
     if context.temp_root and system.get_file_info(context.temp_root) then
@@ -746,4 +797,406 @@ test.describe("projectsearch", function()
     test.equal(view.searching, true)
     view:stop_search()
   end)
+  ---Prepare a global search without launching workers and optionally populate matches.
+  ---@param context table Temporary project fixture
+  ---@param position "left"|"right"|"center" Requested placement
+  ---@param results? boolean Populate two files with one match each
+  ---@return plugins.projectsearch.resultsview view Shown global search
+  ---@return core.docview source Original document view
+  local function global_search(context, position, results)
+    local source = core.open_file(join_path(context.project_a, "main.txt"))
+    source.doc:set_selection(1, 1)
+    projectsearch.hide()
+    projectsearch.set_position(position)
+    local view = projectsearch.show({ text = "needle", path = context.project_a })
+    view.results_list:clear()
+    view.query = "needle"
+    view.replaced = false
+    view.replace_toggle:set_toggle(false)
+    view.filters_toggle:set_toggle(false)
+    view.total_files_processed = nil
+    if results then
+      add_result(view, join_path(context.project_a, "src", "one.txt"), "needle one", 1, 6)
+      add_result(view, join_path(context.project_b, "lib", "two.txt"), "needle two", 1, 6)
+      view.results_list.selected = 2
+      view.total_files, view.total_files_processed = 2, 2
+      view.start_time, view.end_time = 0, 0
+    end
+    settle_focus(view, view.find_text.textview)
+    core.root_view:update()
+    return view, source
+  end
+
+  test.test("centered live search keeps its surface and border visible between results", function(context)
+    local view = global_search(context, "center", true)
+    view.regex_toggle:set_toggle(false)
+    view.wholeword_toggle:set_toggle(false)
+    view.find_text:set_text("nee")
+    view.find_text.textview.doc:set_selection(1, 4)
+    config.plugins.projectsearch.live_search = true
+    config.plugins.projectsearch.threading.workers = 1
+    local frames = {}
+    context.old_begin_search = view.begin_search
+    view.begin_search = function(self, ...)
+      context.old_begin_search(self, ...)
+      -- Capture after old results are cleared, before any worker can deliver new ones.
+      core.root_view:update()
+      local width, height = core.window:get_size()
+      core.clip_rect_stack = { { 0, 0, width, height } }
+      renderer.begin_frame(core.window)
+      renderer.set_clip_rect(0, 0, width, height)
+      core.root_view:draw()
+      renderer.end_frame()
+      local frame = renderer.to_canvas(core.window, 0, 0, width, height)
+      local x, y, _, h = self:get_floating_bounds()
+      frames[#frames + 1] = {
+        surface = { frame:get_pixels(math.floor(self.position.x + 1),
+          math.floor(self.position.y + 1), 1, 1):byte(1, 3) },
+        border = { frame:get_pixels(math.floor(x), math.floor(y + h / 2),
+          1, 1):byte(1, 3) }
+      }
+    end
+    for i, char in ipairs { "d", "l", "e", "x" } do
+      core.on_event("textinput", char)
+      for _ = 1, 200 do
+        if #frames == i and not view.searching and not view.queue_search then break end
+        coroutine.yield(0.01)
+      end
+      test.equal(#frames, i, "each keystroke must refresh the live search")
+      test.not_ok(view.searching)
+      test.not_ok(view.queue_search)
+      test.same(frames[i].surface, { style.background2[1], style.background2[2], style.background2[3] })
+      test.same(frames[i].border, { style.text[1], style.text[2], style.text[3] })
+      test.equal(view.results_list.total_results, i == 4 and 0 or 1)
+      test.equal(core.active_view, view.find_text.textview)
+      test.ok(view.floating_visible)
+    end
+  end)
+
+  for _, position in ipairs { "left", "right", "center" } do
+    test.test(position .. " search cycles fields and results with Tab and Shift+Tab", function(context)
+      local view = global_search(context, position, true)
+      for _, mode in ipairs {
+        { replace = false, filters = false },
+        { replace = true, filters = false },
+        { replace = false, filters = true },
+        { replace = true, filters = true }
+      } do
+        view.replace_toggle:set_toggle(mode.replace)
+        view.filters_toggle:set_toggle(mode.filters)
+        core.root_view:update()
+        local targets = { view.find_text }
+        if mode.replace then targets[#targets + 1] = view.replace_text end
+        if mode.filters then
+          targets[#targets + 1] = view.includes_text
+          targets[#targets + 1] = view.excludes_text
+        end
+        targets[#targets + 1] = view.results_list
+        view:swap_active_child(view.find_text)
+        local selected = view.results_list.selected
+        for i = 2, #targets + 1 do
+          core.on_event("keypressed", "tab")
+          local target = targets[(i - 1) % #targets + 1]
+          test.equal(view.child_active, target)
+          test.equal(core.active_view, target.textview or target)
+        end
+        keymap.modkeys.shift = true
+        for i = #targets, 1, -1 do
+          core.on_event("keypressed", "tab")
+          test.equal(view.child_active, targets[i])
+          test.equal(core.active_view, targets[i].textview or targets[i])
+        end
+        keymap.modkeys.shift = nil
+        test.equal(view.results_list.selected, selected)
+      end
+    end)
+
+    test.test(position .. " search arrows focus results before moving the selection", function(context)
+      local view = global_search(context, position, true)
+      view.replace_toggle:set_toggle(true)
+      view.filters_toggle:set_toggle(true)
+      core.root_view:update()
+      for _, input in ipairs {
+        view.find_text, view.replace_text, view.includes_text, view.excludes_text
+      } do
+        input:set_text("unchanged")
+        for _, key in ipairs { "up", "down" } do
+          view:swap_active_child(input)
+          input.textview.doc:set_selection(1, 4)
+          view.results_list.selected = 2
+          core.on_event("keypressed", key)
+          test.equal(core.active_view, view.results_list)
+          test.equal(view.results_list.selected, 2)
+          test.equal(input:get_text(), "unchanged")
+          test.equal(select(2, input.textview.doc:get_selection()), 4)
+          core.on_event("keypressed", key)
+          test.equal(view.results_list.selected, key == "up" and 1 or 3)
+        end
+      end
+    end)
+  end
+
+  test.test("empty search skips results when tabbing and retains input focus on arrows", function(context)
+    local view = global_search(context, "center")
+    for _, key in ipairs { "up", "down", "tab" } do
+      core.on_event("keypressed", key)
+      test.equal(core.active_view, view.find_text.textview)
+    end
+    view.total_files, view.total_files_processed = 0, 0
+    view.start_time, view.end_time = 0, 0
+    core.root_view:update()
+    test.ok(view.results_list:is_visible())
+    keymap.modkeys.shift = true
+    core.on_event("keypressed", "tab")
+    test.equal(core.active_view, view.find_text.textview)
+    keymap.modkeys.shift = nil
+    for _, key in ipairs { "up", "down" } do
+      core.on_event("keypressed", key)
+      test.equal(core.active_view, view.find_text.textview)
+    end
+  end)
+
+  test.test("tabbed search also cycles from its inputs to results", function(context)
+    local view = create_results_view(context)
+    add_result(view, join_path(context.project_a, "src", "one.txt"), "needle one", 1, 6)
+    view.total_files, view.total_files_processed = 1, 1
+    view.start_time, view.end_time = 0, 0
+    core.root_view:update()
+    view:swap_active_child(view.find_text)
+    core.on_event("keypressed", "tab")
+    test.equal(core.active_view, view.results_list)
+    core.on_event("keypressed", "tab")
+    test.equal(core.active_view, view.find_text.textview)
+    core.on_event("keypressed", "down")
+    test.equal(core.active_view, view.results_list)
+  end)
+
+  test.test("Escape from another prompt leaves centered search open", function(context)
+    local view = global_search(context, "center", true)
+    core.command_view:enter("Test", { text = "another prompt" })
+    core.on_event("keypressed", "escape")
+    test.not_ok(core.command_view:is_open())
+    test.ok(view:is_visible())
+    test.equal(core.active_view, view.find_text.textview)
+    core.on_event("keypressed", "escape")
+    test.not_ok(view:is_visible())
+  end)
+
+  test.test("position selector moves a shown search without replacing its state", function(context)
+    local view, source = global_search(context, "left", true)
+    view:set_target_size("x", 420 * SCALE)
+    local sidebar_width = view:get_width()
+    local editor_node = core.root_view.root_node:get_node_for_view(source)
+    local items, input = view.results_list.items, view.find_text
+    view.filters_toggle:set_toggle(true)
+    view.includes_text:set_text("src/**")
+    treeview.visible = true
+    projectsearch.hide()
+    projectsearch.show({ text = "needle" })
+    settle_focus(view, input.textview)
+    test.not_ok(treeview.visible)
+    for _, position in ipairs { "right", "center", "left", "center", "right", "left" } do
+      projectsearch.set_position(position)
+      core.root_view:update(); core.root_view:update()
+      test.equal(view.display_position, position)
+      test.equal(view.find_text, input)
+      test.equal(view.find_text:get_text(), "needle")
+      test.equal(view.includes_text:get_text(), "src/**")
+      test.equal(view.results_list.items, items)
+      test.equal(view.results_list.selected, 2)
+      test.equal(core.root_view.root_node:get_node_for_view(source), editor_node)
+      test.equal(not not view.floating_visible, position == "center")
+      test.equal(treeview.visible, position ~= "left")
+      local node = core.root_view.root_node:get_node_for_view(view)
+      if position == "center" then
+        test.is_nil(node)
+      else
+        test.not_nil(node)
+        test.near(view:get_width(), sidebar_width, 0.01)
+        local parent = node:get_parent_node(core.root_view.root_node)
+        test.equal(position == "left" and parent.a or parent.b, node)
+      end
+    end
+    local selector
+    for _, item in ipairs(config.plugins.projectsearch.config_spec) do
+      if item.path == "position" then selector = item end
+    end
+    test.not_nil(selector)
+    test.equal(selector.set_value("center"), "center")
+    test.equal(view.display_position, "center")
+    test.ok(view.floating_visible)
+    local ok = pcall(projectsearch.set_position, "invalid")
+    test.not_ok(ok)
+    test.equal(config.plugins.projectsearch.position, "center")
+  end)
+
+  test.test("side placement survives toolbar docking changes", function(context)
+    local view, source = global_search(context, "left", true)
+    local editor = core.root_view.root_node:get_node_for_view(source)
+    for _, side in ipairs { "left", "right" } do
+      projectsearch.set_position(side)
+      for _, position in ipairs { "left", "top", "bottom", "right" } do
+        treeview:set_toolbar_position(position)
+        core.root_view:update(); core.root_view:update()
+        test.equal(core.root_view.root_node:get_node_for_view(source), editor)
+        test.not_nil(core.root_view.root_node:get_node_for_view(view))
+        test.not_nil(core.root_view.root_node:get_node_for_view(treeview))
+        test.not_nil(core.root_view.root_node:get_node_for_view(treeview.toolbar))
+      end
+    end
+  end)
+
+  test.test("centered search focuses input when empty and results when reopening", function(context)
+    local view = global_search(context, "center")
+    test.equal(core.active_view, view.find_text.textview)
+    add_result(view, join_path(context.project_a, "src", "one.txt"), "needle one", 1, 6)
+    view.total_files, view.total_files_processed = 1, 1
+    view.start_time, view.end_time = 0, 0
+    projectsearch.hide()
+    view.results_list.selected = 0
+    projectsearch.show()
+    settle_focus(view, view.results_list)
+    test.equal(view.child_active, view.results_list)
+    test.ok(view.results_list:get_selected().position)
+  end)
+
+  test.test("centered result focus supports navigation, expansion and Enter", function(context)
+    local view = global_search(context, "center", true)
+    projectsearch.hide(); projectsearch.show()
+    settle_focus(view, view.results_list)
+    keymap.modkeys = {}
+    local list, selected = view.results_list, view.results_list.selected
+    core.on_event("keypressed", "down")
+    test.equal(list.selected, selected + 1)
+    local count = #list.items
+    core.on_event("keypressed", "right")
+    test.ok(#list.items < count)
+    core.on_event("keypressed", "left")
+    test.equal(#list.items, count)
+    core.on_event("keypressed", "up")
+    test.equal(list.selected, selected)
+    core.on_event("keypressed", "pagedown")
+    test.ok(list.scroll.to.y > 0)
+    core.on_event("keypressed", "home")
+    test.equal(list.scroll.to.y, 0)
+    core.on_event("keypressed", "return")
+    test.not_ok(view:is_visible())
+    test.not_ok(view.floating_visible)
+    test.ok(core.active_view:extends(DocView))
+    test.equal(common.normalize_path(core.active_view.doc.abs_filename),
+      common.normalize_path(join_path(context.project_a, "src", "one.txt")))
+    projectsearch.show()
+    settle_focus(view, view.results_list)
+  end)
+
+  test.test("new selected text focuses the centered search input", function(context)
+    local view, source = global_search(context, "center", true)
+    projectsearch.hide()
+    core.set_active_view(source)
+    source.doc:set_selection(1, 1, 1, 5)
+    projectsearch.show()
+    settle_focus(view, view.find_text.textview)
+    test.equal(view.find_text:get_text(), "main")
+    test.ok(view.find_text.textview.doc:has_selection())
+    test.equal(view.results_list.total_results, 2)
+  end)
+
+  test.test("reopening a selected regex result preserves the query and result focus", function(context)
+    local view = global_search(context, "center", true)
+    view.find_text:set_text("nee[a-z]+")
+    view.regex_toggle:set_toggle(true)
+    view:open_selected_result()
+    test.not_ok(view:is_visible())
+    projectsearch.show()
+    settle_focus(view, view.results_list)
+    test.equal(view.find_text:get_text(), "nee[a-z]+")
+    test.ok(view.regex_toggle:is_toggled())
+    test.equal(view.results_list.selected, 2)
+  end)
+
+  test.test("centered Escape and close button restore the source view", function(context)
+    local view, source = global_search(context, "center", true)
+    keymap.modkeys = {}
+    core.on_event("keypressed", "escape")
+    test.not_ok(view:is_visible())
+    test.equal(core.active_view, source)
+    projectsearch.show(); settle_focus(view, view.results_list)
+    view.close_button:on_click()
+    test.not_ok(view:is_visible())
+    test.equal(core.active_view, source)
+  end)
+
+  test.test("outside clicks dismiss the popup and retain the clicked editor focus", function(context)
+    local view, source = global_search(context, "center", true)
+    local root = core.root_view
+    root.size.x, root.size.y = 1400, 900
+    root:update(); root:update()
+    local node = root.root_node:get_node_for_view(source)
+    local x, y = node.position.x + node.size.x - 10, node.position.y + node.size.y - 20
+    test.not_ok(view:hit_test(x, y))
+    core.on_event("mousepressed", "left", x, y, 1)
+    core.on_event("mousereleased", "left", x, y)
+    test.not_ok(view:is_visible())
+    test.equal(core.active_view, source)
+    coroutine.yield(0)
+    test.equal(core.active_view, source)
+  end)
+
+  test.test("hiding before queued focus runs leaves editor focus intact", function(context)
+    local view, source = global_search(context, "center", true)
+    projectsearch.hide()
+    projectsearch.show()
+    projectsearch.hide()
+    coroutine.yield(0)
+    core.root_view:update()
+    test.not_ok(view:is_visible())
+    test.equal(core.active_view, source)
+  end)
+
+  test.test("centered bounds fit resizing without shrinking on repeated updates", function(context)
+    local view = global_search(context, "center", true)
+    local root = core.root_view
+    for _, size in ipairs { { 1200, 900 }, { 650, 460 }, { 1600, 1000 } } do
+      root.size.x, root.size.y = size[1], size[2]
+      root:update(); root:update()
+      local x, y, width, height = view:get_floating_bounds()
+      test.ok(x >= root.position.x and y >= root.position.y)
+      test.ok(x + width <= root.position.x + root.size.x)
+      test.ok(y + height <= root.position.y + root.size.y)
+      test.near(x + width / 2, root.position.x + root.size.x / 2, 0.01)
+      test.near(y + height / 2, root.position.y + root.size.y / 2, 0.01)
+      for _ = 1, 10 do root:update() end
+      test.near(select(3, view:get_floating_bounds()), width, 0.01)
+      test.near(select(4, view:get_floating_bounds()), height, 0.01)
+      test.equal(view.results_list.selected, 2)
+      test.equal(view.results_list.total_results, 2)
+    end
+  end)
+
+  test.test("centered search resizes with scale while keeping results and focus", function(context)
+    local view = global_search(context, "center", true)
+    projectsearch.hide(); projectsearch.show()
+    settle_focus(view, view.results_list)
+    core.root_view.size.x, core.root_view.size.y = 1800, 1300
+    core.root_view:update(); core.root_view:update()
+    local _, _, width, height = view:get_floating_bounds()
+    context.old_scale, context.scale_env = scale.get(), os.getenv("PRAGTICAL_SCALE")
+    context.scale_values = { { config, "mouse_wheel_scroll", config.mouse_wheel_scroll } }
+    for _, values in ipairs { style, style.padding, style.margin.tab } do
+      for key, value in pairs(values) do
+        if type(value) == "number" then context.scale_values[#context.scale_values + 1] = { values, key, value } end
+      end
+    end
+    context.font_sizes = {}
+    for _, name in ipairs { "font", "big_font", "icon_font", "icon_big_font" } do
+      context.font_sizes[style[name]] = style[name]:get_size()
+    end
+    scale.set(context.old_scale * 1.25)
+    for _ = 1, 5 do core.root_view:update() end
+    test.ok(select(3, view:get_floating_bounds()) > width)
+    test.ok(select(4, view:get_floating_bounds()) > height)
+    test.equal(view.results_list.selected, 2)
+    test.equal(core.active_view, view.results_list)
+  end)
+
 end)
