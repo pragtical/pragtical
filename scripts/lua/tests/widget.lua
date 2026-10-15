@@ -10,6 +10,13 @@ local ListBox = require "widget.listbox"
 local TreeList = require "widget.treelist"
 local config = require "core.config"
 local command = require "core.command"
+local RootView = require "core.rootview"
+local Label = require "widget.label"
+local NoteBook = require "widget.notebook"
+local Container = require "widget.container"
+local style = require "core.style"
+local EmptyView = require "core.emptyview"
+local Dialog = require "widget.dialog"
 
 local function root_widget(context, floating)
   local root = Widget(nil, floating or false)
@@ -509,4 +516,442 @@ test.describe("widget mouse events", function()
     end)
   end
 
+end)
+
+test.describe("widget rendering", function()
+  test.before_each(function(context)
+    context.roots = {}
+    context.scale = SCALE
+    context.clip_rect_stack = core.clip_rect_stack
+    context.recent_projects = core.recent_projects
+    context.root_view = core.root_view
+    context.active_view = core.active_view
+    context.last_active_view = core.last_active_view
+    context.next_active_view = core.next_active_view
+    context.style = {}
+    for _, name in ipairs { "font", "big_font", "icon_font", "icon_big_font", "padding" } do
+      context.style[name] = style[name]
+    end
+  end)
+
+  test.after_each(function(context)
+    for _, root in ipairs(context.roots) do root:destroy() end
+    SCALE = context.scale
+    for name, value in pairs(context.style) do style[name] = value end
+    core.clip_rect_stack = context.clip_rect_stack
+    core.recent_projects = context.recent_projects
+    core.root_view = context.root_view
+    core.active_view = context.active_view
+    core.last_active_view = context.last_active_view
+    core.next_active_view = context.next_active_view
+  end)
+
+  local function set_scale(context, factor)
+    SCALE = factor
+    local ratio = factor / context.scale
+    for _, name in ipairs { "font", "big_font", "icon_font", "icon_big_font" } do
+      style[name] = context.style[name]:copy(context.style[name]:get_size() * ratio)
+    end
+    style.padding = { x = context.style.padding.x * ratio, y = context.style.padding.y * ratio }
+  end
+
+  for _, factor in ipairs { 1, 1.25, 1.5, 1.75, 2, 3 } do
+    test.it("draws complete borders within their bounds at scale " .. factor, function(context)
+      set_scale(context, factor)
+      local root = root_widget(context)
+      root.border.width = factor
+      root.border.color = { 220, 120, 30, 128 }
+      root:set_position(20.6 * factor, 20.6 * factor)
+      root:set_size(100.6 * factor, 70.6 * factor)
+      local background = { 30, 40, 50, 255 }
+      root.background_color = background
+      root:update()
+      local window = renwindow.create("Widget borders", 640, 480)
+      core.clip_rect_stack = { { 0, 0, 640, 480 } }
+      renderer.begin_frame(window)
+      renderer.set_clip_rect(0, 0, 640, 480)
+      renderer.draw_rect(0, 0, 640, 480, background)
+      root:draw()
+      renderer.end_frame()
+      local capture = renderer.to_canvas(window, 0, 0, 640, 480)
+      local function pixel(x, y) return { capture:get_pixels(x, y, 1, 1):byte(1, 3) } end
+      local function round(value) return math.floor(value + 0.5) end
+      local x, y, w, h = root:get_floating_bounds()
+      local left, top = round(x), round(y)
+      local right, bottom = round(x + w), round(y + h)
+      local color = pixel(round(x + w / 2), top)
+      for column = left, right - 1 do
+        test.same(pixel(column, top), color)
+        test.same(pixel(column, bottom - 1), color)
+        test.same(pixel(column, bottom), { 30, 40, 50 })
+      end
+      for row = top, bottom - 1 do
+        test.same(pixel(left, row), color)
+        test.same(pixel(right - 1, row), color)
+        test.same(pixel(right, row), { 30, 40, 50 })
+      end
+    end)
+
+    test.it("keeps a child border inside a fractional viewport at scale " .. factor, function(context)
+      set_scale(context, factor)
+      local root = root_widget(context)
+      root.border.width = 0
+      root:set_position(20.6 * factor, 20.6 * factor)
+      root:set_size(100.6 * factor, 70.6 * factor)
+      local child = Widget(root)
+      child:set_position(0, 0)
+      child:set_size(root.size.x, root.size.y)
+      root:update()
+      local x, y, w, h = child:get_floating_bounds()
+      test.near(x, root.position.x, 1e-8)
+      test.near(y, root.position.y, 1e-8)
+      test.near(x + w, root.position.x + root.size.x, 1e-8)
+      test.near(y + h, root.position.y + root.size.y, 1e-8)
+    end)
+
+    test.it("scrolls nested controls together at scale " .. factor, function(context)
+      set_scale(context, factor)
+      local root = root_widget(context)
+      root.scrollable = true
+      root.get_scrollable_size = function() return 2400 end
+      root:set_position(20.6 * factor, 20.6 * factor)
+      local parent = Widget(root)
+      parent:set_position(10.3 * factor, 10.3 * factor)
+      parent:set_size(400, 1600)
+      local label = Label(parent, "A scrolling label")
+      label:set_position(12.2 * factor, 80.7 * factor)
+      local input = NumberBox(parent, 10, 0, 100)
+      input:set_position(12.2 * factor, 120.3 * factor)
+      for _ = 1, 4 do root:update() end
+      local controls = { parent, label, input, input.textbox, input.decrease_button,
+        input.increase_button, input.textbox.textview }
+      local origins = {}
+      for index, control in ipairs(controls) do origins[index] = control.position.y end
+      for step = 1, 80 do
+        local offset = step * 0.3
+        root.scroll.y, root.scroll.to.y = offset, offset
+        root:update()
+        local pixels = math.floor(offset + 0.5)
+        for index, control in ipairs(controls) do
+          test.near(control.position.y + pixels, origins[index], 1e-8)
+        end
+      end
+    end)
+
+    test.it("fits notebook panes to the content viewport at scale " .. factor, function(context)
+      set_scale(context, factor)
+      local root = root_widget(context)
+      local book = NoteBook(root)
+      book:set_position(10.6 * factor, 10.6 * factor)
+      book:set_size(250.6 * factor, 150.6 * factor)
+      local pane = book:add_pane("first", "First")
+      book:add_pane("second", "Second")
+      for _ = 1, 4 do root:update() end
+      local x, y, w, h = pane:get_floating_bounds()
+      test.near(x, book.position.x, 1e-8)
+      test.near(x + w, book.position.x + book.size.x, 1e-8)
+      test.near(y + h, book.position.y + book.size.y, 1e-8)
+      test.ok(y > book.active_pane.tab.position.y)
+    end)
+  end
+
+  for _, nested in ipairs { false, true } do
+    test.it("keeps ListBox drawing and row clicks aligned while its "
+      .. (nested and "ancestor" or "parent") .. " scrolls", function(context)
+      local root = root_widget(context)
+      root.scrollable = true
+      root.get_scrollable_size = function() return 2000 end
+      root:set_position(20.65, 20.65)
+      local parent = root
+      if nested then
+        parent = Widget(root)
+        parent:set_position(10.3, 10.3)
+        parent:set_size(450, 1800)
+      end
+      local list = ListBox(parent)
+      list:set_position(20.7, 70.7)
+      list:set_size(320, 140)
+      list:add_column("Rows")
+      for index = 1, 30 do list:add_row({ "Row " .. index }, index) end
+      for _ = 1, 4 do root:update() end
+      local painted = {}
+      local draw_row = list.draw_row
+      function list:draw_row(index, x, y, only_calc)
+        if not only_calc then painted[index] = { x, y } end
+        return draw_row(self, index, x, y, only_calc)
+      end
+      local original_y = list.position.y
+      for _, offsets in ipairs { { 30.1, 11.1 }, { 30.4, 11.4 }, { 30.6, 11.6 }, { 60.7, 35.8 } } do
+        root.scroll.y, root.scroll.to.y = offsets[1], offsets[1]
+        list.scroll.y, list.scroll.to.y = offsets[2], offsets[2]
+        root:update()
+        painted = {}
+        draw(root)
+        local first = list.visible_rows[1]
+        local row = list.rows[first]
+        local x, y = unpack(painted[first])
+        test.near(y, original_y - math.floor(offsets[1] + 0.5)
+          - math.floor(offsets[2] + 0.5) + list.border.width + row.y, 1e-8)
+        -- Pick a row below the fixed column heading.
+        for _, index in ipairs(list.visible_rows) do
+          local position = painted[index]
+          local middle = position[2] + list.rows[index].h / 2
+          if middle > list.position.y + list:get_font():get_height() + style.padding.y
+            and middle < list.position.y + list.size.y then
+            test.equal(list:get_row_at_position(position[1] + 20, middle), index)
+            break
+          end
+        end
+      end
+    end)
+  end
+
+  test.it("reuses visible rows while scrolling within the same pixel", function(context)
+    local root = root_widget(context)
+    local list = ListBox(root)
+    list:set_size(300, 140)
+    for index = 1, 30 do list:add_row({ "Row " .. index }) end
+    root:update()
+    list.scroll.y, list.scroll.to.y = 20.1, 20.1
+    root:update()
+    local visible_rows = list.visible_rows
+    list.scroll.y, list.scroll.to.y = 20.4, 20.4
+    root:update()
+    test.equal(list.visible_rows, visible_rows)
+    list.scroll.y, list.scroll.to.y = 20.6, 20.6
+    root:update()
+    test.ok(list.visible_rows ~= visible_rows)
+  end)
+
+  test.it("reflows container children after a scale change without resizing the viewport", function(context)
+    set_scale(context, 1)
+    local root = root_widget(context)
+    local container = Container(root)
+    container:set_size(400, 100)
+    local first, second = Button(container, "First action"), Button(container, "Second action")
+    for _ = 1, 4 do root:update() end
+    test.equal(first:get_position().y, second:get_position().y)
+    set_scale(context, 2)
+    for _ = 1, 6 do root:update() end
+    test.ok(second:get_position().y >= first:get_bottom())
+    test.ok(container:get_height() >= second:get_bottom())
+  end)
+
+  test.it("keeps the Welcome list border visible across live scale changes", function(context)
+    set_scale(context, 1)
+    core.recent_projects = { "/projects/first", "/projects/second" }
+    local view = EmptyView()
+    context.roots[#context.roots + 1] = view
+    view:set_position(0, 0)
+    view:set_size(1440, 900)
+    for _, factor in ipairs { 1, 1.25, 1.5, 1.75, 2, 3, 1 } do
+      set_scale(context, factor)
+      for _ = 1, 6 do view:update() end
+      local list = view.recent_projects
+      test.near(list:get_width(), view.size.x - style.padding.x * 2, 1e-8)
+      view.scroll.to.y = view:get_scrollable_size() - view.size.y
+      for _ = 1, 6 do view:update() end
+      local bottom = list.position.y + list.size.y + list.border.width
+      test.ok(bottom <= view.position.y + view.size.y - style.padding.y + 1e-8)
+    end
+  end)
+
+  test.it("draws dialog children once", function(context)
+    local dialog = Dialog("Rendering")
+    context.roots[#context.roots + 1] = dialog
+    dialog.defer_draw = false
+    dialog:set_floating(false)
+    dialog:show()
+    dialog:set_position(20, 20)
+    local child = Widget(dialog:get_panel())
+    child:set_size(30, 30)
+    local draws = 0
+    function child:draw()
+      draws = draws + 1
+      return Widget.draw(self)
+    end
+    dialog:update()
+    draw(dialog)
+    test.equal(draws, 1)
+  end)
+
+  test.it("keeps oversized dialog chrome inside the floating viewport", function(context)
+    set_scale(context, 3)
+    core.root_view = RootView()
+    core.root_view.size.x, core.root_view.size.y = 640, 480
+    local dialog = Dialog("Large dialog")
+    context.roots[#context.roots + 1] = dialog
+    dialog:show()
+    local content = Widget(dialog:get_panel())
+    content:set_size(1200, 800)
+    dialog:set_floating_bounds(10.25, 20.5, 600.5, 400.5)
+    dialog:update()
+    local x, y, w, h = dialog:get_floating_bounds()
+    test.ok(dialog.close.position.x >= x)
+    test.ok(dialog.close.position.x + dialog.close:get_width() <= x + w)
+    test.ok(dialog.panel:get_right() <= dialog.size.x)
+    test.ok(dialog.panel:get_bottom() <= dialog.size.y)
+    test.ok(dialog.panel:get_h_scrollable_size() > dialog.panel.size.x)
+    test.ok(dialog.panel:get_scrollable_size() > dialog.panel.size.y)
+    test.ok(y + h <= core.root_view.size.y)
+  end)
+end)
+
+test.describe("TextBox cursor", function()
+  test.before_each(function(context)
+    context.root_view = core.root_view
+    context.active_view = core.active_view
+    context.last_active_view = core.last_active_view
+    context.next_active_view = core.next_active_view
+    context.cursor_change_req = core.cursor_change_req
+    context.transitions = config.transitions
+    config.transitions = false
+    core.root_view = RootView()
+    core.root_view.size.x, core.root_view.size.y = 900, 650
+    core.root_view.root_node.is_primary_node = true
+    context.roots = {}
+  end)
+
+  test.after_each(function(context)
+    for _, root in ipairs(context.roots) do root:destroy() end
+    core.root_view = context.root_view
+    core.active_view = context.active_view
+    core.last_active_view = context.last_active_view
+    core.next_active_view = context.next_active_view
+    core.cursor_change_req = context.cursor_change_req
+    config.transitions = context.transitions
+  end)
+
+  local function controls(context, floating)
+    local root = root_widget(context, floating)
+    if not floating then core.root_view.root_node:add_view(root) end
+    local pane = child_widget(root)
+    pane:set_size(400, 250)
+    local number = NumberBox(pane, 10, 0, 20)
+    number:set_position(20, 20)
+    local button = Button(pane, "Other control")
+    button:set_position(20, 100)
+    local label = Label(pane, "Description")
+    label:set_position(20, 160)
+    for _ = 1, 3 do core.root_view:update() end
+    return root, number.textbox, { number.decrease_button, number.increase_button, button, label, pane }
+  end
+
+  local function move(x, y)
+    core.on_event("mousemoved", x, y, 0, 0)
+    core.root_view:update()
+  end
+
+  local function focus(input)
+    local x, y = input.position.x + 10, input.position.y + input.size.y / 2
+    move(x, y)
+    core.on_event("mousepressed", "left", x, y, 1)
+    core.on_event("mousereleased", "left", x, y)
+    core.root_view:update()
+    test.equal(core.active_view, input.textview)
+    test.equal(core.cursor_change_req, "ibeam")
+  end
+
+  for _, floating in ipairs { false, true } do
+    local mode = floating and "floating" or "docked"
+    test.it("synchronizes " .. mode .. " input activation without clearing the remembered field", function(context)
+      local root, input, targets = controls(context, floating)
+      focus(input)
+      local activations, deactivations = 0, 0
+      local activate, deactivate = input.activate, input.deactivate
+      function input:activate()
+        activations = activations + 1
+        activate(self)
+      end
+      function input:deactivate()
+        deactivations = deactivations + 1
+        deactivate(self)
+      end
+      local text = input:get_text()
+      core.set_active_view(targets[3])
+      core.root_view:update()
+      test.not_ok(input.active)
+      test.equal(input.border.color, style.text)
+      test.equal(root.child_active, input)
+      test.not_ok(input:on_mouse_wheel(-1))
+      test.equal(input:get_text(), text)
+      test.equal(deactivations, 1)
+      for _ = 1, 5 do core.root_view:update() end
+      test.equal(deactivations, 1)
+
+      core.set_active_view(root:get_focus_target())
+      core.root_view:update()
+      test.ok(input.active)
+      test.equal(input.border.color, style.caret)
+      test.equal(activations, 1)
+      for _ = 1, 5 do core.root_view:update() end
+      test.equal(activations, 1)
+      test.equal(deactivations, 1)
+    end)
+
+    test.it("follows hover outside a focused nested " .. mode .. " input", function(context)
+      local root, input, targets = controls(context, floating)
+      root.scrollable = true
+      root.get_scrollable_size = function() return 1200 end
+      core.root_view:update()
+      for _, target in ipairs(targets) do
+        focus(input)
+        local x, y = target.position.x + target.size.x - 5, target.position.y + target.size.y - 5
+        move(x, y)
+        test.not_ok(input.mouse_is_hovering)
+        test.is_nil(input.textview.mouse_selecting)
+        test.equal(core.active_view, input.textview)
+        test.equal(core.cursor_change_req, "arrow")
+        for _ = 1, 3 do
+          core.cursor_change_req = nil
+          core.root_view:update()
+          test.not_equal(core.cursor_change_req, "ibeam")
+        end
+      end
+      focus(input)
+      local x, y, w, h = root.v_scrollbar:get_thumb_rect()
+      test.ok(w > 0 and h > 0)
+      move(x + w / 2, y + h / 2)
+      test.not_ok(input.mouse_is_hovering)
+      test.equal(core.cursor_change_req, "arrow")
+    end)
+
+    test.it("keeps keyboard focus independent of the " .. mode .. " input cursor", function(context)
+      local root, input, targets = controls(context, floating)
+      local button = targets[3]
+      move(button.position.x + 5, button.position.y + 5)
+      core.cursor_change_req = nil
+      root:swap_active_child(input)
+      test.is_nil(core.cursor_change_req)
+      core.root_view:update()
+      test.is_nil(core.cursor_change_req)
+      test.equal(core.active_view, input.textview)
+      core.cursor_change_req = "hand"
+      root:swap_active_child()
+      test.equal(core.cursor_change_req, "hand")
+      move(input.position.x + 10, input.position.y + input.size.y / 2)
+      test.not_ok(input.active)
+      test.ok(input.mouse_is_hovering)
+      test.equal(core.cursor_change_req, "ibeam")
+    end)
+
+    test.it("keeps the text cursor only during a captured " .. mode .. " selection", function(context)
+      local _, input = controls(context, floating)
+      focus(input)
+      local x, y = input.position.x + 10, input.position.y + input.size.y / 2
+      core.on_event("mousepressed", "left", x, y, 1)
+      move(800, 600)
+      test.not_ok(input.mouse_is_hovering)
+      test.not_nil(input.textview.mouse_selecting)
+      test.equal(input.captured_button, "left")
+      test.equal(core.cursor_change_req, "ibeam")
+      core.on_event("mousereleased", "left", 800, 600)
+      core.root_view:update()
+      test.is_nil(input.textview.mouse_selecting)
+      test.is_nil(core.root_view.grab)
+      test.equal(core.active_view, input.textview)
+      move(800, 600)
+      test.equal(core.cursor_change_req, "arrow")
+    end)
+  end
 end)

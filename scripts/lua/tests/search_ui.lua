@@ -7,6 +7,7 @@ local test = require "core.test"
 local ui = require "plugins.search_ui"
 local TextBox = require "widget.textbox"
 local config = require "core.config"
+local style = require "core.style"
 
 local inputs = {}
 for _, child in ipairs(ui.childs) do
@@ -123,6 +124,7 @@ test.describe("search_ui mouse selection", function()
     context.next_active_view = core.next_active_view
     context.modkeys = keymap.modkeys
     context.transitions = config.transitions
+    context.position = config.plugins.search_ui.position
     context.clipboard = system.get_clipboard()
     context.texts = { inputs[1]:get_text(), inputs[2]:get_text() }
     keymap.modkeys = {}
@@ -144,11 +146,57 @@ test.describe("search_ui mouse selection", function()
     context.doc:on_close()
     keymap.modkeys = context.modkeys
     config.transitions = context.transitions
+    config.plugins.search_ui.position = context.position
     system.set_clipboard(context.clipboard or "")
     core.active_view = context.active_view
     core.last_active_view = context.last_active_view
     core.next_active_view = context.next_active_view
   end)
+
+  for _, position in ipairs { "top", "bottom", "right" } do
+    for i, field in ipairs { "Find", "Replace" } do
+      test.test(position .. " " .. field .. " focus styling follows the keyboard target", function(context)
+        ui:hide()
+        config.plugins.search_ui.position = position
+        core.set_active_view(context.view)
+        test.ok(command.perform("find-replace:replace"))
+        for _ = 1, 3 do core.root_view:update() end
+        local input = inputs[i]
+        input:set_text("needle")
+        local x, y = input.position.x + 10, input.position.y + input.size.y / 2
+        core.on_event("mousepressed", "left", x, y, 1)
+        core.on_event("mousereleased", "left", x, y)
+        core.root_view:update()
+        test.equal(core.active_view, input.textview)
+        test.ok(input.active)
+        test.equal(input.border.color, style.caret)
+        input.textview.doc:set_selection(1, 3, 1, 5)
+        local selection = { input.textview.doc:get_selection() }
+
+        x = context.view.position.x + context.view:get_gutter_width() + 20
+        y = context.view.position.y + style.padding.y + context.view:get_font():get_height() / 2
+        core.on_event("mousemoved", x, y, 0, 0)
+        core.on_event("mousepressed", "left", x, y, 1)
+        core.on_event("mousereleased", "left", x, y)
+        core.root_view:update()
+        test.equal(core.active_view, context.view)
+        test.not_ok(input.active)
+        test.equal(input.border.color, style.text)
+        test.equal(ui.child_active, input)
+        test.same({ input.textview.doc:get_selection() }, selection)
+        core.on_event("textinput", "X")
+        test.equal(context.doc:get_text(1, 1, math.huge, math.huge), "X")
+        test.equal(input:get_text(), "needle")
+
+        core.set_active_view(ui:get_focus_target())
+        core.root_view:update()
+        test.equal(core.active_view, input.textview)
+        test.ok(input.active)
+        test.equal(input.border.color, style.caret)
+        test.same({ input.textview.doc:get_selection() }, selection)
+      end)
+    end
+  end
 
   for i, field in ipairs { "Find", "Replace" } do
     test.test(field .. " supports pasted overflow through real root events", function(context)

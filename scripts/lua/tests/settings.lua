@@ -12,6 +12,10 @@ local SelectBox = require "widget.selectbox"
 local TextBox = require "widget.textbox"
 local Toggle = require "widget.toggle"
 local WidgetList = require "widget.widgetlist"
+local NumberBox = require "widget.numberbox"
+local ListBox = require "widget.listbox"
+local RootView = require "core.rootview"
+local style = require "core.style"
 local SettingsView = getmetatable(settings.ui)
 
 local function find_child(view, class)
@@ -23,6 +27,79 @@ local function find_child(view, class)
     if child:is(class) then return child end
   end
 end
+
+test.describe("settings scrolling", function()
+  test.before_each(function(context)
+    context.scale = SCALE
+    context.transitions = config.transitions
+    context.clip_rect_stack = core.clip_rect_stack
+    context.redraw = core.redraw
+    context.style = {}
+    for _, name in ipairs { "font", "big_font", "icon_font", "icon_big_font", "padding" } do
+      context.style[name] = style[name]
+    end
+    config.transitions = false
+  end)
+
+  test.after_each(function(context)
+    if context.view then context.view:destroy() end
+    SCALE = context.scale
+    for name, value in pairs(context.style) do style[name] = value end
+    config.transitions = context.transitions
+    core.clip_rect_stack = context.clip_rect_stack
+    core.redraw = context.redraw
+  end)
+
+  for _, factor in ipairs { 1, 1.25, 1.3, 1.5, 1.75, 2, 3 } do
+    test.it("keeps Settings content stable between scroll pixels at scale " .. factor, function(context)
+      SCALE = factor
+      local ratio = factor / context.scale
+      for _, name in ipairs { "font", "big_font", "icon_font", "icon_big_font" } do
+        style[name] = context.style[name]:copy(context.style[name]:get_size() * ratio)
+      end
+      style.padding = { x = context.style.padding.x * ratio, y = context.style.padding.y * ratio }
+      local view = SettingsView()
+      context.view = view
+      view:show()
+      view:set_position(20.65, 20.65)
+      view:set_size(900, 650)
+      local window = renwindow.create("Settings scrolling", 960, 720)
+      local function capture()
+        core.clip_rect_stack = { { 0, 0, 960, 720 } }
+        renderer.begin_frame(window)
+        renderer.set_clip_rect(0, 0, 960, 720)
+        renderer.draw_rect(0, 0, 960, 720, style.background)
+        view:draw()
+        renderer.end_frame()
+        -- Exclude the fixed headings, viewport edges and scrollbar thumbs.
+        local frame = renderer.to_canvas(window, 80, 200, 760, 400)
+        return frame:get_pixels(0, 0, 760, 400)
+      end
+      for _, name in ipairs { "colors", "keybindings", "core" } do
+        view.notebook:set_pane(name)
+        if name == "core" then
+          for _, pane in ipairs(view.core_sections.panes) do pane.expanded = true end
+        end
+        for _ = 1, 40 do view:update() end
+        local pane = name == "keybindings" and view.keybinds or view[name]
+        local scroller = find_child(pane, ListBox) or pane
+        test.ok(scroller:get_scrollable_size() > scroller.size.y + 31)
+        capture()
+        for _, pair in ipairs { { 30.1, 30.4 }, { 30.6, 30.9 } } do
+          scroller.scroll.y, scroller.scroll.to.y = pair[1], pair[1]
+          view:update()
+          local before = capture()
+          scroller.scroll.y, scroller.scroll.to.y = pair[2], pair[2]
+          view:update()
+          test.ok(capture() == before, name .. " moved within a single scroll pixel")
+        end
+        core.redraw = false
+        for _ = 1, 5 do view:update() end
+        test.not_ok(core.redraw)
+      end
+    end)
+  end
+end)
 
 test.describe("installed plugin layout", function()
   test.before_each(function(context)
@@ -137,6 +214,75 @@ test.describe("installed plugin layout", function()
       test.is_nil(view.captured_widget)
     end)
   end
+end)
+
+test.describe("settings input cursor", function()
+  test.before_each(function(context)
+    context.root_view = core.root_view
+    context.active_view = core.active_view
+    context.last_active_view = core.last_active_view
+    context.next_active_view = core.next_active_view
+    context.cursor_change_req = core.cursor_change_req
+    context.transitions = config.transitions
+    config.transitions = false
+    core.root_view = RootView()
+    core.root_view.size.x, core.root_view.size.y = 900, 650
+    core.root_view.root_node.is_primary_node = true
+    context.view = SettingsView()
+    context.view:show()
+    context.view.notebook:set_pane("core")
+    context.view.core_sections:toggle_pane("General", true)
+    core.root_view.root_node:add_view(context.view)
+    for _ = 1, 20 do core.root_view:update() end
+  end)
+
+  test.after_each(function(context)
+    context.view:destroy()
+    core.root_view = context.root_view
+    core.active_view = context.active_view
+    core.last_active_view = context.last_active_view
+    core.next_active_view = context.next_active_view
+    core.cursor_change_req = context.cursor_change_req
+    config.transitions = context.transitions
+  end)
+
+  test.it("uses the arrow over other controls while a NumberBox keeps focus", function(context)
+    local view = context.view
+    local pane = view.core_sections:get_pane("General")
+    local number, label
+    for _, child in ipairs(pane.container.childs) do
+      if child:is(NumberBox) and (not number or child.position.y < number.position.y) then
+        number = child
+      elseif child:is(Label) and (child.original_label or child.label) == "File Size Limit:" then
+        label = child
+      end
+    end
+    test.not_nil(number)
+    test.not_nil(label)
+    local input = number.textbox
+    local targets = { number.decrease_button, number.increase_button,
+      find_child(pane.container, Button), label }
+    for _, target in ipairs(targets) do
+      local x, y = input.position.x + 10, input.position.y + input.size.y / 2
+      test.equal(core.root_view.root_node:get_child_overlapping_point(x, y).active_view, view)
+      core.on_event("mousemoved", x, y, 0, 0)
+      core.on_event("mousepressed", "left", x, y, 1)
+      core.on_event("mousereleased", "left", x, y)
+      core.root_view:update()
+      test.ok(core.active_view == input.textview)
+      test.equal(core.cursor_change_req, "ibeam")
+      core.on_event("mousemoved", target.position.x + 5, target.position.y + 5, 0, 0)
+      core.root_view:update()
+      test.not_ok(input.mouse_is_hovering)
+      test.ok(core.active_view == input.textview)
+      test.equal(core.cursor_change_req, "arrow")
+      for _ = 1, 3 do
+        core.cursor_change_req = nil
+        core.root_view:update()
+        test.not_equal(core.cursor_change_req, "ibeam")
+      end
+    end
+  end)
 end)
 
 test.describe("settings renderer preference", function()

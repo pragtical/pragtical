@@ -534,11 +534,13 @@ function MenuView:update()
   local height = self.visible
     and style.font:get_height() + style.padding.y * 2
     or 0
-  if self.visible and self.size.y >= height then
+  if self.visible and self.size.y == height then
     if
       self.prev_size
       and self.prev_size.x == self.size.x
       and self.prev_size.y == self.size.y
+      and self.prev_size.scale == SCALE
+      and self.registry_revision == self.revision
     then
       return
     end
@@ -554,7 +556,7 @@ function MenuView:update()
     self.menu:hide()
   end
   self.compact, self.registry_revision = compact, self.revision
-  self.prev_size = {x = self.size.x, y = self.size.y}
+  self.prev_size = {x = self.size.x, y = self.size.y, scale = SCALE}
 end
 
 ---Draw the bar and label highlights while its animated height remains positive.
