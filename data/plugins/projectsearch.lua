@@ -7,6 +7,7 @@ local config = require "core.config"
 local style = require "core.style"
 local ContextMenu = require "core.contextmenu"
 local DocView = require "core.docview"
+local Node = require "core.node"
 local Widget = require "widget"
 local Button = require "widget.button"
 local FilePicker = require "widget.filepicker"
@@ -15,6 +16,9 @@ local SearchReplaceList = require "widget.searchreplacelist"
 local TextBox = require "widget.textbox"
 local ToggleButton = require "widget.togglebutton"
 
+---@class plugins.projectsearch
+local projectsearch = {}
+
 local treeview
 core.add_thread(function()
   if config.plugins.treeview ~= false then
@@ -22,6 +26,8 @@ core.add_thread(function()
   end
 end)
 
+---@class config.plugins.projectsearch
+---@field position "left"|"right"|"center" Placement of the reusable global search view
 config.plugins.projectsearch = common.merge({
   threading = {
     workers = math.ceil(thread.get_cpu_count() / 2) + 1
@@ -29,9 +35,26 @@ config.plugins.projectsearch = common.merge({
   live_search = false,
   syntax_highlighting = true,
   split_direction = "right",
+  position = "left",
   -- The config specification used by gui generators
   config_spec = {
     name = "Project Search",
+    {
+      label = "Position",
+      description = "Dock global project search on either side or show it as a centered popup.",
+      path = "position",
+      type = "selection",
+      default = "left",
+      values = {
+        { "Left", "left" },
+        { "Right", "right" },
+        { "Center", "center" }
+      },
+      set_value = function(value)
+        projectsearch.set_position(value)
+        return value
+      end
+    },
     {
       label = "Workers",
       description = "The maximum amount of threads to create per search.",
@@ -84,6 +107,11 @@ local threaded_replace_id = 0
 ---@field source_view core.view?
 ---@field result_split_node core.node?
 ---@field result_split_views core.docview[]?
+---@field is_global boolean Whether this is the reusable global search panel
+---@field display_position? "left"|"right"|"center" Applied global placement
+---@field sidebar_width number Remembered docked width in scale-independent units
+---@field node? core.node Docked placement, absent in centered mode
+---@field focus_generation integer Invalidates queued focus when hiding or reopening
 ---@overload fun(path?:string,text:string,type:'"plain"'|'"regex"',insensitive?:boolean,whole_word?:boolean,replacement?:string):plugins.projectsearch.resultsview
 local ResultsView = Widget:extend()
 
@@ -113,6 +141,8 @@ function ResultsView:new(path, text, search_type, insensitive, whole_word, repla
   self.type_name = "plugins.projectsearch.resultsview"
   self.stop = false
   self.is_global = false
+  self.sidebar_width = 400
+  self.focus_generation = 0
   self.defer_draw = false
   self.scrollable = true
   self.brightness = 0
@@ -177,7 +207,7 @@ function ResultsView:new(path, text, search_type, insensitive, whole_word, repla
   self.context_menu = ContextMenu()
   self.context_menu:register(function()
     local item = self.results_list:get_selected()
-    return core.active_view == self and item and item.position
+    return self:owns_view(core.active_view) and item and item.position
   end, {
     { text = "Open", command = "project-search:open-selected" },
     { text = "Open in Split", command = "project-search:open-selected-split" }
@@ -332,7 +362,9 @@ function ResultsView:apply_options(options, enable_run)
     self.find_text:set_text(options.text)
   end
 
-  self.regex_toggle:set_toggle(options.search_type == "regex")
+  if options.search_type ~= nil then
+    self.regex_toggle:set_toggle(options.search_type == "regex")
+  end
 
   if type(options.insensitive) == "boolean" then
     self.sensitive_toggle:set_toggle(not options.insensitive)
@@ -700,7 +732,6 @@ local function worker_threads_add_results(self, result_channels)
   for _, channel_results in ipairs(result_channels) do
     local results = channel_results:first()
     if results then
-      self.queue_skip_draw = false
       self.total_files_processed = self.total_files_processed + 1
       channel_results:pop()
       if type(results) == "table" then
@@ -1154,8 +1185,6 @@ function ResultsView:queue_refresh()
       while true do
         local text = self.find_text:get_text()
         if not self.searching and not self.replacing and #text > 2 then
-          -- skip draw to smooth out result list changes
-          self.queue_skip_draw = true
           self.replaced = false
           self.path = self.file_picker:get_path()
           self.query = text
@@ -1178,7 +1207,6 @@ function ResultsView:queue_refresh()
   elseif self.replacing then
     report_status("Replace")
   elseif #self.find_text:get_text() == 0 then
-    self.queue_skip_draw = false
     self.results_list:clear()
     self.total_files_processed = nil
     self.find_button:set_label("Find")
@@ -1293,7 +1321,13 @@ function ResultsView:open_selected_result(open_in_split)
     dv.doc:set_selection(l, c2, l, c1)
     dv.doc:add_search_selection(l, c2, l, c1)
     dv:scroll_to_make_visible(l, c1, true)
-    if self.is_global then core.set_active_view(self) end
+    if self.is_global then
+      if self.display_position == "center" then
+        projectsearch.hide()
+      else
+        core.set_active_view(self)
+      end
+    end
   end)
   return true
 end
@@ -1330,15 +1364,71 @@ function ResultsView:on_mouse_pressed(button, x, y, clicks)
   return ResultsView.super.on_mouse_pressed(self, button, x, y, clicks)
 end
 
+---Scale docked width while centered placement follows the available viewport.
+---@param new_scale number Updated interface scale
+---@param prev_scale number Previous interface scale
 function ResultsView:on_scale_change(new_scale, prev_scale)
   ResultsView.super.on_scale_change(self, new_scale, prev_scale)
-  if self.is_global then
-    local size = self:get_size()
-    size.x = size.x / prev_scale
-    size.x = size.x * new_scale
-    self:set_size(size.x)
+  if self.is_global and self.display_position ~= "center" then
+    local width = self:get_width() / prev_scale * new_scale
+    self:set_size(width)
+    self.sidebar_width = width / new_scale
   end
 end
+
+---Fit centered global search inside the viewport on scale or window-size changes.
+---RootView calls this before updating and drawing a shown floating view.
+function ResultsView:update_floating()
+  if self.is_global and self.display_position == "center" then
+    local root = core.root_view
+    local width = math.max(1, math.min(900 * SCALE, root.size.x - style.padding.x * 4))
+    local height = math.max(1, math.min(650 * SCALE, root.size.y - style.padding.y * 4))
+    self:set_floating_bounds(
+      root.position.x + (root.size.x - width) / 2,
+      root.position.y + (root.size.y - height) / 2,
+      width, height
+    )
+  end
+  ResultsView.super.update_floating(self)
+end
+
+
+---Focus the result list and reveal its selection without focusing any text input.
+---Choose the first match if no result has been selected yet.
+function ResultsView:focus_results()
+  self:swap_active_child()
+  core.set_active_view(self)
+  self:swap_active_child(self.results_list)
+  local list = self.results_list
+  if not list:get_selected() then
+    list.selected = #list.items > 0 and 1 or 0
+    for i, item in ipairs(list.items) do
+      if item.position then list.selected = i; break end
+    end
+  end
+  list:scroll_to_selected()
+end
+
+
+---Close centered search on Escape only while it owns keyboard focus.
+---@param stroke string Normalized key binding
+---@return boolean consumed Whether the search popup handled Escape
+function ResultsView:on_key_pressed(stroke)
+  if self.is_global and self.display_position == "center"
+    and stroke == "escape" and self:owns_view(core.active_view) then
+    projectsearch.hide()
+    return true
+  end
+  return false
+end
+
+
+---Dismiss centered global search through its normal visibility and focus lifecycle.
+---@param reason "escape"|"outside"|"focuslost" Cause supplied by RootView
+function ResultsView:on_floating_dismiss(reason)
+  if self.is_global then projectsearch.hide() else self:hide() end
+end
+
 
 function ResultsView:update()
   if not ResultsView.super.update(self) then return false end
@@ -1429,20 +1519,20 @@ function ResultsView:update()
       + py * 3
     self.results_list:set_position(0, yoffset)
     self.results_list:set_size(self.size.x, self.size.y - yoffset)
-  elseif not self.queue_skip_draw then
+  else
     self.results_list:hide()
   end
 end
 
 
 function ResultsView:draw()
-  if self.queue_skip_draw or not ResultsView.super.draw(self) then return false end
+  if not ResultsView.super.draw(self) then return false end
   if not self.total_files_processed then return true end
 
   -- status
   local ox, oy = self:get_content_offset()
   local x, y = ox + style.padding.x, oy + style.padding.y
-  local per = common.clamp(self.total_files_processed / self.total_files, 0, 1)
+  local per = common.clamp(self.total_files_processed / math.max(self.total_files, 1), 0, 1)
   local text
   if self.searching then
     text = string.format(
@@ -1520,9 +1610,6 @@ local function get_selected_text()
   end
 end
 
----@class plugins.projectsearch
-local projectsearch = {}
-
 ---@type plugins.projectsearch.resultsview
 projectsearch.ResultsView = ResultsView
 
@@ -1571,179 +1658,268 @@ projectsearch._test.get_global_project_search = function()
   return global_project_search
 end
 
----@param visible boolean
----@param toggle boolean
-local function sync_treeview_visibility(visible, toggle)
-  if treeview and toggle then
-    local treeview_visible = not visible
-    if visible then
-      previous_treeview_hidden = not treeview.visible
-    elseif previous_treeview_hidden then
-      treeview_visible = false
-    end
-    treeview.visible = treeview_visible
+---Hide TreeView only while the left search panel occupies its sidebar space.
+---Restore the original visibility when hiding or moving to another position.
+---@param visible boolean Whether global project search is shown
+local function sync_treeview_visibility(visible)
+  if not treeview then return end
+  local hide = visible and global_project_search.display_position == "left"
+  if hide and previous_treeview_hidden == nil then
+    previous_treeview_hidden = not treeview.visible
+    treeview.visible = false
+  elseif not hide and previous_treeview_hidden ~= nil then
+    treeview.visible = not previous_treeview_hidden
+    previous_treeview_hidden = nil
   end
 end
 
----@param path? string
----@return plugins.projectsearch.resultsview
-local function ensure_global_project_search(path)
-  if global_project_search then
-    if path then global_project_search.file_picker:set_path(path) end
-    return global_project_search
-  end
-
-  global_project_search = ResultsView(path, "", "plain")
-  global_project_search.is_global = true
-  global_project_search.source_view = previous_view
-  global_project_search:set_size(400 * SCALE)
-  global_project_search:show()
-  local node, split_direction = nil, "left"
-  if treeview then
-    -- when treeview enabled split to the right of it for consistent position
-    node = core.root_view.root_node:get_node_for_view(treeview)
-    if not node then node = core.root_view:get_primary_node() end
-    split_direction = "right"
+---Replace a layout branch without consuming nodes referenced by other panels.
+---@param root core.rootview Layout owner
+---@param node core.node Branch to replace
+---@param replacement core.node Surviving or newly constructed branch
+local function replace_layout_node(root, node, replacement)
+  local parent = node:get_parent_node(root.root_node)
+  if parent then
+    parent[parent.a == node and "a" or "b"] = replacement
   else
-    node = core.root_view:get_active_node()
+    root.root_node = replacement
   end
-  global_project_search.node = node:split(
-    split_direction, global_project_search, {x = true}, true
-  )
+end
+
+---Check whether a branch contains an ordinary editor pane.
+---@param node core.node Branch to inspect
+---@return boolean unlocked Whether any leaf is unlocked
+local function has_editor_node(node)
+  if node.type == "leaf" then return not node.locked end
+  return has_editor_node(node.a) or has_editor_node(node.b)
+end
+
+---Find the document area while keeping application bars and toolbars at the edges.
+---@param root core.rootview Layout owner
+---@return core.node target Branch beside which to dock search
+---@return table? docking TreeView toolbar layout whose documents branch must be updated
+local function get_dock_target(root)
+  local docking = treeview and treeview.toolbar_layout
+  if docking and node_is_in_tree(root.root_node, docking.documents) then
+    return docking.documents, docking
+  end
+  local target = root:get_primary_node()
+  local parent = target:get_parent_node(root.root_node)
+  while parent and has_editor_node(parent.a) and has_editor_node(parent.b) do
+    target = parent
+    parent = target:get_parent_node(root.root_node)
+  end
+  return target
+end
+
+---Move the global view without recreating its inputs, results or document panes.
+---@param position "left"|"right"|"center" Requested placement
+function ResultsView:apply_position(position)
+  assert(position == "left" or position == "right" or position == "center",
+    "Invalid projectsearch position")
+  if self.display_position == position then return end
+  local root = core.root_view
+  local visible, active = self:is_visible(), core.active_view
+  if self.display_position and self.display_position ~= "center" then
+    self.sidebar_width = self:get_width() / SCALE
+  end
+  self.context_menu:hide()
+  root:cancel_floating_input(self)
+  self:hide()
+  self:set_floating(false)
+  local node = root.root_node:get_node_for_view(self)
+  if node then
+    local parent = node:get_parent_node(root.root_node)
+    local sibling = parent.a == node and parent.b or parent.a
+    local docking = treeview and treeview.toolbar_layout
+    if docking and docking.documents == parent then docking.documents = sibling end
+    replace_layout_node(root, parent, sibling)
+  end
+  self.node = nil
+  self.display_position = position
+  self.defer_draw = position == "center"
+  if self.defer_draw then
+    self:set_floating(true, {
+      focus = "click",
+      dismiss_on_escape = false,
+      dismiss_on_outside_click = true,
+      consume_outside_click = false
+    })
+    self:update_floating()
+  else
+    self:set_size(self.sidebar_width * SCALE)
+    local target, docking = get_dock_target(root)
+    local panel = Node()
+    panel:add_view(self)
+    panel.locked, panel.resizable = { x = true }, true
+    local split = Node("hsplit")
+    replace_layout_node(root, target, split)
+    if position == "left" then
+      split.a, split.b = panel, target
+    else
+      split.a, split.b = target, panel
+    end
+    if docking then docking.documents = split end
+    self.node = panel
+  end
+  if visible then
+    self:show()
+    if position ~= "center" then self:set_size(self.sidebar_width * SCALE) end
+  else
+    self:hide()
+  end
+  root.root_node:update_layout()
+  if active then core.set_active_view(active) end
+  core.redraw = true
+end
+
+---Configure global search placement, moving an existing view immediately.
+---The preference is saved by Settings when its position selector is used.
+---@param position "left"|"right"|"center" Docking edge or floating popup
+function projectsearch.set_position(position)
+  assert(position == "left" or position == "right" or position == "center",
+    "Invalid projectsearch position")
+  config.plugins.projectsearch.position = position
+  if global_project_search then
+    global_project_search:apply_position(position)
+    sync_treeview_visibility(global_project_search:is_visible())
+  end
+end
+
+---Find the ResultsView containing keyboard focus, including nested widget inputs.
+---@return boolean is_project_search Whether the containing view is visible
+---@return plugins.projectsearch.resultsview? view Containing search view
+local function active_view_is_project_search()
+  local view = core.active_view
+  while view and not view:extends(ResultsView) do view = view.parent end
+  return view ~= nil and view:is_visible(), view
+end
+
+---Create the reusable global view and apply its configured placement.
+---@param path? string Initial search directory
+---@return plugins.projectsearch.resultsview view Reused global search
+local function ensure_global_project_search(path)
+  if not global_project_search then
+    global_project_search = ResultsView(path, "", "plain")
+    global_project_search.is_global = true
+  elseif path then
+    global_project_search.file_picker:set_path(path)
+  end
+  global_project_search:apply_position(config.plugins.projectsearch.position)
   return global_project_search
 end
 
----Toggle the global project search view.
----@param options? plugins.projectsearch.resultsview.options
----@return plugins.projectsearch.resultsview
-function projectsearch.toggle(options)
-  options = options or {}
+---Recognize the document selection made by opening the currently selected result.
+---That selection resumes result navigation rather than replacing a regex query.
+---@param view plugins.projectsearch.resultsview Search containing the result
+---@param doc core.doc Document whose current selection may be that result
+---@return boolean matches Whether the source selection is the selected search match
+local function selection_matches_result(view, doc)
+  local item = view.results_list:get_selected()
+  if not item or not item.position
+    or common.normalize_path(doc.abs_filename) ~= common.normalize_path(item.parent.file.path)
+  then
+    return false
+  end
+  local l1, c1, l2, c2 = doc:get_selection(true)
+  return l1 == item.line.line and l2 == l1
+    and c1 == item.position.col1 and c2 == item.position.col2 + 1
+end
 
-  local visible = true
-  local toggle = true
-  local path = options.path
-  local has_focus = options.has_focus
-
-  ---@type core.docview?
-  local doc_view = (core.active_view and core.active_view:is(DocView))
-    and core.active_view
-
+---Show global search and queue focus after its controls have been laid out.
+---Existing centered results receive navigation focus unless a new query was supplied.
+---@param options plugins.projectsearch.resultsview.options Search options
+---@return plugins.projectsearch.resultsview view Shown global search
+local function show_global_project_search(options)
+  local is_search = active_view_is_project_search()
   local selection = ""
-  if doc_view then
-    local doc = doc_view.doc
-    selection = doc:get_text(
-      table.unpack({ doc:get_selection() })
-    )
-  end
-
-  if not has_focus and not previous_view then
+  local source_doc
+  if not is_search then
     previous_view = core.active_view
-  end
-
-  if not global_project_search then
-    ensure_global_project_search(path)
-  else
-    local gvisible = global_project_search:is_visible()
-    if path then global_project_search.file_picker:set_path(path) end
-    if selection ~= "" then
-      if not gvisible then
-        global_project_search:toggle_visible(true, false, true)
-      else
-        toggle = false
-      end
-    elseif not has_focus and gvisible then
-      toggle = false
-    elseif not path or not gvisible then
-      visible = not gvisible
-      global_project_search:toggle_visible(true, false, true)
-    else
-      toggle = false
+    if core.active_view and core.active_view:is(DocView) then
+      source_doc = core.active_view.doc
+      selection = source_doc:get_text(source_doc:get_selection())
     end
   end
-
-  if visible and previous_view then
-    global_project_search.source_view = previous_view
+  local view = ensure_global_project_search(options.path)
+  if selection == view.find_text:get_text()
+    or source_doc and selection_matches_result(view, source_doc)
+  then
+    selection = ""
   end
-
-  global_project_search:apply_options(options, visible)
-
-  sync_treeview_visibility(visible, toggle)
-
+  if previous_view then view.source_view = previous_view end
+  view:show()
+  if options.text == nil and selection ~= "" then view.find_text:set_text(selection) end
+  view:apply_options(options, true)
+  sync_treeview_visibility(true)
+  view.focus_generation = view.focus_generation + 1
+  local generation = view.focus_generation
+  local focus_results = view.display_position == "center"
+    and view.results_list.total_results > 0 and selection == ""
+    and options.text == nil and options.path == nil and not options.run
   core.add_thread(function()
-    if visible then
-      core.set_active_view(global_project_search)
-      global_project_search:swap_active_child()
-      global_project_search:swap_active_child(global_project_search.find_text)
-      if selection ~= "" then
-        global_project_search.find_text:set_text(selection)
-        global_project_search.find_text.textview.doc:set_selection(
-          1, 1, 1, #selection + 1
-        )
+    if not view:is_visible() or view.focus_generation ~= generation then return end
+    if focus_results then
+      view:focus_results()
+    else
+      view:swap_active_child()
+      core.set_active_view(view)
+      view:swap_active_child(view.find_text)
+      if selection ~= "" and options.text == nil then
+        view.find_text.textview.doc:set_selection(1, 1, 1, #selection + 1)
       end
-    elseif previous_view then
-      core.set_active_view(previous_view)
-      previous_view = nil
     end
   end)
-
-  return global_project_search
+  return view
 end
 
----@return boolean is_project_search
----@return plugins.projectsearch.resultsview? view
-local function active_view_is_project_search()
-  local is_results_view = false
-  local view
-  if
-    core.active_view
-    and
-    core.active_view:get_name() == "Project Search and Replace"
-    and
-    core.active_view.type_name ~= "widget.filepicker"
-  then
-    local element = core.active_view
-    while element.parent do
-      element = core.active_view.parent
-    end
-    if element:is_visible() then
-      is_results_view = true
-      view = element
-    end
-  end
-  return is_results_view, view
-end
-
----Show the global project search view.
+---Toggle the global project search view, or focus it when invoked from the editor.
 ---@param options? plugins.projectsearch.resultsview.options
----@return plugins.projectsearch.resultsview
+---@return plugins.projectsearch.resultsview view Reusable global search
+function projectsearch.toggle(options)
+  options = options or {}
+  local is_search, active = active_view_is_project_search()
+  local view = global_project_search
+  local has_focus = options.has_focus
+  if has_focus == nil then has_focus = is_search and active == view end
+  if view and view:is_visible() and has_focus and not options.path then
+    return projectsearch.hide(options)
+  end
+  return show_global_project_search(options)
+end
+
+---Show or focus global search, preserving its query and result state.
+---@param options? plugins.projectsearch.resultsview.options
+---@return plugins.projectsearch.resultsview view Reusable global search
 function projectsearch.show(options)
-  options = options or {}
-  if not global_project_search or not global_project_search:is_visible() then
-    options.has_focus = active_view_is_project_search()
-    return projectsearch.toggle(options)
-  end
-  global_project_search:apply_options(options, true)
-  return global_project_search
+  return show_global_project_search(options or {})
 end
 
----Hide the global project search view.
+---Hide global search and restore focus synchronously before outside clicks continue.
+---A queued show must not later focus an input that has already been hidden.
 ---@param options? plugins.projectsearch.resultsview.options
----@return plugins.projectsearch.resultsview?
+---@return plugins.projectsearch.resultsview? view Reusable global search, if created
 function projectsearch.hide(options)
-  options = options or {}
-  if not global_project_search then return end
-  global_project_search:apply_options(options, false)
-  if global_project_search:is_visible() then
-    global_project_search:hide()
-    sync_treeview_visibility(false, true)
-    core.add_thread(function()
-      if previous_view then
-        core.set_active_view(previous_view)
-        previous_view = nil
-      end
-    end)
+  local view = global_project_search
+  if not view then return end
+  view:apply_options(options or {}, false)
+  view.focus_generation = view.focus_generation + 1
+  local focused = view:owns_view(core.active_view)
+  if focused then view:swap_active_child() end
+  view.context_menu:hide()
+  view:hide()
+  sync_treeview_visibility(false)
+  if focused and previous_view then
+    local target = previous_view
+    while target and not target.floating_visible
+      and not core.root_view.root_node:get_node_for_view(target)
+    do
+      target = target.parent
+    end
+    if target then core.set_active_view(previous_view) end
   end
-  return global_project_search
+  previous_view = nil
+  return view
 end
 
 local prompt_states = {}
@@ -1781,8 +1957,8 @@ end
 
 command.add(nil, {
   ["project-search:find"] = function(path)
-    local has_focus = active_view_is_project_search()
-    projectsearch.toggle({ path = path, has_focus = has_focus })
+    local has_focus, view = active_view_is_project_search()
+    projectsearch.toggle({ path = path, has_focus = has_focus and view == global_project_search })
   end,
 
   ["project-search:open-tab"] = function(path)
@@ -1821,39 +1997,33 @@ command.add(
   }
 )
 
----Focus the next or previous input text
+---Cycle through visible text fields and populated results in both directions.
 ---@param view plugins.projectsearch.resultsview
 ---@param reverse? boolean
 local function cycle_input_text(view, reverse)
-  if not view.child_active then
-    view:swap_active_child(view.find_text)
-  else
-    local current_active = view.child_active
-    local active_pos = nil
-    local first_textbox = nil
-    local start = reverse and 1 or #view.childs
-    local ending = reverse and #view.childs or 1
-    local increment = reverse and 1 or -1
-    for i=start, ending, increment do
-      local child = view.childs[i]
-      if child == current_active then
-        active_pos = i
-      elseif child.type_name == "widget.textbox" and child:is_visible() then
-        if not first_textbox then first_textbox = child end
-        if
-          (not reverse and active_pos and i < active_pos)
-          or
-          (reverse and active_pos and i > active_pos)
-        then
-          view:swap_active_child(child)
-          core.last_active_view = view
-          return
-        end
-      end
-    end
-    view:swap_active_child(first_textbox or current_active)
-    core.last_active_view = view
+  local targets = {}
+  for _, child in ipairs {
+    view.find_text, view.replace_text, view.includes_text, view.excludes_text
+  } do
+    if child:is_visible() then targets[#targets + 1] = child end
   end
+  if view.results_list:is_visible() and #view.results_list.items > 0 then
+    targets[#targets + 1] = view.results_list
+  end
+  if #targets == 0 then return end
+  local index = reverse and #targets or 1
+  for i, child in ipairs(targets) do
+    if child == view.child_active then
+      index = (i - 1 + (reverse and -1 or 1)) % #targets + 1
+      break
+    end
+  end
+  if targets[index] == view.results_list then
+    view:focus_results()
+  else
+    view:swap_active_child(targets[index])
+  end
+  core.last_active_view = view
 end
 
 command.add(
@@ -1899,7 +2069,21 @@ command.add(
   }
 )
 
-command.add(ResultsView, {
+command.add(function()
+  local is_search, view = active_view_is_project_search()
+  local child = view and view.child_active
+  return is_search and child and child.textview == core.active_view
+    and view.results_list:is_visible() and #view.results_list.items > 0, view
+end, {
+  ["project-search:focus-results"] = function(view)
+    view:focus_results()
+  end
+})
+
+command.add(function()
+  local is_search, view = active_view_is_project_search()
+  return is_search and (core.active_view == view or core.active_view == view.results_list), view
+end, {
   ["project-search:select-previous"] = function(view)
     view.results_list:select_prev()
   end,
@@ -1955,8 +2139,8 @@ keymap.add {
   ["alt+w"]              = "project-search:toggle-whole-words",
   ["alt+f"]              = "project-search:toggle-file-filters",
   ["ctrl+r"]             = "project-search:toggle-replace-mode",
-  ["up"]                 = "project-search:select-previous",
-  ["down"]               = "project-search:select-next",
+  ["up"]                 = { "project-search:focus-results", "project-search:select-previous" },
+  ["down"]               = { "project-search:focus-results", "project-search:select-next" },
   ["left"]               = "project-search:toggle-expand",
   ["right"]              = "project-search:toggle-expand",
   ["space"]              = "project-search:toggle-checkbox",
