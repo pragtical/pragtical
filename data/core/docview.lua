@@ -210,9 +210,18 @@ end
 ---Attempt to close the view, prompting to save if document is dirty.
 ---Shows "Unsaved Changes" dialog if this is the last view of a dirty document.
 ---@param do_close function Callback to execute when close is confirmed
-function DocView:try_close(do_close)
-  if self.doc:is_dirty()
-  and #core.get_views_referencing_doc(self.doc) == 1 then
+---@param closing_views? table<core.view, boolean> Views removed together; other references keep their document open
+function DocView:try_close(do_close, closing_views)
+  if not self.doc:is_dirty() then do_close(); return end
+  local references = core.get_views_referencing_doc(self.doc)
+  local last_reference = #references == 1
+  if closing_views then
+    last_reference = true
+    for _, view in ipairs(references) do
+      if not closing_views[view] then last_reference = false; break end
+    end
+  end
+  if last_reference then
     core.command_view:enter("Unsaved Changes; Confirm Close", {
       submit = function(_, item)
         if item.text:match("^[cC]") then

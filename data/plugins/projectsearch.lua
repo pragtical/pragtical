@@ -19,15 +19,8 @@ local ToggleButton = require "widget.togglebutton"
 ---@class plugins.projectsearch
 local projectsearch = {}
 
-local treeview
-core.add_thread(function()
-  if config.plugins.treeview ~= false then
-    treeview = require "plugins.treeview"
-  end
-end)
-
 ---@class config.plugins.projectsearch
----@field position "left"|"right"|"center" Placement of the reusable global search view
+---@field position "left"|"right"|"top"|"bottom"|"center" Placement of the reusable global search view
 config.plugins.projectsearch = common.merge({
   threading = {
     workers = math.ceil(thread.get_cpu_count() / 2) + 1
@@ -41,13 +34,15 @@ config.plugins.projectsearch = common.merge({
     name = "Project Search",
     {
       label = "Position",
-      description = "Dock global project search on either side or show it as a centered popup.",
+      description = "Place global project search in a dock or show it as a centered popup.",
       path = "position",
       type = "selection",
       default = "left",
       values = {
         { "Left", "left" },
         { "Right", "right" },
+        { "Top", "top" },
+        { "Bottom", "bottom" },
         { "Center", "center" }
       },
       set_value = function(value)
@@ -108,8 +103,8 @@ local threaded_replace_id = 0
 ---@field result_split_node core.node?
 ---@field result_split_views core.docview[]?
 ---@field is_global boolean Whether this is the reusable global search panel
----@field display_position? "left"|"right"|"center" Applied global placement
----@field sidebar_width number Remembered docked width in scale-independent units
+---@field display_position? "left"|"right"|"top"|"bottom"|"center" Applied global placement
+---@field sidebar_width number Initial side dock width in scale-independent units
 ---@field node? core.node Docked placement, absent in centered mode
 ---@field focus_generation integer Invalidates queued focus when hiding or reopening
 ---@overload fun(path?:string,text:string,type:'"plain"'|'"regex"',insensitive?:boolean,whole_word?:boolean,replacement?:string):plugins.projectsearch.resultsview
@@ -397,7 +392,6 @@ end
 function ResultsView:get_name()
   return "Project Search and Replace"
 end
-
 
 ---File searching thread function that uses worker threads to perform
 ---multi-file searching.
@@ -1364,18 +1358,6 @@ function ResultsView:on_mouse_pressed(button, x, y, clicks)
   return ResultsView.super.on_mouse_pressed(self, button, x, y, clicks)
 end
 
----Scale docked width while centered placement follows the available viewport.
----@param new_scale number Updated interface scale
----@param prev_scale number Previous interface scale
-function ResultsView:on_scale_change(new_scale, prev_scale)
-  ResultsView.super.on_scale_change(self, new_scale, prev_scale)
-  if self.is_global and self.display_position ~= "center" then
-    local width = self:get_width() / prev_scale * new_scale
-    self:set_size(width)
-    self.sidebar_width = width / new_scale
-  end
-end
-
 ---Fit centered global search inside the viewport on scale or window-size changes.
 ---RootView calls this before updating and drawing a shown floating view.
 function ResultsView:update_floating()
@@ -1663,123 +1645,75 @@ end
 ---@type plugins.projectsearch.resultsview?
 local global_project_search
 
----@type boolean?
-local previous_treeview_hidden
-
 projectsearch._test.get_global_project_search = function()
   return global_project_search
 end
 
----Hide TreeView only while the left search panel occupies its sidebar space.
----Restore the original visibility when hiding or moving to another position.
----@param visible boolean Whether global project search is shown
-local function sync_treeview_visibility(visible)
-  if not treeview then return end
-  local hide = visible and global_project_search.display_position == "left"
-  if hide and previous_treeview_hidden == nil then
-    previous_treeview_hidden = not treeview.visible
-    treeview.visible = false
-  elseif not hide and previous_treeview_hidden ~= nil then
-    treeview.visible = not previous_treeview_hidden
-    previous_treeview_hidden = nil
+---Keep the runtime placement and node reference synchronized with core dock moves.
+---@param side? core.node.dock_side New dock edge
+---@param previous_side? core.node.dock_side Previous edge
+function ResultsView:on_dock_changed(side, previous_side)
+  self.node = side and core.root_view:get_dock(side) or nil
+  if side then self.display_position = side end
+end
+
+---Reveal docked search with Widget's size animation, preserving its input state and saved size.
+function ResultsView:show()
+  local visible = self:is_visible()
+  if visible then return end
+  ResultsView.super.show(self)
+  if self.is_global and self.display_position and self.display_position ~= "center" then
+    local root = core.root_view
+    if not self.dock_size then self:set_size(self.sidebar_width * SCALE, 300 * SCALE) end
+    local dock = root:add_dock_view(self, self.display_position)
+    if not visible then
+      dock:update_dock_header()
+      local axis = dock.locked.x and "x" or "y"
+      local header = axis == "y" and dock:should_show_tabs() and dock.dock_header.height or 0
+      self:set_size(self.dock_size.x * SCALE, self.dock_size.y * SCALE - header)
+      if config.transitions and config.fps >= 30 then
+        self:show_animated(axis ~= "x", axis ~= "y")
+      end
+    end
   end
 end
 
----Replace a layout branch without consuming nodes referenced by other panels.
----@param root core.rootview Layout owner
----@param node core.node Branch to replace
----@param replacement core.node Surviving or newly constructed branch
-local function replace_layout_node(root, node, replacement)
-  local parent = node:get_parent_node(root.root_node)
-  if parent then
-    parent[parent.a == node and "a" or "b"] = replacement
-  else
-    root.root_node = replacement
-  end
+---Detach hidden global search while preserving its reusable widget and results.
+function ResultsView:hide()
+  if self.is_global then core.root_view:remove_dock_view(self) end
+  ResultsView.super.hide(self)
 end
 
----Check whether a branch contains an ordinary editor pane.
----@param node core.node Branch to inspect
----@return boolean unlocked Whether any leaf is unlocked
-local function has_editor_node(node)
-  if node.type == "leaf" then return not node.locked end
-  return has_editor_node(node.a) or has_editor_node(node.b)
+---Report effective visibility, including dock visibility and selection.
+---@return boolean visible Whether this panel can currently receive input
+function ResultsView:is_visible()
+  if not ResultsView.super.is_visible(self) then return false end
+  local dock = self.is_global and core.root_view:get_dock_for_view(self)
+  return not dock or dock.dock_visible and dock.active_view == self
 end
 
----Find the document area while keeping application bars and toolbars at the edges.
----@param root core.rootview Layout owner
----@return core.node target Branch beside which to dock search
----@return table? docking TreeView toolbar layout whose documents branch must be updated
-local function get_dock_target(root)
-  local docking = treeview and treeview.toolbar_layout
-  if docking and node_is_in_tree(root.root_node, docking.documents) then
-    return docking.documents, docking
-  end
-  local target = root:get_primary_node()
-  local parent = target:get_parent_node(root.root_node)
-  while parent and has_editor_node(parent.a) and has_editor_node(parent.b) do
-    target = parent
-    parent = target:get_parent_node(root.root_node)
-  end
-  return target
-end
-
----Move the global view without recreating its inputs, results or document panes.
----@param position "left"|"right"|"center" Requested placement
+---Move global search between a shared dock and its centered floating placement.
+---Preserves widgets, current results, and the originating document focus.
+---@param position "left"|"right"|"top"|"bottom"|"center" Requested placement
 function ResultsView:apply_position(position)
-  assert(position == "left" or position == "right" or position == "center",
-    "Invalid projectsearch position")
+  assert(position == "left" or position == "right" or position == "top"
+    or position == "bottom" or position == "center", "Invalid projectsearch position")
   if self.display_position == position then return end
   local root = core.root_view
-  local visible, active = self:is_visible(), core.active_view
-  if self.display_position and self.display_position ~= "center" then
-    self.sidebar_width = self:get_width() / SCALE
-  end
+  local visible, active = self.visible, core.active_view
   self.context_menu:hide()
-  root:cancel_floating_input(self)
   self:hide()
   self:set_floating(false)
-  local node = root.root_node:get_node_for_view(self)
-  if node then
-    local parent = node:get_parent_node(root.root_node)
-    local sibling = parent.a == node and parent.b or parent.a
-    local docking = treeview and treeview.toolbar_layout
-    if docking and docking.documents == parent then docking.documents = sibling end
-    replace_layout_node(root, parent, sibling)
-  end
-  self.node = nil
   self.display_position = position
   self.defer_draw = position == "center"
   if self.defer_draw then
     self:set_floating(true, {
-      focus = "click",
-      dismiss_on_escape = false,
-      dismiss_on_outside_click = true,
-      consume_outside_click = false
+      focus = "click", dismiss_on_escape = false,
+      dismiss_on_outside_click = true, consume_outside_click = false
     })
     self:update_floating()
-  else
-    self:set_size(self.sidebar_width * SCALE)
-    local target, docking = get_dock_target(root)
-    local panel = Node()
-    panel:add_view(self)
-    panel.locked, panel.resizable = { x = true }, true
-    local split = Node("hsplit")
-    replace_layout_node(root, target, split)
-    if position == "left" then
-      split.a, split.b = panel, target
-    else
-      split.a, split.b = target, panel
-    end
-    if docking then docking.documents = split end
-    self.node = panel
   end
-  if visible then
-    self:show()
-    if position ~= "center" then self:set_size(self.sidebar_width * SCALE) end
-  else
-    self:hide()
-  end
+  if visible then self:show() end
   root.root_node:update_layout()
   if active then core.set_active_view(active) end
   core.redraw = true
@@ -1787,14 +1721,14 @@ end
 
 ---Configure global search placement, moving an existing view immediately.
 ---The preference is saved by Settings when its position selector is used.
----@param position "left"|"right"|"center" Docking edge or floating popup
+---@param position "left"|"right"|"top"|"bottom"|"center" Docking edge or floating popup
 function projectsearch.set_position(position)
-  assert(position == "left" or position == "right" or position == "center",
+  assert(position == "left" or position == "right" or position == "top"
+    or position == "bottom" or position == "center",
     "Invalid projectsearch position")
   config.plugins.projectsearch.position = position
   if global_project_search then
     global_project_search:apply_position(position)
-    sync_treeview_visibility(global_project_search:is_visible())
   end
 end
 
@@ -1860,16 +1794,9 @@ local function show_global_project_search(options)
     selection = ""
   end
   if previous_view then view.source_view = previous_view end
-  if view.display_position ~= "center" and not view:is_visible()
-    and config.transitions and config.fps >= 30
-  then
-    view:show_animated(false, true)
-  else
-    view:show()
-  end
+  view:show()
   if options.text == nil and selection ~= "" then view.find_text:set_text(selection) end
   view:apply_options(options, true)
-  sync_treeview_visibility(true)
   view.focus_generation = view.focus_generation + 1
   local generation = view.focus_generation
   local focus_results = view.display_position == "center"
@@ -1927,12 +1854,12 @@ function projectsearch.hide(options)
   view.context_menu:hide()
   if view.display_position == "center" then
     view:hide_floating({ to = "top" })
-  elseif view:is_visible() and config.transitions and config.fps >= 30 then
-    view:hide_animated(false, true)
+  elseif view.node and config.transitions and config.fps >= 30 then
+    core.root_view:clear_dock_view_input(view, true)
+    view:hide_animated(not view.node.locked.x, not view.node.locked.y)
   else
     view:hide()
   end
-  sync_treeview_visibility(false)
   if focused and previous_view then
     local target = previous_view
     while target and not target.floating_visible

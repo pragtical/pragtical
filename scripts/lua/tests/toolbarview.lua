@@ -56,8 +56,8 @@ test.describe("toolbar layout", function()
     context.tree, context.toolbar = TreeView(), ToolbarView()
     context.tree.target_size = 200
     context.tree.default_size = 200
-    context.tree.node = context.documents:split("left", context.tree, { x = true }, true)
-    context.documents = context.tree.node:get_parent_node(core.root_view.root_node).b
+    core.root_view:add_dock_view(context.tree, "left")
+    core.root_view:set_dock_size("left", 200)
     context.tree:attach_toolbar(context.toolbar)
     settle()
   end)
@@ -82,7 +82,7 @@ test.describe("toolbar layout", function()
     local toolbar = ToolbarView()
     context.standalone = toolbar
     toolbar.position.x, toolbar.position.y = 123, 65
-    local docking = context.tree.toolbar_layout.group
+    local docking = context.tree.toolbar_layout.node
     local icon_w, icon_h = toolbar:get_icon_size()
     for _, orientation in ipairs { "horizontal", "vertical" } do
       toolbar.size.x, toolbar.size.y = 300, 160
@@ -106,7 +106,7 @@ test.describe("toolbar layout", function()
       end
       test.equal(context.tree.toolbar_position, "left")
       test.equal(config.plugins.treeview.toolbar_position, "left")
-      test.equal(context.tree.toolbar_layout.group, docking)
+      test.equal(context.tree.toolbar_layout.node, docking)
       test.is_nil(core.root_view.root_node:get_node_for_view(toolbar))
     end
   end)
@@ -212,14 +212,14 @@ test.describe("toolbar layout", function()
     test.test(position .. " visibility follows the tree only for horizontal layouts", function(context)
       local toolbar, tree = context.toolbar, context.tree
       context.tree:set_toolbar_position(position)
-      tree.visible = false
+      tree:set_visible(false)
       settle()
-      test.equal(tree.size.x, 0)
+      test.equal(core.root_view:get_dock_for_view(tree).size.x, 0)
       test.equal(toolbar:is_visible(), vertical)
       test.equal((vertical and toolbar.size.x or toolbar.size.y) > 0, vertical)
       test.equal(toolbar.visible, true)
       toolbar:toggle_visible()
-      tree.visible = true
+      tree:set_visible(true)
       settle()
       test.not_ok(toolbar:is_visible())
       test.equal(vertical and toolbar.size.x or toolbar.size.y, 0)
@@ -384,7 +384,7 @@ test.describe("toolbar layout", function()
   for _, position in ipairs { "left", "right" } do
     test.test("keeps the " .. position .. " hamburger accessible with the tree and menu hidden", function(context)
       context.tree:set_toolbar_position(position)
-      context.tree.visible = false
+      context.tree:set_visible(false)
       settle()
       test.not_ok(core.menu_view.visible)
       test.equal(core.menu_view.size.y, 0)
@@ -434,9 +434,9 @@ test.describe("toolbar layout", function()
           local desired_width = common.round(math.max(
             context.tree.default_size, toolbar:get_min_width()
           ))
-          test.equal(context.tree.size.x, math.min(
-            desired_width, core.root_view.size.x - style.divider_size
-          ))
+          test.near(context.tree.size.x, math.min(
+            desired_width, core.root_view.workspace_node.size.x - 100 * SCALE - style.divider_size
+          ), 0.01)
         end
         toolbar:on_mouse_wheel(-100, 0)
         settle()

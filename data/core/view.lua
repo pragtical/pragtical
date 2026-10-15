@@ -104,6 +104,8 @@ local Scrollbar = require "core.scrollbar"
 ---@field v_scrollbar core.scrollbar
 ---@field h_scrollbar core.scrollbar
 ---@field current_scale number
+---@field dock_size? core.view.position Remembered outer dock width/height in scale-independent units
+---@field private dock_layout? { axis: string, size: number, outer_size: number, extent: number, destination?: number } Last allocation and animation destination, for dock sizing
 ---@field floating boolean Whether the view uses floating placement
 ---@field floating_options? core.view.floating_options Placement ownership and input policy
 ---@field floating_visible? boolean Whether the view is registered, including closing slides
@@ -229,6 +231,14 @@ function View:move_towards(t, k, dest, rate, name)
   if type(t) ~= "table" then
     return self:move_towards(self, t, k, dest, rate, name)
   end
+  local layout = t == self.size and self.dock_layout
+  if layout and k == layout.axis then
+    layout.destination = dest
+    if t[k] == layout.size then
+      -- Continue from the requested size when the viewport constrained the last layout.
+      t[k] = self.dock_size[k] * SCALE + layout.size - layout.extent
+    end
+  end
   local val = t[k]
   -- we use epsilon comparison in case dest is inconsistent
   if math.abs(dest - val) < 1e-8 then t[k] = dest return end
@@ -284,7 +294,8 @@ end
 ---Override to show confirmation dialogs for unsaved changes.
 ---Example: `core.command_view:enter("Save?", {submit = do_close})`
 ---@param do_close function Call this function to actually close the view
-function View:try_close(do_close)
+---@param closing_views? table<core.view, boolean> Views being closed together, for shared-document safeguards
+function View:try_close(do_close, closing_views)
   do_close()
 end
 
@@ -507,7 +518,7 @@ function View:set_floating(enabled, options)
 end
 
 
----Get the popup's outer rectangle in screen coordinates, including borders.
+---Get the outer rectangle in screen coordinates, including borders for popups and dock content.
 ---Override together with set_floating_bounds() for composite views.
 ---@return number x Screen x coordinate
 ---@return number y Screen y coordinate
@@ -518,7 +529,7 @@ function View:get_floating_bounds()
 end
 
 
----Set the popup's outer rectangle when RootView places, drags, or resizes it.
+---Set the outer rectangle when RootView places a popup or a dock layout fits its content.
 ---Override for composites that need to update child layout or account for borders.
 ---@param x number Screen x coordinate
 ---@param y number Screen y coordinate
@@ -579,6 +590,12 @@ function View:is_floating_owner_visible()
   local root = core.root_view
   local node = root and root.root_node:get_node_for_view(self)
   if node then
+    local dock = root:get_dock_for_view(self)
+    if dock then
+      if not dock.dock_visible then return false end
+      local active = dock.dock_layouts[dock.active_view]
+      if not active or not active:get_node_for_view(self) then return false end
+    end
     return node.active_view == self
   end
   if self.parent then
@@ -594,6 +611,12 @@ end
 function View:on_floating_visibility_changed(visible)
 end
 
+---Called after attaching to, moving between, or detaching from a workspace dock.
+---Use this to synchronize panel placement and associated controls, never to redock recursively.
+---@param side? core.node.dock_side New dock edge, or nil after removal
+---@param previous_side? core.node.dock_side Previous edge, or nil on first registration
+function View:on_dock_changed(side, previous_side)
+end
 
 ---Handle a dismissal requested by Escape, an outside click, or window focus loss.
 ---The default implementation hides the view immediately; override for custom handling.
