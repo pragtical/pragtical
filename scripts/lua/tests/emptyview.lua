@@ -99,4 +99,25 @@ test.describe("emptyview", function()
 
     test.equal(view:get_selected_recent_project(), project_a)
   end)
+
+  test.it("keeps room below the recent projects border when the page overflows", function()
+    view:set_size(600, 300)
+    for _ = 1, 6 do view:update() end
+    view.scroll.to.y = view:get_scrollable_size() - view.size.y
+    for _ = 1, 6 do view:update() end
+    local list = view.recent_projects
+    local bottom = list.position.y + list.size.y + list.border.width
+    test.ok(bottom <= view.position.y + view.size.y - style.padding.y)
+  end)
+
+  test.it("invalidates cached layout after a scale change", function()
+    view:set_size(1200, 800)
+    view:update()
+    view:on_scale_change(SCALE, SCALE)
+    test.equal(view.prev_size.x, -1)
+    test.equal(view.prev_size.y, -1)
+    view:update()
+    test.equal(view.prev_size.x, view.size.x)
+    test.equal(view.prev_size.y, view.size.y)
+  end)
 end)

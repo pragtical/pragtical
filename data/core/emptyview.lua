@@ -144,6 +144,12 @@ function EmptyView:get_h_scrollable_size()
   return 0
 end
 
+---Keep the final widget and its bottom border clear of the viewport edge.
+---@return number height Scrollable content height including trailing padding
+function EmptyView:get_scrollable_size()
+  return math.max(self.size.y, self:get_real_height() + style.padding.y)
+end
+
 ---Find the recent-project row under a screen position.
 ---@param x number
 ---@param y number
@@ -232,7 +238,12 @@ function EmptyView:remove_all_recent_projects()
   self:refresh_recent_projects()
 end
 
-function EmptyView:on_scale_change(new_scale)
+---Refresh cached layout and the logo when the UI scale changes.
+---@param new_scale number Current UI scale
+---@param prev_scale number Previous UI scale
+function EmptyView:on_scale_change(new_scale, prev_scale)
+  EmptyView.super.on_scale_change(self, new_scale, prev_scale)
+  self.prev_size.x, self.prev_size.y = -1, -1
   if not icon_font_scaled then
     icon_font_scaled = true
     icon_huge_font = style.icon_big_font:copy(110 * new_scale)

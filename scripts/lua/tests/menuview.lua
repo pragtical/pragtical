@@ -8,6 +8,7 @@ local RootView = require "core.rootview"
 local MenuView = require "core.menuview"
 local ContextMenu = require "core.contextmenu"
 local test = require "core.test"
+local style = require "core.style"
 
 local menu_modifier = PLATFORM == "Mac OS X" and "left option" or "left alt"
 
@@ -21,6 +22,7 @@ test.describe("application menu", function()
     context.draw_text = common.draw_text
     context.open_in_system = common.open_in_system
     context.modkeys = keymap.modkeys
+    context.scale, context.font, context.padding = SCALE, style.font, style.padding
     keymap.modkeys = {}
     core.root_view = RootView(); core.root_view.root_node.is_primary_node = true
     core.root_view.size.x, core.root_view.size.y = 900, 600
@@ -46,12 +48,29 @@ test.describe("application menu", function()
     common.draw_text = context.draw_text
     common.open_in_system = context.open_in_system
     keymap.modkeys = context.modkeys
+    SCALE, style.font, style.padding = context.scale, context.font, context.padding
     if context.opener_binding then
       local binding = context.opener_binding
       keymap.map[binding.stroke] = binding.commands
       keymap.reverse_map["menu-bar:open"] = binding.shortcuts
     end
   end)
+
+  for _, transitions in ipairs { false, true } do
+    test.test("resizes both ways after scaling with transitions " .. tostring(transitions), function(context)
+      config.transitions = transitions
+      config.animation_type = "lerp"
+      core.fps, config.fps = 60, 60
+      for _, factor in ipairs { 1, 2, 1.25, 3, 1.5, 1 } do
+        local ratio = factor / context.scale
+        SCALE = factor
+        style.font = context.font:copy(context.font:get_size() * ratio)
+        style.padding = { x = context.padding.x * ratio, y = context.padding.y * ratio }
+        for _ = 1, 60 do core.root_view:update() end
+        test.equal(core.menu_view.size.y, style.font:get_height() + style.padding.y * 2)
+      end
+    end)
+  end
 
   test.test("falls back to one button when all labels no longer fit", function()
     test.not_ok(core.menu_view.compact)

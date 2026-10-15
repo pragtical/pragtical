@@ -329,19 +329,23 @@ end
 
 ---Check if a point overlaps any resizable divider in the tree.
 ---Recursively searches for dividers that can be dragged.
+---Collapsed branches cannot receive divider hits.
 ---@param px number Screen x coordinate
 ---@param py number Screen y coordinate
 ---@return core.node? node The node whose divider is under the point, or nil
 function Node:get_divider_overlapping_point(px, py)
+  if self.size.x <= 0 or self.size.y <= 0 then return end
   if self.type ~= "leaf" then
     local axis = self.type == "hsplit" and "x" or "y"
     if self.a:is_resizable(axis) and self.b:is_resizable(axis) then
       local p = 6
       local x, y, w, h = self:get_divider_rect()
-      x, y = x - p, y - p
-      w, h = w + p * 2, h + p * 2
-      if px > x and py > y and px < x + w and py < y + h then
-        return self
+      if w > 0 and h > 0 then
+        x, y = x - p, y - p
+        w, h = w + p * 2, h + p * 2
+        if px > x and py > y and px < x + w and py < y + h then
+          return self
+        end
       end
     end
     return self.a:get_divider_overlapping_point(px, py)
@@ -503,6 +507,7 @@ end
 
 
 ---Get the rectangle for this node's divider (for split nodes).
+---Use the allocated gap so collapsed panes do not paint into neighboring nodes.
 ---@return number? x Screen x coordinate, or nil for leaf nodes
 ---@return number? y Screen y coordinate, or nil for leaf nodes
 ---@return number? w Width, or nil for leaf nodes
@@ -510,9 +515,11 @@ end
 function Node:get_divider_rect()
   local x, y = self.position.x, self.position.y
   if self.type == "hsplit" then
-    return x + self.a.size.x, y, style.divider_size, self.size.y
+    x = self.a.position.x + self.a.size.x
+    return x, y, math.max(0, self.b.position.x - x), self.size.y
   elseif self.type == "vsplit" then
-    return x, y + self.a.size.y, self.size.x, style.divider_size
+    y = self.a.position.y + self.a.size.y
+    return x, y, self.size.x, math.max(0, self.b.position.y - y)
   end
 end
 
@@ -821,7 +828,9 @@ end
 ---Draw this node and its children.
 ---For leaf nodes: draws tabs (if shown) and active view.
 ---For split nodes: draws divider and recursively draws children.
+---Skip collapsed branches, including their nested dividers.
 function Node:draw()
+  if self.size.x <= 0 or self.size.y <= 0 then return end
   if self.type == "leaf" then
     if self:should_show_tabs() then
       self:draw_tabs()
