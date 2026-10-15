@@ -350,8 +350,12 @@ local function set_indent_type(doc, type)
 end
 
 local function set_indent_type_command(dv)
+  local indent_type = dv.doc:get_indent_info()
   core.command_view:enter("Specify indent style for this file", {
-    submit = function(value)
+    restore_state = { text = "", suggestion_id = indent_type == "hard" and "tabs" or "spaces" },
+    get_suggestion_id = function(item) return item.text end,
+    submit = function(value, item)
+      if value == "" then value = item.text end
       local doc = dv.doc
       value = value:lower()
       set_indent_type(doc, value == "tabs" and "hard" or "soft")
@@ -359,7 +363,8 @@ local function set_indent_type_command(dv)
     suggest = function(text)
       return common.fuzzy_match({"tabs", "spaces"}, text)
     end,
-    validate = function(text)
+    validate = function(text, item)
+      if text == "" and item then text = item.text end
       local t = text:lower()
       return t == "tabs" or t == "spaces"
     end
@@ -378,13 +383,23 @@ local function set_indent_size(doc, size)
 end
 
 local function set_indent_size_command(dv)
+  local _, size = dv.doc:get_indent_info()
+  local sizes = {}
+  -- Offer the Settings UI range without limiting custom positive sizes.
+  for value = 1, 10 do sizes[value] = tostring(value) end
+  if not sizes[size] then sizes[#sizes + 1] = tostring(size) end
   core.command_view:enter("Specify indent size for current file", {
-    submit = function(value)
+    restore_state = { text = "", suggestion_id = size },
+    get_suggestion_id = function(item) return tonumber(item.text) end,
+    suggest = function(text) return common.fuzzy_match(sizes, text) end,
+    submit = function(value, item)
+      if value == "" then value = item.text end
       value = math.floor(tonumber(value))
       local doc = dv.doc
       set_indent_size(doc, value)
     end,
-    validate = function(value)
+    validate = function(value, item)
+      if value == "" and item then value = item.text end
       value = tonumber(value)
       return value ~= nil and value >= 1
     end

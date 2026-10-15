@@ -131,25 +131,34 @@ end
 ---Open a commandview to select a charset and executes the given callback,
 ---@param title_label string Title displayed on the commandview
 ---@param callback fun(charset: string)
-function encodings.select_encoding(title_label, callback)
+---@param current_charset? string Encoding to highlight and reveal in the unfiltered list
+function encodings.select_encoding(title_label, callback, current_charset)
+  local has_current_charset = false
+  local labels, charsets = {}, {}
+  for _, item in ipairs(encodings.get_all()) do
+    local label = item.name .. " (" .. item.charset .. ")"
+    labels[#labels + 1], charsets[label] = label, item.charset
+    if item.charset == current_charset then
+      has_current_charset = true
+    end
+  end
+  if current_charset and not has_current_charset then
+    -- Detection can return a charset (such as ASCII) outside the conversion list.
+    labels[#labels + 1], charsets[current_charset] = current_charset, current_charset
+  end
   core.command_view:enter(title_label, {
+    restore_state = { text = "", suggestion_id = current_charset },
+    get_suggestion_id = function(item) return item.charset end,
+    validate = function(_, item) return item ~= nil end,
     submit = function(_, item)
       callback(item.charset)
     end,
     suggest = function(text)
-      local charsets = encodings.get_all()
-      local list_labels = {}
-      local list_charset = {}
-      for _, element in ipairs(charsets) do
-        local label = element.name .. " (" .. element.charset .. ")"
-        table.insert(list_labels, label)
-        list_charset[label] = element.charset
-      end
-      local res = common.fuzzy_match(list_labels, text)
+      local res = common.fuzzy_match(labels, text)
       for i, name in ipairs(res) do
         res[i] = {
           text = name,
-          charset = list_charset[name]
+          charset = charsets[name]
         }
       end
       return res

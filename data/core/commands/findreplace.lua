@@ -11,6 +11,19 @@ local last_view, last_fn, last_text, last_sel
 local case_sensitive = config.find_case_sensitive or false
 local find_regex = config.find_regex or false
 local found_expression
+local remembered_doc = setmetatable({}, { __mode = "v" })
+local remembered_mode
+local find_state, replace_state
+
+---Keep only the most recent document and search mode without retaining the document.
+---@param source core.doc Document for the next find/replace prompt
+local function sync_prompt_context(source)
+  local mode = tostring(case_sensitive) .. ":" .. tostring(find_regex)
+  if remembered_doc[1] ~= source or remembered_mode ~= mode then
+    find_state, replace_state = nil, nil
+  end
+  remembered_doc[1], remembered_mode = source, mode
+end
 
 local function doc()
   local is_DocView = core.active_view:is(DocView) and not core.active_view:is(CommandView)
@@ -56,9 +69,13 @@ end
 
 
 local function find(label, search_fn)
+  if core.command_view:is_open() then return end
   last_view, last_sel = core.active_view,
     { core.active_view.doc:get_selection() }
+  local source = last_view.doc
+  sync_prompt_context(source)
   local text = last_view.doc:get_text(table.unpack(last_sel))
+  local restored = text == "" and find_state or nil
   found_expression = false
 
   core.status_view:show_tooltip(get_find_tooltip())
@@ -67,6 +84,12 @@ local function find(label, search_fn)
     text = text,
     select_text = true,
     show_suggestions = false,
+    restore_state = restored,
+    get_suggestion_id = function(item) return item.text end,
+    on_save_state = function(snapshot, submitted)
+      sync_prompt_context(source)
+      find_state = not submitted and snapshot or nil
+    end,
     submit = function(text, item)
       insert_unique(core.previous_find, text)
       core.status_view:remove_tooltip()
@@ -79,6 +102,7 @@ local function find(label, search_fn)
       end
     end,
     suggest = function(text)
+      text = restored and restored.text or text
       update_preview(last_sel, search_fn, text)
       last_fn, last_text = search_fn, text
       return core.previous_find
@@ -91,40 +115,77 @@ local function find(label, search_fn)
       end
     end
   })
+  if restored and last_text ~= core.command_view:get_text() then
+    last_text = core.command_view:get_text()
+    update_preview(last_sel, search_fn, last_text)
+  end
+  restored = nil
 end
 
 
-local function replace(kind, default, fn)
+local function replace(kind, default, fn, in_selection)
+  if core.command_view:is_open() then return end
+  local source = doc()
+  sync_prompt_context(source)
+  local saved = default == "" and replace_state or nil
+  if saved and (saved.kind ~= kind or saved.in_selection ~= in_selection) then saved = nil end
   core.status_view:show_tooltip(get_find_tooltip())
+
+  ---Open the replacement stage using the current operation's document and callbacks.
+  ---@param old string Search text to replace
+  ---@param snapshot? core.commandview.snapshot Interrupted replacement input
+  local function enter_replacement(old, snapshot)
+    local s = string.format("Replace %s %q With", kind, old)
+    core.command_view:enter(s, {
+      text = old,
+      select_text = true,
+      show_suggestions = false,
+      restore_state = snapshot,
+      get_suggestion_id = function(item) return item.text end,
+      on_save_state = function(state, submitted)
+        sync_prompt_context(source)
+        replace_state = not submitted and {
+          kind = kind, in_selection = in_selection, old = old, snapshot = state
+        } or nil
+      end,
+      submit = function(new)
+        core.status_view:remove_tooltip()
+        insert_unique(core.previous_replace, new)
+        local results = source:replace(function(text)
+          return fn(text, old, new)
+        end)
+        local n = 0
+        for _,v in pairs(results) do
+          n = n + v
+        end
+        core.log("Replaced %d instance(s) of %s %q with %q", n, kind, old, new)
+      end,
+      suggest = function() return core.previous_replace end,
+      cancel = function()
+        core.status_view:remove_tooltip()
+      end
+    })
+  end
+
+  if saved and saved.old then
+    enter_replacement(saved.old, saved.snapshot)
+    return
+  end
   core.command_view:enter("Find To Replace " .. kind, {
     text = default,
     select_text = true,
     show_suggestions = false,
+    restore_state = saved and saved.snapshot or nil,
+    get_suggestion_id = function(item) return item.text end,
+    on_save_state = function(snapshot, submitted)
+      sync_prompt_context(source)
+      replace_state = not submitted and {
+        kind = kind, in_selection = in_selection, snapshot = snapshot
+      } or nil
+    end,
     submit = function(old)
       insert_unique(core.previous_find, old)
-
-      local s = string.format("Replace %s %q With", kind, old)
-      core.command_view:enter(s, {
-        text = old,
-        select_text = true,
-        show_suggestions = false,
-        submit = function(new)
-          core.status_view:remove_tooltip()
-          insert_unique(core.previous_replace, new)
-          local results = doc():replace(function(text)
-            return fn(text, old, new)
-          end)
-          local n = 0
-          for _,v in pairs(results) do
-            n = n + v
-          end
-          core.log("Replaced %d instance(s) of %s %q with %q", n, kind, old, new)
-        end,
-        suggest = function() return core.previous_replace end,
-        cancel = function()
-          core.status_view:remove_tooltip()
-        end
-      })
+      enter_replacement(old)
     end,
     suggest = function() return core.previous_find end,
     cancel = function()
@@ -202,6 +263,7 @@ end
 
 ---@param in_selection? boolean whether to replace in the selections only, or in the whole file.
 local function find_replace(in_selection)
+  if core.command_view:is_open() then return end
   local l1, c1, l2, c2 = doc():get_selection()
   local selected_text = ""
   if not in_selection then
@@ -214,7 +276,7 @@ local function find_replace(in_selection)
     end
     local result, matches = regex.gsub(regex.compile(old, "m"), text, new)
     return result, matches
-  end)
+  end, in_selection)
 end
 
 command.add(has_unique_selection, {

@@ -2,6 +2,7 @@
 local core = require "core"
 local command = require "core.command"
 local translate = require "core.doc.translate"
+local last_delimiter = ""
 
 
 local function gmatch_to_array(text, ptn)
@@ -70,7 +71,11 @@ end
 command.add("core.docview", {
   ["tabularize:tabularize"] = function(dv)
     core.command_view:enter("Tabularize On Delimiter", {
+      text = last_delimiter,
+      select_text = true,
+      on_save_state = function(snapshot) last_delimiter = snapshot.text end,
       submit = function(delim)
+        last_delimiter = delim
         if delim == "" then delim = " " end
 
         local doc = dv.doc

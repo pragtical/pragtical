@@ -1746,6 +1746,39 @@ function projectsearch.hide(options)
   return global_project_search
 end
 
+local prompt_states = {}
+
+---Open a resumable search prompt, scoped to its mode, project set and search path.
+---@param mode "plain"|"regex" Search syntax
+---@param path? string Directory to search instead of all project roots
+local function enter_search_prompt(mode, path)
+  if core.command_view:is_open() then return end
+  local roots = {}
+  for i, project in ipairs(core.projects) do roots[i] = project.path end
+  local context = table.concat(roots, "\0") .. "\0"
+    .. (path and core.root_project():absolute_path(path) or "")
+  local saved = prompt_states[mode]
+  if saved and saved.context ~= context then
+    prompt_states[mode], saved = nil, nil
+  end
+  local text = get_selected_text() or ""
+  core.command_view:enter("Find " .. (mode == "plain" and "Text" or "Regex") .. " In " .. (path or "Project"), {
+    text = text,
+    select_text = true,
+    restore_state = text == "" and saved and saved.snapshot or nil,
+    on_save_state = function(snapshot, submitted)
+      prompt_states[mode] = not submitted and { context = context, snapshot = snapshot } or nil
+    end,
+    submit = function(query)
+      if mode == "plain" then
+        projectsearch.search_plain(query, path, true)
+      else
+        projectsearch.search_regex(query, path, true)
+      end
+    end,
+  })
+end
+
 command.add(nil, {
   ["project-search:find"] = function(path)
     local has_focus = active_view_is_project_search()
@@ -1765,21 +1798,11 @@ command.add(nil, {
   end,
 
   ["project-search:find-plain"] = function(path)
-    core.command_view:enter("Find Text In " .. (path or "Project"), {
-      text = get_selected_text(),
-      select_text = true,
-      submit = function(text)
-        projectsearch.search_plain(text, path, true)
-      end
-    })
+    enter_search_prompt("plain", path)
   end,
 
   ["project-search:find-regex"] = function(path)
-    core.command_view:enter("Find Regex In " .. (path or "Project"), {
-      submit = function(text)
-        projectsearch.search_regex(text, path, true)
-      end
-    })
+    enter_search_prompt("regex", path)
   end,
 })
 

@@ -59,6 +59,7 @@ local coroutine_running = false
 local cache_expiration_time = 0
 local last_indexed_projects = ""
 local active_find_file_label = "Open File From Project"
+local saved_state, saved_projects, saved_label
 
 local function basedir_files()
   local files_return = {}
@@ -106,7 +107,8 @@ local function update_suggestions()
     and
     core.command_view.label == active_find_file_label .. ": "
   then
-    core.command_view:update_suggestions()
+    -- Indexing can reorder results without changing the user's query.
+    core.command_view:restore_state(core.command_view:save_state())
   end
 end
 
@@ -474,6 +476,7 @@ end
 
 command.add(nil, {
   ["core:find-file"] = function(label, selection_callback)
+    if core.command_view:is_open() then return end
     if not coroutine_running then
       if #core.projects > 1 then
         multiple_projects = true
@@ -484,7 +487,7 @@ command.add(nil, {
 
     local current_projects = ""
     for _, project in ipairs(core.projects) do
-      current_projects = current_projects .. project.path .. ":"
+      current_projects = current_projects .. project.path .. "\0"
     end
 
     local base_files, dirs = basedir_files()
@@ -512,7 +515,16 @@ command.add(nil, {
 
     local filter_cache = {}
     active_find_file_label = label or "Open File From Project"
+    if saved_projects ~= current_projects or saved_label ~= active_find_file_label then
+      saved_state = nil
+    end
+    saved_projects, saved_label = current_projects, active_find_file_label
     core.command_view:enter(active_find_file_label, {
+      restore_state = not selection_callback and saved_state or nil,
+      on_save_state = not selection_callback and function(snapshot, submitted)
+        saved_state = not submitted and snapshot or nil
+      end or nil,
+      get_suggestion_id = function(item) return item.text end,
       submit = function(text, suggestion)
         if not suggestion then
           if text == "" then return end

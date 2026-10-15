@@ -36,7 +36,10 @@ end
 ---@field suggestions_offset number Scroll offset for suggestions list
 ---@field suggestions_first integer First visible suggestion index
 ---@field suggestions_last integer Last visible suggestion index
+---@field suggestions_query string Query used to generate the current results
+---@field suggestions_change_id integer Input revision represented by the results or completion
 ---@field suggestions_view core.view Floating companion for suggestion input and scrolling
+---@field restore_suggestion_scroll? { offset: number, target_offset: number } Pending restoration in logical rows
 ---@field reset_suggestion_scroll? boolean Reset scrolling to the first result after new results
 ---@field reveal_suggestion? boolean Reveal keyboard selection on the next companion update
 ---@field last_change_id integer Last document change ID (for detecting updates)
@@ -73,6 +76,9 @@ local noop = function() end
 ---@field show_suggestions boolean Whether to show suggestions box
 ---@field typeahead boolean Whether to enable typeahead completion
 ---@field wrap boolean Whether suggestion cycling wraps around
+---@field restore_state? core.commandview.snapshot Snapshot to restore with this prompt's callbacks
+---@field on_save_state? fun(snapshot: core.commandview.snapshot, submitted: boolean) Called after cleanup and before submit/cancel; submitted means validation passed
+---@field get_suggestion_id? fun(item: table): string|number Stable result identity for restoring a selection after reordering
 local default_state = {
   submit = noop,
   suggest = noop,
@@ -87,6 +93,34 @@ local default_state = {
 }
 
 
+---Reusable prompt data, independent of callbacks, results, documents and animation.
+---Offsets count rows from the first result, regardless of the prompt's placement.
+---@class core.commandview.snapshot
+---@field text string Displayed input text
+---@field query? string Query used to regenerate results; defaults to text
+---@field selections? integer[] Copied flat input selections: line1, col1, line2, col2
+---@field last_selection? integer Active input selection index
+---@field suggestion_idx? integer Selected result index; defaults to the first result
+---@field suggestion_id? string|number Stable identity supplied by get_suggestion_id; missing results restore only the query
+---@field last_text? string Previous input used for typeahead; defaults to text
+---@field save_suggestion? string Original input retained while browsing hidden history
+---@field suggestions_offset? number Current list offset in logical rows; defaults to zero
+---@field suggestions_target_offset? number Target list offset in logical rows; defaults to current
+
+
+---Convert a logical result offset to a clamped pixel scroll in the current placement.
+---@param view core.commandview Prompt owning the list
+---@param offset number Offset in rows from the first result
+---@param height number List viewport height in pixels
+---@return number scroll Pixel scroll offset
+local function suggestion_scroll_from_offset(view, offset, height)
+  local lh = view:get_suggestion_line_height()
+  local maximum = math.max(0, #view.suggestions * lh - height)
+  local scroll = offset * lh
+  return common.clamp(view.display_position == "bottom" and maximum - scroll or scroll, 0, maximum)
+end
+
+
 ---Constructor - initializes the command view.
 function CommandView:new()
   CommandView.super.new(self, SingleLineDoc())
@@ -96,6 +130,8 @@ function CommandView:new()
   self.suggestions_offset = 0
   self.suggestions_first = 1
   self.suggestions_last = 0
+  self.suggestions_query = ""
+  self.suggestions_change_id = 0
   self.last_change_id = 0
   self.last_text = ""
   self.gutter_width = 0
@@ -191,7 +227,12 @@ function CommandView:new()
   overlay.update = function(view)
     local lh = self:get_suggestion_line_height()
     local bottom = self.display_position == "bottom"
-    if self.reset_suggestion_scroll then
+    local restored = self.restore_suggestion_scroll
+    if restored then
+      view.scroll.y = suggestion_scroll_from_offset(self, restored.offset, view.size.y)
+      view.scroll.to.y = suggestion_scroll_from_offset(self, restored.target_offset, view.size.y)
+      self.restore_suggestion_scroll = nil
+    elseif self.reset_suggestion_scroll then
       view.scroll.to.y = bottom and math.max(
         0, view:get_scrollable_size() - view.size.y
       ) or 0
@@ -369,7 +410,9 @@ function CommandView:get_suggestion_scroll(height)
   local maximum = math.max(
     0, #self.suggestions * self:get_suggestion_line_height() - height
   )
-  if self.reset_suggestion_scroll then
+  if self.restore_suggestion_scroll then
+    return suggestion_scroll_from_offset(self, self.restore_suggestion_scroll.offset, height)
+  elseif self.reset_suggestion_scroll then
     return self.display_position == "bottom" and maximum or 0
   end
   return common.clamp(self.suggestions_view.scroll.y, 0, maximum)
@@ -464,10 +507,7 @@ end
 ---Run cancellation after removal so its callback can open a replacement prompt.
 ---@param do_close fun() Continuation that removes the floating prompt
 function CommandView:try_close(do_close)
-  local cancel = self.state.cancel
-  self:exit(true)
-  do_close()
-  cancel(true)
+  self:exit(false, false, do_close)
 end
 
 
@@ -592,6 +632,7 @@ end
 function CommandView:complete()
   if #self.suggestions > 0 and self.suggestions[self.suggestion_idx] then
     self:set_text(self.suggestions[self.suggestion_idx].text)
+    self.suggestions_change_id = self.doc:get_change_id()
   end
 end
 
@@ -609,11 +650,132 @@ function CommandView:submit()
 end
 
 
+---Capture an open prompt without retaining its callbacks, results or input undo history.
+---Pending edits are saved as a fresh query without invoking the suggestion provider.
+---@return core.commandview.snapshot? snapshot Nil when no prompt is open
+function CommandView:save_state()
+  if self.state == default_state then return nil end
+  local text = self:get_text()
+  local change_id = self.doc:get_change_id()
+  local pending = self.last_change_id ~= change_id and self.suggestions_change_id ~= change_id
+  local _, _, _, height = self:get_suggestions_bounds()
+  local scroll = self:get_suggestion_scroll(height)
+  local target = self.reset_suggestion_scroll and scroll or self.suggestions_view.scroll.to.y
+  if self.restore_suggestion_scroll then
+    target = suggestion_scroll_from_offset(self, self.restore_suggestion_scroll.target_offset, height)
+  end
+  target = common.clamp(target, 0, math.max(0, #self.suggestions * self:get_suggestion_line_height() - height))
+  local _, _, offset = self:get_suggestion_range(scroll, height)
+  local _, _, target_offset = self:get_suggestion_range(target, height)
+  local suggestion = not pending and self.suggestions[self.suggestion_idx]
+  local suggestion_id = suggestion and self.state.get_suggestion_id
+    and self.state.get_suggestion_id(suggestion) or nil
+  assert(suggestion_id == nil or type(suggestion_id) == "string" or type(suggestion_id) == "number",
+    "Expected a string or number suggestion ID")
+  return {
+    text = text,
+    query = pending and text or self.suggestions_query,
+    selections = { table.unpack(self.doc.selections) },
+    last_selection = self.doc.last_selection,
+    suggestion_idx = pending and 1 or self.suggestion_idx,
+    suggestion_id = suggestion_id,
+    last_text = self.last_text,
+    save_suggestion = self.save_suggestion,
+    suggestions_offset = pending and 0 or math.max(0, offset),
+    suggestions_target_offset = pending and 0 or math.max(0, target_offset),
+  }
+end
+
+
+---Restore an open prompt using its current provider exactly once, then restore the input.
+---Result indexes and row offsets are clamped to the regenerated list and current viewport.
+---A snapshot containing only text/query starts with the first result and initial scrolling.
+---With get_suggestion_id, reordered results follow their identity and are revealed.
+---If that result is gone, only the query is restored, discarding stale completion text.
+---@param snapshot core.commandview.snapshot Prompt data, never modified by restoration
+---@return boolean restored False when no prompt is open
+function CommandView:restore_state(snapshot)
+  if self.state == default_state then return false end
+  assert(type(snapshot) == "table" and type(snapshot.text) == "string", "Expected a CommandView snapshot with text")
+  assert(snapshot.query == nil or type(snapshot.query) == "string", "Expected a string snapshot query")
+  self:update_suggestions(snapshot.query or snapshot.text)
+  local index = snapshot.suggestion_idx
+  local moved = false
+  if snapshot.suggestion_id ~= nil and self.state.get_suggestion_id then
+    local item = index and self.suggestions[index]
+    if not item or self.state.get_suggestion_id(item) ~= snapshot.suggestion_id then
+      index = nil
+      for i, suggestion in ipairs(self.suggestions) do
+        if self.state.get_suggestion_id(suggestion) == snapshot.suggestion_id then
+          index = i
+          break
+        end
+      end
+    end
+    if not index then
+      -- A removed result must not leave its completed text or old index selected.
+      snapshot = { text = snapshot.query or snapshot.text }
+    else
+      moved = index ~= snapshot.suggestion_idx
+    end
+  end
+  if self:get_text() ~= snapshot.text then self:set_text(snapshot.text) end
+  if snapshot.selections and #snapshot.selections > 0 then
+    self.doc.selections = { table.unpack(snapshot.selections) }
+    self.doc:sanitize_selection()
+    self.doc.last_selection = common.clamp(snapshot.last_selection or 1, 1, #self.doc.selections / 4)
+  else
+    self.doc:set_selection(1, #self:get_text() + 1)
+  end
+  self.suggestion_idx = #self.suggestions > 0
+    and common.clamp(index or 1, 1, #self.suggestions) or 0
+  self.last_text = snapshot.last_text or snapshot.text
+  self.save_suggestion = snapshot.save_suggestion
+  self.last_change_id = self.doc:get_change_id()
+  self.restore_suggestion_scroll = {
+    offset = snapshot.suggestions_offset or 0,
+    target_offset = snapshot.suggestions_target_offset or snapshot.suggestions_offset or 0,
+  }
+  self.reset_suggestion_scroll, self.reveal_suggestion = false, moved
+  local _, _, _, height = self:get_suggestions_bounds()
+  self.suggestions_view.scroll.y = suggestion_scroll_from_offset(self, self.restore_suggestion_scroll.offset, height)
+  self.suggestions_view.scroll.to.y = suggestion_scroll_from_offset(self, self.restore_suggestion_scroll.target_offset, height)
+  core.redraw = true
+  return true
+end
+
+
+---Check whether a prompt is open, including one that has not received focus yet.
+---@return boolean open True until the current prompt exits
+function CommandView:is_open()
+  return self.state ~= default_state
+end
+
+
 ---Enter command mode with a prompt.
 ---Activates the command view with specified label and options.
+---Ignored while another prompt is already open.
+---State recall is opt-in and session-only; callers own snapshots and their context rules.
+---To highlight an initial result without filtering, pass restore_state with empty text
+---and its suggestion_id, and provide get_suggestion_id to identify the results.
 ---@param label string Label text to display (": " will be appended)
 ---@param options core.commandview.state Configuration options for this command session
 ---@overload fun(label: string, submit: function, suggest: function, cancel: function, validate: function)
+---Example: remember a plugin prompt for this editor session.
+---```lua
+---local saved
+---local function open_picker(items)
+---  core.command_view:enter("Pick", {
+---    suggest = function(query) return common.fuzzy_match(items, query) end,
+---    get_suggestion_id = function(item) return item.text end,
+---    restore_state = saved,
+---    on_save_state = function(snapshot, submitted)
+---      saved = not submitted and snapshot or nil
+---    end,
+---    submit = function(text, item) --[[ use the selected item ]] end,
+---  })
+---end
+---```
 function CommandView:enter(label, ...)
   if self.state ~= default_state then
     return
@@ -648,7 +810,11 @@ function CommandView:enter(label, ...)
     self:set_text(text, self.state.select_text)
   end
 
-  self:update_suggestions()
+  if self.state.restore_state then
+    self:restore_state(self.state.restore_state)
+  else
+    self:update_suggestions()
+  end
   self.gutter_text_brightness = 100
   self.label = label .. ": "
   if self.floating then
@@ -664,22 +830,28 @@ end
 ---Restores previous view and calls cancel callback if not submitted.
 ---@param submitted boolean? True if command was submitted, false if cancelled
 ---@param inexplicit boolean? True if exit was automatic (e.g., focus lost)
-function CommandView:exit(submitted, inexplicit)
+---@param do_close fun()? Optional placement removal performed before session callbacks
+function CommandView:exit(submitted, inexplicit, do_close)
+  local state = self.state
+  local snapshot = state.on_save_state and self:save_state()
   if core.active_view == self then
     core.set_active_view(core.last_active_view)
   end
-  local cancel = self.state.cancel
   self.state = default_state
   self.doc:reset()
   self.suggestions = {}
   self.save_suggestion = nil
   self.last_text = ""
+  self.suggestions_query = ""
+  self.restore_suggestion_scroll = nil
   self.suggestions_view:hide_floating()
   if self.floating_visible then
     self.floating_closing = true
     core.root_view:cancel_floating_input(self)
   end
-  if not submitted then cancel(not inexplicit) end
+  if do_close then do_close() end
+  if snapshot then state.on_save_state(snapshot, not not submitted) end
+  if not submitted then state.cancel(not inexplicit) end
 end
 
 
@@ -706,8 +878,10 @@ end
 
 ---Update suggestions list by calling suggest callback.
 ---Normalizes string suggestions to table format {text = string}.
-function CommandView:update_suggestions()
-  local t = self.state.suggest(self:get_text()) or {}
+---@param query string? Query to regenerate instead of the displayed input
+function CommandView:update_suggestions(query)
+  self.suggestions_query = query or self:get_text()
+  local t = self.state.suggest(self.suggestions_query) or {}
   local res = {}
   for i, item in ipairs(t) do
     if type(item) == "string" then
@@ -716,8 +890,10 @@ function CommandView:update_suggestions()
     res[i] = item
   end
   self.suggestions = res
+  self.suggestions_change_id = self.doc:get_change_id()
   self.suggestion_idx = 1
   self.reset_suggestion_scroll = true
+  self.restore_suggestion_scroll = nil
 end
 
 
