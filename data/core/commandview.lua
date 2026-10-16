@@ -54,7 +54,7 @@ end
 ---@field save_suggestion string? Saved suggestion for cycling
 ---@field display_position "bottom"|"top"|"center" Placement retained for the current prompt
 ---@field dock_node? core.node Detached input node reused when returning to a bar placement
----@field center_height number Settled panel height used to keep the opening anchor stable
+---@field center_height number Maximum panel height reserved for stable centered placement
 local CommandView = DocView:extend()
 
 function CommandView:__tostring() return "CommandView" end
@@ -467,7 +467,7 @@ function CommandView:set_floating_bounds(x, y, w, h)
 end
 
 
----Center the panel using its settled height so opening rows keep a stable anchor.
+---Center using the maximum visible result count so filtering keeps the top fixed.
 ---Recompute scale and window limits while retaining the closing panel's anchor.
 function CommandView:update_floating()
   local root = core.root_view
@@ -477,7 +477,8 @@ function CommandView:update_floating()
   local input = math.min(self:get_font():get_height() + style.padding.y * 2,
     math.max(0, height - 2 * border))
   if self.state ~= default_state then
-    local suggestions = self:get_suggestions_height()
+    local suggestions = self.state.show_suggestions
+      and config.max_visible_commands * self:get_suggestion_line_height() or 0
     self.center_height = math.min(
       height,
       input + 2 * border + (suggestions > 0 and suggestions + border or 0)
