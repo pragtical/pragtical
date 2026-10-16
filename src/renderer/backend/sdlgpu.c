@@ -4134,6 +4134,10 @@ static bool gpu_draw_text_batches_to_bridge(
     float v1 = (float) (glyph->src_y - glyph->texture_y0 + clipped.y - dst.y + clipped.h) / (float) glyph->texture_h;
     float color[4];
     gpu_color_to_float(glyph->color, color);
+    if (glyph->format == EGlyphFormatColor) {
+      // Color glyphs already contain premultiplied RGB; apply only text opacity.
+      color[0] = color[1] = color[2] = color[3];
+    }
 
     GpuBatchMaterial material = gpu_text_batch_material(glyph->texture, glyph->format);
     bool overlaps_last = have_last_glyph
