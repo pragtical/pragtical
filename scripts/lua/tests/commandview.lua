@@ -134,6 +134,19 @@ test.describe("commandview floating suggestions", function()
     system.chdir(context.cwd)
   end)
 
+  test.test("centered prompt fully hides after a tiny closing remainder", function()
+    config.commandview_position = "center"
+    local view = core.command_view
+    view:enter("Prompt", {})
+    core.root_view:update()
+    view:exit()
+    -- Floating-point interpolation can stop just short of exact zero.
+    view.size.y = 5.3290705182008e-15
+    view:update()
+    test.equal(view.size.y, 0)
+    test.not_ok(view.floating_visible)
+  end)
+
   test.test("suggestions receive pointer events without replacing prompt focus", function(context)
     local selected
     core.command_view:enter("Pick", {

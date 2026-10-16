@@ -231,7 +231,7 @@ function View:move_towards(t, k, dest, rate, name)
   end
   local val = t[k]
   -- we use epsilon comparison in case dest is inconsistent
-  if math.abs(dest - val) < 1e-8 then return end
+  if math.abs(dest - val) < 1e-8 then t[k] = dest return end
   if not config.transitions or config.disabled_transitions[name] or config.fps < 30 then
     t[k] = dest
   else
