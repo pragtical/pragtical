@@ -639,10 +639,12 @@ test.describe("settings", function()
     test.not_nil(option)
     test.equal(option.type, settings.type.LIST_WIDGETS)
     test.equal(option.filterable, false)
-    test.equal(option.visible_rows, 9)
-    test.equal(#option.items, 9)
+    test.equal(option.visible_rows, 10)
+    test.equal(#option.items, 10)
+    test.equal(option.default.floating, false)
 
     config.disabled_transitions = {
+      floating = false,
       scroll = false,
       commandview = true,
       contextmenu = false,
@@ -655,27 +657,33 @@ test.describe("settings", function()
     local view = settings.show_config("Transition Settings", { option })
     local list = find_child(view, WidgetList)
     test.not_nil(list)
-    test.equal(#list.items, 9)
+    test.equal(#list.items, 10)
 
-    local scroll_toggle
+    local scroll_toggle, floating_toggle
     for _, entry in ipairs(list.items) do
-      if entry.data.key == "scroll" then
+      if entry.data.key == "scroll" or entry.data.key == "floating" then
         for _, child in ipairs(entry.row.childs) do
           if child:is(Toggle) then
-            scroll_toggle = child
+            if entry.data.key == "scroll" then scroll_toggle = child
+            else floating_toggle = child end
             break
           end
         end
       end
     end
     test.not_nil(scroll_toggle)
+    test.not_nil(floating_toggle)
     scroll_toggle:on_change(true)
+    floating_toggle:on_change(true)
 
+    test.equal(config.disabled_transitions.floating, true)
     test.equal(config.disabled_transitions.scroll, true)
     test.equal(config.disabled_transitions.commandview, true)
     test.equal(settings.config.disabled_transitions.scroll, true)
+    test.equal(settings.config.disabled_transitions.floating, true)
 
     local saved = dofile(USERDIR .. "/user_settings.lua")
+    test.equal(saved.config.disabled_transitions.floating, true)
     test.equal(saved.config.disabled_transitions.scroll, true)
     test.equal(saved.config.disabled_transitions.commandview, true)
   end)

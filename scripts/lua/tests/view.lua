@@ -16,18 +16,21 @@ test.describe("floating View", function()
   test.before_each(function(context)
     context.root, context.active, context.last, context.next = core.root_view, core.active_view, core.last_active_view, core.next_active_view
     context.transitions, context.fps, context.config_fps = config.transitions, core.fps, config.fps
+    context.floating_disabled, context.scroll_disabled = config.disabled_transitions.floating, config.disabled_transitions.scroll
     core.root_view = RootView()
     core.root_view.root_node.is_primary_node = true
     core.root_view.size.x, core.root_view.size.y = 500, 400
     core.active_view = core.root_view.root_node.active_view
     config.transitions = false
     core.fps, config.fps = 60, 60
+    config.disabled_transitions.floating, config.disabled_transitions.scroll = false, false
     context.views = {}
   end)
   test.after_each(function(context)
     for _, view in ipairs(context.views) do view:hide_floating() end
     core.root_view, core.active_view, core.last_active_view, core.next_active_view = context.root, context.active, context.last, context.next
     config.transitions, core.fps, config.fps = context.transitions, context.fps, context.config_fps
+    config.disabled_transitions.floating, config.disabled_transitions.scroll = context.floating_disabled, context.scroll_disabled
   end)
 
   test.test("mode is optional and registration is idempotent", function(context)
@@ -188,6 +191,42 @@ test.describe("floating View", function()
       for _ = 1, 120 do core.root_view:update() end
       test.equal(view.floating_visible, false); test.equal(completed, 2)
       test.equal(view.position.x, 40); test.equal(view.position.y, 40)
+    end)
+  end
+
+  for _, setting in ipairs {
+    { title = "global transitions", transitions = false, fps = 60 },
+    { title = "floating slides", transitions = true, fps = 60, floating = true },
+    { title = "low frame rate", transitions = true, fps = 15 },
+    { title = "named transition", transitions = true, fps = 60, name = "scroll" }
+  } do
+    test.test("disabled " .. setting.title .. " completes floating show and hide immediately", function(context)
+      config.transitions, config.fps, core.fps = setting.transitions, setting.fps, setting.fps
+      config.disabled_transitions.floating = setting.floating == true
+      config.disabled_transitions.scroll = setting.name == "scroll"
+      local previous = core.active_view
+      local view = popup(context, { focus = "show", modal = true })
+      local shown, hidden = 0, 0
+      local options = { from = "top", name = setting.name, on_complete = function() shown = shown + 1 end }
+      view:show_floating(options)
+      test.equal(view.position.x, 40)
+      test.equal(view.position.y, 40)
+      test.ok(view.floating_visible)
+      test.is_nil(view.floating_transition)
+      test.is_nil(view.floating_destination)
+      test.equal(shown, 1)
+      test.equal(core.active_view, view)
+      test.equal(options.from, "top")
+      view:hide_floating { to = "top", name = setting.name, on_complete = function() hidden = hidden + 1 end }
+      test.not_ok(view.floating_visible)
+      test.not_ok(view.floating_closing)
+      test.is_nil(view.floating_transition)
+      test.equal(hidden, 1)
+      test.equal(core.active_view, previous)
+      test.is_nil(core.root_view:get_modal_view())
+      core.root_view:update()
+      test.equal(shown, 1)
+      test.equal(hidden, 1)
     end)
   end
 

@@ -296,6 +296,7 @@ settings.add("General",
 )
 
 local disabled_transition_items = {
+  { key = "floating", label = "Floating View Slides" },
   { key = "scroll", label = "Scrolling" },
   { key = "commandview", label = "Command View" },
   { key = "contextmenu", label = "Context Menu" },
@@ -434,6 +435,7 @@ settings.add("Graphics",
       path = "disabled_transitions",
       type = settings.type.LIST_WIDGETS,
       default = {
+        floating = false,
         scroll = false,
         commandview = false,
         contextmenu = false,

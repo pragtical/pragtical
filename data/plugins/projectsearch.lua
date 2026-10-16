@@ -1383,13 +1383,25 @@ function ResultsView:update_floating()
     local root = core.root_view
     local width = math.max(1, math.min(900 * SCALE, root.size.x - style.padding.x * 4))
     local height = math.max(1, math.min(650 * SCALE, root.size.y - style.padding.y * 4))
-    self:set_floating_bounds(
-      root.position.x + (root.size.x - width) / 2,
-      root.position.y + (root.size.y - height) / 2,
-      width, height
-    )
+    local x = root.position.x + (root.size.x - width) / 2
+    local y = root.position.y + (root.size.y - height) / 2
+    if self.floating_transition then
+      self.floating_destination.x, self.floating_destination.y = x, y
+      x, y = self:get_floating_bounds()
+    end
+    self:set_floating_bounds(x, y, width, height)
   end
   ResultsView.super.update_floating(self)
+end
+
+---Slide centered global search down from the top using the core floating transition.
+---@param options? core.view.floating_transition Explicit transition overriding the default slide
+---@return plugins.projectsearch.resultsview view This view
+function ResultsView:show_floating(options)
+  if not options and self.is_global and self.display_position == "center" then
+    options = { from = "top" }
+  end
+  return ResultsView.super.show_floating(self, options)
 end
 
 
@@ -1848,7 +1860,13 @@ local function show_global_project_search(options)
     selection = ""
   end
   if previous_view then view.source_view = previous_view end
-  view:show()
+  if view.display_position ~= "center" and not view:is_visible()
+    and config.transitions and config.fps >= 30
+  then
+    view:show_animated(false, true)
+  else
+    view:show()
+  end
   if options.text == nil and selection ~= "" then view.find_text:set_text(selection) end
   view:apply_options(options, true)
   sync_treeview_visibility(true)
@@ -1907,7 +1925,13 @@ function projectsearch.hide(options)
   local focused = view:owns_view(core.active_view)
   if focused then view:swap_active_child() end
   view.context_menu:hide()
-  view:hide()
+  if view.display_position == "center" then
+    view:hide_floating({ to = "top" })
+  elseif view:is_visible() and config.transitions and config.fps >= 30 then
+    view:hide_animated(false, true)
+  else
+    view:hide()
+  end
   sync_treeview_visibility(false)
   if focused and previous_view then
     local target = previous_view

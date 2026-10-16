@@ -662,6 +662,7 @@ end
 ---Show or raise the view in RootView's floating layer and apply its focus policy.
 ---Requires a view detached from its node and parent container.
 ---Reopening cancels a pending close and its completion callback.
+---Disabled transitions apply placement and run the completion callback immediately.
 ---@param options? core.view.floating_transition Optional opening slide (from) and callback
 ---@return core.view view This view, for chaining
 function View:show_floating(options)
@@ -679,6 +680,8 @@ function View:show_floating(options)
     "Detach the view from its parent before showing it as floating"
   )
   options = options or {}
+  local animate = options.from and config.transitions and config.fps >= 30
+    and not config.disabled_transitions[options.name or "floating"]
   local reopening = self.floating_visible
   local destination = self.floating_destination
   self.floating_transition, self.floating_position = nil, nil
@@ -692,13 +695,13 @@ function View:show_floating(options)
   root:place_floating_view(self)
   local sx, sy = self:get_floating_bounds()
   self.floating_destination = nil
-  if options.from and not reopening then
+  if animate and not reopening then
     local x, y, w, h = self:get_floating_bounds()
     self.floating_destination = { x = x, y = y }
     x, y = slide_position(root, options.from, x, y, w, h)
     self:set_floating_bounds(x, y, w, h)
   end
-  if options.from then
+  if animate then
     self.floating_destination = { x = sx, y = sy }
     self.floating_transition = options
   elseif options.on_complete then
@@ -721,6 +724,7 @@ end
 
 ---Hide the floating view, close owned popups, cancel input, and restore focus.
 ---A closing slide delays removal while the view immediately stops receiving input.
+---Disabled transitions remove the view and run the completion callback immediately.
 ---@param options? core.view.floating_transition Optional closing slide (to) and callback
 ---@return core.view view This view, for chaining
 function View:hide_floating(options)
@@ -729,7 +733,9 @@ function View:hide_floating(options)
   options = options or {}
   local root = core.root_view
   if root then root:cancel_floating_input(self) end
-  if options.to and not self.floating_closing then
+  if options.to and not self.floating_closing and config.transitions and config.fps >= 30
+    and not config.disabled_transitions[options.name or "floating"]
+  then
     local x, y = self:get_floating_bounds()
     self.floating_destination = self.floating_destination or { x = x, y = y }
     self.floating_closing = true

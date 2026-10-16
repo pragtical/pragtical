@@ -400,7 +400,7 @@ function TreeView:update()
     self:move_towards(self.size, "x", dest, nil, "treeview")
     -- round to allow constant positioning of slibing elements on resize
     self.size.x = common.round(self.size.x)
-    if math.abs(dest - self.size.x) < 2 then self.size.x = dest end
+    if math.abs(dest - self.size.x) <= 2 then self.size.x = dest end
   end
 
   if self.size.x == 0 or self.size.y == 0 or not self.visible then return end
