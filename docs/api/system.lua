@@ -154,17 +154,19 @@ function system.get_window_mode(window) end
 function system.set_window_bordered(window, bordered) end
 
 ---
----When then window is run borderless (without system decorations), this
+---When the window is run borderless (without system decorations), this
 ---function allows to set the size of the different regions that allow
 ---for custom window management.
----To disable custom window management, call this function without any
----arguments
+---All dimensions use renderer coordinates. The interactive rectangle receives
+---normal pointer input instead of window dragging; omit it to clear the region.
+---To disable custom window management, call this function with only the window.
 ---
 ---@param window renwindow Target window
 ---@param title_height? number Height of the window decoration
 ---@param controls_width? number Width of window controls (maximize,minimize and close buttons, etc).
 ---@param resize_border? number The amount of pixels reserved for resizing
-function system.set_window_hit_test(window, title_height, controls_width, resize_border) end
+---@param interactive_rect? {x:number, y:number, w:number, h:number} Normal-input region within the title bar
+function system.set_window_hit_test(window, title_height, controls_width, resize_border, interactive_rect) end
 
 ---
 ---Get the size and coordinates of the window.

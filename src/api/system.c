@@ -65,14 +65,22 @@ static void str_tolower(char *p) {
 #define RESIZE_FROM_RIGHT 0
 
 static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *pt, void *data) {
-  const HitTestInfo hit_info = ((RenWindow *)data)->hit_test_info;
-  const int resize_border = hit_info.resize_border;
-  const int controls_width = hit_info.controls_width;
+  const RenWindow *ren = data;
+  const HitTestInfo hit_info = ren->hit_test_info;
+  const float resize_border = hit_info.resize_border / ren->scale_x;
+  const float controls_width = hit_info.controls_width / ren->scale_x;
+  const SDL_FRect rect = hit_info.interactive_rect;
+  /* Keep partially covered logical pixels interactive at fractional densities. */
+  const bool interactive = rect.w > 0 && rect.h > 0
+    && pt->x >= floorf(rect.x / ren->scale_x)
+    && pt->y >= floorf(rect.y / ren->scale_y)
+    && pt->x < ceilf((rect.x + rect.w) / ren->scale_x)
+    && pt->y < ceilf((rect.y + rect.h) / ren->scale_y);
   int w, h;
 
   SDL_GetWindowSize(window, &w, &h);
 
-  if (pt->y < hit_info.title_height &&
+  if (!interactive && pt->y < hit_info.title_height / ren->scale_y &&
     #if RESIZE_FROM_TOP
     pt->y > resize_border &&
     #endif
@@ -612,14 +620,24 @@ static int f_set_window_hit_test(lua_State *L) {
     SDL_SetWindowHitTest(renwin_get_sdl_window(window_renderer), NULL, NULL);
     return 0;
   }
-  float controls_width = luaL_checkinteger(L, 3);
-  float title_height = luaL_checkinteger(L, 2);
-  float resize_border = luaL_checkinteger(L, 4);
-  renwin_convert_coordinates(window_renderer, &controls_width, &title_height, false);
-  renwin_convert_coordinates(window_renderer, &resize_border, NULL, false);
-  window_renderer->hit_test_info.title_height = title_height;
-  window_renderer->hit_test_info.controls_width = controls_width;
-  window_renderer->hit_test_info.resize_border = resize_border;
+  HitTestInfo hit_info = {
+    .title_height = luaL_checknumber(L, 2),
+    .controls_width = luaL_checknumber(L, 3),
+    .resize_border = luaL_checknumber(L, 4)
+  };
+  if (!lua_isnoneornil(L, 5)) {
+    luaL_checktype(L, 5, LUA_TTABLE);
+    lua_getfield(L, 5, "x");
+    hit_info.interactive_rect.x = luaL_checknumber(L, -1);
+    lua_getfield(L, 5, "y");
+    hit_info.interactive_rect.y = luaL_checknumber(L, -1);
+    lua_getfield(L, 5, "w");
+    hit_info.interactive_rect.w = luaL_checknumber(L, -1);
+    lua_getfield(L, 5, "h");
+    hit_info.interactive_rect.h = luaL_checknumber(L, -1);
+    lua_pop(L, 4);
+  }
+  window_renderer->hit_test_info = hit_info;
   SDL_SetWindowHitTest(renwin_get_sdl_window(window_renderer), &hit_test, window_renderer);
   return 0;
 }

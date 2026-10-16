@@ -503,7 +503,7 @@ settings.add("User Interface",
     },
     {
       label = "Show Menu Bar",
-      description = "Show the responsive application menu bar.",
+      description = "Show the application menu bar on the top or inside the title bar in borderless mode.",
       path = "show_menubar",
       type = settings.type.TOGGLE,
       default = false,
@@ -1343,6 +1343,12 @@ local function load_settings()
   -- prioritize this option to prevent plugins from using wrong backend
   if settings.config.dirmonitor_backend then
     config.dirmonitor_backend = settings.config.dirmonitor_backend
+  end
+  -- When performing a core restart the borderless mode gets reset on core.init
+  -- to prevent possible issue of re-introducing system borders we manually set
+  -- this flag from user stored settings.
+  if settings.config.borderless ~= nil then
+    config.borderless = settings.config.borderless
   end
 end
 

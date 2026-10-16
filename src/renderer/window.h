@@ -3,9 +3,11 @@
 #include "renderer/cache.h"
 
 struct HitTestInfo {
-  int title_height;
-  int controls_width;
-  int resize_border;
+  /* Renderer coordinates, converted using the current window density at hit time. */
+  float title_height;
+  float controls_width;
+  float resize_border;
+  SDL_FRect interactive_rect;
 };
 typedef struct HitTestInfo HitTestInfo;
 

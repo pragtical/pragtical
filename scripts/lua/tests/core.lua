@@ -4,6 +4,7 @@ local Node = require "core.node"
 local RootView = require "core.rootview"
 local command = require "core.command"
 local config = require "core.config"
+local common = require "core.common"
 
 local function add_doc(name, dirty, context)
   local doc = {
@@ -128,6 +129,91 @@ test.describe("core project switching", function()
     test.equal(retained.closed, 0)
     test.equal(retained:is_dirty(), true)
   end)
+end)
+
+test.describe("core startup decorations", function()
+  test.before_each(function(c)
+    c.directory = core.temp_filename()
+    test.ok(common.mkdirp(c.directory .. PATHSEP .. "a"))
+    test.ok(common.mkdirp(c.directory .. PATHSEP .. "b"))
+    local file = assert(io.open(c.directory .. PATHSEP .. "init.lua", "w"))
+    file:write([[
+local core = require "core"
+local common = require "core.common"
+local command = require "core.command"
+local config = require "core.config"
+local bordered = not dofile(USERDIR .. PATHSEP .. "user_settings.lua").config.borderless
+-- Saved settings must override an opposite value from the user module,
+-- including an explicitly saved false value.
+config.borderless = bordered
+local requests = {}
+local set_window_bordered = system.set_window_bordered
+system.set_window_bordered = function(window, enabled)
+  requests[#requests + 1] = enabled
+  return set_window_bordered(window, enabled)
+end
+core.add_thread(function()
+  local ok, err = xpcall(function()
+    assert(config.borderless == not bordered, "saved borderless setting was not applied")
+    assert(core.title_view.visible == not bordered, "title visibility disagrees with settings")
+    assert(#requests > 0, "window decorations were not configured")
+    for _, enabled in ipairs(requests) do
+      assert(enabled == bordered, "startup reapplied default window decorations")
+    end
+    local path = USERDIR .. PATHSEP .. "generation"
+    local input = io.open(path, "r")
+    local generation = input and tonumber(input:read("*a")) or 0
+    if input then input:close() end
+    assert(RESTARTED == (generation > 0), "expected a retained window after changing projects")
+    local project = USERDIR .. PATHSEP .. (generation % 2 == 0 and "a" or "b")
+    assert(common.normalize_path(core.root_project().path) == common.normalize_path(project),
+      "Change Project did not select the expected directory")
+    if generation == 2 then core.quit(true); return end
+    local output = assert(io.open(path, "w"))
+    output:write(generation + 1)
+    output:close()
+    assert(command.perform("core:change-project-folder-commandview"))
+    core.command_view:set_text(USERDIR .. PATHSEP .. (generation % 2 == 0 and "b" or "a"))
+    core.command_view:submit()
+    assert(core.restart_request, "Change Project did not restart the runtime")
+  end, debug.traceback)
+  if not ok then
+    io.stdout:write(err, "\n")
+    core.quit(true, 1)
+  end
+end)
+]])
+    file:close()
+  end)
+
+  test.after_each(function(c)
+    if c.process and c.process:running() then
+      c.process:kill()
+      c.process:wait(1000, 0.01)
+    end
+    if c.directory then common.rm(c.directory, true) end
+  end)
+
+  for _, borderless in ipairs { true, false } do
+    test.test("preserves saved borderless=" .. tostring(borderless) .. " across project changes", function(c)
+      local file = assert(io.open(c.directory .. PATHSEP .. "user_settings.lua", "w"))
+      file:write("return { config = { borderless = ", tostring(borderless),
+        ", auto_fps = false, fps = 60 } }")
+      file:close()
+      c.process = assert(process.start({ EXEFILE, c.directory .. PATHSEP .. "a" }, {
+        stdout = process.REDIRECT_PIPE,
+        stderr = process.REDIRECT_STDOUT,
+        env = {
+          PRAGTICAL_USERDIR = c.directory, PRAGTICAL_SCALE = "1",
+          PRAGTICAL_RENDERER = "surface",
+          SDL_VIDEO_DRIVER = "dummy", SDL_AUDIO_DRIVER = "dummy"
+        }
+      }))
+      local status = c.process:wait(15000, 0.01)
+      local output = c.process:read_stdout() or ""
+      test.equal(status, 0, "project-change subprocess failed: " .. output)
+    end)
+  end
 end)
 
 test.describe("core window state", function()
