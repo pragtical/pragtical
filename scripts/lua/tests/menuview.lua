@@ -12,6 +12,16 @@ local style = require "core.style"
 
 local menu_modifier = PLATFORM == "Mac OS X" and "left option" or "left alt"
 
+---Track an independent menu so its popups are removed before restoring the root.
+---@param context table Current test context
+---@param items core.contextmenu.item[] Initial independent entries
+---@return core.menuview menu Independent menu
+local function independent_menu(context, items)
+  local menu = MenuView(items)
+  context.menus[#context.menus + 1] = menu
+  return menu
+end
+
 test.describe("application menu", function()
   test.before_each(function(context)
     context.root, context.active, context.last, context.next, context.bar = core.root_view, core.active_view, core.last_active_view, core.next_active_view, core.menu_view
@@ -35,9 +45,11 @@ test.describe("application menu", function()
     core.root_view:update()
     context.handles = {}
     context.commands = {}
+    context.menus = {}
   end)
   test.after_each(function(context)
     core.menu_view.menu:hide()
+    for _, menu in ipairs(context.menus) do menu:hide() end
     for _, handle in ipairs(context.handles) do core.menu_view:unregister(handle) end
     for _, entry in ipairs(context.commands) do command.map[entry.name] = entry.previous end
     core.root_view, core.active_view, core.last_active_view, core.next_active_view, core.menu_view = context.root, context.active, context.last, context.next, context.bar
@@ -54,6 +66,204 @@ test.describe("application menu", function()
       keymap.map[binding.stroke] = binding.commands
       keymap.reverse_map["menu-bar:open"] = binding.shortcuts
     end
+  end)
+
+  test.test("independent menus keep entries, visibility, and caches separate", function(context)
+    local first = independent_menu(context, { { id = "first", text = "First", items = {} } })
+    local second = independent_menu(context, {})
+    test.not_ok(first.application_menu)
+    test.is_nil(first.defaults)
+    test.ok(first.visible)
+    test.equal(#first.items, 1)
+    test.equal(#second.items, 0)
+    test.ok(core.menu_view.application_menu)
+    local entries = first:entries()
+    second:register({}, { { id = "second", text = "Second", items = {} } })
+    test.equal(first:entries(), entries)
+    test.equal(first.items[1].id, "first")
+    test.equal(second.items[1].id, "second")
+    first:hide()
+    test.not_ok(first.visible)
+    test.ok(second.visible)
+    test.ok(config.show_menubar)
+    config.show_menubar = false
+    second:update()
+    test.ok(second.visible)
+    first:show()
+    test.ok(first.visible)
+    test.not_ok(config.show_menubar)
+    second:toggle()
+    test.not_ok(second.visible)
+    test.ok(first.visible)
+    test.not_ok(config.show_menubar)
+  end)
+
+  test.test("explicit bounds drive drawing and popup anchors without refreshing callbacks", function(context)
+    local calls = 0
+    local menu = independent_menu(context, {
+      { id = "local", text = "Local", items = { { id = "run", text = "Run", command = function() end } },
+        visible = function() calls = calls + 1; return true end }
+    })
+    menu.position.x, menu.position.y, menu.size.x = 700, 500, 800
+    menu:set_bounds(40.5, 55.25, 300, 32)
+    test.equal(calls, 0)
+    test.equal(menu.position.x, 700)
+    test.equal(menu.position.y, 500)
+    menu:update()
+    test.equal(calls, 1)
+    local x, y, width, height = menu:get_bounds()
+    test.equal(x, 40.5)
+    test.equal(y, 55.25)
+    test.equal(height, 32)
+    test.ok(width > 0 and width <= 300)
+    test.equal(menu.size.y, 0)
+    test.not_ok(menu:hit_test(701, 501))
+    test.equal(menu:label_at(x + 1, y + 1), 1)
+    local text_x, text_y
+    common.draw_text = function(font, color, text, align, bx, by, w, h)
+      if text == "Local" then text_x, text_y = bx, by end
+      return context.draw_text(font, color, text, align, bx, by, w, h)
+    end
+    renderer.begin_frame(core.window); menu:draw(); renderer.end_frame()
+    test.equal(text_x, x)
+    test.equal(text_y, y)
+    menu:open(1)
+    test.equal(calls, 2)
+    local inline_width = menu.inline_width
+    menu:set_bounds(130, 160, 300, 32)
+    test.equal(calls, 2)
+    test.equal(menu.inline_width, inline_width)
+    test.ok(menu.menu.show_context_menu)
+    local anchor = menu.menu.floating_options.anchor.target()
+    test.equal(anchor.x, 130)
+    test.equal(anchor.y + anchor.h, 192)
+    test.not_ok(menu:hit_test(x + 1, y + 1))
+    test.equal(menu:label_at(131, 161), 1)
+    menu:hide()
+    test.not_ok(menu.menu.show_context_menu)
+    test.ok(config.show_menubar)
+  end)
+
+  test.test("a plain view can host menus and forward pointer and keyboard navigation", function(context)
+    local performed = 0
+    local menu = independent_menu(context, {
+      { id = "first", text = "First", items = {
+        { id = "nested", text = "Nested", items = {
+          { id = "run", text = "Run", command = function() performed = performed + 1 end }
+        } }
+      } },
+      { id = "second", text = "Second", items = { { id = "other", text = "Other", command = function() end } } }
+    })
+    local host = View()
+    ---Place and update the independently owned menu once per host update.
+    function host:update()
+      menu:set_bounds(self.position.x + 35, self.position.y + 15, 300, 30)
+      menu:update()
+    end
+    ---Refresh final geometry before painting the hosted labels.
+    function host:draw()
+      menu:set_bounds(self.position.x + 35, self.position.y + 15, 300, 30)
+      menu:draw()
+    end
+    ---Forward presses inside the menu while retaining normal host content input.
+    function host:on_mouse_pressed(button, x, y, clicks)
+      if menu:hit_test(x, y) then return menu:on_mouse_pressed(button, x, y, clicks) end
+      return View.on_mouse_pressed(self, button, x, y, clicks)
+    end
+    ---Forward movement so labels can switch and clear hover.
+    function host:on_mouse_moved(...) menu:on_mouse_moved(...) end
+    ---Clear label hover when the pointer leaves the host.
+    function host:on_mouse_left() menu:on_mouse_left() end
+    core.root_view:get_primary_node():add_view(host)
+    core.root_view:update(); core.root_view:update()
+    renderer.begin_frame(core.window); core.root_view:draw(); renderer.end_frame()
+    local x, y = menu:get_bounds()
+    core.root_view:on_mouse_moved(x + 1, y + 1, 0, 0)
+    core.root_view:on_mouse_pressed("left", x + 1, y + 1, 1)
+    core.root_view:on_mouse_released("left", x + 1, y + 1)
+    test.ok(menu.menu.show_context_menu)
+    test.equal(core.active_view, host)
+    core.on_event("keypressed", "down")
+    core.on_event("keypressed", "right")
+    test.ok(menu.menu.child_menu.show_context_menu)
+    core.on_event("keypressed", "return")
+    test.equal(performed, 1)
+    test.not_ok(menu.menu.show_context_menu)
+    test.equal(core.active_view, host)
+    menu:open(1)
+    for index, _, bx in menu:each_label() do
+      if index == 2 then core.root_view:on_mouse_moved(bx + 1, y + 1, 0, 0) end
+    end
+    test.equal(menu.active_menu, 2)
+    core.root_view:on_mouse_pressed("left", 850, 550, 1)
+    core.root_view:on_mouse_released("left", 850, 550)
+    test.not_ok(menu.menu.show_context_menu)
+  end)
+
+  test.test("bounds resizing uses cached compact layout and zero sizes retain explicit bounds", function(context)
+    local menu = independent_menu(context, {
+      { id = "first", text = "First", items = { { id = "run", text = "Run", command = function() end } } },
+      { id = "second", text = "Second", items = {} }
+    })
+    menu:set_bounds(50, 80, 300, 30); menu:update(); menu:open(1)
+    local layout = menu.label_layout
+    menu:set_bounds(60, 90, 30, 30)
+    test.ok(menu.compact)
+    test.not_ok(menu.menu.show_context_menu)
+    test.equal(menu.label_layout, layout)
+    local _, _, width = menu:get_bounds()
+    test.equal(width, 30)
+    test.equal(menu:label_at(61, 91), 0)
+    for _, size in ipairs { { 0, 30 }, { 30, 0 }, { 0, 0 } } do
+      menu:set_bounds(60, 90, size[1], size[2]); menu:update()
+      test.ok(menu.bounds)
+      test.equal(menu.size.y, 0)
+      test.not_ok(menu:hit_test(60, 90))
+    end
+    menu:set_bounds(60, 90, 300, 30); menu:update(); menu:open(1)
+    menu:set_bounds()
+    test.is_nil(menu.bounds)
+    test.not_ok(menu.menu.show_context_menu)
+    menu.size.x = 300; menu:update()
+    test.equal(menu.size.y, style.font:get_height() + style.padding.y * 2)
+    menu:set_bounds(70, 100, 300, 30); menu:update()
+    test.equal(menu.size.y, 0)
+    test.ok(menu.inline_width > 0)
+  end)
+
+  test.test("width transitions finish before the hidden fast path and idle bounds do not redraw", function(context)
+    local calls = 0
+    local menu = independent_menu(context, {
+      { id = "local", text = "Local", items = {}, visible = function() calls = calls + 1; return true end }
+    })
+    menu:set_bounds(20, 40, 300, 30); menu:update()
+    local width, layout, bounds = menu.inline_width, menu.label_layout, menu.bounds
+    local redraw = core.redraw
+    core.redraw = false
+    menu:set_bounds(20, 40, 300, 30); menu:update()
+    test.not_ok(core.redraw)
+    core.redraw = redraw
+    test.equal(menu.label_layout, layout)
+    test.equal(menu.bounds, bounds)
+    test.equal(calls, 1)
+    config.transitions, config.animation_type = true, "lerp"
+    config.disabled_transitions.menubar = false
+    core.fps, config.fps, config.animation_rate = 60, 60, 1
+    menu:hide(); menu:update()
+    test.ok(menu.inline_width > 0 and menu.inline_width < width)
+    for _ = 1, 60 do menu:update() end
+    test.equal(menu.inline_width, 0)
+    local hidden_calls = 0
+    menu:register({}, { { id = "hidden", text = "Hidden", items = {},
+      visible = function() hidden_calls = hidden_calls + 1; return true end } })
+    for _ = 1, 5 do menu:update() end
+    test.equal(hidden_calls, 0)
+    menu:show(); menu:update()
+    test.equal(hidden_calls, 1)
+    test.ok(menu.inline_width > 0)
+    for _ = 1, 60 do menu:update() end
+    menu:hide(); menu:update(); menu:show(); menu:update()
+    test.ok(menu.inline_width > 0)
   end)
 
   for _, transitions in ipairs { false, true } do

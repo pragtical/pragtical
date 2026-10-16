@@ -12,35 +12,59 @@ local ContextMenu = require "core.contextmenu"
 ---@field name? string Plugin name used to replace a previous contribution
 ---@field removed? boolean Whether unregister() has already removed the entries
 
----Responsive application menu bar with an instance-owned plugin registry.
+---Responsive menu bar with an instance-owned registry and optional explicit bounds.
 ---@class core.menuview : core.view
----@overload fun():core.menuview
----@field items core.contextmenu.item[] Application menu registrations
+---@overload fun(items?:core.contextmenu.item[]):core.menuview
+---@field application_menu boolean Whether application defaults and visibility settings are used
+---@field items core.contextmenu.item[] Menu registrations
 ---@field revision integer Registration revision for cache invalidation
 ---@field registrations table<string, core.menuview.registration> Named plugin registrations
 ---@field defaults? core.menuview.registration Core command registration
 ---@field menu core.contextmenu Popup used to display the active menu group
----@field visible boolean Requested bar visibility, synchronized with config.show_menubar
+---@field visible boolean Requested bar visibility; application menus synchronize with config.show_menubar
 ---@field compact? boolean Whether the bar uses one Menu label because groups do not fit
 ---@field active_menu? integer Open top-level group index, or 0 for the combined menu
 ---@field hovered? integer Hovered label index, or 0 for the compact label
 ---@field menu_entries? core.contextmenu.item[] Cached visible top-level entries
 ---@field entries_revision? integer Registry revision used by the visibility cache
 ---@field registry_revision? integer Registry revision last applied to the bar layout
+---@field bounds? {x:number, y:number, w:number, h:number} Available explicit rectangle; nil uses node layout
+---@field inline_width number Animated width occupied inside the explicit rectangle
+---@field label_layout? core.menuview.label_layout Cached label measurements
 local MenuView = View:extend()
+
+---Measurements shared by layout, drawing, and pointer input.
+---@class core.menuview.label_layout
+---@field entries core.contextmenu.item[] Measured top-level entries
+---@field font renderer.font Measured font
+---@field font_size number Measured font size
+---@field padding number Horizontal label padding
+---@field widths number[] Padded group widths
+---@field width number Total group width
+---@field compact_width number Padded width of the compact Menu label
 
 ---Separator sentinel shared with ContextMenu for plugin registrations.
 MenuView.DIVIDER = ContextMenu.DIVIDER
 
----Initialize this bar's registry, default commands, popup, and configured visibility.
-function MenuView:new()
+---Create an application menu, or an independent menu when an item array is supplied.
+---Independent menus start visible; pass an empty array to register entries later.
+---Entries use the same stable IDs and validation as register().
+---@param items? core.contextmenu.item[] Independent entries; omit for application defaults and settings
+function MenuView:new(items)
   MenuView.super.new(self)
   self.items = {}
   self.registrations = {}
   self.revision = 0
-  self:add_defaults()
-  self.visible = config.show_menubar
+  self.application_menu = items == nil
+  if self.application_menu then
+    self:add_defaults()
+    self.visible = config.show_menubar
+  else
+    self:register({}, items)
+    self.visible = true
+  end
   self.menu = ContextMenu()
+  self.inline_width = 0
 end
 
 ---Resolve a registration path of stable IDs to the destination child array.
@@ -358,32 +382,101 @@ function MenuView:add_defaults()
   })
 end
 
----Keep the editor's keyboard focus when clicking the application menu bar.
+---Keep the editor's keyboard focus when clicking the menu bar.
 ---@return nil target The bar never takes focus
 function MenuView:get_focus_target()
   return nil
 end
 
----Show the bar using its slide animation and enable its visibility setting.
+---Show the bar using its slide animation and update application settings if used.
 function MenuView:show()
   self.visible = true
-  config.show_menubar = true
+  if self.application_menu then config.show_menubar = true end
 end
 
----Close the popup and slide the bar away, disabling its visibility setting.
+---Close the popup and slide the bar away, updating application settings if used.
 function MenuView:hide()
   self.menu:hide()
   self.hovered = nil
-  self.visible, config.show_menubar = false, false
+  self.visible = false
+  if self.application_menu then config.show_menubar = false end
 end
 
----Toggle the bar's requested visibility and its corresponding config setting.
+---Toggle this bar's visibility.
 function MenuView:toggle()
   if self.visible then
     self:hide()
   else
     self:show()
   end
+end
+
+---Set the menu's available rectangle in screen coordinates.
+---Omit all arguments to resume automatic node layout. Zero sizes retain explicit bounds.
+---The host forwards pointer events and hides the menu when hiding or removing it.
+---Update the menu once per frame, through its node or the host, and draw it in the
+---host. Refresh bounds before drawing if node layout moved or resized the host.
+---Bounds changes do not advance animation or refresh menu callbacks.
+---Example inside a host view using an independent menu:
+---```lua
+---function MyView:new()
+---  MyView.super.new(self)
+---  self.menu = MenuView({ { id = "tools", text = "Tools", items = {} } })
+---end
+---function MyView:update()
+---  self.menu:set_bounds(self.position.x, self.position.y, self.size.x, 30 * SCALE)
+---  self.menu:update()
+---end
+---function MyView:draw()
+---  self.menu:set_bounds(self.position.x, self.position.y, self.size.x, 30 * SCALE)
+---  self.menu:draw()
+---end
+---function MyView:on_mouse_pressed(button, x, y, clicks)
+---  if self.menu:hit_test(x, y) then return self.menu:on_mouse_pressed(button, x, y, clicks) end
+---  return MyView.super.on_mouse_pressed(self, button, x, y, clicks)
+---end
+---function MyView:on_mouse_moved(...) self.menu:on_mouse_moved(...) end
+---function MyView:on_mouse_left() self.menu:on_mouse_left() end
+--- -- Call self.menu:hide() when hiding or removing MyView.
+---```
+---@param x? number Left edge; omit to resume automatic node layout
+---@param y? number Top edge, required when x is supplied
+---@param width? number Available width, required when x is supplied
+---@param height? number Available height, required when x is supplied
+function MenuView:set_bounds(x, y, width, height)
+  local explicit = x ~= nil
+  local bounds = self.bounds
+  if explicit then
+    width, height = math.max(0, width), math.max(0, height)
+    if bounds and bounds.x == x and bounds.y == y
+      and bounds.w == width and bounds.h == height
+    then return end
+  elseif not bounds then
+    return
+  end
+  if explicit ~= (bounds ~= nil) then
+    self.menu:hide()
+    self.hovered = nil
+    self.inline_width, self.size.y = 0, 0
+    self.move_data_inline_width, self.size.move_data_y = nil, nil
+  end
+  if explicit then
+    bounds = bounds or {}
+    bounds.x, bounds.y, bounds.w, bounds.h = x, y, width, height
+    self.bounds = bounds
+    -- Reflow cached labels after layout without reevaluating entry callbacks.
+    if self.label_layout then
+      local compact = self.label_layout.width > width
+      if compact ~= self.compact then
+        self.menu:hide()
+        self.hovered = nil
+        self.compact = compact
+      end
+    end
+  else
+    self.bounds = nil
+  end
+  core.redraw = true
 end
 
 ---Get visible top-level groups, cached until registration changes or opening refreshes.
@@ -409,19 +502,68 @@ function MenuView:entries(refresh)
   return items
 end
 
+---Measure labels only when their entries, font, or padding changes.
+---@return core.menuview.label_layout layout Cached padded widths
+function MenuView:measure_labels()
+  local entries = self:entries()
+  local layout = self.label_layout
+  local font_size = style.font:get_size()
+  if not layout or layout.entries ~= entries or layout.font ~= style.font
+    or layout.font_size ~= font_size or layout.padding ~= style.padding.x
+  then
+    layout = {
+      entries = entries, font = style.font, font_size = font_size,
+      padding = style.padding.x, widths = {}, width = 0,
+      compact_width = style.font:get_width("Menu") + style.padding.x * 2
+    }
+    for i, item in ipairs(entries) do
+      local width = style.font:get_width(item.text) + style.padding.x * 2
+      layout.widths[i] = width
+      layout.width = layout.width + width
+    end
+    self.label_layout = layout
+  end
+  return layout
+end
+
+---Get the displayed menu rectangle using explicit bounds or node layout.
+---Its occupied width may be smaller than set_bounds() allows, including during animation.
+---@return number x Screen x coordinate
+---@return number y Screen y coordinate
+---@return number width Visible width, clipped during a width transition
+---@return number height Visible height
+function MenuView:get_bounds()
+  local bounds = self.bounds
+  if bounds then
+    return bounds.x, bounds.y, math.min(self.inline_width, bounds.w), bounds.h
+  end
+  return self.position.x, self.position.y, self.size.x, self.size.y
+end
+
+---Test the displayed bar rectangle, including explicit bounds and visibility.
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean inside Whether the point lies in the visible bar
+function MenuView:hit_test(x, y)
+  local bx, by, width, height = self:get_bounds()
+  return self.visible and x >= bx and y >= by
+    and x < bx + width and y < by + height
+end
+
 ---Iterate bar labels with their screen x coordinates and padded widths.
 ---@return fun():integer, string, number, number iterator Yields index, label, x, width; compact index is 0
 function MenuView:each_label()
-  local x = self.position.x
+  local x = self:get_bounds()
+  local layout = self:measure_labels()
   return coroutine.wrap(function()
     if self.compact then
       coroutine.yield(
         0, "Menu", x,
-        style.font:get_width("Menu") + style.padding.x * 2
+        layout.compact_width
       )
     else
-      for i, item in ipairs(self:entries()) do
-        local width = style.font:get_width(item.text) + style.padding.x * 2
+      for i, item in ipairs(layout.entries) do
+        local width = layout.widths[i]
         coroutine.yield(i, item.text, x, width)
         x = x + width
       end
@@ -434,12 +576,7 @@ end
 ---@param y number Screen y coordinate
 ---@return integer? index Label index, 0 for the compact label, or nil outside the bar
 function MenuView:label_at(x, y)
-  if not self.visible then
-    return
-  end
-  if y < self.position.y or y >= self.position.y + self.size.y then
-    return
-  end
+  if not self:hit_test(x, y) then return end
   for i, _, bx, width in self:each_label() do
     if x >= bx and x < bx + width then return i end
   end
@@ -454,18 +591,22 @@ function MenuView:open(index)
   if self.menu.show_context_menu then self.menu:hide() end
   index = index or ((self.compact or not self.visible) and 0 or 1)
   local item = entries[index]
-  local x = self.position.x
+  local x, y, _, height = self:get_bounds()
   for i, _, bx in self:each_label() do if i == index then x = bx end end
   self.active_menu = index
   self.menu:show_items(
     index == 0 and entries or item.items or { item },
-    x, self.position.y + self.size.y,
+    x, y + height,
     {
       disabled = true,
       owner = self,
       anchor = {
         target = function()
-          return { x = x, y = self.position.y, w = 0, h = self.size.y }
+          local bx, by, _, bh = self:get_bounds()
+          for i, _, label_x in self:each_label() do
+            if i == index then bx = label_x; break end
+          end
+          return { x = bx, y = by, w = 0, h = bh }
         end,
         side = "bottom"
       }
@@ -479,7 +620,7 @@ function MenuView:open(index)
   end
 end
 
----Keep keyboard-opened application popups available while the bar itself is hidden.
+---Keep explicitly opened popups available while the bar itself is hidden.
 ---@return boolean visible Always true
 function MenuView:is_floating_owner_visible()
   return true
@@ -528,41 +669,35 @@ end
 ---Animate visibility and select compact layout when groups exceed available width.
 ---Closes stale popups after registry or layout changes without rebuilding rows.
 function MenuView:update()
-  self.visible = config.show_menubar
-  -- update only if size needs changing
-  if not self.visible and self.size.y <= 0 then return end
-  local height = self.visible
-    and style.font:get_height() + style.padding.y * 2
-    or 0
-  if self.visible and self.size.y == height then
-    if
-      self.prev_size
-      and self.prev_size.x == self.size.x
-      and self.prev_size.y == self.size.y
-      and self.prev_size.scale == SCALE
-      and self.registry_revision == self.revision
-    then
-      return
+  if self.application_menu then
+    if self.visible and not config.show_menubar then
+      self.menu:hide()
+      self.hovered = nil
     end
+    self.visible = config.show_menubar
   end
-  -- regular update routine
-  self:move_towards(self.size, "y", height, nil, "menubar")
-  local width = 0
-  for _, item in ipairs(self:entries()) do
-    width = width + style.font:get_width(item.text) + style.padding.x * 2
-  end
-  local compact = width > self.size.x
-  if compact ~= self.compact or self.registry_revision ~= self.revision then
-    self.menu:hide()
-  end
+  if not self.visible and self.size.y <= 0 and self.inline_width <= 0 then return end
+  local layout = self:measure_labels()
+  local width = self.bounds and self.bounds.w or self.size.x
+  local compact = layout.width > width
+  if compact ~= self.compact or self.registry_revision ~= self.revision then self.menu:hide() end
   self.compact, self.registry_revision = compact, self.revision
-  self.prev_size = {x = self.size.x, y = self.size.y, scale = SCALE}
+  if self.bounds then
+    self.size.y = 0
+    local target = self.visible and math.min(width, compact and layout.compact_width or layout.width) or 0
+    self:move_towards("inline_width", target, nil, "menubar")
+  else
+    local height = self.visible and style.font:get_height() + style.padding.y * 2 or 0
+    self:move_towards(self.size, "y", height, nil, "menubar")
+  end
 end
 
----Draw the bar and label highlights while its animated height remains positive.
+---Draw labels within the standalone row or the host's animated inline bounds.
 function MenuView:draw()
-  if self.size.y <= 0 then return end
-  self:draw_background(style.background2)
+  local bx, by, bw, bh = self:get_bounds()
+  if bw <= 0 or bh <= 0 then return end
+  core.push_clip_rect(bx, by, bw, bh)
+  renderer.draw_rect(bx, by, bw, bh, style.background2)
   for i, text, x, width in self:each_label() do
     if
       i == self.hovered
@@ -570,18 +705,19 @@ function MenuView:draw()
       and i == self.active_menu
     then
       renderer.draw_rect(
-        x, self.position.y,
-        width, self.size.y,
+        x, by,
+        width, bh,
         style.selection
       )
     end
     common.draw_text(
       style.font, style.text,
       text, "center",
-      x, self.position.y,
-      width, self.size.y
+      x, by,
+      width, bh
     )
   end
+  core.pop_clip_rect()
 end
 
 return MenuView
