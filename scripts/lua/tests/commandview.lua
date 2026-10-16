@@ -256,9 +256,9 @@ test.describe("commandview floating suggestions", function()
         test.ok(view.floating_visible)
         test.equal(context.view.position.y, original_y)
         test.equal(context.view.size.y, original_height)
-        local x, y, w, h = view:get_floating_bounds()
+        local x, y, w = view:get_floating_bounds()
         test.near(x + w / 2, root.position.x + root.size.x / 2, 0.01)
-        test.near(y + h / 2, root.position.y + root.size.y / 2, 0.01)
+        test.near(y + view.center_height / 2, root.position.y + root.size.y / 2, 0.01)
       elseif position == "top" then
         test.ok(root.root_node:get_node_for_view(view).locked.y)
         test.near(view.position.y, core.menu_view.position.y + core.menu_view.size.y + style.divider_size, 0.01)
@@ -545,6 +545,52 @@ test.describe("commandview floating suggestions", function()
     end)
   end
 
+  for _, transitions in ipairs { false, true } do
+    test.test("centered top stays fixed while filtering with transitions " .. tostring(transitions), function(context)
+      local root, view = core.root_view, core.command_view
+      config.commandview_position = "center"
+      config.transitions, config.animation_type = transitions, "linear"
+      config.disabled_transitions.commandview = false
+      core.fps, config.fps = 60, 60
+      patch(context, config, "max_visible_commands", 5)
+      local counts = { empty = 0, one = 1, many = 12, few = 3 }
+      view:enter("Pick", {
+        text = "empty",
+        suggest = function(query)
+          local items = {}
+          for i = 1, counts[query] or 0 do items[i] = "entry " .. i end
+          return items
+        end
+      })
+      local top = view.position.y
+      local heights = {}
+      for _, query in ipairs { "empty", "one", "many", "few", "empty", "many" } do
+        view:set_text(query)
+        for _ = 1, 45 do
+          root:update()
+          test.near(view.position.y, top, 0.001)
+        end
+        local _, _, _, height = view:get_floating_bounds()
+        heights[query] = height
+        test.equal(#view.suggestions, counts[query])
+        test.equal(not not view.suggestions_view.floating_visible, counts[query] > 0)
+        if counts[query] >= config.max_visible_commands then
+          test.near(top - style.divider_size + height / 2,
+            root.position.y + root.size.y / 2, 0.01)
+        end
+      end
+      test.ok(heights.empty < heights.one)
+      test.ok(heights.one < heights.few)
+      test.ok(heights.few < heights.many)
+      view:exit()
+      for _ = 1, 45 do
+        root:update()
+        test.near(view.position.y, top, 0.001)
+      end
+      test.not_ok(view.floating_visible)
+    end)
+  end
+
   test.test("centered prompts resize and reposition while the UI scale changes", function(context)
     save_scale_metrics(context)
     local root, view = core.root_view, core.command_view
@@ -554,19 +600,19 @@ test.describe("commandview floating suggestions", function()
     for _, factor in ipairs { 1, 1.3, 1.5, 1 } do
       scale.set(factor)
       root:update(); root:update()
-      local x, y, w, h = view:get_floating_bounds()
+      local x, y, w = view:get_floating_bounds()
       test.near(w, 800 * factor, 0.01)
       test.near(x + w / 2, root.size.x / 2, 0.01)
-      test.near(y + h / 2, root.size.y / 2, 0.01)
+      test.near(y + view.center_height / 2, root.size.y / 2, 0.01)
       test.equal(core.active_view, view)
       test.equal(#root.floating_views, 2)
     end
     root.size.x, root.size.y = 350, 200
     root:update(); root:update()
-    local x, y, w, h = view:get_floating_bounds()
+    local x, y, w = view:get_floating_bounds()
     test.near(w, root.size.x - 2 * style.padding.x, 0.01)
     test.near(x + w / 2, root.size.x / 2, 0.01)
-    test.near(y + h / 2, root.size.y / 2, 0.01)
+    test.near(y + view.center_height / 2, root.size.y / 2, 0.01)
   end)
 
   test.test("centered palette renders a border around both input and results", function()
@@ -588,8 +634,9 @@ test.describe("commandview floating suggestions", function()
       { x, y + h * 0.8 }, { x + w - 1, y + h * 0.8 }
     }
     for _, point in ipairs(points) do
-      test.same({ frame:get_pixels(math.floor(point[1]), math.floor(point[2]), 1, 1):byte(1, 3) },
-        { style.dim[1], style.dim[2], style.dim[3] })
+      test.same({ frame:get_pixels(common.round(point[1]), common.round(point[2]), 1, 1):byte(1, 3) },
+        { style.dim[1], style.dim[2], style.dim[3] },
+        string.format("border at %.2f, %.2f in a %dx%d window", point[1], point[2], width, height))
     end
   end)
 
