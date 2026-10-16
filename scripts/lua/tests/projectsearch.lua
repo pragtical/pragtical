@@ -251,6 +251,8 @@ test.describe("projectsearch", function()
     context.old_live_search = config.plugins.projectsearch.live_search
     context.old_workers = config.plugins.projectsearch.threading.workers
     context.old_transitions = config.transitions
+    context.old_animation_type, context.old_animation_rate = config.animation_type, config.animation_rate
+    context.old_fps, context.old_core_fps = config.fps, core.fps
     context.old_tree_visible = treeview.visible
     context.old_toolbar_position = treeview.toolbar_position
     context.root_size = { x = core.root_view.size.x, y = core.root_view.size.y }
@@ -284,6 +286,7 @@ test.describe("projectsearch", function()
   end)
 
   test.after_each(function(context)
+    config.transitions = false
     local global = projectsearch._test.get_global_project_search()
     if global then
       if global.searching then
@@ -309,6 +312,8 @@ test.describe("projectsearch", function()
     treeview.visible = context.old_tree_visible
     core.root_view.size.x, core.root_view.size.y = context.root_size.x, context.root_size.y
     config.transitions = context.old_transitions
+    config.animation_type, config.animation_rate = context.old_animation_type, context.old_animation_rate
+    config.fps, core.fps = context.old_fps, context.old_core_fps
     thread.create = context.old_thread_create
     keymap.modkeys = context.modkeys
     config.plugins.projectsearch.split_direction = context.old_split_direction
@@ -825,6 +830,122 @@ test.describe("projectsearch", function()
     settle_focus(view, view.find_text.textview)
     core.root_view:update()
     return view, source
+  end
+
+  for _, animation_type in ipairs { "linear", "constant" } do
+    for _, position in ipairs { "left", "right" } do
+      test.test(animation_type .. " " .. position .. " search shortcut animates opening and closing", function(context)
+        treeview.visible = true
+        treeview:set_toolbar_position("right")
+        local view, source = global_search(context, position, true)
+        local root = core.root_view
+        view:set_target_size("x", 460 * SCALE)
+        root:update()
+        local width, items = view:get_width(), view.results_list.items
+        projectsearch.hide()
+        config.transitions, config.animation_type, config.animation_rate = true, animation_type, 1
+        config.fps, core.fps = 60, 60
+        local function toggle()
+          keymap.modkeys = { [split_click_modifier] = true, shift = true }
+          core.on_event("keypressed", "f")
+          keymap.modkeys = {}
+        end
+        toggle()
+        root:update()
+        test.ok(view.size.x > 0 and view:get_width() < width)
+        local opening_width = view.size.x
+        projectsearch.show()
+        test.near(view.size.x, opening_width, 0.01)
+        root:update()
+        test.ok(view.size.x > opening_width)
+        for _ = 1, 80 do root:update() end
+        test.near(view:get_width(), width, 0.01)
+        test.equal(#view.animations, 0)
+        settle_focus(view, view.find_text.textview)
+        toggle()
+        test.equal(core.active_view, source)
+        root:update()
+        test.ok(view:is_visible())
+        test.ok(view.size.x > 0 and view:get_width() < width)
+        for _ = 1, 80 do root:update() end
+        test.not_ok(view:is_visible())
+        test.equal(view.size.x, 0)
+        test.equal(treeview.size.x, common.round(treeview.target_size))
+        test.equal(#view.animations, 0)
+        test.near(view:get_width(), width, 0.01)
+        test.equal(view.results_list.items, items)
+        toggle()
+        for _ = 1, 80 do root:update() end
+        test.ok(view:is_visible())
+        test.near(view:get_width(), width, 0.01)
+        test.equal(#view.animations, 0)
+        test.equal(view.results_list.items, items)
+      end)
+    end
+  end
+
+  for _, position in ipairs { "left", "right" } do
+    test.test(position .. " sidebar toggles immediately when transitions are unavailable", function(context)
+      local view = global_search(context, position)
+      local width = view:get_width()
+      for _, settings in ipairs { { false, 60 }, { true, 15 } } do
+        config.transitions, config.fps, core.fps = settings[1], settings[2], settings[2]
+        projectsearch.hide()
+        test.not_ok(view:is_visible())
+        test.equal(#view.animations, 0)
+        projectsearch.show()
+        test.ok(view:is_visible())
+        test.near(view:get_width(), width, 0.01)
+        test.equal(#view.animations, 0)
+      end
+    end)
+  end
+
+  for _, animation_type in ipairs { "linear", "constant" } do
+    test.test(animation_type .. " centered search slides without resizing and restores focus on close", function(context)
+      local view, source = global_search(context, "center", true)
+      local root = core.root_view
+      local x, y, width, height = view:get_floating_bounds()
+      local items = view.results_list.items
+      projectsearch.hide()
+      config.transitions, config.animation_type, config.animation_rate = true, animation_type, 1
+      config.fps, core.fps = 60, 60
+      projectsearch.show()
+      local _, opening_y = view:get_floating_bounds()
+      test.ok(opening_y + height <= root.position.y)
+      root:update()
+      local current_x, current_y, current_width, current_height = view:get_floating_bounds()
+      test.ok(current_y > opening_y and current_y < y)
+      test.near(current_x, x, 0.01)
+      test.near(current_width, width, 0.01)
+      test.near(current_height, height, 0.01)
+      for _ = 1, 80 do root:update() end
+      settle_focus(view, view.results_list)
+      test.near(select(2, view:get_floating_bounds()), y, 0.01)
+      test.is_nil(view.floating_transition)
+      projectsearch.hide()
+      test.equal(core.active_view, source)
+      test.ok(view.floating_closing)
+      test.ok(root:get_floating_view_at(x + width / 2, y + height / 2) ~= view)
+      root:update()
+      current_x, current_y, current_width, current_height = view:get_floating_bounds()
+      test.ok(current_y < y and current_y > root.position.y - height)
+      test.near(current_x, x, 0.01)
+      test.near(current_width, width, 0.01)
+      test.near(current_height, height, 0.01)
+      for _ = 1, 80 do root:update() end
+      test.not_ok(view:is_visible())
+      test.not_ok(view.floating_visible)
+      test.is_nil(view.floating_transition)
+      test.equal(core.active_view, source)
+      test.equal(view.results_list.items, items)
+      test.equal(view.results_list.selected, 2)
+      projectsearch.show()
+      for _ = 1, 80 do root:update() end
+      test.ok(view:is_visible())
+      test.near(select(2, view:get_floating_bounds()), y, 0.01)
+      test.is_nil(view.floating_transition)
+    end)
   end
 
   test.test("centered live search keeps its surface and border visible between results", function(context)

@@ -14,6 +14,9 @@ test.describe("About dialog", function()
     context.root, context.active = core.root_view, core.active_view
     context.last, context.next = core.last_active_view, core.next_active_view
     context.transitions = config.transitions
+    context.animation_type, context.animation_rate = config.animation_type, config.animation_rate
+    context.fps, context.core_fps = config.fps, core.fps
+    context.floating_transition = config.disabled_transitions.floating
     context.window_size, context.open = system.get_window_size, common.open_in_system
     context.clip_rect_stack = core.clip_rect_stack
     context.scale, context.scale_env = scale.get(), os.getenv("PRAGTICAL_SCALE")
@@ -39,6 +42,9 @@ test.describe("About dialog", function()
     core.root_view, core.active_view = context.root, context.active
     core.last_active_view, core.next_active_view = context.last, context.next
     config.transitions = context.transitions
+    config.animation_type, config.animation_rate = context.animation_type, context.animation_rate
+    config.fps, core.fps = context.fps, context.core_fps
+    config.disabled_transitions.floating = context.floating_transition
     system.get_window_size, common.open_in_system = context.window_size, context.open
     core.clip_rect_stack = context.clip_rect_stack
     core.menu_view.menu:set_floating(true, { owner = context.menu_owner or false })
@@ -85,6 +91,61 @@ test.describe("About dialog", function()
     core.root_view:update()
     test.equal(about.contributors.rows, rows)
     test.equal(#core.root_view.floating_views, 1)
+  end)
+
+  for _, animation_type in ipairs { "linear", "constant" } do
+    test.test(animation_type .. " slides on opening, Escape and the close button", function(context)
+      local root = core.root_view
+      local dialog = AboutView.show_dialog()
+      local x, y, width, height = dialog:get_floating_bounds()
+      local rows = dialog:get_panel().childs[1].contributors.rows
+      dialog:hide()
+      config.transitions, config.animation_type, config.animation_rate = true, animation_type, 1
+      config.fps, core.fps, config.disabled_transitions.floating = 60, 60, false
+      test.equal(AboutView.show_dialog(), dialog)
+      local _, opening_y = dialog:get_floating_bounds()
+      test.ok(opening_y + height <= root.position.y)
+      test.equal(core.active_view, dialog)
+      root:update()
+      local current_x, current_y, current_width, current_height = dialog:get_floating_bounds()
+      test.ok(current_y > opening_y and current_y < y)
+      test.near(current_x, x, 0.01)
+      test.near(current_width, width, 0.01)
+      test.near(current_height, height, 0.01)
+      for _ = 1, 80 do root:update() end
+      test.is_nil(dialog.floating_transition)
+      test.near(select(2, dialog:get_floating_bounds()), y, 0.01)
+      core.on_event("keypressed", "escape")
+      test.ok(dialog.floating_closing)
+      test.ok(dialog.floating_visible)
+      test.is_nil(root:get_modal_view())
+      test.equal(core.active_view, context.editor)
+      root:update()
+      test.ok(select(2, dialog:get_floating_bounds()) < y)
+      for _ = 1, 80 do root:update() end
+      test.not_ok(dialog.floating_visible)
+      test.not_ok(dialog.visible)
+      AboutView.show_dialog()
+      for _ = 1, 80 do root:update() end
+      dialog.close:on_click()
+      test.ok(dialog.floating_closing)
+      test.ok(dialog.floating_visible)
+      test.equal(core.active_view, context.editor)
+      for _ = 1, 80 do root:update() end
+      test.not_ok(dialog.floating_visible)
+      test.equal(dialog:get_panel().childs[1].contributors.rows, rows)
+    end)
+  end
+
+  test.test("floating transition setting disables About slides", function(context)
+    config.transitions, config.fps, core.fps = true, 60, 60
+    config.disabled_transitions.floating = true
+    local dialog = AboutView.show_dialog()
+    test.is_nil(dialog.floating_transition)
+    test.ok(select(2, dialog:get_floating_bounds()) >= core.root_view.position.y)
+    dialog.close:on_click()
+    test.not_ok(dialog.floating_visible)
+    test.equal(core.active_view, context.editor)
   end)
 
   test.test("fits a small window without shrinking or losing scrollable content", function()

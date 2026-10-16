@@ -242,6 +242,22 @@ function AboutDialog:new()
   AboutView(self:get_panel())
 end
 
+---Prepare the dialog bounds before core places it or starts its opening slide.
+---@param visible boolean Whether the floating dialog is shown
+function AboutDialog:on_floating_visibility_changed(visible)
+  AboutDialog.super.on_floating_visibility_changed(self, visible)
+  if visible then
+    self:fit_to_window()
+    self:update_size_position()
+  end
+end
+
+---Slide the dialog upward when closing and release modal input immediately.
+function AboutDialog:hide()
+  if self.floating_closing then return end
+  self:hide_floating({ to = "top" })
+end
+
 ---Fit the scaled outer size inside the editor window and center the dialog.
 ---Preserve the current tab, contents and keyboard focus.
 function AboutDialog:fit_to_window()
@@ -257,7 +273,13 @@ end
 ---@param new_scale number Updated editor scale
 ---@param prev_scale number Previous editor scale
 function AboutDialog:on_scale_change(new_scale, prev_scale)
+  local x, y = self:get_floating_bounds()
   self:fit_to_window()
+  if self.floating_transition then
+    local tx, ty, width, height = self:get_floating_bounds()
+    self.floating_destination.x, self.floating_destination.y = tx, ty
+    self:set_floating_bounds(x, y, width, height)
+  end
   AboutDialog.super.on_scale_change(self, new_scale, prev_scale)
 end
 
@@ -285,11 +307,7 @@ function AboutView.show_dialog()
   if not dialog then
     dialog = AboutDialog()
   end
-  -- Hidden widgets store pending sizes; show the reused dialog before resizing it.
-  dialog:show()
-  dialog:fit_to_window()
-  dialog:update_size_position()
-  dialog:bring_to_front()
+  dialog:show_floating({ from = "top" })
   return dialog
 end
 
