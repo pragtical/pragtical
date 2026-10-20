@@ -29,8 +29,6 @@ local DirWatch = require "core.dirwatch"
 ---@field scroll_to_focused_file boolean
 ---Smoothly scroll to focused file.
 ---@field animate_scroll_to_focused_file boolean
----Show file counts aside directories.
----@field show_file_count boolean
 ---Show hidden files and directories.
 ---@field show_hidden boolean
 ---Show ignored files and directories.
@@ -43,7 +41,6 @@ config.plugins.treeview = common.merge({
   expand_dirs_to_focused_file = false,
   scroll_to_focused_file = false,
   animate_scroll_to_focused_file = true,
-  show_file_count = true,
   show_hidden = false,
   show_ignored = false
 }, config.plugins.treeview)
@@ -82,6 +79,7 @@ end
 ---@field depth integer Path depth relative to the project
 ---@field expanded boolean Whether children are expanded
 ---@field files? system.fileinfo[] Cached directory children
+---@field symlink? boolean Whether this is a directory symlink
 
 ---Nodes owned by TreeView for placing its toolbar around the tree/document split.
 ---@class plugins.treeview.toolbar_layout
@@ -118,7 +116,6 @@ function TreeView:new()
   self.show_hidden = config.plugins.treeview.show_hidden
   self.show_ignored = config.plugins.treeview.show_ignored
   self.cache = {}
-  self.file_count_cache = {}
   self.expanded = {}
   self.tooltip = { x = 0, y = 0, begin = 0, alpha = 0 }
   self.last_scroll_y = 0
@@ -128,42 +125,6 @@ function TreeView:new()
   self.watches = { }
 end
 
-function TreeView:get_recursive_file_count(project, path)
-  local cached = self.file_count_cache[path]
-  if cached ~= nil then
-    return cached
-  end
-
-  -- watch project update
-  if self.watches[project] then
-    self.watches[project]:watch(path)
-  end
-
-  local count = 0
-  for _, name in ipairs(system.list_dir(path) or {}) do
-    if self.show_hidden or not name:find("^%.") then
-      local child_path = path .. PATHSEP .. name
-      local info
-
-      if self.show_ignored then
-        info = system.get_file_info(child_path)
-      else
-        info = project:get_file_info(child_path)
-      end
-
-      if info then
-        if info.type == "file" then
-          count = count + 1
-        elseif info.type == "dir" then
-          count = count + self:get_recursive_file_count(project, child_path)
-        end
-      end
-    end
-  end
-
-  self.file_count_cache[path] = count
-  return count
-end
 
 function TreeView:set_target_size(axis, value)
   if axis == "x" then
@@ -200,7 +161,7 @@ function TreeView:get_cached(project, path)
       project = project,
       name = basename,
       type = info.type,
-      project = project
+      symlink = info.symlink
     }
     if self.expanded[path] ~= nil then
       t.expanded = self.expanded[path]
@@ -233,20 +194,8 @@ function TreeView:get_cached(project, path)
         return system.path_compare(a.name, a.type, b.name, b.type)
       end
     )
-
-    t.has_subdirs = false
-    for _, file in ipairs(t.files) do
-      if file.type == "dir" and (self.show_hidden or not file.name:find("^%.")) then
-        t.has_subdirs = true
-        break
-      end
-    end
   end
 
-  -- show file count
-  if config.plugins.treeview.show_file_count and t.type == "dir" then
-    t.file_count = self:get_recursive_file_count(project, path)
-  end
   return t
 end
 
@@ -372,7 +321,7 @@ end
 
 function TreeView:get_text_bounding_box(item, x, y, w, h)
   local icon_width = style.icon_font:get_width("D")
-  local xoffset = item.depth * style.padding.x + style.padding.x + icon_width
+  local xoffset = item.depth * style.padding.x + self:get_gutter_width() + icon_width
   x = x + xoffset
   w = style.font:get_width(item.name) + 2 * style.padding.x
   return x, y, w, h
@@ -418,9 +367,16 @@ function TreeView:on_mouse_left()
   end
 end
 
-function TreeView:invalidate_cache()
-  self.cache = {}
-  self.file_count_cache = {}
+---Invalidate one directory after a filesystem change, or reset all cached rows.
+---@param project? core.project Project owning the changed directory
+---@param path? string Absolute changed directory; omit both arguments for a full reset
+function TreeView:invalidate_cache(project, path)
+  if project and path then
+    self.cache[path] = nil
+  else
+    self.cache = {}
+  end
+  core.redraw = true
 end
 
 ---Cancel pending or shown path tooltips and hide their floating companion.
@@ -514,10 +470,7 @@ end
 
 
 function TreeView:get_h_scrollable_size()
-  local  _, _, v_scroll_w = self.v_scrollbar:get_thumb_rect()
-  return self.scroll_width + (
-    self.size.x > self.scroll_width + v_scroll_w and 0 or style.padding.x
-  )
+  return self.scroll_width
 end
 
 
@@ -586,36 +539,56 @@ function TreeView:draw_item_icon(item, active, hovered, x, y, w, h)
 end
 
 
+---Draw the scrollable icon and name, preserving get_item_icon/get_item_text hooks.
+---Return the intrinsic text endpoint even when the supplied viewport clips it.
+---@param item plugins.treeview.item
+---@param active boolean
+---@param hovered boolean
+---@param x number Scrolled content x coordinate after indentation and chevron
+---@param y number Row top in screen coordinates
+---@param w number Available body width
+---@param h number Row height
+---@return number endpoint Unclipped screen x coordinate after the text
 function TreeView:draw_item_body(item, active, hovered, x, y, w, h)
-    x = x + self:draw_item_icon(item, active, hovered, x, y, w, h)
-    return self:draw_item_text(item, active, hovered, x, y, w, h)
+  x = x + self:draw_item_icon(item, active, hovered, x, y, w, h)
+  return self:draw_item_text(item, active, hovered, x, y, w, h)
 end
 
-function TreeView:draw_file_count(item, y, h)
-  if
-    not config.plugins.treeview.show_file_count
-    or item.type ~= "dir"
-    or item.file_count == nil
-    or item.file_count == 0
-  then
-    return
-  end
+---Get the fixed left gutter width, shared by every row and unaffected by scrolling.
+---Override alongside draw_item_gutter() when markers need more room.
+---@return number width Gutter width in screen pixels, including its spacing
+function TreeView:get_gutter_width()
+  return style.padding.x
+end
 
-  -- do not show file count of parent dir when sub dir is expanded
-  if item.expanded and item.has_subdirs then
-    return
-  end
+---Draw optional markers inside the fixed left gutter. Empty by default.
+---Example: override get_gutter_width() to return 20 * SCALE, then draw an icon
+---here using common.draw_text(style.icon_font, style.dim, "!", "center", x, y, w, h).
+---@param item plugins.treeview.item
+---@param active boolean
+---@param hovered boolean
+---@param x number Fixed gutter left edge in screen coordinates
+---@param y number Row top in screen coordinates
+---@param w number Clipped gutter width
+---@param h number Row height
+function TreeView:draw_item_gutter(item, active, hovered, x, y, w, h)
+end
 
-  common.draw_text(
-    style.font,
-    style.dim or style.text,
-    tostring(item.file_count),
-    "right",
-    self.position.x + style.padding.x,
-    y,
-    self.size.x - 2 * style.padding.x,
-    h
-  )
+---Draw right-aligned row information once and return the horizontal space it used.
+---TreeView clips this hook to the available row area, then clips the body before
+---the returned width. Return zero when empty; include all drawn content in the width.
+---The default does not draw any information.
+---Example: draw a cached label at x + w - label_width, then return label_width.
+---@param item plugins.treeview.item
+---@param active boolean
+---@param hovered boolean
+---@param x number Available area left edge in screen coordinates
+---@param y number Row top in screen coordinates
+---@param w number Available width, ending before the scrollbar and right padding
+---@param h number Row height
+---@return number width Occupied width, anchored at x + w
+function TreeView:draw_item_info(item, active, hovered, x, y, w, h)
+  return 0
 end
 
 function TreeView:draw_item_chevron(item, active, hovered, x, y, w, h)
@@ -641,13 +614,29 @@ end
 
 function TreeView:draw_item(item, active, hovered, x, y, w, h)
   self:draw_item_background(item, active, hovered, x, y, w, h)
-
-  x = x + item.depth * style.padding.x + style.padding.x
-  x = x + self:draw_item_chevron(item, active, hovered, x, y, w, h)
-
-  local text_width = self:draw_item_body(item, active, hovered, x, y, w, h)
-  self:draw_file_count(item, y, h)
-  return text_width
+  local left, right = self.position.x, self.position.x + self.size.x
+  local gutter = math.min(math.max(0, self:get_gutter_width()), self.size.x)
+  local inset = style.padding.x
+  local scrollable = self:get_scrollable_size()
+  if scrollable ~= math.huge and scrollable > self.size.y then
+    inset = math.max(inset, (self.v_scrollbar.expanded_size or style.expanded_scrollbar_size) + SCALE)
+  end
+  right = math.max(left + gutter, right - inset)
+  core.push_clip_rect(left, y, gutter, h)
+  self:draw_item_gutter(item, active, hovered, left, y, gutter, h)
+  core.pop_clip_rect()
+  core.push_clip_rect(left + gutter, y, right - left - gutter, h)
+  local info = self:draw_item_info(item, active, hovered, left + gutter, y, right - left - gutter, h)
+  core.pop_clip_rect()
+  info = math.max(0, info)
+  local reserve = info > 0 and info + style.padding.x or 0
+  local body_right = math.max(left + gutter, right - reserve)
+  core.push_clip_rect(left + gutter, y, body_right - left - gutter, h)
+  x = x + item.depth * style.padding.x + gutter
+  x = x + self:draw_item_chevron(item, active, hovered, x, y, math.max(0, body_right - x), h)
+  local endpoint = self:draw_item_body(item, active, hovered, x, y, math.max(0, body_right - x), h)
+  core.pop_clip_rect()
+  return endpoint + reserve + inset
 end
 
 
@@ -769,9 +758,7 @@ function TreeView:toggle_expand(toggle, item)
     end
     self.expanded[item.abs_filename] = item.expanded
     if self.watches[item.project] then
-      -- always watch
-      -- self.watches[item.project]:watch(item.abs_filename, item.expanded)
-      self.watches[item.project]:watch(item.abs_filename, true)
+      self.watches[item.project]:watch(item.abs_filename, item.expanded)
     end
   end
 end
@@ -914,16 +901,21 @@ end
 local old_remove_project = core.remove_project
 function core.remove_project(project, force)
   local project = old_remove_project(project, force)
-  view:invalidate_cache()
-  view.watches[project] = nil
+  if project then
+    view.cache = {}
+    view.watches[project] = nil
+  end
+  return project
 end
 
 core.add_thread(function()
   while true do
-    for k,v in pairs(view.watches) do
-      v:check(function()
-        view:invalidate_cache()
+    for project, watch in pairs(view.watches) do
+      local changed = {}
+      watch:check(function(directory)
+        changed[directory] = true
       end)
+      for directory in pairs(changed) do view:invalidate_cache(project, directory) end
     end
     coroutine.yield(0.1)
   end
@@ -1522,16 +1514,6 @@ config.plugins.treeview.config_spec = {
     end
   },
   {
-    label = "Show File Count",
-    description = "Show file count aside directories.",
-    path = "show_file_count",
-    type = "toggle",
-    default = false,
-    on_apply = function(value)
-      view.show_file_count = value
-    end,
-  },
-  {
     label = "Show Hidden",
     description = "Show hidden files and directories.",
     path = "show_hidden",
@@ -1602,6 +1584,25 @@ if toolbar_view then
     checked = function() return toolbar_view.visible end
   }
 end
+entries[#entries + 1] = {
+  id = "treeview-options", text = "Treeview Options", items = {
+    {
+      id = "hidden", text = "Show Hidden Files", command = "treeview:toggle-hidden",
+      ---Reflect the tree's hidden-file filter when opening or visiting the entry.
+      ---@return boolean checked Whether hidden files are shown
+      checked = function() return view.show_hidden end
+    },
+    {
+      id = "ignored", text = "Show Ignored Files", command = "treeview:toggle-ignored",
+      ---Reflect the tree's ignored-file filter when opening or visiting the entry.
+      ---@return boolean checked Whether ignored files are shown
+      checked = function() return view.show_ignored end
+    }
+  }
+}
 core.menu_view:register({ "view" }, entries, "treeview")
+core.menu_view:register({ "view", "focus" }, {
+  { id = "treeview", text = "Focus Treeview", command = "treeview:toggle-focus" }
+}, "treeview-focus")
 
 return view

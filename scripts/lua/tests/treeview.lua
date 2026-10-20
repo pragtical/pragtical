@@ -378,3 +378,115 @@ test.describe("treeview context menu", function()
     test.equal(path, context.items[2].abs_filename)
   end)
 end)
+
+test.describe("treeview row regions", function()
+  test.before_each(function(c)
+    c.scale, c.clip = SCALE, core.clip_rect_stack
+    c.font, c.icons, c.padding = style.font, style.icon_font, style.padding
+    c.divider, c.scrollbar = style.divider_size, style.expanded_scrollbar_size
+    c.view = TreeView()
+    c.view.position.x, c.view.position.y = 37.25, 20.5
+    c.view.size.x, c.view.size.y = 300, 200
+    c.view.item_icon_width, c.view.item_text_spacing = 12, 5
+    c.window = renwindow.create("TreeView regions", 1000, 500)
+    c.item = { name = ("long filename "):rep(20), type = "file", depth = 0 }
+  end)
+
+  test.after_each(function(c)
+    SCALE, core.clip_rect_stack = c.scale, c.clip
+    style.font, style.icon_font, style.padding = c.font, c.icons, c.padding
+    style.divider_size, style.expanded_scrollbar_size = c.divider, c.scrollbar
+  end)
+
+  for _, factor in ipairs { 1, 1.25, 1.5, 2 } do
+    test.test("clips fixed gutter and info around a scrollable body at scale " .. factor, function(c)
+      SCALE = factor
+      style.font = c.font:copy(c.font:get_size() * factor / c.scale)
+      style.icon_font = c.icons:copy(c.icons:get_size() * factor / c.scale)
+      style.padding = { x = c.padding.x * factor / c.scale, y = c.padding.y * factor / c.scale }
+      style.expanded_scrollbar_size = c.scrollbar * factor / c.scale
+      local view = c.view
+      view.size.x = 300 * factor
+      view.get_gutter_width = function() return 24 * factor end
+      view.get_scrollable_size = function() return 1000 end
+      local gutter, info, body, calls, text_calls
+      calls, text_calls = 0, 0
+      local colors = { gutter = { 20, 70, 180, 255 }, info = { 20, 180, 70, 255 }, body = { 180, 20, 70, 255 } }
+      view.draw_item_gutter = function(_, _, _, _, x, y, w, h)
+        gutter = { x, y, w, h }
+        renderer.draw_rect(x - 100, y, 2000, h, colors.gutter)
+      end
+      view.draw_item_info = function(_, _, _, _, x, y, w, h)
+        calls = calls + 1
+        info = { x + w - 40 * factor, y, 40 * factor, h }
+        renderer.draw_rect(table.unpack { info[1], y, info[3], h, colors.info })
+        return info[3]
+      end
+      view.get_item_text = function(_, item)
+        text_calls = text_calls + 1
+        return item.name, style.font, style.accent
+      end
+      view.draw_item_body = function(self, item, active, hovered, x, y, w, h)
+        body = { x, y, w, h }
+        renderer.draw_rect(x - 100, y, 2000, h, colors.body)
+        return TreeView.draw_item_body(self, item, active, hovered, x, y, w, h)
+      end
+      local function render(scroll)
+        view.scroll.x, view.scroll.to.x = scroll, scroll
+        core.clip_rect_stack = { { 0, 0, 1000, 500 } }
+        renderer.begin_frame(c.window)
+        renderer.set_clip_rect(0, 0, 1000, 500)
+        renderer.draw_rect(0, 0, 1000, 500, style.background2)
+        local x, y = view:get_content_offset()
+        local endpoint = view:draw_item(c.item, true, false, x, y, view.size.x, view:get_item_height())
+        renderer.end_frame()
+        return endpoint - x, renderer.to_canvas(c.window, 0, 0, 1000, 500)
+      end
+      local extent, frame = render(0)
+      local y = common.round(view.position.y + view:get_item_height() - 2)
+      local function pixel(x)
+        return { frame:get_pixels(common.round(x), y, 1, 1):byte(1, 3) }
+      end
+      test.same(pixel(gutter[1] + gutter[3] / 2), { 20, 70, 180 })
+      test.same(pixel(body[1] + 2), { 180, 20, 70 })
+      test.same(pixel(info[1] + info[3] / 2), { 20, 180, 70 })
+      test.same(pixel(info[1] - style.padding.x / 2), { style.line_highlight[1], style.line_highlight[2], style.line_highlight[3] })
+      local gutter_x, info_x, body_x = gutter[1], info[1], body[1]
+      local moved = render(70)
+      test.near(moved, extent, 0.001)
+      test.equal(gutter[1], gutter_x)
+      test.equal(info[1], info_x)
+      test.near(body[1], body_x - 70, 0.001)
+      local maximum = extent - view.size.x
+      test.ok(maximum > 0)
+      render(maximum)
+      local end_x = body[1] + view.item_icon_width + view.item_text_spacing + style.font:get_width(c.item.name)
+      test.near(end_x, info[1] - style.padding.x, 0.5)
+      view.v_scrollbar.expand_percent = 1
+      render(maximum)
+      test.equal(info[1], info_x)
+      test.equal(calls, 4)
+      test.equal(text_calls, 4)
+    end)
+  end
+
+  test.test("empty info uses no separator space and narrow rows never get negative bounds", function(c)
+    local view, calls = c.view, 0
+    view.get_item_text = function() return "short", style.font, style.text end
+    view.get_scrollable_size = function() return 100 end
+    view.draw_item_info = function(_, _, _, _, _, _, w)
+      calls = calls + 1
+      test.ok(w >= 0)
+      return 0
+    end
+    view.draw_item_gutter = function(_, _, _, _, _, _, w) test.ok(w >= 0) end
+    core.clip_rect_stack = { { 0, 0, 1000, 500 } }
+    renderer.begin_frame(c.window)
+    for _, width in ipairs { 300, 10, 0 } do
+      view.size.x = width
+      view:draw_item(c.item, false, false, view.position.x, view.position.y, width, view:get_item_height())
+    end
+    renderer.end_frame()
+    test.equal(calls, 3)
+  end)
+end)
