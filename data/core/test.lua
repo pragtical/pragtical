@@ -68,6 +68,17 @@ local common = require "core.common"
 ---@class core.test
 local test = {}
 
+local trace_enabled = os.getenv("PRAGTICAL_TEST_TRACE") == "1"
+
+---Write a flushed diagnostic checkpoint when `PRAGTICAL_TEST_TRACE=1`.
+---@param message string Description of the operation about to run.
+function test.trace(message)
+  if trace_enabled then
+    io.stdout:write(string.format("TRACE %.3f %s\n", system.get_time(), message))
+    io.stdout:flush()
+  end
+end
+
 local builder_root
 local builder_stack
 
@@ -355,10 +366,13 @@ local function run_case(node, file_result, names, before_hooks, after_hooks, on_
     return
   end
 
+  test.trace("SETUP " .. result.full_name)
   local ok, err = run_hooks(before_hooks, context)
   if ok then
+    test.trace("BODY " .. result.full_name)
     ok, err = run_routine(node.fn, context)
   end
+  test.trace("TEARDOWN " .. result.full_name)
   local after_ok, after_err = run_after_hooks(after_hooks, context)
 
   if not ok then
@@ -376,7 +390,9 @@ local function run_case(node, file_result, names, before_hooks, after_hooks, on_
 
   result.duration = system.get_time() - started_at
   add_result(file_result, result, on_result)
+  test.trace("YIELD " .. result.full_name)
   yield_to_ui()
+  test.trace("RESUME " .. result.full_name)
 end
 
 local function run_suite_node(node, file_result, names, before_hooks, after_hooks, on_result)
@@ -770,6 +786,7 @@ local function run_sync(path, options)
     }
     table.insert(results.files, file_result)
 
+    test.trace("LOAD " .. file)
     local suite, load_err = test.load_file(file)
     if not suite then
       add_result(file_result, {
@@ -810,6 +827,7 @@ end
 ---@return string? errmsg
 function test.run(path, options)
   options = options or {}
+  test.trace(string.format("runtime: %s %s, %s", PLATFORM, ARCH, jit and jit.version or _VERSION))
   local info, errmsg = system.get_file_info(path)
   if not info then
     return nil, errmsg or ("path not found: " .. tostring(path))

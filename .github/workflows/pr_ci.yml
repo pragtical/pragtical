@@ -98,9 +98,21 @@ jobs:
           bash --version
           bash scripts/build.sh --bundle --debug --forcefallback
       - name: Run Tests
+        timeout-minutes: 15
+        env:
+          PRAGTICAL_TEST_TRACE: '1'
         run: |
           source scripts/common.sh
-          SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
+          SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy python3 scripts/run-with-diagnostics.py \
+            --output "$RUNNER_TEMP/pragtical-test-diagnostics" \
+            -- ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
+      - name: Upload Test Diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: macOS Test Diagnostics ${{ matrix.config.arch }}
+          path: ${{ runner.temp }}/pragtical-test-diagnostics
+          if-no-files-found: ignore
       - name: Create DMG Image
         run: bash scripts/package.sh --version ${INSTALL_REF} --debug --dmg
       - name: Upload Artifact
