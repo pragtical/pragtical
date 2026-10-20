@@ -18,14 +18,14 @@ jobs:
       version: ${{ steps.tag.outputs.version }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: Set Tag
         id: tag
         run: |
           echo "version=rolling" >> "$GITHUB_OUTPUT"
       - name: Update Tag
-        uses: richardsimko/update-tag@v1
+        uses: richardsimko/update-tag@v3
         with:
           tag_name: ${{ steps.tag.outputs.version }}
         env:
@@ -72,14 +72,14 @@ jobs:
       CXX: g++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: Set Environment Variables
         run: |
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -134,14 +134,14 @@ jobs:
           - arch: x86_64
             image: macos-15-intel
           - arch: arm64
-            image: macos-14
+            image: macos-15
     runs-on: ${{ matrix.config.image }}
     env:
       CC: clang
       CXX: clang++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: System Information
         run: |
@@ -155,7 +155,7 @@ jobs:
           echo "INSTALL_REF=${{ needs.release.outputs.version }}" >> "$GITHUB_ENV"
           echo "INSTALL_NAME=pragtical-${{ needs.release.outputs.version }}-macos-${{ matrix.config.arch }}" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -195,7 +195,7 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2

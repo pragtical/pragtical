@@ -21,7 +21,7 @@ jobs:
       CXX: ${{ matrix.config.cxx }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: Set Environment Variables
         if: ${{ matrix.config.cc == 'gcc' }}
@@ -30,7 +30,7 @@ jobs:
           echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
           echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-linux-$(uname -m)-portable" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -65,14 +65,14 @@ jobs:
           - arch: x86_64
             image: macos-15-intel
           - arch: arm64
-            image: macos-14
+            image: macos-15
     runs-on: ${{ matrix.config.image }}
     env:
       CC: clang
       CXX: clang++
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: System Information
         run: |
@@ -86,7 +86,7 @@ jobs:
           echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
           echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-macos-${{ matrix.config.arch }}" >> "$GITHUB_ENV"
       - name: Python Setup
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: 3.9
       - name: Setup cmake
@@ -122,7 +122,7 @@ jobs:
         shell: msys2 {0}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -183,14 +183,14 @@ jobs:
           - { target: x64, name: x86_64 }
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - name: Setup Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: ${{ matrix.arch.target }}
       - name: Python Setup
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: '3.x'
       - name: Install meson and ninja
