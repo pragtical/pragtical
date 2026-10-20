@@ -5,24 +5,12 @@ local test = require "core.test"
 local temp_root
 
 local HTTP_SERVER_SCRIPT = [=[
-import faulthandler
-import os
-import sys
-
-TRACE = os.environ.get("PRAGTICAL_TEST_TRACE") == "1"
-if TRACE:
-    print("TRACE HTTP server: Python " + sys.version, flush=True)
-    faulthandler.enable()
-    faulthandler.dump_traceback_later(4)
-
 import json
+import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
-
-if TRACE:
-    print("TRACE HTTP server: imports complete", flush=True)
 
 
 PAYLOAD = b"downloaded-data"
@@ -204,8 +192,6 @@ class Handler(BaseHTTPRequestHandler):
 
 port_path = sys.argv[1] if len(sys.argv) > 1 else None
 try:
-    if TRACE:
-        print("TRACE HTTP server: binding loopback listener", flush=True)
     server = LocalHTTPServer(("127.0.0.1", 0), Handler)
 except PermissionError as exc:
     if port_path:
@@ -214,18 +200,11 @@ except PermissionError as exc:
         sys.exit(0)
     raise
 
-if TRACE:
-    print("TRACE HTTP server: listener bound", flush=True)
-
 if port_path:
     with open(sys.argv[1], "w", encoding="utf-8") as fp:
         fp.write(str(server.server_address[1]))
 else:
     print(server.server_address[1], flush=True)
-
-if TRACE:
-    faulthandler.cancel_dump_traceback_later()
-    print("TRACE HTTP server: port published; serving requests", flush=True)
 
 try:
     server.serve_forever()
@@ -258,7 +237,6 @@ local function python_command(script_path, port_path)
 end
 
 local function read_server_port(proc, port_path, label)
-  test.trace(label .. " server: waiting for port file " .. port_path)
   local deadline = system.get_time() + 5
   while system.get_time() < deadline do
     local file = io.open(port_path, "rb")
@@ -270,7 +248,6 @@ local function read_server_port(proc, port_path, label)
       end
       local port = tonumber(content)
       if port then
-        test.trace(label .. " server: ready on port " .. port)
         return port
       end
       if not proc:running() then
@@ -283,9 +260,8 @@ local function read_server_port(proc, port_path, label)
     coroutine.yield(0.01)
   end
 
-  test.trace(label .. " server: startup failed, running=" .. tostring(proc:running()))
   proc:wait(1000, 0.01)
-  -- Read available diagnostics without waiting for a live child's stderr to close.
+  -- Read available stderr without waiting for a live child's stream to close.
   local stderr = proc:read_stderr(65536) or ""
   if stderr:find("Operation not permitted", 1, true) then
     test.skip_now(label .. " test server cannot create local sockets")
@@ -321,13 +297,11 @@ local function start_http_server(context)
   write_file(script_path, HTTP_SERVER_SCRIPT)
   context.server_script_paths[#context.server_script_paths + 1] = script_path
 
-  test.trace("HTTP server: spawning Python")
   local proc = process.start(python_command(script_path, port_path), {
-    stdout = process.REDIRECT_PARENT,
+    stdout = process.REDIRECT_PIPE,
     stderr = process.REDIRECT_PIPE,
   })
   test.not_nil(proc)
-  test.trace("HTTP server: spawned PID " .. proc:pid())
 
   context.server_processes[#context.server_processes + 1] = proc
 
@@ -389,7 +363,6 @@ test.describe("http", function()
     local base_url = start_http_server(context)
 
     local redirects = {}
-    test.trace("HTTP request: GET redirect")
     local ok, err, result, info = await_callback(function(done)
       http.get(base_url .. "/redirect", { q = "hello world" }, {
         headers = {
@@ -414,7 +387,6 @@ test.describe("http", function()
     test.contains(redirects[1].url, "/redirect")
     test.contains(info.url, "/json?from=redirect")
 
-    test.trace("HTTP request: POST JSON")
     local post_ok, post_err, post_result, post_info = await_callback(function(done)
       http.post(base_url .. "/echo-body", "application/json", {
         name = "pragtical",
@@ -433,7 +405,6 @@ test.describe("http", function()
     test.contains(post_result.content_type, "application/json")
     test.equal(post_result.json.name, "pragtical")
 
-    test.trace("HTTP request: HEAD")
     local head_ok, head_err, head_result, head_info = await_callback(function(done)
       http.head(base_url .. "/head", nil, {
         decode_json = false,
@@ -446,7 +417,6 @@ test.describe("http", function()
     test.equal(head_result, "")
     test.equal(head_info.headers["x-head"], "ok")
 
-    test.trace("HTTP request: OPTIONS")
     local options_ok, options_err, options_result, options_info = await_callback(function(done)
       http.options(base_url .. "/options", nil, {
         decode_json = false,
