@@ -1402,6 +1402,24 @@ command.add(text_compare_with_predicate, {
   end
 })
 
+core.menu_view:register({ "tools" }, {
+  {
+    id = "compare", text = "Compare", items = {
+      { id = "files", text = "Compare Files…", command = "diff-view:start-files-comparison" },
+      core.menu_view.DIVIDER,
+      { id = "select-file", text = "Select File for Comparison", command = "diff-view:select-file-for-compare" },
+      { id = "compare-file", text = "Compare File with Selected", command = "diff-view:compare-file-with-selected" },
+      core.menu_view.DIVIDER,
+      { id = "select-text", text = "Select Text for Comparison", command = "diff-view:select-text-for-compare" },
+      { id = "compare-text", text = "Compare Text with Selected", command = "diff-view:compare-text-with-selected" },
+      core.menu_view.DIVIDER,
+      { id = "previous", text = "Previous Change", command = "diff-view:prev-change" },
+      { id = "next", text = "Next Change", command = "diff-view:next-change" },
+      { id = "apply", text = "Apply Change to Other Side", command = "diff-view:sync-change" }
+    }
+  }
+}, "diffview")
+
 
 -- Register context menu items
 core.add_thread(function()

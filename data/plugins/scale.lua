@@ -269,7 +269,11 @@ core.menu_view:register({ "view" }, {
     items = {
       { id = "in", text = "Zoom In", command = "scale:increase" },
       { id = "out", text = "Zoom Out", command = "scale:decrease" },
-      { id = "reset", text = "Reset Zoom", command = "scale:reset" }
+      { id = "reset", text = "Reset Zoom", command = "scale:reset" },
+      core.menu_view.DIVIDER,
+      { id = "code-in", text = "Increase Code Font Size", command = "scale:increase-code" },
+      { id = "code-out", text = "Decrease Code Font Size", command = "scale:decrease-code" },
+      { id = "code-reset", text = "Reset Code Font Size", command = "scale:reset-code" }
     }
   }
 }, "scale")

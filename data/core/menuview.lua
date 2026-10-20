@@ -1,5 +1,6 @@
 local core = require "core"
 local config = require "core.config"
+local command = require "core.command"
 local style = require "core.style"
 local common = require "core.common"
 local View = require "core.view"
@@ -274,6 +275,9 @@ function MenuView:add_defaults()
       self:entry("select-all", "Select All", "doc:select-all"),
       DIVIDER,
       self:group("lines", "Lines", {
+        self:entry("insert-above", "Insert Line Above", "doc:newline-above"),
+        self:entry("insert-below", "Insert Line Below", "doc:newline-below"),
+        DIVIDER,
         self:entry("duplicate", "Duplicate Lines", "doc:duplicate-lines"),
         self:entry("delete", "Delete Lines", "doc:delete-lines"),
         self:entry("move-up", "Move Lines Up", "doc:move-lines-up"),
@@ -284,8 +288,12 @@ function MenuView:add_defaults()
         self:entry("unindent", "Unindent", "doc:unindent")
       }),
       self:group("selection", "Selection", {
+        self:entry("clear", "Clear Selection", "doc:select-none"),
         self:entry("word", "Select Word", "doc:select-word"),
         self:entry("lines", "Select Lines", "doc:select-lines"),
+        DIVIDER,
+        self:entry("cursor-above", "Add Cursor Above", "doc:create-cursor-previous-line"),
+        self:entry("cursor-below", "Add Cursor Below", "doc:create-cursor-next-line"),
         DIVIDER,
         self:entry("next", "Next Occurrence", "find-replace:select-next"),
         self:entry("previous", "Previous Occurrence", "find-replace:select-previous"),
@@ -303,12 +311,28 @@ function MenuView:add_defaults()
         ),
         self:group("encoding", "Encoding", {
           self:entry("change", "Change Encoding…", "doc:change-encoding"),
-          self:entry("reload", "Reload With Encoding…", "doc:reload-with-encoding")
+          self:entry("reload", "Reload With Encoding…", "doc:reload-with-encoding"),
+          DIVIDER,
+          self:entry("bom", "Byte Order Mark", "doc:toggle-bom",
+            ---Reflect the active document's byte order mark.
+            ---@return boolean checked Whether a byte order mark is present
+            function()
+              return core.active_view.doc and core.active_view.doc.bom ~= nil or false
+            end
+          )
         })
       }),
       DIVIDER,
       self:entry("comment", "Toggle Line Comment", "doc:toggle-line-comments"),
-      self:entry("block-comment", "Toggle Block Comment", "doc:toggle-block-comments")
+      self:entry("block-comment", "Toggle Block Comment", "doc:toggle-block-comments"),
+      DIVIDER,
+      self:entry("overwrite", "Overwrite Mode", "doc:toggle-overwrite",
+        ---Reflect overwrite mode in the active document.
+        ---@return boolean checked Whether typing overwrites existing text
+        function()
+          return core.active_view.doc and core.active_view.doc.overwrite or false
+        end
+      )
     }),
     self:group("search", "Search", {
       self:entry("find", "Find…", "find-replace:find"),
@@ -333,9 +357,16 @@ function MenuView:add_defaults()
         self:entry("up", "Up", "root:switch-to-up"),
         self:entry("down", "Down", "root:switch-to-down")
       }),
+      self:group("resize", "Resize Pane", {
+        self:entry("grow", "Grow", "root:grow"),
+        self:entry("shrink", "Shrink", "root:shrink")
+      }),
       self:group("switch-tab", "Switch Tab", {
         self:entry("next", "Next Tab", "root:switch-to-next-tab"),
-        self:entry("previous", "Previous Tab", "root:switch-to-previous-tab")
+        self:entry("previous", "Previous Tab", "root:switch-to-previous-tab"),
+        DIVIDER,
+        self:entry("move-left", "Move Tab Left", "root:move-tab-left"),
+        self:entry("move-right", "Move Tab Right", "root:move-tab-right")
       }),
       DIVIDER,
       self:entry("statusbar", "Status Bar", "status-bar:toggle", function()
@@ -355,7 +386,37 @@ function MenuView:add_defaults()
       end),
       DIVIDER,
       self:entry("markdown-preview", "Preview Markdown", "markdown-view:preview"),
-      self:entry("markdown-raw", "View Markdown Source", "markdown-view:view-raw")
+      self:entry("markdown-raw", "View Markdown Source", "markdown-view:view-raw"),
+      {
+        id = "image", text = "Image",
+        ---Show image controls only when their command predicate accepts the view.
+        ---@return boolean visible Whether an image view is active
+        visible = function() return command.is_valid("image-view:auto-fit") end,
+        items = {
+          self:entry("fit", "Fit Image", "image-view:auto-fit"),
+          self:entry("zoom-in", "Zoom In", "image-view:zoom-in"),
+          self:entry("zoom-out", "Zoom Out", "image-view:zoom-out"),
+          self:entry("actual-size", "Actual Size", "image-view:zoom-reset"),
+          DIVIDER,
+          self:group("background", "Background", {
+            self:entry("solid", "Solid", "image-view:background-mode-solid",
+              ---Reflect the solid image background setting.
+              ---@return boolean checked Whether a solid background is selected
+              function() return config.images_background_mode == "solid" end
+            ),
+            self:entry("grid", "Checkerboard", "image-view:background-mode-grid",
+              ---Reflect the checkerboard image background setting.
+              ---@return boolean checked Whether a checkerboard background is selected
+              function() return config.images_background_mode == "grid" end
+            ),
+            self:entry("none", "Transparent", "image-view:background-mode-none",
+              ---Reflect the transparent image background setting.
+              ---@return boolean checked Whether no image background is drawn
+              function() return config.images_background_mode == "none" end
+            )
+          })
+        }
+      }
     }),
     self:group("tools", "Tools", {
       self:entry("commands", "Command Palette…", "core:find-command"),

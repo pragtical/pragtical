@@ -5,6 +5,9 @@ local command = require "core.command"
 local keymap = require "core.keymap"
 local View = require "core.view"
 local RootView = require "core.rootview"
+local Doc = require "core.doc"
+local DocView = require "core.docview"
+local ImageView = require "core.imageview"
 local MenuView = require "core.menuview"
 local ContextMenu = require "core.contextmenu"
 local test = require "core.test"
@@ -20,6 +23,52 @@ local function independent_menu(context, items)
   local menu = MenuView(items)
   context.menus[#context.menus + 1] = menu
   return menu
+end
+
+---Open a nested application entry using its registered IDs.
+---@param path string[] Menu group IDs followed by a leaf ID
+---@return core.contextmenu menu Popup containing the leaf
+---@return core.contextmenu.item item Snapshot of the requested entry
+local function open_entry(path)
+  local bar = core.menu_view
+  local menu
+  for i, id in ipairs(path) do
+    local entries = menu and menu.items or bar:entries()
+    local index
+    for n, item in ipairs(entries) do
+      if item.id == id then index = n; break end
+    end
+    test.not_nil(index, "Missing menu entry: " .. table.concat(path, "/", 1, i))
+    if not menu then
+      bar:open(index)
+      menu = bar.menu
+    else
+      menu.selected = index
+      if i == #path then return menu, entries[index] end
+      menu:open_submenu()
+      menu = menu.child_menu
+      test.not_nil(menu, "Submenu did not open: " .. id)
+    end
+  end
+end
+
+---Activate a real menu entry through the nested popup dispatch path.
+---@param path string[] Menu group IDs followed by a leaf ID
+local function activate_entry(path)
+  local menu, item = open_entry(path)
+  test.ok(item.enabled, "Disabled menu entry: " .. table.concat(path, "/"))
+  menu:call_selected_item()
+  test.not_ok(core.menu_view.menu.show_context_menu)
+end
+
+---Copy a loaded plugin's contribution into the isolated test menu.
+---@param context table Current test context
+---@param name string Named plugin registration
+---@param path string[] Registration destination
+local function use_plugin_entries(context, name, path)
+  local registration = context.bar.registrations[name]
+  test.not_nil(registration, "Missing plugin menu: " .. name)
+  context.handles[#context.handles + 1] = core.menu_view:register(path, registration.entries, name)
 end
 
 test.describe("application menu", function()
@@ -549,7 +598,8 @@ test.describe("application menu", function()
     for _, name in ipairs {
       "findfile", "projectsearch", "treeview", "scale", "settings",
       "linewrapping", "detectindent", "codefold", "macro",
-      "plugin_manager", "trimwhitespace", "quote", "drawwhitespace"
+      "plugin_manager", "trimwhitespace", "quote", "drawwhitespace",
+      "diffview", "autocomplete"
     } do
       local handle = context.bar.registrations[name]
       if package.loaded["plugins." .. name] then
@@ -565,6 +615,200 @@ test.describe("application menu", function()
         test.is_nil(handle, "Unloaded plugin contributed entries: " .. name)
       end
     end
+  end)
+
+  test.describe("default command actions", function()
+    test.before_each(function(context)
+      context.documents = {}
+      context.files = {}
+      context.image_background = config.images_background_mode
+    end)
+
+    test.after_each(function(context)
+      config.images_background_mode = context.image_background
+      if context.autocomplete then
+        context.autocomplete.close()
+        context.autocomplete.map["menu-command-test"] = nil
+      end
+      if context.code_scale then require("plugins.scale").set_code(context.code_scale) end
+      for _, doc in ipairs(context.documents) do doc:on_close() end
+      for _, path in ipairs(context.files) do os.remove(path) end
+    end)
+
+    ---Add a document to the test layout without registering it in core.docs.
+    ---@param context table Current test context
+    ---@param text string Initial document content
+    ---@return core.docview view Active document view
+    local function add_document(context, text)
+      local doc = Doc(nil, nil, true)
+      doc:insert(1, 1, text)
+      context.documents[#context.documents + 1] = doc
+      local view = DocView(doc)
+      core.root_view:get_primary_node():add_view(view)
+      return view
+    end
+
+    test.test("nested editing entries keep document focus and refresh mode checkmarks", function(context)
+      local view = add_document(context, "first\nsecond\n")
+      local doc = view.doc
+      doc:set_selection(2, 2, 2, 5)
+      activate_entry({ "edit", "selection", "cursor-above" })
+      test.equal(#doc.selections, 8)
+      activate_entry({ "edit", "selection", "clear" })
+      test.equal(#doc.selections, 4)
+      test.not_ok(doc:has_any_selection())
+      doc:set_selection(2, 1)
+      activate_entry({ "edit", "lines", "insert-above" })
+      test.equal(doc.lines[2], "\n")
+      activate_entry({ "edit", "lines", "insert-below" })
+      test.equal(doc.lines[3], "\n")
+      local _, item = open_entry({ "edit", "overwrite" })
+      test.not_ok(item.checked_value)
+      activate_entry({ "edit", "overwrite" })
+      _, item = open_entry({ "edit", "overwrite" })
+      test.ok(item.checked_value)
+      test.equal(core.active_view, view)
+    end)
+
+    test.test("BOM entry follows encoding availability and the document mark", function(context)
+      local view = add_document(context, "text")
+      local path = { "edit", "convert", "encoding", "bom" }
+      view.doc.encoding = "UTF-8"
+      activate_entry(path)
+      test.equal(view.doc.bom, encoding.get_charset_bom("UTF-8"))
+      local _, item = open_entry(path)
+      test.ok(item.checked_value)
+      activate_entry(path)
+      _, item = open_entry(path)
+      test.not_ok(item.checked_value)
+      view.doc.encoding = "ISO-8859-1"
+      _, item = open_entry(path)
+      test.not_ok(item.enabled)
+      test.equal(core.active_view, view)
+    end)
+
+    test.test("tab arrangement and pane resizing preserve the selected view", function(context)
+      add_document(context, "first")
+      local second = add_document(context, "second")
+      local node = core.root_view:get_primary_node()
+      local index = node:get_view_idx(second)
+      activate_entry({ "view", "switch-tab", "move-left" })
+      test.equal(node:get_view_idx(second), index - 1)
+      activate_entry({ "view", "switch-tab", "move-right" })
+      test.equal(node:get_view_idx(second), index)
+      node:split("right", View())
+      core.set_active_view(second)
+      local parent = core.root_view.root_node:get_node_for_view(second):get_parent_node(core.root_view.root_node)
+      local divider = parent.divider
+      activate_entry({ "view", "resize", "grow" })
+      test.ok(parent.divider > divider)
+      activate_entry({ "view", "resize", "shrink" })
+      test.equal(parent.divider, divider)
+      test.equal(core.active_view, second)
+    end)
+
+    test.test("image controls follow active view and dispatch zoom and background changes", function(context)
+      core.menu_view:open(4)
+      for _, item in ipairs(core.menu_view.menu.items) do test.not_equal(item.id, "image") end
+      local image = ImageView()
+      core.root_view:get_primary_node():add_view(image)
+      activate_entry({ "view", "image", "zoom-in" })
+      test.equal(image.zoom_scale, 1.5)
+      activate_entry({ "view", "image", "zoom-out" })
+      test.equal(image.zoom_scale, 1)
+      activate_entry({ "view", "image", "actual-size" })
+      test.equal(image.zoom_mode, "fixed")
+      activate_entry({ "view", "image", "fit" })
+      test.equal(image.zoom_mode, "fit")
+      for _, mode in ipairs { "solid", "grid", "none" } do
+        activate_entry({ "view", "image", "background", mode })
+        test.equal(config.images_background_mode, mode)
+        local menu, item = open_entry({ "view", "image", "background", mode })
+        test.ok(item.checked_value)
+        for _, other in ipairs(menu.items) do
+          test.equal(other.checked_value, other.id == mode)
+        end
+      end
+      test.equal(core.active_view, image)
+    end)
+
+    test.test("code font entries leave interface size unchanged", function(context)
+      local scale = require "plugins.scale"
+      context.code_scale = scale.get_code()
+      use_plugin_entries(context, "scale", { "view" })
+      local view = add_document(context, "text")
+      local ui_scale, font_size = SCALE, style.font:get_size()
+      activate_entry({ "view", "zoom", "code-in" })
+      test.ok(scale.get_code() > context.code_scale)
+      activate_entry({ "view", "zoom", "code-out" })
+      test.equal(scale.get_code(), context.code_scale)
+      activate_entry({ "view", "zoom", "code-reset" })
+      test.equal(scale.get_code(), DEFAULT_SCALE)
+      test.equal(SCALE, ui_scale)
+      test.equal(style.font:get_size(), font_size)
+      test.equal(core.active_view, view)
+    end)
+
+    test.test("comparison entries retain selected text and apply from the focused side", function(context)
+      use_plugin_entries(context, "diffview", { "tools" })
+      local a = add_document(context, "first\nbefore\nlast")
+      a.doc:set_selection(1, 1, math.huge, math.huge)
+      activate_entry({ "tools", "compare", "select-text" })
+      local b = add_document(context, "first\nafter\nlast")
+      b.doc:set_selection(1, 1, math.huge, math.huge)
+      activate_entry({ "tools", "compare", "compare-text" })
+      local diff = core.active_view
+      context.documents[#context.documents + 1] = diff.doc_view_a.doc
+      context.documents[#context.documents + 1] = diff.doc_view_b.doc
+      test.equal(diff.doc_view_a.doc.lines[2], "before\n")
+      test.equal(diff.doc_view_b.doc.lines[2], "after\n")
+      while diff.updater_idx ~= nil do coroutine.yield(0.01) end
+      core.root_view:update()
+      core.root_view:update()
+      core.set_active_view(diff.doc_view_b)
+      diff.doc_view_b.doc:set_selection(1, 1)
+      activate_entry({ "tools", "compare", "next" })
+      test.equal(diff.doc_view_b.doc:get_selection(), 2)
+      diff.doc_view_b.doc:set_selection(3, 1)
+      activate_entry({ "tools", "compare", "previous" })
+      test.equal(diff.doc_view_b.doc:get_selection(), 2)
+      activate_entry({ "tools", "compare", "apply" })
+      test.equal(diff.doc_view_a.doc.lines[3], "after\n")
+      test.equal(diff.doc_view_b.doc.lines[2], "after\n")
+      test.equal(core.active_view, diff.doc_view_b)
+    end)
+
+    test.test("file comparison entries remember the first file across document switches", function(context)
+      use_plugin_entries(context, "diffview", { "tools" })
+      for _, text in ipairs { "first file", "second file" } do
+        local path = core.temp_filename(".txt")
+        context.files[#context.files + 1] = path
+        local file = assert(io.open(path, "wb"))
+        file:write(text)
+        file:close()
+        local view = add_document(context, text)
+        view.doc:set_filename(path, path)
+        activate_entry({ "tools", "compare", #context.files == 1 and "select-file" or "compare-file" })
+      end
+      local diff = core.active_view
+      context.documents[#context.documents + 1] = diff.doc_view_a.doc
+      context.documents[#context.documents + 1] = diff.doc_view_b.doc
+      for i, view in ipairs { diff.doc_view_a, diff.doc_view_b } do
+        test.equal(common.normalize_path(view.doc.abs_filename), common.normalize_path(context.files[i]))
+      end
+      while diff.updater_idx ~= nil do coroutine.yield(0.01) end
+    end)
+
+    test.test("completion entry opens suggestions without taking document focus", function(context)
+      context.autocomplete = require "plugins.autocomplete"
+      use_plugin_entries(context, "autocomplete", { "tools" })
+      context.autocomplete.add({ name = "menu-command-test", items = { unique_menu_symbol = false } })
+      local view = add_document(context, "unique_menu_symbol\nunique")
+      view.doc:set_selection(2, 7)
+      activate_entry({ "tools", "autocomplete" })
+      test.ok(context.autocomplete.is_open())
+      test.equal(core.active_view, view)
+    end)
   end)
 
   test.test("replaces named registrations without disturbing other plugins", function(context)
