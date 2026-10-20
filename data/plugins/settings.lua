@@ -496,7 +496,7 @@ settings.add("User Interface",
       description = "Use built-in window decorations.",
       path = "borderless",
       type = settings.type.TOGGLE,
-      default = false,
+      default = true,
       on_apply = function()
         core.configure_borderless_window()
       end

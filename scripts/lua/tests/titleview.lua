@@ -201,6 +201,9 @@ test.describe("borderless application menu", function()
       test.equal(core.menu_view.size.y, 0)
       local call = context.calls[#context.calls]
       test.equal(call[2], height)
+      test.equal(call[4], 3 * factor)
+      test.ok(call[4] < style.padding.y,
+        "resize strip must stay below status bar text")
       test.equal(call[5].x, x)
       test.equal(call[5].y, y)
       test.equal(call[5].w, width)

@@ -159,6 +159,7 @@ function system.set_window_bordered(window, bordered) end
 ---for custom window management.
 ---All dimensions use renderer coordinates. The interactive rectangle receives
 ---normal pointer input instead of window dragging; omit it to clear the region.
+---Resize regions are inactive while maximized or fullscreen.
 ---To disable custom window management, call this function with only the window.
 ---
 ---@param window renwindow Target window

@@ -384,9 +384,9 @@ config.draw_whitespace = false
 ---When set to true, Pragtical draws its own window decorations,
 ---which can be useful for certain setups.
 ---
----Defaults to false.
+---Defaults to true.
 ---@type boolean
-config.borderless = false
+config.borderless = true
 
 ---Shows/hides the close buttons on tabs.
 ---When hidden, users can close tabs via keyboard shortcuts or commands.
