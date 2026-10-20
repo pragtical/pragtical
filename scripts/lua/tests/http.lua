@@ -18,6 +18,7 @@ if TRACE:
 import json
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
 
 if TRACE:
@@ -25,6 +26,15 @@ if TRACE:
 
 
 PAYLOAD = b"downloaded-data"
+
+
+class LocalHTTPServer(ThreadingHTTPServer):
+    """Bind the loopback fixture without HTTPServer's reverse DNS lookup."""
+
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = self.server_address[0]
+        self.server_port = self.server_address[1]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -196,7 +206,7 @@ port_path = sys.argv[1] if len(sys.argv) > 1 else None
 try:
     if TRACE:
         print("TRACE HTTP server: binding loopback listener", flush=True)
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LocalHTTPServer(("127.0.0.1", 0), Handler)
 except PermissionError as exc:
     if port_path:
         with open(port_path, "w", encoding="utf-8") as fp:
