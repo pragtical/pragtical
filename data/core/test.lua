@@ -69,14 +69,44 @@ local common = require "core.common"
 local test = {}
 
 local trace_enabled = os.getenv("PRAGTICAL_TEST_TRACE") == "1"
+local trace_message
+local trace_routines = setmetatable({}, { __mode = "k" })
 
 ---Write a flushed diagnostic checkpoint when `PRAGTICAL_TEST_TRACE=1`.
 ---@param message string Description of the operation about to run.
 function test.trace(message)
   if trace_enabled then
+    trace_message = message
     io.stdout:write(string.format("TRACE %.3f %s\n", system.get_time(), message))
     io.stdout:flush()
   end
+end
+
+---Periodically save suspended Lua stacks while a diagnostic test run is active.
+---@param runner core.test.runner
+local function trace_threads(runner)
+  local directory = os.getenv("PRAGTICAL_TEST_DIAGNOSTICS_DIR")
+  if not trace_enabled or not directory then return end
+  core.add_background_thread(function()
+    while runner.status == "running" do
+      coroutine.yield(10)
+      if runner.status ~= "running" then break end
+      local file = io.open(directory .. PATHSEP .. "lua-threads.txt", "w")
+      if file then
+        file:write(string.format("Time: %.3f\nLast checkpoint: %s\n", system.get_time(), trace_message or "none"))
+        for key, thread in pairs(core.threads) do
+          file:write(string.format("\nThread %s (%s), wake=%.3f, average=%.6f\n",
+            tostring(key), thread.loc, thread.wake, thread.avg_time or 0))
+          file:write(debug.traceback(thread.cr, "", 0), "\n")
+        end
+        for routine in pairs(trace_routines) do
+          file:write("\nActive test routine ", tostring(routine), "\n")
+          file:write(debug.traceback(routine, "", 0), "\n")
+        end
+        file:close()
+      end
+    end
+  end)
 end
 
 local builder_root
@@ -294,13 +324,16 @@ local function run_routine(fn, ...)
       return fn(table.unpack(args, 1, args.n))
     end, run_error_handler)
   end)
+  if trace_enabled then trace_routines[cr] = true end
 
   while true do
     local ok, value, extra = coroutine.resume(cr)
     if not ok then
+      trace_routines[cr] = nil
       return false, format_routine_error(cr, value)
     end
     if coroutine.status(cr) == "dead" then
+      trace_routines[cr] = nil
       if not value then
         return false, extra
       end
@@ -864,6 +897,7 @@ function test.run(path, options)
     end
   end)
 
+  trace_threads(runner)
   return runner
 end
 

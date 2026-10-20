@@ -129,6 +129,7 @@ jobs:
     name: macOS
     needs: release
     strategy:
+      fail-fast: false
       matrix:
         config:
           - arch: x86_64

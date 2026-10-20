@@ -60,6 +60,7 @@ jobs:
   build_macos:
     name: macOS
     strategy:
+      fail-fast: false
       matrix:
         config:
           - arch: x86_64

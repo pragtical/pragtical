@@ -16,34 +16,52 @@ import sys
 import time
 
 
+def process_tree(root_pid):
+    """Return process state and owned descendants, including separate groups."""
+    state = subprocess.run(
+        ["ps", "-axo", "pid=,ppid=,pgid=,pcpu=,state=,comm="],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, timeout=10, check=True,
+    ).stdout
+    rows = [line.split(None, 5) for line in state.splitlines()]
+    owned = {str(root_pid)}
+    while True:
+        descendants = {row[0] for row in rows if len(row) == 6 and row[1] in owned}
+        if descendants <= owned:
+            break
+        owned.update(descendants)
+    return state, [row for row in rows if len(row) == 6 and row[0] in owned]
+
+
 def capture_stacks(process_group, output, log):
-    """Save process state and sample Pragtical within the command's session."""
+    """Save process state and sample Pragtical and its child processes on macOS."""
     try:
-        processes = subprocess.run(
-            ["ps", "-axo", "pid=,ppid=,pgid=,pcpu=,state=,comm="],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, timeout=10, check=True,
-        ).stdout
+        processes, owned = process_tree(process_group)
         (output / "processes.txt").write_text(processes)
         if sys.platform != "darwin":
             log("Native stack sampling is only enabled on macOS.")
             return
-        sampled = False
-        for line in processes.splitlines():
-            fields = line.split(None, 5)
-            if (len(fields) != 6 or fields[2] != str(process_group)
-                    or Path(fields[5]).name != "pragtical"):
-                continue
-            pid = fields[0]
-            sampled = True
-            log(f"Sampling Pragtical PID {pid} for five seconds.")
-            with (output / f"sample-{pid}.log").open("w") as sample_log:
-                subprocess.run(
-                    ["sample", pid, "5", "-file", str(output / f"sample-{pid}.txt")],
-                    stdout=sample_log, stderr=subprocess.STDOUT,
-                    timeout=20, check=True,
-                )
-        if not sampled:
+        editors = {row[0] for row in owned if Path(row[5]).name == "pragtical"}
+        targets = set(editors)
+        while True:
+            descendants = {row[0] for row in owned if row[1] in targets}
+            if descendants <= targets:
+                break
+            targets.update(descendants)
+        for row in owned:
+            if row[0] in targets:
+                pid = row[0]
+                log(f"Sampling {row[5]} PID {pid} for five seconds.")
+                try:
+                    with (output / f"sample-{pid}.log").open("w") as sample_log:
+                        subprocess.run(
+                            ["sample", pid, "5", "-file", str(output / f"sample-{pid}.txt")],
+                            stdout=sample_log, stderr=subprocess.STDOUT,
+                            timeout=20, check=True,
+                        )
+                except (OSError, subprocess.SubprocessError) as error:
+                    log(f"Could not sample PID {pid}: {error}")
+        if not editors:
             log("No Pragtical process remains in the monitored process group.")
     except (OSError, subprocess.SubprocessError) as error:
         log(f"Could not complete diagnostic capture: {error}")
@@ -51,18 +69,27 @@ def capture_stacks(process_group, output, log):
 
 def stop_processes(process):
     """Terminate the process group and reap the command, bounding its shutdown."""
+    groups = {process.pid}
     try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
+        _, owned = process_tree(process.pid)
+        pids = {row[0] for row in owned}
+        groups.update(int(row[2]) for row in owned if row[2] in pids)
+    except (OSError, subprocess.SubprocessError):
         pass
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
     try:
         process.wait(timeout=5)
     except subprocess.TimeoutExpired:
         pass
-    try:
-        os.killpg(process.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
     process.wait()
 
 
@@ -99,6 +126,7 @@ def main():
         process = subprocess.Popen(
             command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             start_new_session=True,
+            env=dict(os.environ, PRAGTICAL_TEST_DIAGNOSTICS_DIR=str(output)),
         )
         try:
             # GitHub cancels a timed-out step with SIGTERM. Keep cleanup active.
