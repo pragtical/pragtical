@@ -9,10 +9,20 @@ import json
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from socketserver import TCPServer
 from urllib.parse import parse_qs, urlsplit
 
 
 PAYLOAD = b"downloaded-data"
+
+
+class LocalHTTPServer(ThreadingHTTPServer):
+    """Bind the loopback fixture without HTTPServer's reverse DNS lookup."""
+
+    def server_bind(self):
+        TCPServer.server_bind(self)
+        self.server_name = self.server_address[0]
+        self.server_port = self.server_address[1]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -182,7 +192,7 @@ class Handler(BaseHTTPRequestHandler):
 
 port_path = sys.argv[1] if len(sys.argv) > 1 else None
 try:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    server = LocalHTTPServer(("127.0.0.1", 0), Handler)
 except PermissionError as exc:
     if port_path:
         with open(port_path, "w", encoding="utf-8") as fp:
@@ -247,11 +257,12 @@ local function read_server_port(proc, port_path, label)
     if not proc:running() then
       break
     end
-    system.sleep(0.01)
+    coroutine.yield(0.01)
   end
 
   proc:wait(1000, 0.01)
-  local stderr = proc.stderr:read("all") or ""
+  -- Read available stderr without waiting for a live child's stream to close.
+  local stderr = proc:read_stderr(65536) or ""
   if stderr:find("Operation not permitted", 1, true) then
     test.skip_now(label .. " test server cannot create local sockets")
   end
@@ -316,7 +327,11 @@ test.describe("http", function()
       local proc = context.server_processes[i]
       if proc and proc:running() then
         proc:terminate()
-        proc:wait(2, 0.01)
+        proc:wait(1000, 0.01)
+        if proc:running() then
+          proc:kill()
+          proc:wait(1000, 0.01)
+        end
       end
     end
 

@@ -211,11 +211,11 @@ local function read_server_port(proc, port_path, label)
     if not proc:running() then
       break
     end
-    system.sleep(0.01)
+    coroutine.yield(0.01)
   end
 
   proc:wait(1000, 0.01)
-  local stderr = proc.stderr:read("all") or ""
+  local stderr = proc:read_stderr(65536) or ""
   if stderr:find("Operation not permitted", 1, true) then
     test.skip_now(label .. " test server cannot create local sockets")
   end
