@@ -158,6 +158,12 @@ test.describe("system", function()
       or sandbox == "macos")
   end)
 
+  test.test("sleep preserves sub-millisecond durations", function()
+    local started = system.get_time()
+    for _ = 1, 4 do system.sleep(0.0005) end
+    test.ok(system.get_time() - started >= 0.002)
+  end)
+
   test.test("supports basic window helpers on a temporary window", function()
     local window = renwindow.create("system-test-window", 96, 72)
     test.not_nil(window)

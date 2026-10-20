@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <math.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include "api/api.h"
@@ -120,7 +121,56 @@ typedef struct {
   bool       shutting_down;
   bool       restart;
   int        exit_status;
+  SDL_TimerID wake_timer;
+  Uint32     wake_event;
 } AppState;
+
+/* Wake SDL's callback loop without queuing an editor input event. The timer
+ * only holds an event type, so an already-running callback cannot access a
+ * freed AppState after cancellation, shutdown or restart. */
+static Uint64 SDLCALL wake_iteration(void *userdata, SDL_TimerID id, Uint64 interval) {
+  (void)id;
+  (void)interval;
+  SDL_Event event = {0};
+  event.type = (Uint32)(uintptr_t)userdata;
+  SDL_PushEvent(&event);
+  return 0;
+}
+
+/* Sleep directly for short frame delays. Longer deadlines use SDL's outer
+ * event wait and a one-shot timer so input can interrupt them. */
+static void schedule_iteration(AppState *app, double wait) {
+  bool should_sleep = wait > 0 && !system_has_pending_events();
+  /* Avoid timer-thread and event-queue overhead for waits of at most 20 ms. */
+  if (should_sleep && wait <= 0.020) {
+    SDL_SetHintWithPriority(SDL_HINT_MAIN_CALLBACK_RATE, "0", SDL_HINT_OVERRIDE);
+    SDL_DelayNS((Uint64)(wait * SDL_NS_PER_SECOND));
+    return;
+  }
+  if (should_sleep) {
+    /* Headless drivers poll every 1 ms in SDL_WaitEvent. Keep their bounded
+     * sleep instead; also use it if creating the deadline timer fails. */
+    const char *driver = SDL_GetCurrentVideoDriver();
+    bool headless = !driver || SDL_strcmp(driver, "dummy") == 0 ||
+                              SDL_strcmp(driver, "offscreen") == 0;
+    if (!headless) {
+      bool timed = isfinite(wait);
+      if (timed) {
+        Uint64 ns = (Uint64)(SDL_min(wait, 86400.0) * SDL_NS_PER_SECOND);
+        app->wake_timer = SDL_AddTimerNS(SDL_max(ns, 1), wake_iteration,
+                                        (void *)(uintptr_t)app->wake_event);
+      }
+      if (!timed || app->wake_timer) {
+        SDL_SetHintWithPriority(SDL_HINT_MAIN_CALLBACK_RATE, "waitevent", SDL_HINT_OVERRIDE);
+        return;
+      }
+    }
+  }
+  SDL_SetHintWithPriority(SDL_HINT_MAIN_CALLBACK_RATE, "0", SDL_HINT_OVERRIDE);
+  if (should_sleep) {
+    SDL_DelayNS((Uint64)(SDL_min(wait, 0.016) * SDL_NS_PER_SECOND));
+  }
+}
 
 /* Lua init-code: loads and starts the core.  core.run() is now non-blocking
  * (it only sets up the run-loop state); SDL_AppIterate drives the loop by
@@ -303,7 +353,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
   app->argv              = argv;
   app->has_restarted     = 0;
   app->core_run_step_ref = -1;
+  app->wake_event = SDL_RegisterEvents(1);
   *appstate = app;
+  if (!app->wake_event) return SDL_APP_FAILURE;
+  /* Lua deadlines control the callback rate, including the initial iteration
+   * and shutdown; an inherited environment hint must not override them. */
+  SDL_SetHintWithPriority(SDL_HINT_MAIN_CALLBACK_RATE, "0", SDL_HINT_OVERRIDE);
 
 #ifdef SDL_PLATFORM_APPLE
   enable_momentum_scroll();
@@ -321,6 +376,7 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
   AppState *app = appstate;
+  if (app && event->type == app->wake_event) return SDL_APP_CONTINUE;
   if (app && app->shutting_down) {
     if (event->type == SDL_EVENT_QUIT) app->restart = false;
     return SDL_APP_CONTINUE;
@@ -332,9 +388,13 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
   AppState *app = appstate;
+  if (app->wake_timer) {
+    SDL_RemoveTimer(app->wake_timer);
+    app->wake_timer = 0;
+  }
 
-  bool workers_finished = api_thread_poll(app->L);
   if (app->shutting_down) {
+    bool workers_finished = api_thread_poll(app->L);
     if (!workers_finished) {
       SDL_Delay(1);
       return SDL_APP_CONTINUE;
@@ -351,7 +411,8 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 
   /* Call core.run_step() — one frame of the main loop.
    * Returns true  → keep running
-   * Returns false → quit or restart */
+   * Returns false → quit or restart
+   * Second result → seconds until the next iteration, or infinity for input. */
   if (app->core_run_step_ref == -1) {
     fprintf(stderr, "Error: core.run_step not found or invalid\n");
     return SDL_APP_FAILURE;
@@ -361,7 +422,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
   int errfunc = lua_gettop(app->L);
 
   lua_rawgeti(app->L, LUA_REGISTRYINDEX, app->core_run_step_ref);
-  if (lua_pcall(app->L, 0, 1, errfunc) != LUA_OK) {
+  if (lua_pcall(app->L, 0, 2, errfunc) != LUA_OK) {
     const char *errmsg = lua_tostring(app->L, -1);
     if (!errmsg) errmsg = "(error object is not a string)";
     fprintf(stderr, "Error in core.run_step: %s\n", errmsg);
@@ -382,8 +443,9 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     return SDL_APP_FAILURE;
   }
 
-  bool should_continue = lua_toboolean(app->L, -1);
-  lua_pop(app->L, 2);
+  bool should_continue = lua_toboolean(app->L, -2);
+  double wait = lua_tonumber(app->L, -1);
+  lua_pop(app->L, 3);
 
   if (!should_continue) {
     /* Distinguish between quit and restart. */
@@ -400,6 +462,12 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     api_thread_shutdown(app->L);
     SDL_Event event;
     while (system_event_pop(&event)) {}
+    SDL_SetHintWithPriority(SDL_HINT_MAIN_CALLBACK_RATE, "0", SDL_HINT_OVERRIDE);
+  } else {
+    /* Native workers also need occasional collection if their Lua consumer
+     * is suspended while the window is unfocused. */
+    if (!api_thread_poll(app->L)) wait = SDL_min(wait, 0.1);
+    schedule_iteration(app, wait);
   }
 
   return SDL_APP_CONTINUE;
@@ -410,6 +478,7 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result) {
   (void)result;
   AppState *app = appstate;
   if (app) {
+    if (app->wake_timer) SDL_RemoveTimer(app->wake_timer);
     if (app->L) lua_close(app->L);
     SDL_free(app);
   }
