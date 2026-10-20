@@ -12,9 +12,9 @@ config.renderer = "default"
 
 ---Visibility of the responsive application menu bar.
 ---
----Defaults to false.
+---Defaults to true.
 ---@type boolean
-config.show_menubar = false
+config.show_menubar = true
 
 ---Keep the maximum FPS locked to current display refresh rate.
 ---

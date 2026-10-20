@@ -506,7 +506,7 @@ settings.add("User Interface",
       description = "Show the application menu bar on the top or inside the title bar in borderless mode.",
       path = "show_menubar",
       type = settings.type.TOGGLE,
-      default = false,
+      default = true,
       ---Apply saved or edited visibility through the bar's animated lifecycle.
       ---@param enabled boolean Whether the application menu bar should be shown
       on_apply = function(enabled)
