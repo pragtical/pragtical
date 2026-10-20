@@ -1196,6 +1196,10 @@ command.add(get_active_view, {
   ["autocomplete:open"] = function() show_autocomplete(true) end,
 })
 
+core.menu_view:register({ "tools" }, {
+  { id = "autocomplete", text = "Trigger Autocomplete", command = "autocomplete:open" }
+}, "autocomplete")
+
 --
 -- Keymaps
 --
