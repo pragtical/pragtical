@@ -91,7 +91,7 @@ function TitleView:configure_hit_test(borderless)
   end
   local height = title_view_height()
   local controls = controls_width()
-  local border = style.icon_font:get_width("_")
+  local border = 3 * SCALE
   local x, y, w, h = 0, 0, 0, 0
   if core.menu_view.bounds then
     x, y, w, h = core.menu_view:get_bounds()

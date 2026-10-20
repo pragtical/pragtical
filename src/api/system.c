@@ -61,13 +61,11 @@ static void str_tolower(char *p) {
   }
 }
 
-#define RESIZE_FROM_TOP 0
-#define RESIZE_FROM_RIGHT 0
-
 static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *pt, void *data) {
   const RenWindow *ren = data;
   const HitTestInfo hit_info = ren->hit_test_info;
-  const float resize_border = hit_info.resize_border / ren->scale_x;
+  const float resize_border_x = hit_info.resize_border / ren->scale_x;
+  const float resize_border_y = hit_info.resize_border / ren->scale_y;
   const float controls_width = hit_info.controls_width / ren->scale_x;
   const SDL_FRect rect = hit_info.interactive_rect;
   /* Keep partially covered logical pixels interactive at fractional densities. */
@@ -77,41 +75,36 @@ static SDL_HitTestResult SDLCALL hit_test(SDL_Window *window, const SDL_Point *p
     && pt->x < ceilf((rect.x + rect.w) / ren->scale_x)
     && pt->y < ceilf((rect.y + rect.h) / ren->scale_y);
   int w, h;
+  const SDL_WindowFlags flags = SDL_GetWindowFlags(window);
+
+  if (flags & SDL_WINDOW_FULLSCREEN) return SDL_HITTEST_NORMAL;
 
   SDL_GetWindowSize(window, &w, &h);
 
+  /* Resize edges take precedence over title dragging in normal windows. */
+  if (!(flags & SDL_WINDOW_MAXIMIZED)) {
+    const bool left = pt->x < resize_border_x;
+    const bool right = pt->x >= w - resize_border_x;
+    const bool top = pt->y < resize_border_y;
+    const bool bottom = pt->y >= h - resize_border_y;
+
+    if (top) {
+      if (left) return SDL_HITTEST_RESIZE_TOPLEFT;
+      if (right) return SDL_HITTEST_RESIZE_TOPRIGHT;
+      return SDL_HITTEST_RESIZE_TOP;
+    }
+    if (bottom) {
+      if (left) return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+      if (right) return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+      return SDL_HITTEST_RESIZE_BOTTOM;
+    }
+    if (left) return SDL_HITTEST_RESIZE_LEFT;
+    if (right) return SDL_HITTEST_RESIZE_RIGHT;
+  }
+
   if (!interactive && pt->y < hit_info.title_height / ren->scale_y &&
-    #if RESIZE_FROM_TOP
-    pt->y > resize_border &&
-    #endif
-    pt->x > resize_border && pt->x < w - controls_width) {
+    pt->x > resize_border_x && pt->x < w - controls_width) {
     return SDL_HITTEST_DRAGGABLE;
-  }
-
-  #define REPORT_RESIZE_HIT(name) { \
-    return SDL_HITTEST_RESIZE_##name; \
-  }
-
-  if (pt->x < resize_border && pt->y < resize_border) {
-    REPORT_RESIZE_HIT(TOPLEFT);
-  #if RESIZE_FROM_TOP
-  } else if (pt->x > resize_border && pt->x < w - controls_width && pt->y < resize_border) {
-    REPORT_RESIZE_HIT(TOP);
-  #endif
-  } else if (pt->x > w - resize_border && pt->y < resize_border) {
-    REPORT_RESIZE_HIT(TOPRIGHT);
-  #if RESIZE_FROM_RIGHT
-  } else if (pt->x > w - resize_border && pt->y > resize_border && pt->y < h - resize_border) {
-    REPORT_RESIZE_HIT(RIGHT);
-  #endif
-  } else if (pt->x > w - resize_border && pt->y > h - resize_border) {
-    REPORT_RESIZE_HIT(BOTTOMRIGHT);
-  } else if (pt->x < w - resize_border && pt->x > resize_border && pt->y > h - resize_border) {
-    REPORT_RESIZE_HIT(BOTTOM);
-  } else if (pt->x < resize_border && pt->y > h - resize_border) {
-    REPORT_RESIZE_HIT(BOTTOMLEFT);
-  } else if (pt->x < resize_border && pt->y < h - resize_border && pt->y > resize_border) {
-    REPORT_RESIZE_HIT(LEFT);
   }
 
   return SDL_HITTEST_NORMAL;

@@ -12,9 +12,9 @@ config.renderer = "default"
 
 ---Visibility of the responsive application menu bar.
 ---
----Defaults to false.
+---Defaults to true.
 ---@type boolean
-config.show_menubar = false
+config.show_menubar = true
 
 ---Keep the maximum FPS locked to current display refresh rate.
 ---
@@ -384,9 +384,9 @@ config.draw_whitespace = false
 ---When set to true, Pragtical draws its own window decorations,
 ---which can be useful for certain setups.
 ---
----Defaults to false.
+---Defaults to true.
 ---@type boolean
-config.borderless = false
+config.borderless = true
 
 ---Shows/hides the close buttons on tabs.
 ---When hidden, users can close tabs via keyboard shortcuts or commands.
