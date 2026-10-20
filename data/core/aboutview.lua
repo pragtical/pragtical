@@ -56,6 +56,7 @@ local contributors = {
   { "AmerM137", "Pragtical Contributor, Colors, Ninja", "https://github.com/AmerM137" },
   { "juliardi",	"Pragtical Contributor, Evangelist", "https://github.com/juliardi" },
   { "Walkero", "Pragtical Amiga Port, Tests", "https://github.com/walkero-gr" },
+  { "Vinfall", "Pragtical Contributor, Plugins", "https://github.com/Vinfall"},
   { "Jan", "Pragtical Contributor", "https://github.com/Jan200101" },
   { "tacf", "Pragtical Contributor", "https://github.com/tacf" },
   { "detomastah", "Pragtical Contributor", "https://github.com/detomastah" },
