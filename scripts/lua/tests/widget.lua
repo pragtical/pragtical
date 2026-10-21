@@ -518,6 +518,74 @@ test.describe("widget mouse events", function()
 
 end)
 
+test.describe("widget positioning", function()
+  test.before_each(function(context)
+    context.roots = {}
+    context.transitions = config.transitions
+    config.transitions = false
+    context.root = root_widget(context)
+    context.root.scrollable = true
+    context.nodes = { context.root }
+    local parent = context.root
+    for index = 1, 3 do
+      local child = Widget(parent)
+      child.scrollable = true
+      child:set_position(10.2, 15.6)
+      child:set_size(400 - index * 20, 320 - index * 20)
+      context.nodes[#context.nodes + 1] = child
+      parent = child
+    end
+    for _ = 1, 5 do context.root:update() end
+  end)
+
+  test.after_each(function(context)
+    for _, root in ipairs(context.roots) do root:destroy() end
+    config.transitions = context.transitions
+  end)
+
+  local function check_positions(context, scrollbars)
+    for index = 2, #context.nodes do
+      local node = context.nodes[index]
+      local ox, oy = node.parent:get_content_offset()
+      test.near(node.position.x, ox + node.position.rx + node.border.width, 1e-8)
+      test.near(node.position.y, oy + node.position.ry + node.border.width, 1e-8)
+      if scrollbars then
+        test.equal(node.v_scrollbar.rect.x, node.position.x)
+        test.equal(node.v_scrollbar.rect.y, node.position.y)
+      end
+    end
+  end
+
+  test.it("updates nested positions and scrollbars in the frame their parent moves", function(context)
+    context.root.position.x = 90.25
+    context.root.position.y = 60.85
+    context.root.get_scrollable_size = function() return 1000 end
+    context.root.scroll.y, context.root.scroll.to.y = 0.4, 0.4
+    local child = context.nodes[2]
+    child.get_scrollable_size = function() return 1000 end
+    child.scroll.y, child.scroll.to.y = 0.6, 0.6
+    context.root:update()
+    check_positions(context, true)
+  end)
+
+  test.it("positions a hidden branch before updating it after showing", function(context)
+    local branch = context.nodes[2]
+    branch:hide()
+    context.root.position.y = 140.2
+    context.root:update()
+    branch:show()
+    context.root:update()
+    check_positions(context, true)
+  end)
+
+  test.it("keeps explicit position updates recursive by default", function(context)
+    context.root.position.x = 90.25
+    context.nodes[3].position.ry = 45.6
+    context.root:update_position()
+    check_positions(context)
+  end)
+end)
+
 test.describe("widget rendering", function()
   test.before_each(function(context)
     context.roots = {}
