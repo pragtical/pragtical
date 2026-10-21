@@ -1036,7 +1036,7 @@ static int f_get_time(lua_State *L) {
 static int f_sleep(lua_State *L) {
   double n = luaL_checknumber(L, 1);
   if (n < 0) n = 0;
-  SDL_Delay(n * 1000);
+  SDL_DelayNS(n * SDL_NS_PER_SECOND);
   return 0;
 }
 

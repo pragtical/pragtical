@@ -2080,6 +2080,7 @@ end
 ---Called by C's SDL_AppIterate on every frame.
 ---
 ---@return boolean  true to keep running, false to quit or restart.
+---@return number? wait Seconds until the next iteration; infinity waits for an event.
 function core.run_step()
   local now     = system.get_time()
   local uncapped = config.draw_stats == "uncapped"
@@ -2089,25 +2090,18 @@ function core.run_step()
   if core.frame_start >= cycle_end_time then
     cycle_end_time  = core.frame_start + (core.co_max_time * core.fps)
     main_loop_time  = 0
-    run_has_focus   = system.window_has_focus(core.window)
   end
 
-  -- run all coroutine tasks
-  local time_to_wake   = run_threads()
-  local threads_end_time = system.get_time() - now
-  now = now + threads_end_time
-
-  -- respect coroutines redraw requests
-  if run_has_focus or core.redraw then
-    run_skip_no_focus = core.frame_start + 5
-    run_next_step     = nil
-  end
-
-  -- detect events that arrived via SDL_AppEvent before this iteration
-  -- and use them to enable burst-rendering mode
-  if system.has_pending_events() then
+  run_has_focus = system.window_has_focus(core.window)
+  local has_events = system.has_pending_events()
+  if has_events then
     run_next_step     = nil
     run_burst_events  = now + 3
+  end
+  -- Only activity renews the grace period; timer wakeups do not.
+  if run_has_focus or core.redraw or has_events then
+    run_skip_no_focus = now + 5
+    run_next_step = nil
   end
 
   -- set the run mode
@@ -2121,15 +2115,22 @@ function core.run_step()
     run_threads_mode = "all"
   end
 
+  local time_to_wake = run_threads()
+  local threads_end_time = system.get_time() - now
+  now = now + threads_end_time
+  -- A background coroutine may request a redraw or quit while unfocused.
+  if core.redraw then
+    run_skip_no_focus = now + 5
+    run_threads_mode = "all"
+    run_next_step = nil
+  end
+  if core.restart_request or core.quit_request then return false end
+
+  local wake_at
   if run_threads_mode == "background" then
     -- run background threads, no drawing or events processing
     run_next_step = nil
-    -- Cap sleep to ~16 ms so focus / event changes are noticed quickly
-    system.sleep(math.min(time_to_wake, 0.016))
-    -- allow normal rendering when the mouse moves over the window
-    if system.has_pending_events() then
-      run_skip_no_focus = now + 5
-    end
+    wake_at = now + time_to_wake
   else
     -- listen events and perform drawing as needed
     local did_redraw = false
@@ -2151,21 +2152,11 @@ function core.run_step()
         local nframe = run_next_frame_time - system.get_time()
         nframe = nframe > 0 and nframe or (1/core.fps)
         local b = (uncapped and run_burst_events > now) and rendering_speed or nframe
-        -- Sleep instead of SDL_WaitEvent: SDL3 callbacks prohibit blocking waits
-        -- inside SDL_AppIterate.  Any events that arrive during this sleep will
-        -- be delivered via SDL_AppEvent on the next callback iteration.
-        local sleep_time = math.min(run_next_step - now, time_to_wake, b)
-        if sleep_time > 0 then
-          system.sleep(sleep_time)
-        end
+        wake_at = now + math.min(run_next_step - now, time_to_wake, b)
       else
-        -- No focus and nothing to do: sleep briefly to avoid spinning.
-        -- SDL will call SDL_AppEvent when input arrives.
-        system.sleep(0.016)
-        -- allow normal rendering for up to 5 seconds after receiving event
-        -- to let any animations render smoothly
-        run_skip_no_focus = system.get_time() + 5
-        -- perform a step when we're not in focus in case we get an event
+        -- No background tasks: keep ordinary coroutine deadlines without
+        -- repeatedly renewing the unfocused grace period.
+        wake_at = now + time_to_wake
         run_next_step = nil
       end
     else -- if we redrew, then make sure we only draw at most FPS/sec
@@ -2173,7 +2164,7 @@ function core.run_step()
       local next_frame = math.max(0, 1 / core.fps - elapsed)
       run_next_frame_time = now + next_frame
       run_next_step = run_next_step or run_next_frame_time
-      system.sleep(math.min(uncapped and 0 or 1, next_frame, time_to_wake))
+      wake_at = now + math.min(uncapped and 0 or 1, next_frame, time_to_wake)
     end
   end
 
@@ -2188,7 +2179,8 @@ function core.run_step()
     (system.get_time() - core.frame_start) - threads_end_time
   )
 
-  return true
+  -- Let the native callback choose a short sleep or an interruptible event wait.
+  return true, math.max(0, wake_at - system.get_time())
 end
 
 
