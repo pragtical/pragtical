@@ -1,5 +1,89 @@
 # Changes Log
 
+## [3.14.0] - 2026-10-20
+
+### New Features
+
+* Add application menus, floating views, command palette placement and toolbar docking
+  ([#630](https://github.com/pragtical/pragtical/pull/630))
+
+* Add optional command prompt state recall
+  ([#631](https://github.com/pragtical/pragtical/pull/631))
+
+* Add configurable project search placement
+  ([#632](https://github.com/pragtical/pragtical/pull/632))
+
+* Add workspace session management
+  ([#633](https://github.com/pragtical/pragtical/pull/633))
+
+* Add optional directory file counts to TreeView
+  ([#623](https://github.com/pragtical/pragtical/pull/623))
+
+### Enhancements
+
+* Enable borderless mode and the application menu by default
+  ([#643](https://github.com/pragtical/pragtical/pull/643))
+
+* Embed the application menu in the borderless title bar
+  ([#637](https://github.com/pragtical/pragtical/pull/637))
+
+* Make more editor commands accessible from the application menus
+  ([#640](https://github.com/pragtical/pragtical/pull/640))
+
+* Add TreeView drawing hooks and asynchronous file counting
+  ([#641](https://github.com/pragtical/pragtical/pull/641))
+
+* Lower idle CPU usage
+  ([#645](https://github.com/pragtical/pragtical/pull/645))
+
+* Update Widget to reduce CPU usage
+  ([#646](https://github.com/pragtical/pragtical/pull/646))
+
+* Integrate the updated Plugin Manager and remove obsolete JSON library copies
+  ([#624](https://github.com/pragtical/pragtical/pull/624))
+
+### Fixes
+
+* Allow disabling save commands for embedded document views
+  ([#626](https://github.com/pragtical/pragtical/pull/626))
+
+* Fix mouse selection and scrolling in TextBox inputs
+  ([#628](https://github.com/pragtical/pragtical/pull/628))
+
+* Fix Widget list layout and nested scrollbar input
+  ([#629](https://github.com/pragtical/pragtical/pull/629))
+
+* Fix UI scaling, hidden pane drawing and Widget integration
+  ([#634](https://github.com/pragtical/pragtical/pull/634))
+
+* Fix project search and floating view sliding animations
+  ([#635](https://github.com/pragtical/pragtical/pull/635))
+
+* Preserve color emoji colors in SDL GPU text rendering
+  ([#636](https://github.com/pragtical/pragtical/pull/636))
+
+* Keep centered command prompts stable while filtering
+  ([#638](https://github.com/pragtical/pragtical/pull/638))
+
+* Finish animations at their exact destination
+  ([#639](https://github.com/pragtical/pragtical/pull/639))
+
+* Keep split nodes and tab content within nonnegative bounds
+  ([#647](https://github.com/pragtical/pragtical/pull/647))
+
+### Build System
+
+* Update CI actions, macOS runners and bundled dependencies
+  ([#644](https://github.com/pragtical/pragtical/pull/644))
+
+* Update plugins subproject
+  ([a8f3b1a0](https://github.com/pragtical/plugins/commit/a8f3b1a0))
+
+### Other Changes
+
+* Add Vinfall to the About dialog contributors
+  ([#642](https://github.com/pragtical/pragtical/pull/642))
+
 ## [3.13.1] - 2026-10-02
 
 ### Fixes
@@ -3762,6 +3846,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.14.0]: https://github.com/pragtical/pragtical/releases/tag/v3.14.0
 [3.13.1]: https://github.com/pragtical/pragtical/releases/tag/v3.13.1
 [3.13.0]: https://github.com/pragtical/pragtical/releases/tag/v3.13.0
 [3.12.5]: https://github.com/pragtical/pragtical/releases/tag/v3.12.5
