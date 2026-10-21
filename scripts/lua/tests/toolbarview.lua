@@ -431,9 +431,12 @@ test.describe("toolbar layout", function()
           test.ok(toolbar.size.x >= font:get_width("MM") + style.padding.x * 2 - 0.5)
         else
           test.ok(toolbar.size.y >= font:get_height() + style.padding.y * 2 - 0.5)
-          test.equal(context.tree.size.x, common.round(math.max(
+          local desired_width = common.round(math.max(
             context.tree.default_size, toolbar:get_min_width()
-          )))
+          ))
+          test.equal(context.tree.size.x, math.min(
+            desired_width, core.root_view.size.x - style.divider_size
+          ))
         end
         toolbar:on_mouse_wheel(-100, 0)
         settle()

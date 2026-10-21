@@ -572,6 +572,7 @@ end
 
 ---Calculate child node sizes for a split.
 ---Handles both hsplit and vsplit by swapping x/y axes.
+---Keep the divider and both children within the available extent.
 ---@param self core.node The split node
 ---@param x string Axis being split ("x" or "y")
 ---@param y string Perpendicular axis ("y" or "x")
@@ -581,7 +582,9 @@ end
 ---@param y2? number Locked size of second child on perpendicular axis (unused)
 local function calc_split_sizes(self, x, y, x1, x2, y1, y2)
   local ds = ((x1 and x1 < 1) or (x2 and x2 < 1)) and 0 or style.divider_size
+  ds = math.min(ds, self.size[x])
   local n = x1 and x1 + ds or (x2 and self.size[x] - x2 or math.floor(self.size[x] * self.divider))
+  n = common.clamp(n, ds, self.size[x])
   self.a.position[x] = self.position[x]
   self.a.position[y] = self.position[y]
   self.a.size[x] = n - ds
@@ -601,6 +604,7 @@ function Node:update_layout()
     local av = self.active_view
     if self:should_show_tabs() then
       local _, _, _, th = self:get_tab_rect(1)
+      th = math.min(th, self.size.y)
       av.position.x, av.position.y = self.position.x, self.position.y + th
       av.size.x, av.size.y = self.size.x, self.size.y - th
     else
