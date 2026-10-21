@@ -10,6 +10,7 @@ test.describe("node dividers", function()
     context.active, context.last, context.next = core.active_view, core.last_active_view, core.next_active_view
     context.hide_tabs, context.divider_size = config.hide_tabs, style.divider_size
     context.clip_rect_stack = core.clip_rect_stack
+    context.redraw = core.redraw
     config.hide_tabs = true
   end)
 
@@ -17,12 +18,11 @@ test.describe("node dividers", function()
     core.active_view, core.last_active_view, core.next_active_view = context.active, context.last, context.next
     config.hide_tabs, style.divider_size = context.hide_tabs, context.divider_size
     core.clip_rect_stack = context.clip_rect_stack
+    core.redraw = context.redraw
   end)
 
   local function layout(direction, panel_size)
     local node = Node()
-    node.position.x, node.position.y = 20.25, 20.25
-    node.size.x, node.size.y = 300.5, 200.5
     local content = View()
     function content:draw() self:draw_background(style.background) end
     content._core_step_first_update = true
@@ -31,11 +31,49 @@ test.describe("node dividers", function()
     local axis = (direction == "left" or direction == "right") and "x" or "y"
     panel.size[axis] = panel_size
     node:split(direction, panel, { [axis] = true }, true)
+    node.position.x, node.position.y = 20.25, 20.25
+    node.size.x, node.size.y = 300.5, 200.5
     node:update_layout()
     return node, axis
   end
 
+  local function assert_bounds(node, parent)
+    for _, axis in ipairs { "x", "y" } do
+      test.ok(node.size[axis] >= 0, "negative " .. axis .. " dimension")
+      test.ok(node.position[axis] >= parent.position[axis] - 1e-8)
+      test.ok(node.position[axis] + node.size[axis]
+        <= parent.position[axis] + parent.size[axis] + 1e-8)
+    end
+    if node.type == "leaf" then
+      assert_bounds(node.active_view, node)
+    elseif node.a then
+      assert_bounds(node.a, node)
+      assert_bounds(node.b, node)
+    end
+  end
+
   for _, factor in ipairs { 1, 1.25, 1.5, 1.75, 2, 3 } do
+    test.it("fits dividers and locked panes into small splits at scale " .. factor, function()
+      style.divider_size = factor
+      for _, direction in ipairs { "left", "right", "up", "down" } do
+        for _, locks in ipairs { "none", "first", "second", "both" } do
+          for _, extent in ipairs { 0, factor / 2, factor, factor + 0.25, 20.5, 100.5 } do
+            local node, axis = layout(direction, 40.5)
+            node.size[axis] = extent
+            node.a.locked = (locks == "first" or locks == "both") and { [axis] = true } or nil
+            node.b.locked = (locks == "second" or locks == "both") and { [axis] = true } or nil
+            node.a.active_view.size[axis], node.b.active_view.size[axis] = 40.5, 40.5
+            node:update_layout()
+            assert_bounds(node.a, node)
+            assert_bounds(node.b, node)
+            local x, y, w, h = node:get_divider_rect()
+            local gap = { position = { x = x, y = y }, size = { x = w, y = h } }
+            assert_bounds(gap, node)
+          end
+        end
+      end
+    end)
+
     for _, direction in ipairs { "left", "right", "up", "down" } do
       test.it("omits a collapsed " .. direction .. " divider at scale " .. factor, function()
         style.divider_size = factor
@@ -61,6 +99,37 @@ test.describe("node dividers", function()
       end
     end)
   end
+
+  test.it("keeps tabbed content inside a node shorter than its tab bar", function()
+    config.hide_tabs = false
+    local node = Node()
+    node:add_view(View())
+    node:add_view(View())
+    node.position.x, node.position.y, node.size.x = 20.25, 30.5, 300.5
+    local _, _, _, tab_height = node:get_tab_rect(1)
+    for _, height in ipairs { 0, tab_height / 2, tab_height, tab_height + 3.25 } do
+      node.size.y = height
+      node:update_layout()
+      assert_bounds(node.active_view, node)
+      test.near(node.active_view.size.y, math.max(0, height - tab_height), 1e-8)
+    end
+  end)
+
+  test.it("does not restart a hidden pane's size animation after layout", function()
+    local node = layout("down", 0)
+    local branch = node.b:split("right", View(), {})
+    local pane = View()
+    function pane:update() self:move_towards(self.size, "y", 0) end
+    branch:split("up", pane, {})
+    node:update_layout()
+    for _ = 1, 5 do
+      core.redraw = false
+      pane:update()
+      test.not_ok(core.redraw)
+      node:update_layout()
+      test.equal(pane.size.y, 0)
+    end
+  end)
 
   test.it("does not paint a hidden panel's divider beyond its parent", function()
     local background = { 200, 60, 60, 255 }
@@ -89,9 +158,10 @@ test.describe("node dividers", function()
         local split = branch:split(axis == "y" and "right" or "down", View(), {}, true)
         split:split(axis == "y" and "up" or "left", View(), {}, true)
         node:update_layout()
+        assert_bounds(node.a, node)
+        assert_bounds(node.b, node)
         local x, y, w, h = split:get_divider_rect()
-        -- Splitting an empty region can leave a descendant divider above or
-        -- beside it. The collapsed ancestor must exclude the entire branch.
+        -- A collapsed ancestor must exclude all descendant divider hit regions.
         test.is_nil(node:get_divider_overlapping_point(x + w / 2, y + h / 2))
 
         local background = { 200, 60, 60, 255 }
@@ -107,14 +177,15 @@ test.describe("node dividers", function()
         local top = math.floor(node.position.y + 0.5)
         local right = math.floor(node.position.x + node.size.x + 0.5)
         local bottom = math.floor(node.position.y + node.size.y + 0.5)
+        local color = { style.background[1], style.background[2], style.background[3] }
         -- Every edge of the content remains uniform, without a second divider.
         for column = left, right - 1 do
-          test.same({ capture:get_pixels(column, top, 1, 1):byte(1, 3) }, style.background)
-          test.same({ capture:get_pixels(column, bottom - 1, 1, 1):byte(1, 3) }, style.background)
+          test.same({ capture:get_pixels(column, top, 1, 1):byte(1, 3) }, color)
+          test.same({ capture:get_pixels(column, bottom - 1, 1, 1):byte(1, 3) }, color)
         end
         for row = top, bottom - 1 do
-          test.same({ capture:get_pixels(left, row, 1, 1):byte(1, 3) }, style.background)
-          test.same({ capture:get_pixels(right - 1, row, 1, 1):byte(1, 3) }, style.background)
+          test.same({ capture:get_pixels(left, row, 1, 1):byte(1, 3) }, color)
+          test.same({ capture:get_pixels(right - 1, row, 1, 1):byte(1, 3) }, color)
         end
       end
     end)
