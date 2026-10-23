@@ -104,8 +104,7 @@ config.plugins.autocomplete = common.merge({
       path = "min_len",
       type = "number",
       default = 3,
-      min = 1,
-      max = 999
+      min = 1
     },
     {
       label = "Maximum Height",
