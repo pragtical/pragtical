@@ -1260,6 +1260,7 @@ function StatusView:update()
   local message_visible = self.message and system.get_time() < self.message_timeout
   if message_visible then
     self.scroll.to.y = self.size.y
+    core.request_update(self.message_timeout - system.get_time())
   else
     self.scroll.to.y = 0
   end

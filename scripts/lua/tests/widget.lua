@@ -47,6 +47,7 @@ test.describe("widget mouse events", function()
     context.next_active_view = core.next_active_view
     context.grab = core.root_view.grab
     context.transitions = config.transitions
+    context.redraw = core.redraw
     config.transitions = false
     core.root_view.grab = nil
     context.roots = {}
@@ -55,6 +56,7 @@ test.describe("widget mouse events", function()
   test.after_each(function(context)
     for _, root in ipairs(context.roots) do root:destroy() end
     config.transitions = context.transitions
+    core.redraw = context.redraw
     core.root_view.grab = context.grab
     core.active_view = context.active_view
     core.last_active_view = context.last_active_view
@@ -80,6 +82,19 @@ test.describe("widget mouse events", function()
       test.equal(calls, 1)
     end)
   end
+
+  test.test("queuing a widget animation requests its first update", function(context)
+    local root = root_widget(context)
+    local child = child_widget(root)
+    root:update()
+    local target = { value = 0 }
+    core.redraw = false
+    child:animate(target, { value = 10 })
+    test.ok(core.redraw)
+    root:update()
+    test.equal(target.value, 10)
+    test.equal(#child.animations, 0)
+  end)
 
   test.test("leave reaches nested controls once when switching containers or leaving the view", function(context)
     local root = root_widget(context)

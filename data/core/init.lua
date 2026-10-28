@@ -25,6 +25,8 @@ local Project
 ---Core functionality.
 ---@class core
 local core = {}
+local next_update_time = math.huge
+local threads_pending = false
 
 local map_new_syntax_colors
 
@@ -1306,6 +1308,7 @@ local function add_thread(f, weak_ref, background, ...)
   core.threads[key] = {
     cr = coroutine.create(fn), wake = 0, background = background, loc = loc
   }
+  threads_pending = true
   if background then
     core.background_threads = core.background_threads + 1
   end
@@ -1772,6 +1775,19 @@ local max_coroutines = 1000
 ---@type number
 local main_loop_time = 0
 
+---Request a view update within a delay without keeping the frame loop awake.
+---Forces view update() calls when due, just as core.redraw = true forces
+---draw() calls. An update request does not itself request a redraw.
+---Earlier updates consume the request. Renew it from update() while waiting.
+---Multiple requests coalesce to the earliest deadline.
+---@param delay? number Seconds until the update; defaults to zero
+function core.request_update(delay)
+  next_update_time = math.min(
+    next_update_time, system.get_time() + math.max(0, delay or 0)
+  )
+end
+
+
 function core.step(next_frame_time)
   -- handle events
   local did_keymap = false
@@ -1807,6 +1823,7 @@ function core.step(next_frame_time)
   local priority_event = event_received and event_received ~= "mousemoved"
   core.root_view.size.x, core.root_view.size.y = width, height
   if uncapped or priority_event or next_frame_time < system.get_time() then
+    next_update_time = math.huge
     core.root_view:update()
   end
 
@@ -1999,14 +2016,8 @@ local run_threads = coroutine.wrap(function()
         end
         coroutine.yield(0)
       elseif runs >= max_coroutines then
-        coroutine.yield(
-          yield_time - run_start > minimal_time_to_wake
-            and 0
-            or (minimal_time_to_wake > yield_time
-              and minimal_time_to_wake - yield_time
-              or minimal_time_to_wake
-            )
-        )
+        -- Unvisited threads may be ready sooner than those already checked.
+        coroutine.yield(0)
       end
     end
 
@@ -2058,26 +2069,25 @@ end
 -- Run-loop state shared between core.run() (setup) and core.run_step() (per-frame).
 local run_next_step       = nil
 local run_skip_no_focus   = 0
-local run_burst_events    = 0
 local run_has_focus       = true
 local run_next_frame_time = 0
 
 ---Set up the run-loop state.  Called once from C (SDL_AppInit → init_lua_state)
 ---via the init_code that also calls core.init().  SDL_AppIterate then drives the
----loop by calling core.run_step() on every frame.
+---loop by calling core.run_step() when an event or deadline wakes it.
 function core.run()
   scale = require "plugins.scale"
   run_next_step       = nil
   run_skip_no_focus   = 0
-  run_burst_events    = 0
   run_has_focus       = true
   run_next_frame_time = system.get_time() + 1 / config.fps
+  next_update_time    = math.huge
   core.window:set_vsync(config.auto_fps)
 end
 
 ---Execute one frame of the main loop.
 ---
----Called by C's SDL_AppIterate on every frame.
+---Called by C's SDL_AppIterate when input or a scheduled deadline wakes the loop.
 ---
 ---@return boolean  true to keep running, false to quit or restart.
 ---@return number? wait Seconds until the next iteration; infinity waits for an event.
@@ -2092,17 +2102,19 @@ function core.run_step()
     main_loop_time  = 0
   end
 
-  run_has_focus = system.window_has_focus(core.window)
+  local focused = system.window_has_focus(core.window)
+  local focus_changed = focused ~= run_has_focus
+  run_has_focus = focused
   local has_events = system.has_pending_events()
   if has_events then
     run_next_step     = nil
-    run_burst_events  = now + 3
   end
   -- Only activity renews the grace period; timer wakeups do not.
-  if run_has_focus or core.redraw or has_events then
+  if (focus_changed and focused) or core.redraw or has_events then
     run_skip_no_focus = now + 5
     run_next_step = nil
   end
+  if focus_changed then run_next_step = nil end
 
   -- set the run mode
   if
@@ -2115,6 +2127,7 @@ function core.run_step()
     run_threads_mode = "all"
   end
 
+  threads_pending = false
   local time_to_wake = run_threads()
   local threads_end_time = system.get_time() - now
   now = now + threads_end_time
@@ -2134,36 +2147,24 @@ function core.run_step()
   else
     -- listen events and perform drawing as needed
     local did_redraw = false
-    if not run_next_step or now >= run_next_step then
+    if not run_next_step or now >= math.min(run_next_step, next_update_time) then
       did_redraw    = core.step(run_next_frame_time)
       now           = system.get_time()
       run_next_step = nil
     end
     if core.restart_request or core.quit_request then return false end
     if not did_redraw then
-      if run_has_focus or core.background_threads > 0 or run_skip_no_focus > now then
-        if not run_next_step then -- compute the time until the next blink
-          local t  = now - core.blink_start
-          local h  = config.blink_period / 2
-          local dt = math.ceil(t / h) * h - t
-          local cursor_time_to_wake = dt + 1 / core.fps
-          run_next_step = now + cursor_time_to_wake
-        end
-        local nframe = run_next_frame_time - system.get_time()
-        nframe = nframe > 0 and nframe or (1/core.fps)
-        local b = (uncapped and run_burst_events > now) and rendering_speed or nframe
-        wake_at = now + math.min(run_next_step - now, time_to_wake, b)
-      else
-        -- No background tasks: keep ordinary coroutine deadlines without
-        -- repeatedly renewing the unfocused grace period.
-        wake_at = now + time_to_wake
-        run_next_step = nil
-      end
+      -- An update can request a redraw before the next permitted frame.
+      -- Otherwise only a view deadline or a coroutine needs another iteration.
+      run_next_step = core.redraw and math.max(now, run_next_frame_time)
+        or math.min(run_next_step or math.huge, math.max(run_next_frame_time, next_update_time))
+      wake_at = math.min(run_next_step, now + time_to_wake)
     else -- if we redrew, then make sure we only draw at most FPS/sec
       local elapsed    = now - core.frame_start
       local next_frame = math.max(0, 1 / core.fps - elapsed)
       run_next_frame_time = now + next_frame
-      run_next_step = run_next_step or run_next_frame_time
+      -- One more update lets animations advance or settle after this draw.
+      run_next_step = uncapped and now or run_next_frame_time
       wake_at = now + math.min(uncapped and 0 or 1, next_frame, time_to_wake)
     end
   end
@@ -2180,6 +2181,8 @@ function core.run_step()
   )
 
   -- Let the native callback choose a short sleep or an interruptible event wait.
+  -- A view update can create tasks after this iteration's scheduler pass.
+  if threads_pending then return true, 0 end
   return true, math.max(0, wake_at - system.get_time())
 end
 

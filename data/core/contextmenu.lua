@@ -631,6 +631,9 @@ function ContextMenu:update()
       self.child_menu:hide(); self.child_menu = nil
     end
   end
+  if self.hover_since then
+    core.request_update(self.hover_since + 0.2 - system.get_time())
+  end
 end
 
 ---Draw the animated menu viewport, cached row states, checkmarks, and scrollbar.

@@ -1418,6 +1418,9 @@ function DocView:update(...)
     self.cf_invalidated_at = nil
     recalculate(self)
   end
+  if self.cf_invalidated_at then
+    core.request_update(self.cf_invalidated_at - system.get_time())
+  end
 
   normalize_caret(self)
 end

@@ -1,5 +1,6 @@
 local test = require "core.test"
 local core = require "core"
+local config = require "core.config"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local style = require "core.style"
@@ -81,6 +82,57 @@ local function scan_x_offset_col(view, line, x)
   end
   return line_len
 end
+
+test.describe("docview caret deadlines", function()
+  test.before_each(function(c)
+    c.active, c.redraw = core.active_view, core.redraw
+    c.start, c.timer = core.blink_start, core.blink_timer
+    c.threads, c.background = core.threads, core.background_threads
+    c.disabled, c.period = config.disable_blink, config.blink_period
+    c.clock, c.focus, c.request = system.get_time, system.window_has_focus, core.request_update
+    core.threads, core.background_threads = {}, 0
+    core.blink_start, core.blink_timer = 100, 100
+    config.disable_blink, config.blink_period = false, 1.2
+    c.focused, c.delays = true, {}
+    system.get_time = function() return 100.1 end
+    system.window_has_focus = function() return c.focused end
+    core.request_update = function(delay) c.delays[#c.delays + 1] = delay end
+    c.view = make_view("caret\n")
+    c.view.last_line1, c.view.last_line2 = 1, 1
+    c.view.last_col1, c.view.last_col2 = 1, 1
+    core.active_view = c.view
+  end)
+
+  test.after_each(function(c)
+    core.active_view, core.redraw = c.active, c.redraw
+    core.blink_start, core.blink_timer = c.start, c.timer
+    core.threads, core.background_threads = c.threads, c.background
+    config.disable_blink, config.blink_period = c.disabled, c.period
+    system.get_time, system.window_has_focus, core.request_update = c.clock, c.focus, c.request
+  end)
+
+  test.test("schedules the active caret's next blink", function(c)
+    c.view:update()
+    test.equal(#c.delays, 1)
+    test.near(c.delays[1], 0.5, 1e-8)
+  end)
+
+  test.test("does not schedule disabled caret blinking", function(c)
+    config.disable_blink = true
+    c.view:update()
+    test.equal(#c.delays, 0)
+  end)
+
+  test.test("does not wake for inactive, unfocused or dragged carets", function(c)
+    core.active_view = c.active
+    c.view:update()
+    core.active_view, c.focused = c.view, false
+    c.view:update()
+    c.focused, c.view.mouse_selecting = true, true
+    c.view:update()
+    test.equal(#c.delays, 0)
+  end)
+end)
 
 test.describe("docview", function()
   test.test("ensure_line_visible returns the requested line by default", function()

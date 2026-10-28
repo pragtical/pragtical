@@ -648,7 +648,8 @@ settings.add("User Interface",
     },
     {
       label = "Disable Cursor Blinking",
-      description = "Disables cursor blinking on text input elements.",
+      description = "Disables cursor blinking on text input elements."
+        .. " This reduces idle CPU usage.",
       path = "disable_blink",
       type = settings.type.TOGGLE,
       default = false
