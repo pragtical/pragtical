@@ -430,7 +430,8 @@ test.describe("core idle scheduling", function()
     test.ok(common.mkdirp(c.directory))
     local script = c.directory .. PATHSEP .. "idle.lua"
     local file = assert(io.open(script, "w"))
-    file:write(source)
+    -- SDL's dummy display reports zero refresh; set FPS before core.run().
+    file:write('local config = require "core.config"\nconfig.fps, config.auto_fps = 60, false\n', source)
     file:close()
     c.child = assert(process.start({ EXEFILE, "run", "-n", script }, {
       stdout = process.REDIRECT_PIPE, stderr = process.REDIRECT_STDOUT,
@@ -511,6 +512,176 @@ core.run = function()
     assert(iterate() == math.huge, "empty idle loop did not wait for input")
     now = now + 1
     assert(iterate() == math.huge, "empty idle loop renewed its grace period")
+  end, debug.traceback)
+  if not ok then print(err) end
+  core.quit(true, ok and 0 or 1)
+  core.run_step = function() return false end
+end
+]=])
+  end)
+
+  test.test("focused idle waits for view deadlines and keeps animations responsive", function(c)
+    run_child(c, [=[
+local core = require "core"
+local config = require "core.config"
+local run = core.run
+core.run = function()
+  run()
+  local ok, err = xpcall(function()
+    local now = system.get_time() + 1
+    local focused, pending = true, false
+    local updates, draws, events, progress = 0, 0, 0, 0
+    system.get_time = function() return now end
+    system.window_has_focus = function() return focused end
+    system.has_pending_events = function() return pending end
+    system.poll_event = function()
+      if pending then pending = false; return "textinput", "x" end
+    end
+    core.on_event = function() events = events + 1 end
+    config.fps, core.fps, core.co_max_time = 60, 60, 0.012
+    config.draw_stats = false
+    core.threads, core.background_threads, core.redraw = {}, 0, false
+    local animating = false
+    local on_update
+    core.root_view.update = function()
+      updates = updates + 1
+      if on_update then local fn = on_update; on_update = nil; fn() end
+      if animating and progress < 5 then
+        progress = progress + 1
+        core.redraw = true
+      end
+    end
+    core.root_view.draw = function() draws = draws + 1 end
+    renderer.begin_frame, renderer.end_frame = function() end, function() end
+    renderer.set_clip_rect = function() end
+    local function iterate()
+      for _ = 1, 20 do
+        local running, wait = core.run_step()
+        assert(running and wait >= 0, "invalid scheduler result")
+        if wait > 0 then return wait end
+        now = now + 0.000001
+      end
+      error("scheduler kept returning an immediate deadline")
+    end
+    assert(iterate() == math.huge, "focused idle still wakes for empty frames")
+    local count = updates
+    now = now + 0.1
+    assert(iterate() == math.huge and updates == count, "focus alone updates views")
+    core.request_update(0.4)
+    core.request_update(1)
+    local deadline_wait = iterate()
+    assert(math.abs(deadline_wait - 0.4) < 0.00001,
+      "view deadlines did not coalesce: " .. tostring(deadline_wait))
+    now = now + 0.400001
+    assert(iterate() == math.huge and updates == count + 1, "view deadline was not consumed")
+    local launched = 0
+    on_update = function()
+      core.add_background_thread(function() launched = launched + 1 end)
+    end
+    core.request_update()
+    iterate()
+    assert(launched == 1, "task created during update was left asleep")
+    count = updates
+    local jobs = 0
+    core.add_background_thread(function()
+      jobs = jobs + 1
+      coroutine.yield(0.25)
+      jobs = jobs + 1
+    end)
+    assert(iterate() > 0.24 and updates == count, "background work updates idle views")
+    now = now + 0.250001
+    iterate()
+    assert(jobs == 2 and updates == count, "coroutine deadline did not run independently")
+    pending = true
+    iterate()
+    assert(events == 1 and draws == 1 and updates > count, "input did not resume immediately")
+    now = now + 1
+    iterate()
+    count = updates
+    focused = false
+    iterate()
+    focused = true
+    iterate()
+    assert(updates == count + 2, "focus changes did not update views")
+    animating, core.redraw = true, true
+    core.add_background_thread(function()
+      for _ = 1, 50 do coroutine.yield(0.001) end
+    end)
+    local started, previous_draws = now, draws
+    for _ = 1, 150 do
+      local wait = iterate()
+      if progress == 5 and wait == math.huge then break end
+      assert(wait < math.huge, "animation went to sleep before settling")
+      now = now + wait + 0.000001
+    end
+    assert(progress == 5 and draws - previous_draws == 5, "coroutine wakeups lost an animation frame")
+    assert(now - started >= 4 / 60, "animation ignored the frame limit")
+    assert(iterate() == math.huge, "settled animation kept waking the editor")
+  end, debug.traceback)
+  if not ok then print(err) end
+  core.quit(true, ok and 0 or 1)
+  core.run_step = function() return false end
+end
+]=])
+  end)
+
+  test.test("coroutine batches keep visualizer frames responsive after slow work", function(c)
+    run_child(c, [=[
+local core = require "core"
+local config = require "core.config"
+local run = core.run
+function core.run()
+  run()
+  local ok, err = xpcall(function()
+    local now = system.get_time() + 1
+    system.get_time = function() return now end
+    system.window_has_focus = function() return true end
+    system.has_pending_events = function() return false end
+    system.poll_event = function() end
+    renderer.begin_frame, renderer.end_frame = function() end, function() end
+    renderer.set_clip_rect = function() end
+    core.root_view.update = function() end
+    core.root_view.draw = function() now = now + .008 end
+    config.fps, core.fps, core.co_max_time = 75, 75, .005
+    core.threads, core.background_threads, core.redraw = {}, 0, false
+    local next_visual, frames = now, 0
+    for index = 1, 8 do
+      core.add_thread(function()
+        for iteration = 1, 100 do
+          now = now + (index == 1 and iteration % 3 == 1 and .012 or .0001)
+          coroutine.yield(index % 2 == 0 and .1 or .2)
+        end
+      end)
+    end
+    local owner = {}
+    core.add_thread(function()
+      for _ = 1, 300 do
+        frames = frames + 1
+        now = now + .0001
+        core.redraw = true
+        next_visual = now + 1 / 60
+        coroutine.yield(1 / 60)
+      end
+    end, owner)
+    for iteration = 1, 1500 do
+      local running, wait = core.run_step()
+      assert(running)
+      -- Execution budgets may defer work briefly, but not past a whole frame.
+      local allowed = math.max(1 / config.fps, next_visual - now)
+      assert(wait <= allowed + .000001,
+        string.format("visualizer due in %.6fs but scheduler waits %.6fs", allowed, wait))
+      now = now + wait + .000001
+      if frames >= 100 then break end
+    end
+    assert(frames >= 100, "visualizer did not keep progressing")
+    core.threads = {}
+    local wait
+    for _ = 1, 30 do
+      _, wait = core.run_step()
+      if wait == math.huge then break end
+      now = now + wait + .000001
+    end
+    assert(wait == math.huge, "finished coroutine batches kept idle awake")
   end, debug.traceback)
   if not ok then print(err) end
   core.quit(true, ok and 0 or 1)

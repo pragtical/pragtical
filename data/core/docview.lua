@@ -1180,6 +1180,7 @@ function DocView:update()
       core.redraw = true
     end
     core.blink_timer = tb
+    core.request_update(T / 2 - (tb - t0) % (T / 2))
   end
 
   self:update_ime_location()

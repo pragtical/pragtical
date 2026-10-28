@@ -419,10 +419,13 @@ function TreeView:update()
   if self.size.x == 0 or self.size.y == 0 or not self.visible then return end
 
   local duration = system.get_time() - self.tooltip.begin
-  if self.hovered_item and self.tooltip.x and duration > tooltip_delay then
+  if self.hovered_item and self.tooltip.x and duration >= tooltip_delay then
     self:move_towards(self.tooltip, "alpha", tooltip_alpha, tooltip_alpha_rate, "treeview")
   else
     self.tooltip.alpha = 0
+    if self.hovered_item and self.tooltip.x then
+      core.request_update(tooltip_delay - duration)
+    end
   end
 
   self.item_icon_width = style.icon_font:get_width("D")

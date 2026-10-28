@@ -638,6 +638,7 @@ function AudioView:update()
     self.filter_due = nil
     self:filter_tracks()
   end
+  if self.filter_due then core.request_update(self.filter_due - system.get_time()) end
   local p, gap, h = style.padding.x, style.padding.y, style.font:get_height()
   local w = math.max(1, self.size.x - 2 * p)
   local row = h + gap * 2
