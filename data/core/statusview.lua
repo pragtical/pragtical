@@ -188,7 +188,6 @@ function StatusView:new()
   self.visible = true
 
   self:register_docview_items()
-  self:register_command_items()
   self:register_imageview_items()
 end
 
@@ -403,25 +402,6 @@ function StatusView:register_docview_items()
     command = "doc:toggle-overwrite",
     separator = StatusView.separator2
   }
-end
-
-
----Register default status bar items for command views.
----Shows file count icon.
-function StatusView:register_command_items()
-  if self:get_item("command:files") then return end
-
-  self:add_item({
-    predicate = "core.commandview",
-    name = "command:files",
-    alignment = StatusView.Item.RIGHT,
-    get_item = function()
-      return {
-        style.icon_font, "g",
-        style.font, style.dim, self.separator2
-      }
-    end
-  })
 end
 
 
