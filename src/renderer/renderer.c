@@ -69,6 +69,8 @@ typedef struct {
   SDL_Surface *surface;
   SDL_Rect clip;
   RenColor color;
+  RenPolySpanFn span_fn;
+  void *userdata;
 } RenPolyParams;
 
 /************************* Fonts *************************/
@@ -2082,13 +2084,17 @@ int ren_poly_cbox(RenPoint *points, int npoints, RenRect *cbox) {
   return 0;
 }
 
-void raster_span(int y, int count, const FT_Span *spans, void *user) {
+static void raster_span(int y, int count, const FT_Span *spans, void *user) {
   RenPolyParams *param = (RenPolyParams *) user;
   if (y < param->clip.y || y >= param->clip.y + param->clip.h) return;
   for (int i = 0; i < count; i++) {
     SDL_Rect actual, span = { .x = spans[i].x, .y = y, .w = spans[i].len, .h = 1 };
     if (span.x > param->clip.x + param->clip.w) break;
     if (!SDL_GetRectIntersection(&param->clip, &span, &actual)) continue;
+    if (param->span_fn) {
+      param->span_fn(param->userdata, &actual, spans[i].coverage);
+      continue;
+    }
     *((uint32_t *) draw_rect_surface->pixels) = SDL_MapRGBA(
       SDL_GetPixelFormatDetails(draw_rect_surface->format),
       SDL_GetSurfacePalette(draw_rect_surface),
@@ -2099,10 +2105,12 @@ void raster_span(int y, int count, const FT_Span *spans, void *user) {
   }
 }
 
-void ren_draw_poly(RenSurface *rs, RenPoint *points, unsigned short npoints, RenColor color) {
+bool ren_draw_poly_cb(RenSurface *rs, RenPoint *points, unsigned short npoints, RenColor color,
+                      RenPolySpanFn span_fn, void *userdata) {
   FT_Outline outline;
-  if (npoints == 0 || npoints > MAX_POLY_POINTS) return;
-  if (FT_Outline_New(library, npoints, 1, &outline) != 0) return;
+  if (npoints == 0 || color.a == 0) return true;
+  if (npoints > MAX_POLY_POINTS) return false;
+  if (FT_Outline_New(library, npoints, 1, &outline) != 0) return false;
   for (int i = 0; i < npoints; i++) {
     // this is undocumented, but freetype seems to expect 26.6 fixed point numbers
     outline.points[i].x = points[i].x * 64;
@@ -2110,15 +2118,22 @@ void ren_draw_poly(RenSurface *rs, RenPoint *points, unsigned short npoints, Ren
     outline.tags[i] = points[i].tag;
   }
   outline.contours[0] = npoints - 1;
-  RenPolyParams params = { .color = color, .surface = rs->surface };
+  RenPolyParams params = {
+    .color = color, .surface = rs->surface, .span_fn = span_fn, .userdata = userdata
+  };
   SDL_GetSurfaceClipRect(rs->surface, &params.clip);
-  FT_Outline_Render(library, &outline, &(FT_Raster_Params) {
+  FT_Error error = FT_Outline_Render(library, &outline, &(FT_Raster_Params) {
     .target = NULL,
     .flags = FT_RASTER_FLAG_AA | FT_RASTER_FLAG_DIRECT,
     .gray_spans = &raster_span,
     .user = &params,
   });
   FT_Outline_Done(library, &outline);
+  return error == 0;
+}
+
+void ren_draw_poly(RenSurface *rs, RenPoint *points, unsigned short npoints, RenColor color) {
+  ren_draw_poly_cb(rs, points, npoints, color, NULL, NULL);
 }
 
 /******************* Rectangles **********************/
