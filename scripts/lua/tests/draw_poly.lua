@@ -6,10 +6,13 @@
 -- control-box return value, and the documented "2, 6 or 8 numbers" constraint.
 --
 -- Runs under whatever backend PRAGTICAL_RENDERER selects, so it validates the
--- SDLGPU triangulation paths as well as the software renderer.
+-- SDLGPU polygon paths as well as the software renderer.
 -- Collapsed polygons are checked on both window and offscreen canvas targets.
 
 local test = require "core.test"
+local common = require "core.common"
+local dir = debug.getinfo(1, "S").source:sub(2):match("^(.*[/\\])")
+local visualizer = dofile(dir .. "../fixtures/visualizer.lua")
 
 local BG   = { 0, 0, 0, 255 }
 local FILL = { 255, 90, 40, 255 }
@@ -57,6 +60,111 @@ local function render_poly(context, name, w, h, poly, offscreen)
     capture:save_image(context.temp_root .. PATHSEP .. "draw-poly-" .. name .. ".png")
   end
   return capture:get_pixels(0, 0, w, h), bx, by, bw, bh
+end
+
+-- Independent nonzero-winding check. Exclude pixels touching an edge, whose
+-- antialiased coverage is deliberately not predicted by this point test.
+local function touches_polygon(poly, x, y)
+  local winding = 0
+  local a = poly[#poly]
+  for _, b in ipairs(poly) do
+    local dx, dy = b[1] - a[1], b[2] - a[2]
+    local length = dx * dx + dy * dy
+    local t = length > 0 and math.max(0, math.min(1, ((x - a[1]) * dx + (y - a[2]) * dy) / length)) or 0
+    if (x - a[1] - t * dx)^2 + (y - a[2] - t * dy)^2 <= 1 then return true end
+    local cross = dx * (y - a[2]) - dy * (x - a[1])
+    if a[2] <= y and b[2] > y and cross > 0 then winding = winding + 1 end
+    if a[2] > y and b[2] <= y and cross < 0 then winding = winding - 1 end
+    a = b
+  end
+  return winding ~= 0
+end
+
+for _, target in ipairs { "window", "canvas" } do
+  test.describe(target .. " visualization polygons", function()
+    test.before_each(function(context)
+      context.temp_root = USERDIR .. PATHSEP .. "draw-poly-" .. system.get_process_id()
+        .. "-" .. math.floor(system.get_time() * 1000000)
+      test.ok(common.mkdirp(context.temp_root))
+    end)
+
+    test.after_each(function(context)
+      if os.getenv("PRAGTICAL_KEEP_VISUAL_TEST_OUTPUT") == "1" then
+        print("polygon test output: " .. context.temp_root)
+      else
+        test.ok(common.rm(context.temp_root, true))
+      end
+    end)
+
+    for _, name in ipairs(visualizer.names) do
+      test.test("preserves " .. name .. " strips and unfilled regions", function(context)
+        local w, h, bg = visualizer.width, visualizer.height, visualizer.background
+        local window = renwindow.create("draw-poly-" .. name, w, h)
+        local offscreen = target == "canvas" and canvas.new(w, h, bg)
+        for frame = 1, 3 do
+          local polygons = {}
+          renderer.begin_frame(window)
+          renderer.set_clip_rect(0, 0, w, h)
+          renderer.draw_rect(0, 0, w, h, bg, true)
+          if offscreen then offscreen:draw_rect(0, 0, w, h, bg, true) end
+          -- Later frames exercise clipping and retained-frame invalidation.
+          local inset = (frame - 1) * 16
+          if offscreen then offscreen:set_clip_rect(inset, inset, w - inset * 2, h - inset * 2)
+          else renderer.set_clip_rect(inset, inset, w - inset * 2, h - inset * 2) end
+          visualizer.draw(name, frame, function(poly, color)
+            if offscreen then offscreen:draw_poly(poly, color)
+            else renderer.draw_poly(poly, color) end
+            local integer_poly = {}
+            for i, point in ipairs(poly) do
+              integer_poly[i] = {
+                point[1] >= 0 and math.floor(point[1]) or math.ceil(point[1]),
+                point[2] >= 0 and math.floor(point[2]) or math.ceil(point[2])
+              }
+            end
+            polygons[#polygons + 1] = integer_poly
+          end)
+          if offscreen then
+            offscreen:render()
+            renderer.draw_canvas(offscreen, 0, 0)
+            offscreen:set_clip_rect(0, 0, w, h)
+          end
+          renderer.end_frame()
+          local capture = renderer.to_canvas(window, 0, 0, w, h)
+          test.ok(capture:save_image(context.temp_root .. PATHSEP .. name .. "-" .. frame .. ".png"))
+          local pixels = capture:get_pixels(0, 0, w, h)
+          local blank, lit = 0, 0
+          for y = 0, h - 1, 4 do
+            for x = 0, w - 1, 4 do
+              local touches = false
+              if x >= inset and y >= inset and x < w - inset and y < h - inset then
+                for _, poly in ipairs(polygons) do
+                  if touches_polygon(poly, x + 0.5, y + 0.5) then touches = true; break end
+                end
+              end
+              local r, g, b = pixels:byte((y * w + x) * 4 + 1, (y * w + x) * 4 + 3)
+              if not touches then
+                test.ok(math.abs(r - bg[1]) <= 1 and math.abs(g - bg[2]) <= 1 and math.abs(b - bg[3]) <= 1,
+                  string.format("%s frame %d filled outside the path at %d,%d: %d,%d,%d", name, frame, x, y, r, g, b))
+                blank = blank + 1
+              elseif math.max(r, g, b) > 32 then
+                lit = lit + 1
+              end
+            end
+          end
+          test.ok(blank > 1000, "fixture must exercise unfilled regions")
+          test.ok(lit > 100, "fixture must contain visible strips")
+        end
+      end)
+    end
+
+    test.test("keeps a one-pixel strip inside its bounds", function(context)
+      local poly = { {16, 20}, {80, 20}, {80, 21}, {16, 21} }
+      local pixels = render_poly(context, target .. "-thin-strip", 96, 80, poly, target == "canvas")
+      test.equal(count_fill(pixels, 96, 16, 20, 64, 1, FILL, 2), 64)
+      test.equal(count_fill(pixels, 96, 0, 19, 96, 1, BG, 0), 96)
+      test.equal(count_fill(pixels, 96, 0, 21, 96, 1, BG, 0), 96)
+    end)
+  end)
 end
 
 local function circle_ring(cx, cy, rx, ry, segments)
