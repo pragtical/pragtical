@@ -36,6 +36,7 @@ test.describe("floating document routing", function()
     context.docs, context.transitions = core.docs, config.transitions
     context.enter, context.quit = core.command_view.enter, core.quit
     context.ime_editing, context.ime_location = ime.editing, ime.last_location
+    context.clip, context.redraw = core.clip_rect_stack, core.redraw
     core.docs, context.views = {}, {}
     config.transitions = false
     core.root_view = RootView()
@@ -62,6 +63,7 @@ test.describe("floating document routing", function()
     core.command_view.enter, core.quit = context.enter, context.quit
     ime.editing, ime.last_location = context.ime_editing, context.ime_location
     system.chdir(context.cwd)
+    core.clip_rect_stack, core.redraw = context.clip, context.redraw
   end)
 
   test.test("typed text reaches a focused floating DocView once", function(context)
@@ -229,4 +231,43 @@ test.describe("floating document routing", function()
       test.not_nil(context.node:get_view_idx(context.docked))
     end)
   end
+  test.test("a popup created during update requests its first drawable frame", function(context)
+    local root = core.root_view
+    root:update(); root:update()
+    local parent = View()
+    context.views[#context.views + 1] = parent
+    parent:set_floating(true, { focus = "none" })
+    parent:set_floating_bounds(10, 10, 100, 100)
+    parent:show_floating()
+    root:update()
+    local child, draws
+    parent.update = function()
+      if child then return end
+      child, draws = View(), 0
+      context.views[#context.views + 1] = child
+      child.update = function() end
+      child.draw = function() draws = draws + 1 end
+      child:set_floating(true, { owner = parent, focus = "none" })
+      child:set_floating_bounds(20, 20, 80, 80)
+      child:show_floating()
+    end
+    local function paint()
+      renderer.begin_frame(core.window)
+      core.clip_rect_stack = {{0, 0, 500, 400}}
+      renderer.set_clip_rect(0, 0, 500, 400)
+      core.redraw = false
+      root:draw()
+      renderer.end_frame()
+    end
+    root:update()
+    paint()
+    test.equal(draws, 0, "a popup must update before drawing")
+    root:update()
+    test.ok(core.redraw, "its first update must request the skipped draw")
+    paint()
+    test.equal(draws, 1)
+    root:update()
+    test.not_ok(core.redraw, "a settled popup must not keep drawing")
+  end)
+
 end)

@@ -190,4 +190,23 @@ test.describe("node dividers", function()
       end
     end)
   end
+  test.it("a replacement view requests drawing after its first update only", function()
+    local node = Node()
+    node.size.x, node.size.y = 400, 300
+    node.views, node.active_view = {View()}, nil
+    node.active_view = node.views[1]
+    node:update_layout()
+    node:update(); node:update()
+    local view = View()
+    view.update = function() end
+    node.views, node.active_view = {view}, view
+    node:update_layout()
+    core.redraw = false
+    node:update()
+    test.ok(core.redraw, "a newly updated view needs its first draw")
+    core.redraw = false
+    node:update()
+    test.not_ok(core.redraw, "a settled view must stop requesting frames")
+  end)
+
 end)
