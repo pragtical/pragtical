@@ -275,15 +275,28 @@ local function load_node(node, t)
 end
 
 
----Collects additional project directories relative to the root project.
+---Collects the absolute paths of additional project directories.
 ---@return string[] directories
 local function save_directories()
-  local project_dir = core.root_project().path
   local dir_list = {}
   for i = 2, #core.projects do
-    dir_list[#dir_list + 1] = common.relative_path(project_dir, core.projects[i].path)
+    dir_list[#dir_list + 1] = system.absolute_path(core.projects[i].path)
   end
   return dir_list
+end
+
+
+---Restore added directories, warning about saved paths that are no longer directories.
+---@param directories string[] Saved absolute project directory paths
+local function load_directories(directories)
+  for _, directory in ipairs(directories) do
+    local info = system.get_file_info(directory)
+    if info and info.type == "dir" then
+      core.add_project(directory)
+    else
+      core.warn("Workspace directory '%s' no longer exists; skipping it.", directory)
+    end
+  end
 end
 
 
@@ -338,9 +351,7 @@ local function load_workspace()
         if active_view then
           core.set_active_view(active_view)
         end
-        for _, dir_name in ipairs(workspace.directories) do
-          core.add_project(system.absolute_path(dir_name))
-        end
+        load_directories(workspace.directories)
       end
     end)
     if pending_project == project then
@@ -389,11 +400,7 @@ function workspace.load_session(key)
   for _, doc in ipairs(restored_docs) do documents[#documents + 1] = doc end
   core.visited_files = common.merge({}, session.visited_files or {})
   while #core.projects > 1 do core.remove_project(core.projects[#core.projects]) end
-  for _, directory in ipairs(session.directories or {}) do
-    local path = common.is_absolute_path(directory) and directory
-      or common.normalize_path(project.path .. PATHSEP .. directory)
-    if system.get_file_info(path) then core.add_project(path) end
-  end
+  load_directories(session.directories or {})
   core.root_view.root_node:update_layout()
   core.set_active_view(focus or core.root_view:get_primary_node().active_view)
   storage.clear(STORAGE_MODULE, key)
