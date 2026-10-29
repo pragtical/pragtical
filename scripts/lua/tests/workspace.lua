@@ -7,7 +7,7 @@ local function load_module(path, env)
 end
 
 local function setup(platform, path, saved, defer_load)
-  local state = { saved = saved or {}, writes = {}, cleared = {}, threads = {}, errors = {} }
+  local state = { saved = saved or {}, writes = {}, cleared = {}, threads = {}, errors = {}, warnings = {} }
   local methods = {}
   local root = setmetatable({ type = "leaf", views = {} }, { __index = methods })
   function methods:add_view(view) self.views[#self.views + 1] = view end
@@ -44,6 +44,7 @@ local function setup(platform, path, saved, defer_load)
   end
   function core.root_view:get_primary_node() return root end
   function core.log(...) state.log = { ... } end
+  function core.warn(...) state.warnings[#state.warnings + 1] = string.format(...) end
   function core.try(fn, ...)
     local ok, result = pcall(fn, ...)
     if not ok then state.errors[#state.errors + 1] = result end
@@ -52,6 +53,15 @@ local function setup(platform, path, saved, defer_load)
   function core.root_project() return core.projects[1] end
   function core.set_active_view(view) core.active_view = view end
   function core.add_thread(fn) state.threads[#state.threads + 1] = fn end
+  function core.add_project(path)
+    assert(type(path) == "string", "project path must be a string")
+    for _, project in ipairs(core.projects) do
+      if project.path == path then return project end
+    end
+    local project = { path = path }
+    core.projects[#core.projects + 1] = project
+    return project
+  end
   function core.set_project(project)
     core.projects = {{ path = project }}
     core.visited_files = {}
@@ -101,9 +111,11 @@ local function setup(platform, path, saved, defer_load)
   }
   local env = setmetatable({
     PLATFORM = platform, PATHSEP = platform == "Windows" and "\\" or "/",
+    system = setmetatable({}, { __index = system }),
     require = function(name) return modules[name] or require(name) end
   }, { __index = _G })
   modules["core.common"] = load_module("core/common.lua", env)
+  state.system = env.system
   state.workspace = load_module("plugins/workspace.lua", env)
   state.command = command
 
@@ -143,6 +155,64 @@ local function workspace(path, filename)
 end
 
 test.describe("workspace", function()
+  for _, platform in ipairs { "Windows", "Linux" } do
+    test.test(platform .. " saves and restores absolute added directories with a file from B active", function()
+      local path = platform == "Windows" and "C:\\projects\\A" or "/projects/A"
+      local second = platform == "Windows" and "C:\\libraries\\B" or "/libraries/B"
+      local third = platform == "Windows" and "D:\\libraries\\C" or "/libraries/C"
+      local state = setup(platform, path)
+      state.open("first.lua")
+      state.core.add_project(second)
+      state.core.add_project(third)
+      local filename = second .. (platform == "Windows" and "\\io.c3" or "/io.c3")
+      state.open(filename)
+      state.save()
+      test.same(state.saved["A-1"].directories, { second, third })
+      test.same(state.errors, {})
+      local restored = setup(platform, path, state.saved, true)
+      restored.system.get_file_info = function(directory)
+        if directory == second or directory == third then return { type = "dir" } end
+      end
+      restored.flush()
+      test.equal(#restored.core.projects, 3)
+      test.equal(restored.core.projects[2].path, second)
+      test.equal(restored.core.projects[3].path, third)
+      test.equal(restored.core.active_view.state.filename, filename)
+      test.same(restored.errors, {})
+      test.same(restored.warnings, {})
+    end)
+
+    test.test(platform .. " skips missing directories with warnings during startup and session loading", function()
+      local path = platform == "Windows" and "C:\\projects\\A" or "/projects/A"
+      local sep = platform == "Windows" and "\\" or "/"
+      local missing = path .. sep .. "missing"
+      local file = path .. sep .. "file.txt"
+      local directory = path .. sep .. "valid"
+      for _, manual in ipairs { false, true } do
+        local previous = workspace(path, "selected.lua")
+        previous.directories = { missing, file, directory }
+        local state = setup(platform, path, manual and {} or { ["A-1"] = previous }, true)
+        state.system.get_file_info = function(filename)
+          if filename == directory then return { type = "dir" } end
+          if filename == file then return { type = "file" } end
+        end
+        state.flush()
+        if manual then
+          state.open("current.lua")
+          state.saved["A-2"] = previous
+          test.ok(state.workspace.load_session("A-2"))
+        end
+        test.equal(#state.core.projects, 2)
+        test.equal(state.core.projects[2].path, directory)
+        test.equal(#state.warnings, 2)
+        test.match(state.warnings[1], missing, nil, true)
+        test.match(state.warnings[1], "no longer exists", nil, true)
+        test.match(state.warnings[2], file, nil, true)
+        test.same(state.errors, {})
+      end
+    end)
+  end
+
   test.test("project-switch restart does not save or consume the pending destination", function()
     local first, second = "C:\\Pragtical", "D:\\pragtical"
     local destination = workspace(second, "second.lua")
@@ -571,6 +641,7 @@ test.describe("workspace session switching", function()
     local sessions = workspace_plugin.get_sessions()
     test.equal(#sessions, 1)
     test.equal(sessions[1].count, 2)
+    test.same(storage.load("ws", sessions[1].key).directories, { extra })
     test.ok(workspace_plugin.load_session(sessions[1].key))
     local root = core.root_view.root_node
     test.equal(root.type, "hsplit")
