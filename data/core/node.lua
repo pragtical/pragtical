@@ -688,7 +688,10 @@ function Node:update()
     self:scroll_tabs_to_visible()
     local view = self.active_view
     view:update()
-    view._core_step_first_update = true
+    if not view._core_step_first_update then
+      view._core_step_first_update = true
+      core.redraw = true
+    end
     self:tab_hovered_update(core.root_view.mouse.x, core.root_view.mouse.y)
     local tab_width = self:target_tab_width()
     self:move_towards("tab_shift", tab_width * (self.tab_offset - 1), nil, "tabs")

@@ -1060,7 +1060,10 @@ function RootView:update()
         view:update_floating()
         if view.floating_visible then
           view:update()
-          view._core_step_first_update = true
+          if not view._core_step_first_update then
+            view._core_step_first_update = true
+            core.redraw = true
+          end
         end
       end
     end
