@@ -1687,8 +1687,7 @@ static int f_get_display_info(lua_State* L) {
 
   if (!video_was_init) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
-        SDL_Log("Video subsystem failed: %s", SDL_GetError());
-        return luaL_error(L, "Video subsystem failed: %s", SDL_GetError());
+      return luaL_error(L, "Video subsystem failed: %s", SDL_GetError());
     }
   }
 

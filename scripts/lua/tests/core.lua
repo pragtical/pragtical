@@ -131,6 +131,55 @@ test.describe("core project switching", function()
   end)
 end)
 
+test.describe("core startup without a display", function()
+  test.before_each(function(c)
+    c.directory = core.temp_filename()
+    test.ok(common.mkdirp(c.directory))
+    local file = assert(io.open(c.directory .. PATHSEP .. "display_startup_test.lua", "w"))
+    file:write([[
+local core = require "core"
+-- Prevent a native error dialog if startup regresses on a graphical host.
+function system.show_fatal_error() end
+local ensure_user_directory = core.ensure_user_directory
+function core.ensure_user_directory()
+  assert(DEFAULT_SCALE == 1, "display failure changed the default scale")
+  assert(DEFAULT_FPS == 60, "display failure changed the default frame rate")
+  assert(SCALE == 1.25, "display failure ignored the requested scale")
+  io.stdout:write("DISPLAY DEFAULTS OK\n")
+  return ensure_user_directory()
+end
+return core
+]])
+    file:close()
+  end)
+
+  test.after_each(function(c)
+    if c.process and c.process:running() then
+      c.process:kill()
+      c.process:wait(1000, 0.01)
+    end
+    if c.directory then common.rm(c.directory, true) end
+  end)
+
+  test.test("loads CLI commands when no SDL video driver is available", function(c)
+    c.process = assert(process.start({ EXEFILE, "--help" }, {
+      cwd = c.directory,
+      stdout = process.REDIRECT_PIPE,
+      stderr = process.REDIRECT_STDOUT,
+      env = {
+        PRAGTICAL_USERDIR = c.directory, PRAGTICAL_SCALE = "1.25",
+        PRAGTICAL_RUNTIME = "display_startup_test", PRAGTICAL_RENDERER = "surface",
+        SDL_VIDEO_DRIVER = "pragtical-unavailable", SDL_AUDIO_DRIVER = "dummy"
+      }
+    }))
+    local status = c.process:wait(15000, 0.01)
+    local output = c.process:read_stdout() or ""
+    test.equal(status, 0, "headless startup failed: " .. output)
+    test.contains(output, "DISPLAY DEFAULTS OK")
+    test.not_ok(output:find("Video subsystem failed", 1, true))
+  end)
+end)
+
 test.describe("core startup decorations", function()
   test.before_each(function(c)
     c.directory = core.temp_filename()
