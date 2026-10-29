@@ -448,7 +448,12 @@ end
 
 
 function core.init()
-  DEFAULT_SCALE, DEFAULT_FPS = system.get_display_info()
+  -- Keep startup defaults when no display is available so plugins can select
+  -- a backend, such as a terminal frontend, before creating a window.
+  local ok, default_scale, default_fps = pcall(system.get_display_info)
+  if ok then
+    DEFAULT_SCALE, DEFAULT_FPS = default_scale, default_fps
+  end
   SCALE = tonumber(os.getenv("PRAGTICAL_SCALE")) or DEFAULT_SCALE
 
   -- load config after scale detection for flags that depend on it
