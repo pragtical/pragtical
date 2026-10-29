@@ -111,7 +111,7 @@ local function setup(platform, path, saved, defer_load)
   }
   local env = setmetatable({
     PLATFORM = platform, PATHSEP = platform == "Windows" and "\\" or "/",
-    system = setmetatable({}, { __index = system }),
+    system = setmetatable({ absolute_path = function(path) return path end }, { __index = system }),
     require = function(name) return modules[name] or require(name) end
   }, { __index = _G })
   modules["core.common"] = load_module("core/common.lua", env)
@@ -156,6 +156,22 @@ end
 
 test.describe("workspace", function()
   for _, platform in ipairs { "Windows", "Linux" } do
+    test.test(platform .. " converts relative project paths before saving added directories", function()
+      local path = platform == "Windows" and "C:\\projects\\A" or "/projects/A"
+      local relative = platform == "Windows" and "..\\B" or "../B"
+      local absolute = platform == "Windows" and "C:\\projects\\B" or "/projects/B"
+      local state = setup(platform, path)
+      state.open("first.lua")
+      state.core.add_project(relative)
+      state.system.absolute_path = function(directory)
+        test.equal(directory, relative)
+        return absolute
+      end
+      state.save()
+      test.same(state.saved["A-1"].directories, { absolute })
+      test.same(state.errors, {})
+    end)
+
     test.test(platform .. " saves and restores absolute added directories with a file from B active", function()
       local path = platform == "Windows" and "C:\\projects\\A" or "/projects/A"
       local second = platform == "Windows" and "C:\\libraries\\B" or "/libraries/B"
@@ -611,6 +627,16 @@ test.describe("workspace session switching", function()
     core.active_view, core.last_active_view, core.next_active_view = context.active, context.last, context.next
     system.chdir(context.cwd)
     test.ok(common.rm(context.directory, true))
+  end)
+
+  test.test("saving converts a relative added project path using the native filesystem", function(context)
+    local extra = context.directory .. PATHSEP .. "extra"
+    test.ok(common.mkdirp(extra))
+    system.chdir(context.directory)
+    core.open_file(context.filename)
+    core.add_project("extra")
+    local key = assert(workspace_plugin.save_session())
+    test.same(storage.load("ws", key).directories, { system.absolute_path(extra) })
   end)
 
   test.test("switching restores splits and unsaved file and untitled buffers from its backup", function(context)

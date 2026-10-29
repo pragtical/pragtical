@@ -280,7 +280,7 @@ end
 local function save_directories()
   local dir_list = {}
   for i = 2, #core.projects do
-    dir_list[#dir_list + 1] = core.projects[i].path
+    dir_list[#dir_list + 1] = system.absolute_path(core.projects[i].path)
   end
   return dir_list
 end
