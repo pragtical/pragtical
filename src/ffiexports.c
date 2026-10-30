@@ -79,13 +79,6 @@ EXPORT void rencache_begin_frame_ffi(RenWindow *window_renderer)
   rencache_begin_frame(&window_renderer->cache);
 }
 
-EXPORT void rencache_end_frame_ffi()
-{
-  RenWindow *window = ren_get_target_window();
-  rencache_end_frame(&window->cache);
-  ren_set_target_window(NULL);
-}
-
 EXPORT double system_get_time_ffi()
 {
   return SDL_GetPerformanceCounter() / (double) SDL_GetPerformanceFrequency();

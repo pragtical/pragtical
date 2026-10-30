@@ -44,6 +44,9 @@ struct RenCache {
   void *target;
   void *backend_data;
   bool window_target;
+  /* Unique cache lifetime, included in DRAW_CANVAS hashes to distinguish new
+   * canvases from old ones that occupied the same memory address. */
+  uint64_t generation;
   uint64_t revision;
   const RenBackend *backend;
   RenSurface rensurface;

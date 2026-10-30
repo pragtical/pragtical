@@ -48,7 +48,6 @@ if lua_jit_found
                 'rencache_draw_rect_ffi',
                 'rencache_draw_text_ffi',
                 'rencache_begin_frame_ffi',
-                'rencache_end_frame_ffi',
                 'system_get_time_ffi',
                 'system_wait_event_ffi',
                 'system_sleep_ffi',

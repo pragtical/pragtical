@@ -74,6 +74,7 @@ typedef struct {
 typedef struct {
   RenRect rect;
   RenCache *canvas;
+  uint64_t canvas_generation;
   uint64_t canvas_revision;
 } DrawCanvasCommand;
 
@@ -179,7 +180,9 @@ static bool next_command(RenCache *ren_cache, Command **prev) {
 
 
 void rencache_init(RenCache *rc) {
+  static uint64_t generation = 0;
   memset(rc, 0, sizeof(RenCache));
+  rc->generation = ++generation;
   rc->target = NULL;
   rc->backend_data = NULL;
   rc->window_target = false;
@@ -277,6 +280,8 @@ void rencache_draw_canvas(RenCache *ren_cache, RenRect rect, RenCache *canvas) {
   if (cmd) {
     cmd->rect = rect;
     cmd->canvas = canvas;
+    // A recycled userdata address must not match a previous canvas's draw hash.
+    cmd->canvas_generation = canvas->generation;
     cmd->canvas_revision = canvas->revision;
     rencache_begin_frame(canvas);
   }

@@ -709,6 +709,55 @@ test.describe("graphics apis", function()
       "canvas pixels outside the clip rect should preserve the background")
   end)
 
+  for _, transparent in ipairs { false, true } do
+    test.test("retains queued " .. (transparent and "transparent" or "opaque")
+      .. " canvases until the frame finishes", function()
+      local width, height = 240, 180
+      local window = renwindow.create("graphics-canvas-lifetime", width, height)
+      local background = {20, 40, 80, 255}
+      for frame = 1, 3 do
+        local weak = setmetatable({}, { __mode = "v" })
+        local cache = {}
+        renderer.begin_frame(window)
+        renderer.set_clip_rect(0, 0, width, height)
+        renderer.draw_rect(0, 0, width, height, background)
+        -- A small image cache evicts canvases that are still queued for replay.
+        for index = 1, 32 do
+          local color = {40 + index * 5, 160, 30 + frame * 30, transparent and 128 or 255}
+          local image = canvas.new(8, 8, color, transparent)
+          weak[index] = image
+          cache[index % 2 + 1] = image
+          renderer.draw_canvas(image, 8 + (index - 1) % 8 * 12, 8 + math.floor((index - 1) / 8) * 12)
+        end
+        cache = nil
+        collectgarbage("forcecollect")
+        collectgarbage("forcecollect")
+        local retained = 0
+        for index = 1, 32 do if weak[index] then retained = retained + 1 end end
+        renderer.end_frame()
+        test.equal(retained, 32, "queued images must survive collection before replay")
+
+        local capture = renderer.to_canvas(window, 0, 0, width, height)
+        local pixels = capture:get_pixels(0, 0, width, height)
+        for index = 1, 32 do
+          local x, y = 10 + (index - 1) % 8 * 12, 10 + math.floor((index - 1) / 8) * 12
+          local r, g, b = pixels:byte((y * width + x) * 4 + 1, (y * width + x) * 4 + 3)
+          local alpha = transparent and 128 / 255 or 1
+          local expected = {40 + index * 5, 160, 30 + frame * 30}
+          for channel, value in ipairs {r, g, b} do
+            local blended = expected[channel] * alpha + background[channel] * (1 - alpha)
+            test.ok(math.abs(value - blended) <= 1, string.format(
+              "frame %d image %d channel %d: expected %.2f, got %d",
+              frame, index, channel, blended, value))
+          end
+        end
+        collectgarbage("forcecollect")
+        collectgarbage("forcecollect")
+        test.equal(next(weak), nil, "completed frames must not keep evicted images alive")
+      end
+    end)
+  end
+
   test.test("renders updated canvas textures after previous frame upload", function(context)
     local width, height = 120, 80
     local window = renwindow.create("graphics-canvas-mutation", width, height)

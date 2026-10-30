@@ -50,7 +50,6 @@ ffi.cdef [[
   void rencache_draw_rect_ffi(void *window_renderer, float x, float y, float w, float h, unsigned char r, unsigned char g, unsigned char b, unsigned char a);
   double rencache_draw_text_ffi(void *window_renderer, void **font, const char *text, size_t len, double x, double y, unsigned char r, unsigned char g, unsigned char b, unsigned char a, double tab_offset);
   void rencache_begin_frame_ffi(void *window_renderer);
-  void rencache_end_frame_ffi();
   double system_get_time_ffi();
   bool system_wait_event_ffi(double n);
   void system_sleep_ffi(double s);
@@ -114,10 +113,8 @@ function renderer.begin_frame(window)
   ffi.C.rencache_begin_frame_ffi(windows_pointer_cache[window])
 end
 
-renderer.end_frame_lua = renderer.end_frame
-function renderer.end_frame()
-  ffi.C.rencache_end_frame_ffi()
-end
+-- Keep the native Lua end_frame call: it also releases the queued canvas
+-- references after replay. The raw FFI call bypasses that lifetime management.
 
 renderer.set_clip_rect_lua = renderer.set_clip_rect
 function renderer.set_clip_rect(x, y, w, h)

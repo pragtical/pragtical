@@ -350,7 +350,7 @@ static int f_begin_frame(UNUSED lua_State *L) {
 }
 
 
-static int f_end_frame(UNUSED lua_State *L) {
+static int f_end_frame(lua_State *L) {
   RenWindow *window = ren_get_target_window();
   assert(window != NULL);
   rencache_end_frame(&window->cache);
@@ -359,10 +359,10 @@ static int f_end_frame(UNUSED lua_State *L) {
   // clear the font reference table
   lua_newtable(L);
   lua_rawseti(L, LUA_REGISTRYINDEX, RENDERER_FONT_REF);
+#endif
   // clear the canvas reference table
   lua_newtable(L);
   lua_rawseti(L, LUA_REGISTRYINDEX, RENDERER_CANVAS_REF);
-#endif
   return 0;
 }
 
@@ -509,8 +509,8 @@ static int f_draw_canvas(lua_State *L) {
   lua_Number x = luaL_checknumber(L, 2);
   lua_Number y = luaL_checknumber(L, 3);
 
-#ifndef LUA_JITLIBNAME
-  // stores a reference to this canvas to the reference table
+  // Queued draws hold a raw pointer; retain the canvas until end_frame,
+  // including LuaJIT builds where fonts and other draw calls use FFI.
   lua_rawgeti(L, LUA_REGISTRYINDEX, RENDERER_CANVAS_REF);
   if (lua_istable(L, -1))
   {
@@ -521,7 +521,6 @@ static int f_draw_canvas(lua_State *L) {
     fprintf(stderr, "warning: failed to reference count canvas\n");
   }
   lua_pop(L, 1);
-#endif
 
   int canvas_w, canvas_h;
   canvas->backend->get_canvas_size(canvas, &canvas_w, &canvas_h);
@@ -619,11 +618,11 @@ int luaopen_renderer(lua_State *L) {
   // gets a reference on the registry to store font data
   lua_newtable(L);
   RENDERER_FONT_REF = luaL_ref(L, LUA_REGISTRYINDEX);
+#endif
 
   // gets a reference on the registry to store canvas data
   lua_newtable(L);
   RENDERER_CANVAS_REF = luaL_ref(L, LUA_REGISTRYINDEX);
-#endif
 
   luaL_newlib(L, lib);
   luaL_newmetatable(L, API_TYPE_FONT);
