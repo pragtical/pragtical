@@ -205,6 +205,7 @@ function Node:remove_view(root, view)
     end
   end
   core.last_active_view = nil
+  core.redraw = true
 end
 
 
