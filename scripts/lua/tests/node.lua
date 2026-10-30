@@ -209,4 +209,36 @@ test.describe("node dividers", function()
     test.not_ok(core.redraw, "a settled view must stop requesting frames")
   end)
 
+  for _, active in ipairs { true, false } do
+    test.it("requests drawing when removing an " .. (active and "active" or "inactive") .. " tab", function()
+      local node = Node()
+      local first, second = View(), View()
+      node:add_view(first)
+      node:add_view(second)
+      node:update_layout()
+      node:update(); node:update()
+      core.redraw = false
+      node:close_view(node, active and second or first)
+      test.ok(core.redraw, "removing a tab without an input event must repaint")
+      test.equal(node.active_view, active and first or second)
+      test.equal(#node.views, 1)
+    end)
+  end
+
+  for _, direction in ipairs { "right", "down" } do
+    test.it("requests drawing when closing a " .. direction .. " split", function()
+      local node = Node()
+      local content, panel = View(), View()
+      node:add_view(content)
+      local split = node:split(direction, panel)
+      node:update_layout()
+      node:update(); node:update()
+      core.redraw = false
+      split:close_view(node, panel)
+      test.ok(core.redraw, "closing a split without an input event must repaint")
+      test.equal(node.type, "leaf")
+      test.equal(node.active_view, content)
+    end)
+  end
+
 end)
