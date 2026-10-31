@@ -282,6 +282,36 @@ test.describe("tokenizer", function()
     })
   end)
 
+  test.test("does not restart regex matching after a subsyntax ends the line", function()
+    local original = tokenizer.is_using_native()
+    for _, native in ipairs { false, true } do
+      for _, text in ipairs { "<name>", "<\195\169>" } do
+        local syn = {
+          patterns = {
+            {
+              regex = { "<", ">" }, type = "string",
+              syntax = {
+                patterns = { { pattern = "[^>]+", type = "string" } },
+                symbols = {},
+              },
+            },
+          },
+          symbols = {},
+        }
+        tokenizer.set_use_native(native)
+        if not native then
+          debug.sethook(function() error("tokenizer did not finish the line") end, "", 100000)
+        end
+        local ok, tokens, state = pcall(tokenizer.tokenize, syn, text, string.char(0))
+        debug.sethook()
+        tokenizer.set_use_native(original)
+        test.ok(ok, tostring(tokens))
+        test.same(tokens, { "string", text })
+        test.equal(state, string.char(0))
+      end
+    end
+  end)
+
   test.test("does not close subsyntax on escaped delimiters", function()
     local string_syntax = {
       patterns = {

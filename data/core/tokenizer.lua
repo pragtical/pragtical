@@ -229,8 +229,10 @@ local function find_text(text, p, offset, at_start, close)
     if p.whole_line[p_idx] and next > 1 then
       return
     end
+    -- ucharpos returns nil past the last character; regex.find would restart
+    -- at the beginning instead of testing the end-of-line position.
     res = p.pattern and { text:ufind((at_start or p.whole_line[p_idx]) and "^" .. code or code, next) }
-      or { regex.find(code, text, text:ucharpos(next), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
+      or { regex.find(code, text, text:ucharpos(next) or (#text + 1), (at_start or p.whole_line[p_idx]) and regex.ANCHORED or 0) }
     if p.regex and #res > 0 then
       local char_pos_1 = res[1] > next and string.ulen(text:sub(1, res[1]), nil, nil, true) or next
       local char_pos_2 = string.ulen(text:sub(1, res[2]), nil, nil, true)
