@@ -17,6 +17,11 @@ local Container = require "widget.container"
 local style = require "core.style"
 local EmptyView = require "core.emptyview"
 local Dialog = require "widget.dialog"
+local ItemsList = require "widget.itemslist"
+local FontsList = require "widget.fontslist"
+local FontDialog = require "widget.fontdialog"
+local KeybindDialog = require "widget.keybinddialog"
+local MessageBox = require "widget.messagebox"
 
 local function root_widget(context, floating)
   local root = Widget(nil, floating or false)
@@ -1035,6 +1040,263 @@ test.describe("TextBox cursor", function()
       test.equal(core.active_view, input.textview)
       move(800, 600)
       test.equal(core.cursor_change_req, "arrow")
+    end)
+  end
+end)
+
+test.describe("owned widget dialogs", function()
+  test.before_each(function(context)
+    context.root, context.active = core.root_view, core.active_view
+    context.last, context.next = core.last_active_view, core.next_active_view
+    context.transitions = config.transitions
+    core.root_view = RootView()
+    core.root_view.root_node.is_primary_node = true
+    core.root_view.size.x, core.root_view.size.y = 1200, 900
+    core.active_view = core.root_view.root_node.active_view
+    core.next_active_view = nil
+    config.transitions = false
+    context.widgets = {}
+  end)
+
+  test.after_each(function(context)
+    for _, view in ipairs(core.root_view:floating_snapshot()) do view:destroy() end
+    for _, widget in ipairs(context.widgets) do widget:destroy() end
+    core.root_view, core.active_view = context.root, context.active
+    core.last_active_view, core.next_active_view = context.last, context.next
+    config.transitions = context.transitions
+  end)
+
+  local function update()
+    for _ = 1, 3 do core.root_view:update() end
+  end
+
+  local function click(widget, clicks)
+    local x, y = widget.position.x + 10, widget.position.y + 10
+    core.on_event("mousemoved", x, y, 0, 0)
+    core.on_event("mousepressed", "left", x, y, clicks or 1)
+    core.on_event("mousereleased", "left", x, y)
+    update()
+  end
+
+  local function parent_with(context, class)
+    local parent = Widget()
+    context.widgets[#context.widgets + 1] = parent
+    parent:set_floating(true, { modal = true, focus = "show" })
+    parent:set_size(1000, 750)
+    parent:set_position(30, 30)
+    local field = TextBox(parent, "parent")
+    field:set_position(20, 20)
+    local control = class(parent)
+    control:set_position(20, 100)
+    parent:show()
+    update()
+    return parent, control, field
+  end
+
+  local function top_popup(owner, class)
+    local views = core.root_view.floating_views
+    local child = views[#views]
+    test.ok(child:extends(class))
+    test.equal(child.floating_options.owner, owner)
+    test.ok(child.floating_visible)
+    return child
+  end
+
+  for _, edit in ipairs { false, true } do
+    test.test((edit and "Edit" or "Add") .. " item accepts clicks, typing and save inside a modal parent", function(context)
+      local parent, items = parent_with(context, ItemsList)
+      items:add_item("old")
+      update()
+      if edit then click(items.list); click(items.list, 2) else click(items.add) end
+      local input = top_popup(items, Dialog)
+      test.ok(items.dialog)
+      local count = #core.root_view.floating_views
+      items.add:on_click()
+      test.equal(#core.root_view.floating_views, count)
+      parent:bring_to_front()
+      test.equal(core.root_view.floating_views[count], input)
+      click(input.text)
+      test.equal(core.active_view, input.text.textview)
+      command.perform("doc:select-all")
+      core.on_event("textinput", "argument")
+      test.equal(input.text:get_text(), "argument")
+      click(input.save)
+      test.not_ok(input.floating_visible)
+      test.not_ok(items.dialog)
+      test.equal(items:get_items()[edit and 1 or 2], "argument")
+    end)
+  end
+
+  test.test("dragging and cancelling an input keeps it above its owner and restores the parent's text field", function(context)
+    local parent, items, field = parent_with(context, ItemsList)
+    click(field)
+    test.equal(core.active_view, field.textview)
+    -- Open without changing the parent's remembered text focus.
+    items.add:on_click()
+    update()
+    local input = top_popup(items, Dialog)
+    local x, y = input.position.x + 15, input.position.y + 1
+    local before_x, before_y = input:get_floating_bounds()
+    core.on_event("mousemoved", x, y, 0, 0)
+    core.on_event("mousepressed", "left", x, y, 1)
+    core.on_event("mousemoved", x + 2, y, 2, 0)
+    core.on_event("mousemoved", x + 40, y + 30, 38, 30)
+    core.on_event("mousereleased", "left", x + 40, y + 30)
+    local after_x, after_y = input:get_floating_bounds()
+    test.ok(after_x > before_x)
+    test.ok(after_y > before_y)
+    parent:bring_to_front()
+    click(input.text)
+    click(input.cancel)
+    test.equal(core.active_view, field.textview)
+    test.not_ok(items.dialog)
+    test.same(items:get_items(), {})
+  end)
+
+  for _, class in ipairs { ItemsList, FontsList } do
+    for _, edit in ipairs { false, true } do
+      local name = (edit and "Edit " or "Add ") .. (class == ItemsList and "item" or "font")
+      test.test(name .. " can reopen after owner hides", function(context)
+        local parent, control = parent_with(context, class)
+        if class == ItemsList then control:add_item("old")
+        else control:add_font { name = "Fira Sans", path = DATADIR .. "/fonts/FiraSans-Regular.ttf" } end
+        update()
+        if edit then click(control.list); click(control.list, 2) else click(control.add) end
+        local input = top_popup(control, Dialog)
+        test.ok(control.dialog)
+        parent:hide()
+        test.not_ok(input.floating_visible)
+        test.not_ok(control.dialog)
+        parent:show()
+        update()
+        if edit then click(control.list); click(control.list, 2) else click(control.add) end
+        local replacement = top_popup(control, Dialog)
+        test.not_equal(input, replacement)
+        click(replacement.cancel)
+        test.not_ok(control.dialog)
+      end)
+    end
+  end
+
+  for _, edit in ipairs { false, true } do
+    test.test((edit and "Edit" or "Add") .. " font saves options from its nested text field", function(context)
+      local _, fonts = parent_with(context, FontsList)
+      local font = { name = "Fira Sans", path = DATADIR .. "/fonts/FiraSans-Regular.ttf" }
+      if edit then fonts:add_font(font) end
+      update()
+      if edit then click(fonts.list); click(fonts.list, 2) else click(fonts.add) end
+      local dialog = top_popup(fonts, FontDialog)
+      dialog:set_font(font)
+      click(dialog.font_size.textbox)
+      test.equal(core.active_view, dialog.font_size.textbox.textview)
+      command.perform("doc:select-all")
+      core.on_event("textinput", "18")
+      click(dialog.save)
+      test.equal(fonts:get_fonts()[1].path, font.path)
+      test.equal(fonts:get_options().size, 18)
+      test.not_ok(dialog.floating_visible)
+      test.not_ok(fonts.dialog)
+    end)
+  end
+
+  test.test("SelectBox retains owned popup behavior inside a modal parent", function(context)
+    local parent, box = parent_with(context, SelectBox)
+    box:add_option("First", 1)
+    box:add_option("Second", 2)
+    update()
+    click(box)
+    local list = top_popup(box, Widget)
+    parent:bring_to_front()
+    test.equal(core.root_view.floating_views[#core.root_view.floating_views], list)
+    local row = box.list.rows[2]
+    local x, y = box.list.position.x + 10, box.list.position.y + row.y + row.h / 2
+    core.on_event("mousepressed", "left", x, y, 1)
+    core.on_event("mousereleased", "left", x, y)
+    update()
+    test.equal(box:get_selected_data(), 1)
+    test.not_ok(list.floating_visible)
+  end)
+
+  local errors = {
+    { "item removal without selection", ItemsList, function(items) click(items.remove) end },
+    { "font removal without selection", FontsList, function(fonts) click(fonts.remove) end },
+    { "font priority up without selection", FontsList, function(fonts) click(fonts.up) end },
+    { "font priority down without selection", FontsList, function(fonts) click(fonts.down) end },
+    { "last required font", FontsList, function(fonts)
+      fonts:add_font { name = "font" }; fonts.list:set_selected(1); click(fonts.remove)
+    end },
+    { "maximum fonts", FontsList, function(fonts)
+      for _ = 1, 10 do fonts:add_font { name = "font" } end
+      click(fonts.add)
+    end },
+    { "filtered row removal", ListBox, function(list)
+      list:add_row { "keep" }; list:add_row { "other" }
+      list:filter("keep"); list:remove_row(1)
+      test.equal(#list.rows, 1)
+    end }
+  }
+  for _, case in ipairs(errors) do
+    test.test(case[1] .. " opens a usable owned error popup", function(context)
+      local parent, control = parent_with(context, case[2])
+      case[3](control)
+      update()
+      local message = top_popup(control, MessageBox)
+      parent:bring_to_front()
+      test.equal(core.root_view:get_floating_view_at(message.buttons[1].position.x + 10,
+        message.buttons[1].position.y + 10), message)
+      click(message.buttons[1])
+      test.not_ok(message.floating_visible)
+      test.ok(parent.floating_visible)
+    end)
+  end
+
+  for _, class in ipairs { FontDialog, KeybindDialog } do
+    test.test((class == FontDialog and "FontDialog" or "KeybindDialog") .. " errors stay above the dialog chain", function(context)
+      local parent, fonts = parent_with(context, FontsList)
+      local dialog
+      if class == FontDialog then
+        click(fonts.add)
+        dialog = top_popup(fonts, FontDialog)
+        click(dialog.save)
+      else
+        dialog = KeybindDialog()
+        context.widgets[#context.widgets + 1] = dialog
+        dialog:set_floating(true, { owner = fonts })
+        dialog:show()
+        update()
+        click(dialog.remove)
+      end
+      local message = top_popup(dialog, MessageBox)
+      parent:bring_to_front()
+      test.equal(core.root_view.floating_views[#core.root_view.floating_views], message)
+      click(message.buttons[1])
+      test.not_ok(message.floating_visible)
+      test.ok(dialog.floating_visible)
+      parent:hide()
+      test.not_ok(dialog.floating_visible)
+      test.not_ok(fonts.dialog)
+    end)
+  end
+
+  for _, kind in ipairs { "info", "warning", "error" } do
+    test.test("MessageBox." .. kind .. " preserves callbacks, buttons and optional ownership", function(context)
+      local parent = parent_with(context, ItemsList)
+      local button_id
+      MessageBox[kind]("Title", "Message", function(_, id) button_id = id end,
+        MessageBox.BUTTONS_YES_NO, parent)
+      update()
+      local message = top_popup(parent, MessageBox)
+      test.equal(#message.buttons, 2)
+      click(message.buttons[2])
+      test.equal(button_id, 2)
+      test.not_ok(message.floating_visible)
+      parent:hide()
+      MessageBox[kind]("Standalone", "Message")
+      update()
+      local standalone = core.root_view.floating_views[#core.root_view.floating_views]
+      test.not_ok(standalone.floating_options.owner)
+      click(standalone.buttons[1])
+      test.not_ok(standalone.floating_visible)
     end)
   end
 end)
