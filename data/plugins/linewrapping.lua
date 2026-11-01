@@ -106,10 +106,38 @@ local function get_tokens(doc, line)
   return spew_tokens, doc, line
 end
 
+---Check whether the word after a candidate break fits on a continuation row.
+---Reuse cached syntax tokens so font changes inside a word retain their widths.
+---@param doc core.doc
+---@param default_font renderer.font
+---@param line integer
+---@param token_idx number Token index, or math.huge for untokenized text
+---@param token_col integer Byte column within that token
+---@param indent_size integer
+---@param width number Available row width
+---@param xoffset number Continuation indentation width
+---@return boolean fits
+local function word_fits(doc, default_font, line, token_idx, token_col, indent_size, width, xoffset)
+  local tokens = config.plugins.linewrapping.require_tokenization
+    and doc.highlighter:get_line(line).tokens or { "normal", doc:get_utf8_line(line) }
+  if token_idx == math.huge then token_idx = 1 end
+  for idx = token_idx, #tokens, 2 do
+    local text = tokens[idx + 1]
+    local space = text:find("%s", token_col)
+    local font = get_font(default_font, tokens[idx], indent_size)
+    xoffset = xoffset + get_width(font, text:sub(token_col, (space or #text + 1) - 1), xoffset)
+    if xoffset > width then return false end
+    if space then return true end
+    token_col = 1
+  end
+  return true
+end
+
 -- Computes the breaks for a given line, width and mode. Returns a list of columns
 -- at which the line should be broken.
 function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
   local xoffset, last_i, i, last_space, last_width, begin_width = 0, 1, 1, nil, 0, 0
+  local last_space_token, last_space_col
   local splits = { 1 }
   -- Keep leading indentation with at least one character of the first word.
   local first_text_col = mode == "word"
@@ -117,6 +145,7 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
   local _, indent_size = doc:get_indent_info()
   default_font:set_tab_size(indent_size)
   for idx, type, text in get_tokens(doc, line) do
+    local token_start = i
     local font = get_font(default_font, type, indent_size)
     if idx == 1 or idx == math.huge and config.plugins.linewrapping.indent then
       local _, indent_end = text:find("^%s+")
@@ -130,9 +159,11 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
         w = get_width(font, char, xoffset)
         xoffset = xoffset + w
         if xoffset > width and i > first_text_col then
-          if mode == "word" and last_space then
+          if mode == "word" and last_space and word_fits(
+            doc, default_font, line, last_space_token, last_space_col, indent_size, width, begin_width
+          ) then
             table.insert(splits, last_space + 1)
-            xoffset = w + begin_width + (xoffset - last_width)
+            xoffset = begin_width + (xoffset - last_width)
           else
             table.insert(splits, i)
             xoffset = begin_width
@@ -143,6 +174,7 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
         elseif char == ' ' and i > first_text_col then
           last_space = i
           last_width = xoffset
+          last_space_token, last_space_col = idx, i - token_start + 2
         end
         i = i + #char
       end

@@ -567,6 +567,7 @@ test.describe("word wrapping", function()
     local options = config.plugins.linewrapping
     c.mode, c.indent = options.mode, options.indent
     c.require_tokenization = options.require_tokenization
+    c.keyword_font = style.syntax_fonts.keyword
     c.docs = {}
     options.mode = "word"
   end)
@@ -575,6 +576,7 @@ test.describe("word wrapping", function()
     local options = config.plugins.linewrapping
     options.mode, options.indent = c.mode, c.indent
     options.require_tokenization = c.require_tokenization
+    style.syntax_fonts.keyword = c.keyword_font
     for _, doc in ipairs(c.docs) do doc:on_close() end
   end)
 
@@ -614,6 +616,65 @@ test.describe("word wrapping", function()
         test.same(view:get_line_wraps(1), { 1 })
       end
     end
+  end)
+
+  test.test("oversized words fill the current row after any prefix", function(c)
+    local options = config.plugins.linewrapping
+    for _, tokenized in ipairs { false, true } do
+      options.require_tokenization = tokenized
+      for _, indent in ipairs { false, true } do
+        options.indent = indent
+        for _, prefix in ipairs { "", "- ", "* ", "> ", "1. ", "label: ", "arbitrary text ", "é ", "  - ", "\t- " } do
+          local text = prefix .. ("x"):rep(64) .. "\n"
+          local view = make_view(text)
+          c.docs[#c.docs + 1] = view.doc
+          local font = view:get_font()
+          local _, indent_size = view.doc:get_indent_info()
+          font:set_tab_size(indent_size)
+          local starts = LineWrapping.compute_line_breaks(
+            view.doc, font, 1, font:get_width(prefix .. "xxxxx"), "word"
+          )
+          test.ok(starts[2] > #prefix + 1,
+            string.format("prefix-only row for %q, indent=%s, tokenized=%s",
+              prefix, tostring(indent), tostring(tokenized)))
+          test.equal(view.doc.lines[1], text)
+        end
+      end
+    end
+  end)
+
+  test.test("words that fit the next row still wrap after their prefix", function(c)
+    local options = config.plugins.linewrapping
+    for _, tokenized in ipairs { false, true } do
+      options.require_tokenization = tokenized
+      for _, prefix in ipairs { "- ", "label: " } do
+        local view = make_view(prefix .. "xxxxxxxxx\n")
+        c.docs[#c.docs + 1] = view.doc
+        local font = view:get_font()
+        local starts = LineWrapping.compute_line_breaks(
+          view.doc, font, 1, font:get_width("xxxxxxxxxx"), "word"
+        )
+        test.same(starts, { 1, #prefix + 1 })
+      end
+    end
+  end)
+
+  test.test("oversized word detection includes fonts in subsequent syntax tokens", function(c)
+    config.plugins.linewrapping.require_tokenization = true
+    local text = "-- xxxxxxxxYY\n"
+    local view = make_view(text)
+    c.docs[#c.docs + 1] = view.doc
+    local font = view:get_font()
+    style.syntax_fonts.keyword = font:copy(font:get_size() * 2)
+    view.doc.highlighter.lines[1] = {
+      first_line = true,
+      text = text,
+      tokens = { "normal", "-- xxxxxxxx", "keyword", "YY", "normal", "\n" }
+    }
+    local starts = LineWrapping.compute_line_breaks(
+      view.doc, font, 1, font:get_width("xxxxxxxxxx"), "word"
+    )
+    test.ok(starts[2] > 4, "the entire styled word cannot fit after the prefix")
   end)
 
   test.test("spaces after words remain valid wrapping boundaries", function(c)
