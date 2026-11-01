@@ -1030,7 +1030,7 @@ map_new_syntax_colors = function(clear_new)
     -- Single quote sequences like: 'a'
     ["character"]             = { alt = "string"    },
     -- can be escape sequences like: \t, \r, \n
-    ["character.special"]     = {                   },
+    ["character.special"]     = { alt = "operator"  },
     -- Keywords like: if, else, elseif
     ["conditional" ]          = { alt = "keyword"   },
     -- conditional ternary as: condition ? value1 : value2
