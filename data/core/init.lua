@@ -531,7 +531,7 @@ function core.init()
           end
           if file_abs then
             table.insert(files, file_abs)
-            project_dir = file_abs:match("^(.+)[/\\].+$")
+            project_dir = common.dirname(file_abs) or project_dir
           end
         end
       end

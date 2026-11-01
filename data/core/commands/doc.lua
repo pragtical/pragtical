@@ -848,9 +848,21 @@ command.add(can_save, {
     if dv.doc.filename then
       text = dv.doc.filename
     elseif last_doc and last_doc.filename then
-      local dirname, filename = core.last_active_view.doc.abs_filename:match("(.*)[/\\](.+)$")
-      text = core.normalize_to_project_dir(dirname) .. PATHSEP
-      if text == core.root_project().path then text = "" end
+      local dirname = last_doc.abs_filename:match("(.*)[/\\](.+)$")
+      -- A file directly on an AROS volume has no slash (for example SYS:file).
+      -- Keep the colon as the root separator; a slash there means parent.
+      if PLATFORM == "AROS" and not dirname then
+        dirname = last_doc.abs_filename:match("^([^:]+:)")
+      end
+      if dirname then
+        text = core.normalize_to_project_dir(dirname)
+        if not (PLATFORM == "AROS" and text:sub(-1) == ":") then
+          text = text .. PATHSEP
+        end
+        if text == core.root_project().path then text = "" end
+      else
+        text = ""
+      end
     end
     if not dv.doc.filename and dv.doc.suggested_extension then
       text = (text or "") .. dv.doc:get_name()

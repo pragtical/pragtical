@@ -652,6 +652,10 @@ end
 ---@return string|nil
 function common.dirname(path)
   local dirname = path:match("(.+)["..PATHSEP.."][^"..PATHSEP.."]+$")
+  if not dirname and PLATFORM == "AROS" then
+    -- The volume separator is the parent of a file at an AROS volume root.
+    return path:match("^([^:]+:)")
+  end
   if not dirname and PLATFORM ~= "Windows" and path:sub(1, 1) == PATHSEP then
     return PATHSEP
   end
