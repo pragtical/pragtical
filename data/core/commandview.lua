@@ -32,6 +32,7 @@ end
 ---@field super core.docview
 ---@field suggestion_idx integer Currently selected suggestion index
 ---@field suggestions table[] List of suggestion items
+---@field last_selected_suggestion? table Last result delivered to the prompt's on_select callback
 ---@field suggestions_height number Animated height of suggestions box
 ---@field suggestions_offset number Scroll offset for suggestions list
 ---@field suggestions_first integer First visible suggestion index
@@ -70,6 +71,7 @@ local noop = function() end
 ---@field suggest fun(text: string): table[]? Function returning suggestion list
 ---@field cancel fun(explicit: boolean) Callback when command is cancelled
 ---@field validate fun(text: string, suggestion: table?): boolean Validate before submission
+---@field on_select? fun(suggestion: table?) Called when the highlighted result changes; nil when results become empty. Runs during update, never during drawing
 ---@field text string Initial text to display
 ---@field draw_text? fun(item: table, font: renderer.font, color: renderer.color, x: number, y: number, w: number, h: number) Custom suggestion renderer; w excludes info, spacing and scrollbar, and output is clipped
 ---@field select_text boolean Whether to select initial text
@@ -842,6 +844,7 @@ function CommandView:exit(submitted, inexplicit, do_close)
   self.doc:reset()
   self.suggestions = {}
   self.save_suggestion = nil
+  self.last_selected_suggestion = nil
   self.last_text = ""
   self.suggestions_query = ""
   self.restore_suggestion_scroll = nil
@@ -921,6 +924,14 @@ function CommandView:update()
       self.last_text = current_text
     end
     self.last_change_id = self.doc:get_change_id()
+  end
+
+  if self.state.on_select then
+    local item = self.suggestions[self.suggestion_idx]
+    if item ~= self.last_selected_suggestion then
+      self.last_selected_suggestion = item
+      self.state.on_select(item)
+    end
   end
 
   -- update gutter text color brightness
