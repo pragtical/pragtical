@@ -3,7 +3,7 @@ local syntax = require "core.syntax"
 
 syntax.add {
   name = "XML",
-  files = { "%.xml$" },
+  files = { "%.xml$", "%.svg$" },
   headers = "<%?xml",
   block_comment = { "<!--", "-->" },
   patterns = {

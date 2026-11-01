@@ -3,7 +3,7 @@ local syntax = require "core.syntax"
 
 syntax.add {
   name = "HTML",
-  files = { "%.html?$" },
+  files = { "%.html?$", "%.xhtml$" },
   block_comment = { "<!--", "-->" },
   patterns = {
     {

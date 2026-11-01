@@ -316,4 +316,17 @@ test.describe("language tokenizer fixtures", function()
       "string"
     )
   end)
+
+  for _, sample in ipairs {
+    { extension = "svg", language = "XML", plugin = "xml",
+      header = '<svg xmlns="http://www.w3.org/2000/svg">' },
+    { extension = "xhtml", language = "HTML", plugin = "html",
+      header = '<html xmlns="http://www.w3.org/1999/xhtml">' },
+  } do
+    test.test(sample.extension .. " files are highlighted without an XML declaration", function()
+      assert(loadfile(source_file("data/plugins/language_" .. sample.plugin .. ".lua")))()
+      local syn = syntax.get("fixture." .. sample.extension, sample.header)
+      test.equal(syn.name, sample.language)
+    end)
+  end
 end)
