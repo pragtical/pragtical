@@ -111,6 +111,9 @@ end
 function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
   local xoffset, last_i, i, last_space, last_width, begin_width = 0, 1, 1, nil, 0, 0
   local splits = { 1 }
+  -- Keep leading indentation with at least one character of the first word.
+  local first_text_col = mode == "word"
+    and (doc.lines[line]:find("%S") or #doc.lines[line] + 1) or 0
   local _, indent_size = doc:get_indent_info()
   default_font:set_tab_size(indent_size)
   for idx, type, text in get_tokens(doc, line) do
@@ -126,7 +129,7 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
       for char in common.utf8_chars(text) do
         w = get_width(font, char, xoffset)
         xoffset = xoffset + w
-        if xoffset > width then
+        if xoffset > width and i > first_text_col then
           if mode == "word" and last_space then
             table.insert(splits, last_space + 1)
             xoffset = w + begin_width + (xoffset - last_width)
@@ -137,7 +140,7 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
             xoffset = xoffset + w
           end
           last_space = nil
-        elseif char == ' ' then
+        elseif char == ' ' and i > first_text_col then
           last_space = i
           last_width = xoffset
         end

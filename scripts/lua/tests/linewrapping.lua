@@ -561,3 +561,85 @@ test.describe("linewrapping", function()
     config.plugins.linewrapping.mode = previous_mode
   end)
 end)
+
+test.describe("word wrapping", function()
+  test.before_each(function(c)
+    local options = config.plugins.linewrapping
+    c.mode, c.indent = options.mode, options.indent
+    c.require_tokenization = options.require_tokenization
+    c.docs = {}
+    options.mode = "word"
+  end)
+
+  test.after_each(function(c)
+    local options = config.plugins.linewrapping
+    options.mode, options.indent = c.mode, c.indent
+    options.require_tokenization = c.require_tokenization
+    for _, doc in ipairs(c.docs) do doc:on_close() end
+  end)
+
+  test.test("long words do not leave indentation on its own visual row", function(c)
+    local options = config.plugins.linewrapping
+    for _, tokenized in ipairs { false, true } do
+      options.require_tokenization = tokenized
+      for _, indent in ipairs { false, true } do
+        options.indent = indent
+        for _, prefix in ipairs { " ", "  ", "\t", " \t", (" "):rep(16), ("\t"):rep(4) } do
+          local text = prefix .. ("longword"):rep(4) .. "\n"
+          local view = make_view(text)
+          c.docs[#c.docs + 1] = view.doc
+          local font = view:get_font()
+          LineWrapping.reconstruct_breaks(view, font, font:get_width("longword"))
+          local starts = view:get_line_wraps(1)
+          test.ok(#starts > 1, "long words still fall back to character wrapping")
+          test.equal(starts[1], 1)
+          test.ok(text:sub(1, starts[2] - 1):find("%S"),
+            string.format("indentation-only row for prefix %q, indent=%s, tokenized=%s",
+              prefix, tostring(indent), tostring(tokenized)))
+        end
+      end
+    end
+  end)
+
+  test.test("whitespace-only lines stay on one visual row", function(c)
+    local options = config.plugins.linewrapping
+    for _, tokenized in ipairs { false, true } do
+      options.require_tokenization = tokenized
+      for _, indent in ipairs { false, true } do
+        options.indent = indent
+        local view = make_view("\t    \t\n")
+        c.docs[#c.docs + 1] = view.doc
+        local font = view:get_font()
+        LineWrapping.reconstruct_breaks(view, font, font:get_width("xx"))
+        test.same(view:get_line_wraps(1), { 1 })
+      end
+    end
+  end)
+
+  test.test("spaces after words remain valid wrapping boundaries", function(c)
+    local options = config.plugins.linewrapping
+    options.indent = true
+    for _, tokenized in ipairs { false, true } do
+      options.require_tokenization = tokenized
+      local view = make_view("  one two three\n")
+      c.docs[#c.docs + 1] = view.doc
+      local font = view:get_font()
+      local starts = LineWrapping.compute_line_breaks(
+        view.doc, font, 1, font:get_width("  one two "), "word"
+      )
+      test.same(starts, { 1, 11 })
+    end
+  end)
+
+  test.test("letter wrapping retains its character boundaries", function(c)
+    local options = config.plugins.linewrapping
+    options.indent, options.require_tokenization = false, false
+    local view = make_view("    abcdef\n")
+    c.docs[#c.docs + 1] = view.doc
+    local font = view:get_font()
+    local starts = LineWrapping.compute_line_breaks(
+      view.doc, font, 1, font:get_width("abc"), "letter"
+    )
+    test.same(starts, { 1, 4, 7, 10 })
+  end)
+end)
