@@ -318,6 +318,7 @@ main() {
 
   # These could be symlinks but it seems they doesn't work with AppimageLauncher
   cp resources/icons/logo.svg Pragtical.AppDir/pragtical.svg
+  cp resources/icons/logo.png Pragtical.AppDir/.DirIcon
   cp resources/linux/dev.pragtical.Pragtical.desktop Pragtical.AppDir/
 
   if [[ $addons == true ]]; then
