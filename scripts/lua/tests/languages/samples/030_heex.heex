@@ -1,0 +1,6 @@
+<div class={@class} phx-click="save">
+  <%= for item <- @items do %>
+    <.item value={item} :if={item.visible}>{item.name}</.item>
+  <% end %>
+  <script>let value = "example";</script>
+</div>

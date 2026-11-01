@@ -1,6 +1,9 @@
 <layout name="demo">
   <component id="main" enabled="true">
     <title>{{ title | escape }}</title>
+    <%= for item <- @items do %>
+      <p><%= item.label %></p>
+    <% end %>
     <script>
       function render(items) { return items.map(item => item.label).join(", "); }
     </script>
