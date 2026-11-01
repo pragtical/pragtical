@@ -15,6 +15,8 @@ local common = require "core.common"
 local ContextMenu = require "core.contextmenu"
 local encodings = require "core.doc.encodings"
 local projectsearch = require "plugins.projectsearch"
+local FontDialog = require "widget.fontdialog"
+local FontCache = require "widget.fonts.cache"
 
 ---Replace a test dependency and restore it after the prompt has closed.
 ---@param context table Test fixture
@@ -165,6 +167,133 @@ test.describe("commandview floating suggestions", function()
     test.equal(core.active_view, context.view)
     core.root_view:update()
     test.not_ok(popup.floating_visible)
+  end)
+
+  test.test("on_select follows highlighted results without running on settled updates or draws", function()
+    local view, selections = core.command_view, {}
+    view:enter("Select", {
+      typeahead = false,
+      suggest = function(text) return text == "missing" and {} or { "first", "second" } end,
+      on_select = function(item) selections[#selections + 1] = item and item.text or "empty" end,
+    })
+    view:update()
+    test.same(selections, { "first" })
+    view:update(); view:update()
+    capture_palette()
+    test.same(selections, { "first" })
+    view:move_suggestion_idx(1)
+    view:update()
+    test.same(selections, { "first", "second" })
+    view:set_text("missing")
+    view:update(); view:update()
+    test.same(selections, { "first", "second", "empty" })
+    view:exit()
+    test.is_nil(view.last_selected_suggestion)
+  end)
+
+  test.test("on_select starts at the restored result and reports mouse selection once", function()
+    local view, selections = core.command_view, {}
+    view:enter("Select", {
+      suggest = function() return { "first", "second", "third" } end,
+      restore_state = { text = "", suggestion_idx = 3 },
+      on_select = function(item) selections[#selections + 1] = item.text end,
+    })
+    core.root_view:update(); core.root_view:update()
+    test.same(selections, { "third" })
+    local x, y, _, height = view:get_suggestions_bounds()
+    local cy = y + view:get_suggestion_row(2) - view:get_suggestion_scroll(height)
+      + view:get_suggestion_line_height() / 2
+    core.on_event("mousemoved", x + 20, cy, 0, 0)
+    core.root_view:update()
+    core.on_event("mousemoved", x + 21, cy, 1, 0)
+    core.root_view:update()
+    test.same(selections, { "third", "second" })
+  end)
+
+  for _, position in ipairs { "bottom", "top", "center" } do
+    test.test(position .. " font picker previews temporarily, restores on cancellation and keeps confirmation", function(context)
+      config.commandview_position = position
+      patch(context, core.status_view, "remove_tooltip", function() end)
+      local original = { name = "Original", path = DATADIR .. "/fonts/FiraSans-Regular.ttf" }
+      local candidate = { fullname = "Candidate Mono", path = DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", monospace = true }
+      patch(context, FontCache, "load_cache", function(cache)
+        cache.fonts = { candidate }
+        cache.monospaced, cache.found, cache.found_monospaced = true, 1, 1
+        return true
+      end)
+      local dialog = FontDialog(original, { size = 18 })
+      context.floating_views[#context.floating_views + 1] = dialog
+      dialog:show()
+      dialog:update()
+      local label = dialog.preview.label
+      local sample = renderer.font.get_metadata(candidate.path).sampletext or candidate.fullname
+      local loads, load = 0, renderer.font.load
+      patch(context, renderer.font, "load", function(...)
+        loads = loads + 1
+        return load(...)
+      end)
+      local function update()
+        for _ = 1, 3 do core.root_view:update() end
+      end
+      for _, button in ipairs { dialog.choose, dialog.choose_mono } do
+        button:on_click()
+        update()
+        test.equal(core.active_view, core.command_view)
+        test.equal(dialog.preview.label, sample)
+        test.equal(dialog.preview.font:get_size(), 18 * SCALE)
+        test.equal(dialog:get_font(), original)
+        local count = loads
+        update()
+        test.equal(loads, count)
+        core.command_view:update_suggestions()
+        update()
+        test.equal(loads, count)
+        command.perform("command:escape")
+        update()
+        test.equal(dialog.preview.label, label)
+        test.equal(dialog:get_font(), original)
+      end
+      dialog.choose:on_click()
+      update()
+      core.command_view:set_text("no such font")
+      update()
+      test.equal(dialog.preview.label, label)
+      test.equal(dialog:get_font(), original)
+      core.command_view:submit()
+      test.ok(core.command_view:is_open())
+      command.perform("command:escape")
+      update()
+      dialog.choose:on_click()
+      update()
+      core.set_active_view(context.view)
+      update()
+      test.equal(dialog.preview.label, label)
+      test.equal(dialog:get_font(), original)
+      dialog.choose:on_click()
+      update()
+      core.command_view:submit()
+      update()
+      test.equal(dialog:get_font().path, candidate.path)
+      test.equal(dialog.preview.label, sample)
+    end)
+  end
+
+  test.test("cancelling font browsing without an existing font restores its empty preview", function(context)
+    patch(context, core.status_view, "remove_tooltip", function() end)
+    patch(context, FontCache, "load_cache", function(cache)
+      cache.fonts = { { fullname = "Candidate", path = DATADIR .. "/fonts/FiraSans-Regular.ttf" } }
+      cache.monospaced, cache.found = true, 1
+      return true
+    end)
+    local dialog = FontDialog()
+    context.floating_views[#context.floating_views + 1] = dialog
+    dialog:show()
+    dialog.choose:on_click()
+    core.root_view:update(); core.root_view:update()
+    test.not_equal(dialog.preview.label, "No Font Selected")
+    command.perform("command:escape")
+    test.equal(dialog.preview.label, "No Font Selected")
+    test.is_nil(dialog:get_font())
   end)
 
   for _, name in ipairs { "root:close", "file:delete" } do
