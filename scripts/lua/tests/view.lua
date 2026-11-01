@@ -133,6 +133,47 @@ test.describe("floating View", function()
     test.equal(core.active_view, outside)
   end)
 
+  test.test("closing a child popup restores focus inside its floating parent", function(context)
+    core.next_active_view = nil
+    local parent = popup(context, { modal = true, focus = "show" })
+    parent:show_floating()
+    local field = View()
+    field.subparent = parent
+    core.set_active_view(field)
+    local child = popup(context, { owner = parent, focus = "show" })
+    child:show_floating()
+    test.equal(core.active_view, child)
+    child:hide_floating()
+    test.equal(core.active_view, field)
+  end)
+
+  test.test("closing a popup does not restore hidden or closing focus targets", function(context)
+    for _, closing in ipairs { false, true } do
+      core.next_active_view = nil
+      local outside = core.root_view:get_primary_node().active_view
+      core.active_view = outside
+      local owner = popup(context, { focus = "none" })
+      owner:show_floating()
+      local parent = popup(context, { owner = owner, focus = "show" })
+      parent:show_floating()
+      local field = View()
+      field.parent = parent
+      core.set_active_view(field)
+      local child = popup(context, { focus = "show" })
+      child:show_floating()
+      if closing then
+        config.transitions = true
+        parent:hide_floating { to = "top" }
+      else
+        parent:hide_floating()
+      end
+      child:hide_floating()
+      test.equal(core.active_view, outside)
+      config.transitions = false
+      parent:hide_floating()
+    end
+  end)
+
   test.test("can dismiss on owner clicks while other popups keep their owner inside", function(context)
     core.root_view:update()
     local view = popup(context, { owner = core.active_view, focus = "none", dismiss_on_outside_click = true })

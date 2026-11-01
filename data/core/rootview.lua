@@ -124,7 +124,8 @@ function RootView:cancel_floating_input(view)
   if view:owns_view(core.active_view) then
     local target = core.next_active_view or view.floating_previous_focus
     local node = target and self.root_node:get_node_for_view(target)
-    if not target or not node and not target.floating_visible then
+    local floating = target and self:get_floating_view_for_view(target)
+    if not target or view:owns_view(target) or not node and not floating then
       target = self:get_primary_node().active_view
     end
     local closing = view.floating_closing
@@ -231,14 +232,19 @@ function RootView:get_floating_view_at(x, y)
   return modal
 end
 
----Find the topmost shown floating view containing a keyboard focus target.
----Includes container descendants; excludes popups whose closing slide has started.
+---Find the shown floating container of a keyboard focus target.
+---Includes container descendants; stops at hidden or closing floating containers.
 ---@param target core.view? Focused view or one of its container descendants
 ---@return core.view? view Floating container, or nil for a docked target
 function RootView:get_floating_view_for_view(target)
-  for i = #self.floating_views, 1, -1 do
-    local view = self.floating_views[i]
-    if not view.floating_closing and view:owns_view(target) then return view end
+  local visited = {}
+  while target and not visited[target] do
+    if target.floating then
+      if target.floating_visible and not target.floating_closing then return target end
+      return
+    end
+    visited[target] = true
+    target = target.parent or target.subparent
   end
 end
 
