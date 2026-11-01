@@ -30,7 +30,7 @@ end
 
 local function make_view(context, text)
   local doc = Doc(nil, nil, true)
-  doc.lines = { text }
+  doc.lines = type(text) == "table" and text or { text }
   doc.highlighter:reset()
   context.docs[#context.docs + 1] = doc
   local view = DocView(doc)
@@ -39,9 +39,9 @@ local function make_view(context, text)
   return view
 end
 
-local function draw(context, view)
+local function draw(context, view, line)
   context.calls = {}
-  view:draw_line_text(1, 0, 0)
+  view:draw_line_text(line or 1, 0, 0)
   return context.calls
 end
 
@@ -144,6 +144,72 @@ test.describe("drawwhitespace", function()
     test.equal(#calls, 1)
     test.equal(calls[1].text, block:rep(2))
     test.same(calls[1].color, style.error)
+  end)
+
+  test.test("selected-only markers exclude the end of single-line selections", function(c)
+    local options = config.plugins.drawwhitespace
+    options.show_selected_only = true
+    options.show_leading, options.show_middle = true, true
+    for _, sample in ipairs {
+      { text = "x   y\n", col = 2, marker = options.substitutions[1].sub },
+      { text = "x\t\ty\n", col = 2, marker = options.substitutions[2].sub },
+      { text = "é   y\n", col = 3, marker = options.substitutions[1].sub },
+    } do
+      local view = make_view(c, sample.text)
+      for _, reverse in ipairs { false, true } do
+        view.doc:set_selection(1, sample.col, 1, sample.col + 1, reverse)
+        view:update()
+        local calls = draw(c, view)
+        test.equal(#calls, 1, sample.text)
+        test.equal(calls[1].text, sample.marker, sample.text)
+        test.equal(calls[1].x, view:get_col_x_offset(1, sample.col))
+      end
+    end
+  end)
+
+  test.test("selected-only markers exclude whitespace after selected text", function(c)
+    local options = config.plugins.drawwhitespace
+    options.show_selected_only, options.show_middle = true, true
+    local view = make_view(c, "x   y\n")
+    view.doc:set_selection(1, 1, 1, 2)
+    view:update()
+    test.equal(#draw(c, view), 0)
+  end)
+
+  test.test("selected-only multiline markers honor the exclusive last column", function(c)
+    local options = config.plugins.drawwhitespace
+    options.show_selected_only = true
+    options.show_leading, options.show_middle = true, true
+    local view = make_view(c, { "x  \n", "  \n", "  y\n" })
+    local marker = options.substitutions[1].sub
+    for _, last_col in ipairs { 1, 2, 3 } do
+      for _, reverse in ipairs { false, true } do
+        view.doc:set_selection(1, 2, 3, last_col, reverse)
+        view:update()
+        for line = 1, 2 do
+          local calls = draw(c, view, line)
+          test.equal(#calls, 1)
+          test.equal(calls[1].text, marker:rep(2))
+        end
+        local calls = draw(c, view, 3)
+        test.equal(#calls, last_col == 1 and 0 or 1)
+        if last_col > 1 then
+          test.equal(calls[1].text, marker:rep(last_col - 1))
+        end
+      end
+    end
+  end)
+
+  test.test("selected-only markers retain the last visible selected column", function(c)
+    local options = config.plugins.drawwhitespace
+    options.show_selected_only, options.show_middle = true, true
+    local view = make_view(c, "x    y\n")
+    view.get_visible_cols_range = function() return 2, 4 end
+    view.doc:set_selection(1, 2, 1, 6)
+    view:update()
+    local calls = draw(c, view)
+    test.equal(#calls, 1)
+    test.equal(calls[1].text, options.substitutions[1].sub:rep(3))
   end)
 
   test.test("whitespace-only lines use error blocks without leading dots", function(c)

@@ -159,7 +159,7 @@ function DocView:update()
       -- handle single line selection
       if l1 == l2 and l1 >= vl1 and l1 <= vl2 then
         col1, col2 = self:get_visible_cols_range(l1, 20)
-        c1, c2 = math.max(col1, c1), math.min(col2, c2)
+        c1, c2 = math.max(col1, c1), math.min(col2, c2 - 1)
         selections[l1] = {c1, c2, self.doc.lines[l1]:sub(c1, c2)}
       -- multiple lines selection
       elseif l1 ~= l2 then
@@ -179,7 +179,7 @@ function DocView:update()
         -- last line
         if l2 >= vl1 and l2 <= vl2 then
           col1, col2 = self:get_visible_cols_range(l2, 20)
-          col2 = math.min(c2, col2)
+          col2 = math.min(c2 - 1, col2)
           selections[l2] = {col1, col2, self.doc.lines[l2]:sub(col1, col2)}
         end
       end
