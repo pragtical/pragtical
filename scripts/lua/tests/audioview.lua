@@ -1039,7 +1039,8 @@ test.describe("audio player", function()
       rectangles[#rectangles + 1] = { x = x, y = y, w = w, h = h, color = color }
     end
     renderer.draw_text = function(font, text, x, y, color)
-      texts[#texts + 1] = { x = x, y = y, w = font:get_width(text), h = font:get_height(), color = color }
+      texts[#texts + 1] = { x = x, y = y, w = font:get_width(text), h = font:get_height(), color = color,
+        font = font, text = text }
       return x + font:get_width(text)
     end
     renderer.draw_poly = function(points, color)
@@ -1051,31 +1052,15 @@ test.describe("audio player", function()
         rectangles, texts, polygons = {}, {}, {}
         b:draw()
         local cx, cy = b.position.x + b.size.x / 2, b.position.y + b.size.y / 2
-        if b == view.play_button then
-          test.equal(#texts, 0)
-          test.equal(#rectangles, 2)
-          local a, z = rectangles[1], rectangles[2]
-          test.near((a.x + z.x + z.w) / 2, cx, 1e-9)
-          test.near(a.y + a.h / 2, cy, 1e-9)
-          test.equal(a.y, z.y)
-          test.equal(a.h, z.h)
-        elseif b == view.shuffle_button then
-          test.equal(#polygons, 2)
-          local left, top, right, bottom = math.huge, math.huge, -math.huge, -math.huge
-          for _, poly in ipairs(polygons) do
-            for _, p in ipairs(poly.points) do
-              left, top = math.min(left, p[1]), math.min(top, p[2])
-              right, bottom = math.max(right, p[1]), math.max(bottom, p[2])
-            end
-          end
-          test.near((left + right) / 2, cx, 1e-9)
-          test.near((top + bottom) / 2, cy, 1e-9)
-        else
-          local glyph = texts[1] or rectangles[1]
-          test.not_nil(glyph)
-          test.near(glyph.x + glyph.w / 2, cx, 1e-9)
-          test.near(glyph.y + glyph.h / 2, cy, 1e-9)
-        end
+        test.equal(#rectangles, 0)
+        test.equal(#polygons, 0)
+        test.equal(#texts, 1)
+        local glyph = texts[1]
+        test.equal(glyph.font, style.icon_font)
+        test.equal(glyph.text, b.icon.code)
+        test.near(glyph.x + glyph.w / 2, cx, 1e-9)
+        test.near(glyph.y + glyph.h / 2, cy, 1e-9)
+        if b == view.play_button then test.equal(glyph.text, "⏸") end
       end
     end
     view.repeat_button:on_click("left")
@@ -1084,14 +1069,15 @@ test.describe("audio player", function()
     view.repeat_button:draw()
     test.same(texts[1].color, style.accent)
     view.shuffle_button:on_click("left")
-    polygons = {}
+    texts = {}
     view.shuffle_button:draw()
-    test.same(polygons[1].color, style.accent)
+    test.same(texts[1].color, style.accent)
     view.state = "paused"
     view:update()
     rectangles, texts = {}, {}
     view.play_button:draw()
     test.equal(#rectangles, 0)
     test.equal(#texts, 1)
+    test.equal(texts[1].text, "▶")
   end)
 end)

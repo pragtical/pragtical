@@ -21,10 +21,16 @@ Various scripts and configurations used to configure, build, and package Pragtic
 - **install-dependencies.sh**: Installs required applications to build, package
   and run Pragtical, mainly useful for CI and documentation purpose.
   Preferably not to be used in user systems.
-- **fontello-config.json**:    Used by the icons generator.
+- **fontello-config.json**:    [Fontello][4] project for `data/fonts/icons.ttf`.
 - **generate_header.sh**: Generates a header file for native plugin API
 - **keymap-generator**: Generates a JSON file containing the keymap
+
+To update the icon font, import `fontello-config.json` into Fontello, add the
+required icons without changing existing character codes, and download the
+font archive. Save its `font/icons.ttf` to `data/fonts/icons.ttf` and keep the
+updated `config.json` as `scripts/fontello-config.json`.
 
 [1]: https://github.com/LinusU/node-appdmg
 [2]: https://docs.appimage.org/
 [3]: https://jrsoftware.org/isinfo.php
+[4]: https://fontello.com/

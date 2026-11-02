@@ -86,20 +86,24 @@ test.describe("contextmenu", function()
     test.equal(menu.items[3].text, "Last")
   end)
 
-  test.test("draws checked states without a font checkmark glyph", function()
+  test.test("draws checked and unchecked icons with cached toggle states", function()
     local checked = false
     local menu = new_menu {
       { text = "Checked", command = visible_command, checked = true },
       { text = "Toggle", command = visible_command, checked = function() return checked end }
     }
     local marks, labels = {}, {}
-    renderer.draw_poly = function(points, color)
-      marks[#marks + 1] = points
-      test.equal(color, style.text)
+    renderer.draw_poly = function()
+      test.fail("checkboxes should use the bundled icon font")
     end
-    common.draw_text = function(_, _, text, _, x)
-      test.not_equal(text, "✓")
-      labels[#labels + 1] = x
+    common.draw_text = function(font, color, text, _, x)
+      if text == "☑" or text == "☐" then
+        marks[#marks + 1] = text
+        test.equal(font, style.icon_font)
+        test.equal(color, style.text)
+      else
+        labels[#labels + 1] = x
+      end
     end
     local function draw()
       renderer.begin_frame(core.window)
@@ -109,21 +113,17 @@ test.describe("contextmenu", function()
     end
     menu:update()
     draw()
-    test.equal(#marks, 1)
+    test.same(marks, { "☑", "☐" })
     test.equal(labels[1], labels[2])
-    for _, point in ipairs(marks[1]) do
-      test.ok(point[1] < labels[1])
-      test.ok(point[2] >= menu.position.y and point[2] < menu.position.y + menu.size.y)
-    end
     checked = true
     marks = {}
     draw()
-    test.equal(#marks, 1)
+    test.same(marks, { "☑", "☐" })
     menu:hide()
     test.ok(menu:show(0, 0))
     marks = {}
     draw()
-    test.equal(#marks, 2)
+    test.same(marks, { "☑", "☑" })
   end)
 
   for _, application in ipairs { false, true } do

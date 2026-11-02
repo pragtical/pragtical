@@ -19,7 +19,6 @@ local RULE_HEIGHT = math.max(style.divider_size, 1)
 local RULE_GAP = common.round(10 * SCALE)
 local BLOCK_SPACING = style.padding.y
 local PARAGRAPH_SPACING = BLOCK_SPACING * 2
-local CHECKBOX_SIZE_RATIO = 0.75
 local IMAGE_ROW_PADDING_Y = style.padding.y
 local IMAGE_CACHE_DIR = USERDIR .. PATHSEP .. "cache"
 local ASYNC_PARSE_THRESHOLD = 64 * 1024
@@ -2612,7 +2611,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
         if block.type == "ordered_list" or block.type == "footnotes" then
           marker = string.format("%d.", item.index)
         elseif item.checked ~= nil then
-          marker_size = math.max(common.round(fonts.body.normal:get_height() * CHECKBOX_SIZE_RATIO), 1)
+          marker_size = math.max(fonts.checkbox:get_width("☐"), fonts.checkbox:get_width("☑"))
         else
           marker = "\226\128\162"
         end
@@ -2659,6 +2658,7 @@ render_blocks = function(self, commands, y, blocks, width, x_offset, fonts, acce
             width = marker_size,
             height = math.max(common.round(fonts.body.normal:get_height() * config.line_height), fonts.body.normal:get_height()),
             checked = item.checked,
+            font = fonts.checkbox,
             color = accent_color
           }
         else
@@ -2918,18 +2918,8 @@ local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, 
       if command.type == "rect" then
         renderer.draw_rect(x, y, command.width, command.height, resolve_color(command.color))
       elseif command.type == "checkbox" then
-        local box_size = command.width
-        local box_x = x
-        local box_y = y + math.max(math.floor((command.height - box_size) / 2), 0)
-        local checkbox_color = resolve_color(command.color)
-        renderer.draw_rect(box_x, box_y, box_size, 1, checkbox_color)
-        renderer.draw_rect(box_x, box_y + box_size - 1, box_size, 1, checkbox_color)
-        renderer.draw_rect(box_x, box_y, 1, box_size, checkbox_color)
-        renderer.draw_rect(box_x + box_size - 1, box_y, 1, box_size, checkbox_color)
-        if command.checked then
-          local fill = math.max(box_size - 4, 1)
-          renderer.draw_rect(box_x + 2, box_y + 2, fill, fill, checkbox_color)
-        end
+        common.draw_text(command.font, resolve_color(command.color), command.checked and "☑" or "☐",
+          "left", x, y, command.width, command.height)
       elseif command.type == "image" then
         renderer.draw_canvas(command.image, x, y)
       elseif command.type == "text" then
@@ -4015,6 +4005,7 @@ function MarkdownView:get_font_cache()
         body = fontset,
         quote = fontset,
         code = self.font,
+        checkbox = style.icon_font:copy(self.font:get_size()),
         heading = {}
       }
       for i = 1, 6 do
@@ -4035,6 +4026,7 @@ function MarkdownView:get_font_cache()
       body = make_fontset(style.font),
       quote = make_fontset(style.font),
       code = style.code_font,
+      checkbox = style.icon_font,
       heading = {}
     }
     for i, size in ipairs(sizes) do
