@@ -45,12 +45,13 @@ local function load_project(path)
         if not value_position() then return nil, "invalid storage literal position" end
         local quote = char
         position = position + 1
-        while position <= #text and text:sub(position, position) ~= quote do
-          if text:sub(position, position) == "\\" then position = position + 1 end
-          position = position + 1
+        while true do
+          local ending = text:find("[" .. quote .. "\\]", position)
+          if not ending then return nil, "unterminated storage string" end
+          if text:sub(ending, ending) == quote then position = ending + 1; break end
+          position = ending + 2
         end
-        if position > #text then return nil, "unterminated storage string" end
-        previous, position = "literal", position + 1
+        previous = "literal"
       elseif char:match("[{}%[%],=]") then
         if char == "{" and not value_position() or char == "[" and previous ~= "{" and previous ~= "," then
           return nil, "invalid storage constructor"
@@ -60,7 +61,7 @@ local function load_project(path)
         if depth < 0 or depth > 128 then return nil, "invalid storage nesting" end
         previous, position = char, position + 1
       else
-        local ending, word
+        local _, ending, word
         if char:match("[%d%-%(]") then
           if not value_position() then
             return nil, "storage must contain serialized literals only"
@@ -102,6 +103,7 @@ local storage = {}
 ---@param key string The key under which the data is stored.
 ---@param project? core.project|string Project object, or an explicit storage directory.
 ---@return string|table|number|boolean|nil data The stored data present for this module, at this key.
+---@return string? error An error loading an existing file; nil when no file exists.
 function storage.load(module, key, project)
   local path = module_key_to_path(module, key, project)
   if system.get_file_info(path) then
@@ -114,6 +116,7 @@ function storage.load(module, key, project)
       err = value
     end
     core.error("error loading storage file for %s[%s]: %s", module, key, err)
+    return nil, err
   end
   return nil
 end

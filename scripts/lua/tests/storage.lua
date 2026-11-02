@@ -74,7 +74,9 @@ test.describe("storage scopes", function()
         if name == "core" then return { error = function(...) ctx.errors[#ctx.errors + 1] = string.format(...) end } end
         return require(name)
       end
-    }, { __index = _G })
+    }, { __index = _G, __newindex = function(_, name)
+      error("storage wrote an undeclared global: " .. tostring(name))
+    end })
     ctx.storage = assert(loadfile(DATADIR .. "/core/storage.lua", "t", env))()
   end)
 
