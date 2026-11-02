@@ -452,7 +452,12 @@ static int m_server_accept(lua_State* L) {
     Connection* client = lua_newuserdata(L, sizeof(Connection));
     client->type = TCP;
     client->socket = client_socket;
+    client->port = 0;
+    client->is_ssl = false;
+    client->ssl_io_error[0] = '\0';
     luaL_setmetatable(L, API_TYPE_NET_TCP);
+  } else {
+    lua_pushnil(L);
   }
 
   return 1;

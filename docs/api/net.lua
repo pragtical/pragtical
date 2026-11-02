@@ -141,6 +141,7 @@ function net.address:__tostring() end
 
 ---
 ---Check for new client connections and if found return it.
+---Returns nil without an error when no client is waiting.
 ---
 ---@return net.tcp? client
 ---@return string? errmsg
