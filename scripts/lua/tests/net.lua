@@ -1,19 +1,22 @@
 local net = require "net"
 local test = require "core.test"
 
-local function wait_for(callback)
+-- Avoid immediately reusing listener ports across cases on Windows.
+local next_port = 40000 + system.get_process_id() % 20000
+
+local function wait_for(description, callback)
   local deadline = system.get_time() + 5
   repeat
     local value = callback()
     if value then return value end
     coroutine.yield(0.01)
   until system.get_time() >= deadline
-  test.fail("timed out waiting for loopback traffic")
+  test.fail("timed out waiting for " .. description)
 end
 
 local function receive(connection, size)
   local text = ""
-  return wait_for(function()
+  return wait_for("loopback data", function()
     local chunk, err = connection:read(size - #text)
     test.is_nil(err)
     test.type(chunk, "string")
@@ -27,10 +30,10 @@ test.describe("native net", function()
     context.connections = {}
     context.address = assert(net.resolve_address("127.0.0.1"))
     test.equal(context.address:wait_until_resolved(1000), "success")
-    local first_port = 40000 + system.get_process_id() % 20000
     local err
-    for offset = 0, 63 do
-      local port = first_port + offset
+    for _ = 1, 64 do
+      local port = next_port
+      next_port = next_port + 1
       context.server, err = net.create_server(context.address, port)
       if context.server then
         context.port = port
@@ -67,7 +70,7 @@ test.describe("native net", function()
     local outgoing = assert(net.open_tcp(context.address, context.port))
     context.connections[#context.connections + 1] = outgoing
     test.equal(outgoing:wait_until_connected(1000), "success")
-    local incoming = wait_for(function()
+    local incoming = wait_for("loopback accept on port " .. context.port, function()
       local connection, err = context.server:accept()
       test.is_nil(err)
       return connection
