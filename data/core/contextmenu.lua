@@ -15,7 +15,7 @@ local View = require "core.view"
 ---@field info? string Right-aligned hint; a command's assigned binding takes precedence
 ---@field command? string|fun() Command name or action to run when selected
 ---@field items? core.contextmenu.source Submenu entries or a provider called once on opening, mutually exclusive with command
----@field checked? boolean|fun():boolean Checked state evaluated when opening or navigating
+---@field checked? boolean|fun():boolean Toggle state evaluated when opening or navigating; false shows an empty checkbox
 ---@field visible? boolean|fun():boolean Visibility evaluated when the menu opens
 ---@field divider? boolean Separator stored by application-menu registrations
 ---@field enabled? boolean Command availability cached on an opened entry
@@ -84,26 +84,10 @@ local function resolve(value)
   return value
 end
 
----Compute the checkmark size from the current menu font.
----@return integer size Checkmark size in pixels
-local function checkmark_size()
-  return common.round(style.font:get_height() * 0.65)
-end
-
----Draw a checkmark as a polygon without relying on font glyph availability.
----@param x number Screen x coordinate
----@param y number Screen y coordinate
----@param size number Checkmark size in pixels
----@param color renderer.color Checkmark color
-local function draw_checkmark(x, y, size, color)
-  renderer.draw_poly({
-    { x, y + size * 0.45 },
-    { x + size * 0.16, y + size * 0.30 },
-    { x + size * 0.40, y + size * 0.56 },
-    { x + size * 0.84, y },
-    { x + size, y + size * 0.14 },
-    { x + size * 0.40, y + size * 0.88 }
-  }, color)
+---Reserve the same indicator width for checked and unchecked entries.
+---@return number width Checkbox icon width in pixels
+local function checkbox_width()
+  return math.max(style.icon_font:get_width("☐"), style.icon_font:get_width("☑"))
 end
 
 ---Measure a row's text, hint, submenu arrow, and optional checkmark space.
@@ -122,7 +106,7 @@ local function item_size(item)
     width = width + style.padding.x + style.font:get_width(">")
   end
   if item.checked ~= nil then
-    width = width + style.padding.x + checkmark_size()
+    width = width + style.padding.x + checkbox_width()
   end
   return width, style.font:get_height() + style.padding.y
 end
@@ -658,11 +642,12 @@ function ContextMenu:draw_context_menu()
       end
       local left = bx + style.padding.x
       if item.checked ~= nil then
-        local size = checkmark_size()
-        if item.checked_value then
-          draw_checkmark(left, common.round(by + (bh - size) / 2), size, color)
-        end
-        left = left + size + style.padding.x
+        local width = checkbox_width()
+        -- Center Fontello's raised checkbox artwork alongside the row text.
+        local icon_y = by + style.icon_font:get_size() / 8
+        common.draw_text(style.icon_font, color, item.checked_value and "☑" or "☐",
+          "center", left, icon_y, width, bh)
+        left = left + width + style.padding.x
       end
       common.draw_text(style.font, color, item.text, "left", left, by, bw, bh)
       if item.info or item.items then

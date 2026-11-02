@@ -115,11 +115,9 @@ end
 
 local track_column, folder_column, format_column = column("name", 1), column("folder", 2), column("format", 3)
 
-local shuffle_arrow = {
-  { -8, -5 }, { -4, -5 }, { 3, 3 }, { 4, 3 }, { 4, 1 }, { 8, 4 },
-  { 4, 7 }, { 4, 5 }, { 2, 5 }, { -5, -3 }, { -8, -3 }
-}
-
+---Center a transport glyph while retaining the widget's hover and toggle colors.
+---@param button widget.button|widget.togglebutton
+---@return boolean drawn Whether the visible button was drawn
 local function draw_transport_button(button)
   local active = button.hover_text or button.toggle_hovered or button.enabled
   local color = active and style.accent or style.text
@@ -127,22 +125,7 @@ local function draw_transport_button(button)
   if not Widget.draw(button) then return false end
   local cx = button.position.x + button.size.x / 2
   local cy = button.position.y + button.size.y / 2
-  -- The editor icon font has no pause, stop or shuffle glyphs.
-  if button.transport_shape == "pause" then
-    renderer.draw_rect(cx - 4 * SCALE, cy - 6 * SCALE, 2 * SCALE, 12 * SCALE, color)
-    renderer.draw_rect(cx + 2 * SCALE, cy - 6 * SCALE, 2 * SCALE, 12 * SCALE, color)
-  elseif button.transport_shape == "stop" then
-    renderer.draw_rect(cx - 4 * SCALE, cy - 4 * SCALE, 8 * SCALE, 8 * SCALE, color)
-  elseif button.transport_shape == "shuffle" then
-    for _, sign in ipairs({ 1, -1 }) do
-      local points = {}
-      for i = 1, #shuffle_arrow do
-        local p = shuffle_arrow[sign == 1 and i or #shuffle_arrow - i + 1]
-        points[i] = { cx + p[1] * SCALE, cy + p[2] * sign * SCALE }
-      end
-      renderer.draw_poly(points, color)
-    end
-  elseif button.icon.code then
+  if button.icon.code then
     local font = style.icon_font
     renderer.draw_text(font, button.icon.code,
       cx - font:get_width(button.icon.code) / 2, cy - font:get_height() / 2, color)
@@ -247,17 +230,15 @@ function AudioView:new()
     b.on_click = function(_, mouse) if mouse == "left" then action() end end
     return b
   end
-  self.previous = button("", "<", "Previous track", "previous", function() self:advance(-1) end)
-  self.play_button = button("", ">", "Play / pause", "play-pause", function() self:toggle_play() end)
-  self.stop_button = button("", nil, "Stop", "stop", function() self:stop() end)
-  self.stop_button.transport_shape = "stop"
-  self.next = button("", ">", "Next track", "next", function() self:advance(1) end)
-  self.repeat_button = ToggleButton(self, self.repeat_all, nil, "s")
+  self.previous = button("", "⏮", "Previous track", "previous", function() self:advance(-1) end)
+  self.play_button = button("", "▶", "Play / pause", "play-pause", function() self:toggle_play() end)
+  self.stop_button = button("", "■", "Stop", "stop", function() self:stop() end)
+  self.next = button("", "⏭", "Next track", "next", function() self:advance(1) end)
+  self.repeat_button = ToggleButton(self, self.repeat_all, nil, "↻")
   self.repeat_button.draw = draw_transport_button
   self.repeat_button:set_tooltip("Repeat playlist", "audio-player:toggle-repeat")
   self.repeat_button.on_change = function(_, enabled) self.repeat_all = enabled end
-  self.shuffle_button = ToggleButton(self, self.shuffle)
-  self.shuffle_button.transport_shape = "shuffle"
+  self.shuffle_button = ToggleButton(self, self.shuffle, nil, "⤨")
   self.shuffle_button.draw = draw_transport_button
   self.shuffle_button:set_tooltip("Shuffle playlist", "audio-player:toggle-shuffle")
   self.shuffle_button.on_change = function(_, enabled)
@@ -658,7 +639,7 @@ function AudioView:update()
   y = y + 22 * SCALE
   self.time_y = y
   y = y + h + gap
-  self.play_button.transport_shape = self.state == "playing" and "pause" or nil
+  self.play_button.icon.code = self.state == "playing" and "⏸" or "▶"
   local button_w = math.min(38 * SCALE, math.max(1, (w - gap - 60 * SCALE) / #self.controls - 4 * SCALE))
   for i, b in ipairs(self.controls) do
     b:set_position(p + (i - 1) * (button_w + 4 * SCALE), y)
