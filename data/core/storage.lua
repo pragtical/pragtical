@@ -27,9 +27,9 @@ end
 local function load_project(path)
   local file, err = io.open(path, "rb")
   if not file then return nil, err end
-  local text = file:read(16777217)
+  local text, read_err = file:read("*a")
   file:close()
-  if not text or #text > 16777216 then return nil, "storage exceeds 16 MB" end
+  if not text then return nil, read_err end
   local position, depth, count, previous = 1, 0, 0, nil
   local function value_position()
     return previous == "return" or previous == "=" or previous == "["
@@ -92,7 +92,8 @@ end
 ---object uses project.path/.pragtical/module/key; a string is the storage
 ---base directory itself. Project/explicit-directory files contain serialized
 ---data only, not executable Lua. Keys are filenames; extensions are not added.
----Project loads are bounded to 16 MB, one million literals and nesting of 128.
+---Project loads validate serialized data, with one million literals and nesting
+---of 128. There is no file-size limit.
 ---@class storage
 local storage = {}
 

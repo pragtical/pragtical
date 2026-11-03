@@ -158,4 +158,11 @@ test.describe("storage scopes", function()
     test.equal(pcall(ctx.storage.save, "data", "..", {}, ctx.root), false)
     test.ok(system.get_file_info(ctx.root))
   end)
+
+  test.test("loads project data larger than 16 MB without truncation", function(ctx)
+    local store, base = ctx.storage, ctx.root .. PATHSEP .. "custom"
+    local value = string.rep("x", 16 * 1024 * 1024)
+    test.ok(store.save("data", "large", value, base))
+    test.equal(store.load("data", "large", base), value)
+  end)
 end)
