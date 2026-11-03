@@ -49,7 +49,7 @@ test.describe("system", function()
       "text_input", "set_text_input_rect", "clear_ime", "raise_window",
       "show_fatal_error", "rmdir", "chdir", "getcwd", "ftruncate",
       "mkdir", "list_dir", "absolute_path", "get_file_info", "get_fs_type",
-      "get_clipboard", "set_clipboard", "get_primary_selection",
+      "get_clipboard", "get_clipboard_mime_types", "set_clipboard", "get_primary_selection",
       "set_primary_selection", "get_process_id", "get_time", "sleep",
       "exec", "fuzzy_match", "set_window_opacity", "load_native_plugin",
       "path_compare", "setenv", "get_display_info", "open_file_dialog",
@@ -57,6 +57,30 @@ test.describe("system", function()
     }) do
       assert_callable(system[name], "system." .. name)
     end
+  end)
+
+  test.test("supports clipboard text and MIME data", function()
+    system.set_clipboard("plain text")
+    test.equal(system.get_clipboard(), "plain text")
+
+    system.set_clipboard("mime text", "text/plain")
+    test.equal(system.get_clipboard("text/plain"), "mime text")
+    local mime_types = system.get_clipboard_mime_types()
+    test.not_nil(mime_types)
+    test.contains(mime_types, "text/plain")
+    test.is_nil(system.get_clipboard("image/jpeg"))
+
+    if PLATFORM == "Linux" then
+      local binary = "a\0b"
+      system.set_clipboard(binary, "application/octet-stream")
+      test.equal(system.get_clipboard("application/octet-stream"), binary)
+    end
+
+    system.set_clipboard("charset text", "text/plain;charset=utf-8")
+    test.equal(system.get_clipboard("text/plain;charset=utf-8"), "charset text")
+
+    system.set_clipboard("")
+    test.is_nil(system.get_clipboard_mime_types())
   end)
 
   test.test("handles filesystem utilities", function(context)

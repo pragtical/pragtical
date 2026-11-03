@@ -281,6 +281,23 @@ local commands = {
   ["doc:paste"] = function(dv)
     local clipboard = system.get_clipboard()
     if not clipboard or clipboard == "" then
+      local mime_types = system.get_clipboard_mime_types()
+      if mime_types then
+        for _, mime_type in ipairs(mime_types) do
+          if mime_type == "text/uri-list" then
+            local uri_list = system.get_clipboard(mime_type)
+            if uri_list then
+              local paths = common.uri_list_to_paths(uri_list)
+              if #paths > 0 then
+                clipboard = table.concat(paths, "\n")
+              end
+            end
+            break
+          end
+        end
+      end
+    end
+    if not clipboard or clipboard == "" then
     	return
     end
     -- If the clipboard has changed since our last look, use that instead

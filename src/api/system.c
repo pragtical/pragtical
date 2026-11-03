@@ -978,6 +978,17 @@ static int f_mkdir(lua_State *L) {
 
 
 static int f_get_clipboard(lua_State *L) {
+  const char *mime_type = luaL_optstring(L, 1, NULL);
+
+  if (mime_type) {
+    size_t size = 0;
+    void *data = SDL_GetClipboardData(mime_type, &size);
+    if (!data) { return 0; }
+    lua_pushlstring(L, (const char *) data, size);
+    SDL_free(data);
+    return 1;
+  }
+
   char *text = SDL_GetClipboardText();
   if (!text) { return 0; }
 #ifdef _WIN32
@@ -993,10 +1004,82 @@ static int f_get_clipboard(lua_State *L) {
 }
 
 
+typedef struct {
+  char *data;
+  size_t size;
+} ClipboardData;
+
+static const void * SDLCALL clipboard_data_callback(void *userdata, const char *mime_type, size_t *size) {
+  ClipboardData *data = (ClipboardData *) userdata;
+  (void) mime_type;
+  if (!data) { return NULL; }
+  if (size) { *size = data->size; }
+  return data->data;
+}
+
+static void SDLCALL clipboard_data_cleanup(void *userdata) {
+  ClipboardData *data = (ClipboardData *) userdata;
+  if (data) {
+    SDL_free(data->data);
+    SDL_free(data);
+  }
+}
+
 static int f_set_clipboard(lua_State *L) {
-  const char *text = luaL_checkstring(L, 1);
-  SDL_SetClipboardText(text);
+  size_t len = 0;
+  const char *text = luaL_checklstring(L, 1, &len);
+  const char *mime_type = luaL_optstring(L, 2, NULL);
+
+  // SDL's Cocoa backend expects userdata to be a NUL-terminated string for
+  // this MIME type, so use the text API instead of the data callback.
+  if (!mime_type || SDL_strncmp(mime_type, "text/plain;charset=utf-8", 24) == 0) {
+    SDL_SetClipboardText(text);
+    return 0;
+  }
+
+  if (!SDL_GetCurrentVideoDriver()) {
+    return luaL_error(L, "SDL video subsystem is not initialized");
+  }
+
+  ClipboardData *data = SDL_malloc(sizeof(*data));
+  if (!data) { return luaL_error(L, "out of memory"); }
+
+  data->data = SDL_malloc(len + 1);
+  if (!data->data) {
+    SDL_free(data);
+    return luaL_error(L, "out of memory");
+  }
+
+  SDL_memcpy(data->data, text, len);
+  data->data[len] = '\0';
+  data->size = len;
+
+  const char *mime_types[] = { mime_type };
+  if (!SDL_SetClipboardData(clipboard_data_callback, clipboard_data_cleanup, data, mime_types, 1)) {
+    // SDL owns userdata after this call; the cleanup callback releases it.
+    return luaL_error(L, "could not set clipboard data: %s", SDL_GetError());
+  }
+
   return 0;
+}
+
+
+static int f_get_clipboard_mime_types(lua_State *L) {
+  size_t count = 0;
+  char **mime_types = SDL_GetClipboardMimeTypes(&count);
+  if (!mime_types || count == 0) {
+    SDL_free(mime_types);
+    return 0;
+  }
+
+  lua_createtable(L, (int) count, 0);
+  for (size_t i = 0; i < count; i++) {
+    lua_pushstring(L, mime_types[i]);
+    lua_rawseti(L, -2, (lua_Integer) i + 1);
+  }
+
+  SDL_free(mime_types);
+  return 1;
 }
 
 
@@ -1750,6 +1833,7 @@ static const luaL_Reg lib[] = {
   { "absolute_path",         f_absolute_path         },
   { "get_file_info",         f_get_file_info         },
   { "get_clipboard",         f_get_clipboard         },
+  { "get_clipboard_mime_types", f_get_clipboard_mime_types },
   { "set_clipboard",         f_set_clipboard         },
   { "get_primary_selection", f_get_primary_selection },
   { "set_primary_selection", f_set_primary_selection },

@@ -203,6 +203,29 @@ test.describe("core.doc", function()
     test.is_nil(restored.doc.suggested_extension)
     test.equal(restored.doc:get_name(), "unsaved")
   end)
+
+  test.test("pastes cleaned text/uri-list clipboard data", function(context)
+    local doc = track_doc(context, Doc(nil, nil, true))
+    local view = DocView(doc)
+    core.active_view = view
+    core.cursor_clipboard = {}
+    core.cursor_clipboard_whole_line = {}
+
+    local uri_list, expected
+    if PATHSEP == "\\" then
+      uri_list = "file:///C:/tmp/a%20b.txt\r\nfile:///C:/tmp/c.txt\r\n"
+      expected = { "C:\\tmp\\a b.txt\n", "C:\\tmp\\c.txt\n" }
+    else
+      uri_list = "file:///tmp/a%20b.txt\r\nfile:///tmp/c.txt\r\n"
+      expected = { "/tmp/a b.txt\n", "/tmp/c.txt\n" }
+    end
+
+    system.set_clipboard(uri_list, "text/uri-list")
+    test.ok(command.perform("doc:paste"))
+    test.equal(doc.lines[1], expected[1])
+    test.equal(doc.lines[2], expected[2])
+    system.set_clipboard("")
+  end)
 end)
 
 test.describe("document saving", function()
