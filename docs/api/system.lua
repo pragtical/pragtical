@@ -324,16 +324,34 @@ function system.get_fs_type(path) end
 
 
 ---
+---Retrieve the MIME types available in the clipboard.
+---
+---Returns `nil` when the clipboard has no MIME types.
+---
+---@return string[]?
+function system.get_clipboard_mime_types() end
+
+---
 ---Retrieve the text currently stored on the clipboard.
 ---
+---When `mime_type` is provided, retrieves the raw clipboard data for that
+---MIME type instead. The returned string preserves the exact byte length.
+---
+---@param mime_type? string
 ---@return string?
-function system.get_clipboard() end
+function system.get_clipboard(mime_type) end
 
 ---
 ---Set the content of the clipboard.
 ---
+---When `mime_type` is provided, offers the data under that MIME type instead
+---of setting plain text. A table of MIME types offers the same data under
+---every listed type. Support for arbitrary MIME types depends on the
+---platform's clipboard backend.
+---
 ---@param text string
-function system.set_clipboard(text) end
+---@param mime_type? string|string[]
+function system.set_clipboard(text, mime_type) end
 
 ---
 ---Retrieve the text currently stored in the primary selection.

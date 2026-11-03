@@ -826,6 +826,105 @@ function common.relative_path(ref_dir, dir)
 end
 
 
+---Converts a `text/uri-list` entry or file URI to a local filesystem path.
+---
+---`file://`, `file://localhost`, and `file:` URIs are converted and percent
+---escapes are decoded. Non-file URIs and remote file URIs are returned
+---unchanged. An empty `file://` URI returns an empty string.
+---
+---On Windows, a leading `/` before a drive letter is removed and `/` is
+---converted to `\`.
+---@param uri string
+---@return string
+function common.uri_to_path(uri)
+  local path
+  if uri:sub(1, 7) == "file://" then
+    path = uri:sub(8)
+    if path == "" then
+      return ""
+    end
+    if path:sub(1, 9):lower() == "localhost" then
+      path = path:sub(10)
+    elseif path:sub(1, 1) ~= "/" then
+      -- Remote file URI; keep it as-is.
+      return uri
+    end
+  elseif uri:sub(1, 5) == "file:" then
+    path = uri:sub(6)
+  else
+    return uri
+  end
+
+  if path == "" then
+    return ""
+  end
+
+  path = path:gsub("%%(%x%x)", function(hex)
+    return string.char(tonumber(hex, 16))
+  end)
+  if PATHSEP == "\\" then
+    if path:match("^/[A-Za-z]:/") then
+      path = path:sub(2)
+    end
+    path = path:gsub("/", "\\")
+  end
+  return path
+end
+
+
+local function uri_encode_path(path)
+  return (path:gsub(".", function(char)
+    local byte = char:byte()
+    if (byte >= 0x41 and byte <= 0x5A)     -- A-Z
+    or (byte >= 0x61 and byte <= 0x7A)     -- a-z
+    or (byte >= 0x30 and byte <= 0x39)     -- 0-9
+    or byte == 0x2D or byte == 0x2E        -- - .
+    or byte == 0x5F or byte == 0x7E        -- _ ~
+    or byte == 0x3A or byte == 0x2F then   -- : /
+      return char
+    end
+    return string.format("%%%02X", byte)
+  end))
+end
+
+
+---Converts an absolute filesystem path to a `file://` URI.
+---
+---On Windows, backslashes are converted to slashes and a drive-letter path
+---becomes `file:///C:/...`. The path is expected to be absolute.
+---@param path string
+---@return string
+function common.path_to_uri(path)
+  if PATHSEP == "\\" then
+    path = path:gsub("\\", "/")
+    return "file:///" .. uri_encode_path(path)
+  end
+  return "file://" .. uri_encode_path(path)
+end
+
+
+---Converts a `text/uri-list` clipboard payload into local paths.
+---
+---Non-empty, non-comment lines are converted. `file://` and `file:` URIs
+---become local filesystem paths with percent escapes decoded. Other URIs
+---are kept unchanged.
+---@param text string
+---@return string[]
+function common.uri_list_to_paths(text)
+  local paths = {}
+  for line in text:gmatch("[^\r\n]+") do
+    line = line:gsub("^%s+", ""):gsub("%s+$", "")
+    if line ~= "" and line:sub(1, 1) ~= "#" then
+      local path = common.uri_to_path(line)
+      if path ~= "" then
+        paths[#paths + 1] = path
+      end
+    end
+  end
+  return paths
+end
+
+
 ---Creates a directory recursively if necessary.
 ---@param path string
 ---@return boolean success

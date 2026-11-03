@@ -76,6 +76,90 @@ test.describe("core.common", function()
     end
   end)
 
+  test.describe("uri_list_to_paths", function()
+    test.test("converts file URIs and decodes percent escapes", function()
+      local uri, expected
+      if PATHSEP == "\\" then
+        uri = "file:///C:/tmp/hello%20world.txt"
+        expected = "C:\\tmp\\hello world.txt"
+      else
+        uri = "file:///tmp/hello%20world.txt"
+        expected = "/tmp/hello world.txt"
+      end
+
+      local paths = common.uri_list_to_paths(uri .. "\r\n")
+      test.equal(#paths, 1)
+      test.equal(paths[1], expected)
+    end)
+
+    test.test("handles localhost, comments, blank lines and other URIs", function()
+      local localhost_uri, localhost_expected
+      if PATHSEP == "\\" then
+        localhost_uri = "file://localhost/C:/tmp/second.txt"
+        localhost_expected = "C:\\tmp\\second.txt"
+      else
+        localhost_uri = "file://localhost/tmp/second.txt"
+        localhost_expected = "/tmp/second.txt"
+      end
+
+      local paths = common.uri_list_to_paths(
+        "# copied files\r\n" ..
+        localhost_uri .. "\r\n" ..
+        "\r\n" ..
+        "https://example.com/a%20b\r\n"
+      )
+      test.equal(#paths, 2)
+      test.equal(paths[1], localhost_expected)
+      test.equal(paths[2], "https://example.com/a%20b")
+    end)
+
+    test.test("returns an empty list for comment-only payloads", function()
+      test.equal(#common.uri_list_to_paths("# comment\r\n\r\n"), 0)
+    end)
+  end)
+
+  test.describe("uri_to_path", function()
+    test.test("converts local file URIs", function()
+      if PATHSEP == "\\" then
+        test.equal(common.uri_to_path("file:///C:/tmp/hello%20world.txt"), "C:\\tmp\\hello world.txt")
+        test.equal(common.uri_to_path("file://localhost/C:/tmp/second.txt"), "C:\\tmp\\second.txt")
+      else
+        test.equal(common.uri_to_path("file:///tmp/hello%20world.txt"), "/tmp/hello world.txt")
+        test.equal(common.uri_to_path("file://localhost/tmp/second.txt"), "/tmp/second.txt")
+      end
+    end)
+
+    test.test("leaves non-file and remote file URIs unchanged", function()
+      test.equal(common.uri_to_path("https://example.com/a%20b"), "https://example.com/a%20b")
+      test.equal(common.uri_to_path("file://server/share/file.txt"), "file://server/share/file.txt")
+    end)
+
+    test.test("returns an empty string for an empty file URI", function()
+      test.equal(common.uri_to_path("file://"), "")
+    end)
+  end)
+
+  test.describe("path_to_uri", function()
+    test.test("converts absolute paths to file URIs", function()
+      if PATHSEP == "\\" then
+        test.equal(
+          common.path_to_uri("C:\\tmp\\hello world.txt"),
+          "file:///C:/tmp/hello%20world.txt"
+        )
+      else
+        test.equal(
+          common.path_to_uri("/tmp/hello world.txt"),
+          "file:///tmp/hello%20world.txt"
+        )
+      end
+    end)
+
+    test.test("round-trips paths through uri_to_path", function()
+      local path = PATHSEP == "\\" and "C:\\tmp\\round trip.txt" or "/tmp/round trip.txt"
+      test.equal(common.uri_to_path(common.path_to_uri(path)), path)
+    end)
+  end)
+
   test.describe("path_suggest", function()
     test.test("suggests relative paths from the current directory", function(context)
       system.chdir(context.temp_root)

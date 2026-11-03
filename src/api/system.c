@@ -978,6 +978,17 @@ static int f_mkdir(lua_State *L) {
 
 
 static int f_get_clipboard(lua_State *L) {
+  const char *mime_type = luaL_optstring(L, 1, NULL);
+
+  if (mime_type) {
+    size_t size = 0;
+    void *data = SDL_GetClipboardData(mime_type, &size);
+    if (!data) { return 0; }
+    lua_pushlstring(L, (const char *) data, size);
+    SDL_free(data);
+    return 1;
+  }
+
   char *text = SDL_GetClipboardText();
   if (!text) { return 0; }
 #ifdef _WIN32
@@ -993,10 +1004,123 @@ static int f_get_clipboard(lua_State *L) {
 }
 
 
+typedef struct {
+  size_t size;
+} ClipboardDataHeader;
+
+static const void * SDLCALL clipboard_data_callback(void *userdata, const char *mime_type, size_t *size) {
+  (void) mime_type;
+  if (!userdata) { return NULL; }
+  ClipboardDataHeader *header = (ClipboardDataHeader *) userdata - 1;
+  if (size) { *size = header->size; }
+  return userdata;
+}
+
+static void SDLCALL clipboard_data_cleanup(void *userdata) {
+  if (userdata) {
+    ClipboardDataHeader *header = (ClipboardDataHeader *) userdata - 1;
+    SDL_free(header);
+  }
+}
+
 static int f_set_clipboard(lua_State *L) {
-  const char *text = luaL_checkstring(L, 1);
-  SDL_SetClipboardText(text);
+  size_t len = 0;
+  const char *text = luaL_checklstring(L, 1, &len);
+  int mime_type_type = lua_type(L, 2);
+
+  if (mime_type_type == LUA_TNONE || mime_type_type == LUA_TNIL) {
+    SDL_SetClipboardText(text);
+    return 0;
+  }
+
+  if (!SDL_GetCurrentVideoDriver()) {
+    return luaL_error(L, "SDL video subsystem is not initialized");
+  }
+
+  const char *single_mime_type = NULL;
+  const char **mime_types = NULL;
+  size_t mime_count = 0;
+  bool free_mime_types = false;
+
+  if (mime_type_type == LUA_TSTRING) {
+    single_mime_type = lua_tostring(L, 2);
+    mime_types = &single_mime_type;
+    mime_count = 1;
+  } else if (mime_type_type == LUA_TTABLE) {
+    lua_Integer count = (lua_Integer) lua_rawlen(L, 2);
+    if (count <= 0) {
+      return luaL_error(L, "mime type table must not be empty");
+    }
+    if (count > (lua_Integer) (SIZE_MAX / sizeof(char *))) {
+      return luaL_error(L, "too many mime types");
+    }
+
+    mime_types = SDL_malloc(sizeof(char *) * (size_t) count);
+    if (!mime_types) {
+      return luaL_error(L, "out of memory");
+    }
+    free_mime_types = true;
+
+    for (lua_Integer i = 0; i < count; i++) {
+      lua_rawgeti(L, 2, i + 1);
+      if (lua_type(L, -1) != LUA_TSTRING) {
+        lua_pop(L, 1);
+        SDL_free(mime_types);
+        return luaL_error(L, "mime type table entries must be strings");
+      }
+      mime_types[i] = lua_tostring(L, -1);
+      lua_pop(L, 1);
+    }
+    mime_count = (size_t) count;
+  } else {
+    return luaL_error(L, "mime type must be a string or a table of strings");
+  }
+
+  ClipboardDataHeader *header = SDL_malloc(sizeof(*header) + len + 1);
+  if (!header) {
+    if (free_mime_types) { SDL_free(mime_types); }
+    return luaL_error(L, "out of memory");
+  }
+
+  header->size = len;
+  char *data = (char *) (header + 1);
+  SDL_memcpy(data, text, len);
+  data[len] = '\0';
+
+  bool ok = SDL_SetClipboardData(
+    clipboard_data_callback, clipboard_data_cleanup,
+    data, mime_types, mime_count
+  );
+
+  if (free_mime_types) {
+    SDL_free(mime_types);
+  }
+
+  if (!ok) {
+    // SDL owns userdata after this call; the cleanup callback releases it.
+    return luaL_error(L, "could not set clipboard data: %s", SDL_GetError());
+  }
+
   return 0;
+}
+
+
+static int f_get_clipboard_mime_types(lua_State *L) {
+  size_t count = 0;
+  char **mime_types = SDL_GetClipboardMimeTypes(&count);
+  if (!mime_types || count == 0) {
+    SDL_free(mime_types);
+    return 0;
+  }
+
+  lua_createtable(L, (int) count, 0);
+  for (size_t i = 0; i < count; i++) {
+    lua_pushstring(L, mime_types[i]);
+    lua_rawseti(L, -2, (lua_Integer) i + 1);
+  }
+
+  SDL_free(mime_types);
+  return 1;
 }
 
 
@@ -1750,6 +1874,7 @@ static const luaL_Reg lib[] = {
   { "absolute_path",         f_absolute_path         },
   { "get_file_info",         f_get_file_info         },
   { "get_clipboard",         f_get_clipboard         },
+  { "get_clipboard_mime_types", f_get_clipboard_mime_types },
   { "set_clipboard",         f_set_clipboard         },
   { "get_primary_selection", f_get_primary_selection },
   { "set_primary_selection", f_set_primary_selection },
