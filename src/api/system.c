@@ -1005,34 +1005,30 @@ static int f_get_clipboard(lua_State *L) {
 
 
 typedef struct {
-  char *data;
   size_t size;
-} ClipboardData;
+} ClipboardDataHeader;
 
 static const void * SDLCALL clipboard_data_callback(void *userdata, const char *mime_type, size_t *size) {
-  ClipboardData *data = (ClipboardData *) userdata;
   (void) mime_type;
-  if (!data) { return NULL; }
-  if (size) { *size = data->size; }
-  return data->data;
+  if (!userdata) { return NULL; }
+  ClipboardDataHeader *header = (ClipboardDataHeader *) userdata - 1;
+  if (size) { *size = header->size; }
+  return userdata;
 }
 
 static void SDLCALL clipboard_data_cleanup(void *userdata) {
-  ClipboardData *data = (ClipboardData *) userdata;
-  if (data) {
-    SDL_free(data->data);
-    SDL_free(data);
+  if (userdata) {
+    ClipboardDataHeader *header = (ClipboardDataHeader *) userdata - 1;
+    SDL_free(header);
   }
 }
 
 static int f_set_clipboard(lua_State *L) {
   size_t len = 0;
   const char *text = luaL_checklstring(L, 1, &len);
-  const char *mime_type = luaL_optstring(L, 2, NULL);
+  int mime_type_type = lua_type(L, 2);
 
-  // SDL's Cocoa backend expects userdata to be a NUL-terminated string for
-  // this MIME type, so use the text API instead of the data callback.
-  if (!mime_type || SDL_strncmp(mime_type, "text/plain;charset=utf-8", 24) == 0) {
+  if (mime_type_type == LUA_TNONE || mime_type_type == LUA_TNIL) {
     SDL_SetClipboardText(text);
     return 0;
   }
@@ -1041,21 +1037,66 @@ static int f_set_clipboard(lua_State *L) {
     return luaL_error(L, "SDL video subsystem is not initialized");
   }
 
-  ClipboardData *data = SDL_malloc(sizeof(*data));
-  if (!data) { return luaL_error(L, "out of memory"); }
+  const char *single_mime_type = NULL;
+  const char **mime_types = NULL;
+  size_t mime_count = 0;
+  bool free_mime_types = false;
 
-  data->data = SDL_malloc(len + 1);
-  if (!data->data) {
-    SDL_free(data);
+  if (mime_type_type == LUA_TSTRING) {
+    single_mime_type = lua_tostring(L, 2);
+    mime_types = &single_mime_type;
+    mime_count = 1;
+  } else if (mime_type_type == LUA_TTABLE) {
+    lua_Integer count = (lua_Integer) lua_rawlen(L, 2);
+    if (count <= 0) {
+      return luaL_error(L, "mime type table must not be empty");
+    }
+    if (count > (lua_Integer) (SIZE_MAX / sizeof(char *))) {
+      return luaL_error(L, "too many mime types");
+    }
+
+    mime_types = SDL_malloc(sizeof(char *) * (size_t) count);
+    if (!mime_types) {
+      return luaL_error(L, "out of memory");
+    }
+    free_mime_types = true;
+
+    for (lua_Integer i = 0; i < count; i++) {
+      lua_rawgeti(L, 2, i + 1);
+      if (lua_type(L, -1) != LUA_TSTRING) {
+        lua_pop(L, 1);
+        SDL_free(mime_types);
+        return luaL_error(L, "mime type table entries must be strings");
+      }
+      mime_types[i] = lua_tostring(L, -1);
+      lua_pop(L, 1);
+    }
+    mime_count = (size_t) count;
+  } else {
+    return luaL_error(L, "mime type must be a string or a table of strings");
+  }
+
+  ClipboardDataHeader *header = SDL_malloc(sizeof(*header) + len + 1);
+  if (!header) {
+    if (free_mime_types) { SDL_free(mime_types); }
     return luaL_error(L, "out of memory");
   }
 
-  SDL_memcpy(data->data, text, len);
-  data->data[len] = '\0';
-  data->size = len;
+  header->size = len;
+  char *data = (char *) (header + 1);
+  SDL_memcpy(data, text, len);
+  data[len] = '\0';
 
-  const char *mime_types[] = { mime_type };
-  if (!SDL_SetClipboardData(clipboard_data_callback, clipboard_data_cleanup, data, mime_types, 1)) {
+  bool ok = SDL_SetClipboardData(
+    clipboard_data_callback, clipboard_data_cleanup,
+    data, mime_types, mime_count
+  );
+
+  if (free_mime_types) {
+    SDL_free(mime_types);
+  }
+
+  if (!ok) {
     // SDL owns userdata after this call; the cleanup callback releases it.
     return luaL_error(L, "could not set clipboard data: %s", SDL_GetError());
   }

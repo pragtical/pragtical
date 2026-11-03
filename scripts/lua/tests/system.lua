@@ -79,6 +79,16 @@ test.describe("system", function()
     system.set_clipboard("charset text", "text/plain;charset=utf-8")
     test.equal(system.get_clipboard("text/plain;charset=utf-8"), "charset text")
 
+    system.set_clipboard("multi mime", {"text/plain", "text/uri-list"})
+    local multi_types = system.get_clipboard_mime_types()
+    test.contains(multi_types, "text/plain")
+    test.contains(multi_types, "text/uri-list")
+    test.equal(system.get_clipboard("text/plain"), "multi mime")
+    test.equal(system.get_clipboard("text/uri-list"), "multi mime")
+
+    test.error(function() system.set_clipboard("x", {}) end)
+    test.error(function() system.set_clipboard("x", {"text/plain", 1}) end)
+
     system.set_clipboard("")
     test.is_nil(system.get_clipboard_mime_types())
   end)

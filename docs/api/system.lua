@@ -345,11 +345,12 @@ function system.get_clipboard(mime_type) end
 ---Set the content of the clipboard.
 ---
 ---When `mime_type` is provided, offers the data under that MIME type instead
----of setting plain text. Support for arbitrary MIME types depends on the
+---of setting plain text. A table of MIME types offers the same data under
+---every listed type. Support for arbitrary MIME types depends on the
 ---platform's clipboard backend.
 ---
 ---@param text string
----@param mime_type? string
+---@param mime_type? string|string[]
 function system.set_clipboard(text, mime_type) end
 
 ---
