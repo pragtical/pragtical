@@ -40,6 +40,12 @@ test.describe("system", function()
     end
   end)
 
+  test.test("validates plugin names before loading native libraries", function()
+    test.error(function()
+      system.load_native_plugin(string.rep("a", 600) .. ".core", "missing-library")
+    end, "native plugin name too long")
+  end)
+
   test.test("exports the documented functions", function()
     for _, name in ipairs({
       "poll_event", "wait_event", "has_pending_events", "set_cursor",

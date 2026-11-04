@@ -151,7 +151,9 @@ bool load_cacert_bundle(mbedtls_x509_crt *cacert) {
 /******************************************************************************/
 
 static int f_set_cacert_path(lua_State* L) {
-  const char* path = luaL_checkstring(L, 1);
+  size_t len;
+  const char* path = luaL_checklstring(L, 1, &len);
+  luaL_argcheck(L, len < sizeof(CACERT_BUNDLE), 1, "CA bundle path too long");
   strcpy(CACERT_BUNDLE, path);
   return 0;
 }
@@ -175,7 +177,9 @@ static int f_get_cacert_path(lua_State* L) {
 }
 
 static int f_resolve_address(lua_State* L) {
-  const char* hostname = luaL_checkstring(L, 1);
+  size_t len;
+  const char* hostname = luaL_checklstring(L, 1, &len);
+  luaL_argcheck(L, len < sizeof(((Address*)0)->hostname), 1, "hostname too long");
 
   NET_Address* address;
   if ((address = NET_ResolveHostname(hostname)) != NULL) {
@@ -242,15 +246,15 @@ static int f_open_tcp(lua_State* L) {
 
   int rc = 0;
   if (ssl) {
+    mbedtls_ssl_init(&self->ssl);
+    mbedtls_ssl_config_init(&self->conf);
+    mbedtls_x509_crt_init(&self->cacert);
+
     psa_status_t status = psa_crypto_init();
     if (status != PSA_SUCCESS) {
       rc = MBEDTLS_ERR_SSL_INTERNAL_ERROR;
       goto ssl_error;
     }
-
-    mbedtls_ssl_init(&self->ssl);
-    mbedtls_ssl_config_init(&self->conf);
-    mbedtls_x509_crt_init(&self->cacert);
 
     if (
       (rc = mbedtls_ssl_config_defaults(
@@ -283,11 +287,11 @@ static int f_open_tcp(lua_State* L) {
   return 1;
 
 ssl_error:
-  mbedtls_ssl_close_notify(&self->ssl);
   mbedtls_ssl_free(&self->ssl);
   mbedtls_ssl_config_free(&self->conf);
   mbedtls_x509_crt_free(&self->cacert);
   NET_DestroyStreamSocket(socket);
+  self->socket = NULL;
 
   lua_pushnil(L);
   push_ssl_error(L, rc, self);

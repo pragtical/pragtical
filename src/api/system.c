@@ -1329,7 +1329,14 @@ static int f_load_native_plugin(lua_State *L) {
   char entrypoint_name[512]; entrypoint_name[sizeof(entrypoint_name) - 1] = '\0';
   int result;
 
-  const char *name = luaL_checkstring(L, 1);
+  size_t name_len;
+  const char *name = luaL_checklstring(L, 1, &name_len);
+  luaL_argcheck(
+    L,
+    name_len <= sizeof(entrypoint_name) - sizeof("luaopen_pragtical_"),
+    1,
+    "native plugin name too long"
+  );
   const char *path = luaL_checkstring(L, 2);
   void *library = SDL_LoadObject(path);
   if (!library)
@@ -1362,7 +1369,8 @@ static int f_load_native_plugin(lua_State *L) {
     if (has_dot && !entrypoint) {
       // Allow loading libraries like term.core from term/core.so by adding
       // support for entry functions like luaopen_term_core
-      char fullname[128]; strcpy(fullname, name);
+      char fullname[sizeof(entrypoint_name) - sizeof("luaopen_pragtical_") + 1];
+      strcpy(fullname, name);
       char* dot = NULL;
       while((dot = strstr(fullname, "."))) *dot = '_';
       snprintf(entrypoint_name, sizeof(entrypoint_name), "luaopen_%s", fullname);

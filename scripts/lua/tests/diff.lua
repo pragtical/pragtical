@@ -29,4 +29,14 @@ test.describe("diff", function()
     test.ok(#inline_changes >= 1)
     test.type(inline_changes[1].tag, "string")
   end)
+  test.test("releases abandoned iterators and permits repeated exhaustion", function()
+    for _ = 1, 20 do
+      local iter = diff.diff_iter({"one", "two"}, {"one", "three"})
+      test.equal(iter().tag, "equal")
+    end
+    collectgarbage("forcecollect")
+    local iter = diff.diff_iter({"one"}, {"one"})
+    test.equal(iter().tag, "equal")
+    for _ = 1, 3 do test.is_nil(iter()) end
+  end)
 end)

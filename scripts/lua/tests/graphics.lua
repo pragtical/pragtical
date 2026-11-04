@@ -78,6 +78,31 @@ test.describe("graphics apis", function()
     end
   end)
 
+  test.test("rejects invalid polygons after valid points", function()
+    local c = canvas.new(8, 8, {0, 0, 0, 255}, false)
+    for _, points in ipairs({
+      {{0, 0}, {1}}, {{0, 0}, {1, false}}, {{0, 0}, false}
+    }) do
+      test.error(function() c:draw_poly(points, {255, 255, 255, 255}) end)
+    end
+    local points = {}
+    for i = 1, 16384 do points[i] = {0, 0, 1, 1, 2, 2, 3, 3} end
+    test.error(function() c:draw_poly(points, {255, 255, 255, 255}) end,
+      "too many points")
+    test.not_nil(c:draw_poly({{0, 0}, {6, 0}, {0, 6}}, {255, 255, 255, 255}))
+  end)
+
+  test.test("reads polygon arrays without invoking length callbacks", function()
+    local c = canvas.new(8, 8, {0, 0, 0, 255}, false)
+    local mt = {__len = function() error("polygon length callback invoked") end}
+    local points = setmetatable({
+      setmetatable({"0", "0"}, mt),
+      setmetatable({"6", "0"}, mt),
+      setmetatable({"0", "6"}, mt)
+    }, mt)
+    test.not_nil(c:draw_poly(points, {255, 255, 255, 255}))
+  end)
+
   test.test("exports the documented renwindow, renderer and canvas functions", function()
     for _, name in ipairs({
       "create", "get_size", "get_refresh_rate", "get_renderer_info",

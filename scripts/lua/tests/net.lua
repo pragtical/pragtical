@@ -26,6 +26,13 @@ local function receive(connection, size)
 end
 
 test.describe("native net", function()
+  test.test("rejects oversized network strings", function()
+    test.error(function() net.set_cacert_path(string.rep("x", 1024)) end,
+      "CA bundle path too long")
+    test.error(function() net.resolve_address(string.rep("x", 254)) end,
+      "hostname too long")
+  end)
+
   test.before_each(function(context)
     context.connections = {}
     context.address = assert(net.resolve_address("127.0.0.1"))

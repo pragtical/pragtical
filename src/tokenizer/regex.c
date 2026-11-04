@@ -177,6 +177,7 @@ regex_find_result regex_pattern_find(
 ) {
   regex_find_result result = {false, NULL, regex_find_init()};
   size_t base_offset = regex_offset_relative(offset, subject_len) - 1;
+  if (base_offset > subject_len) return result;
   subject_len -= base_offset;
   if (opts < 0) opts = 0;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(self->re, NULL);
@@ -229,6 +230,7 @@ bool regex_pattern_find_noalloc(
 ) {
   if (errmsg) *errmsg = NULL;
   size_t base_offset = regex_offset_relative(offset, subject_len) - 1;
+  if (base_offset > subject_len) return false;
   subject_len -= base_offset;
   if (opts < 0) opts = 0;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(self->re, NULL);
@@ -267,6 +269,7 @@ regex_match_result regex_pattern_match(
 ) {
   regex_match_result result = {false, NULL, regex_match_init()};
   size_t base_offset = regex_offset_relative(offset, subject_len) - 1;
+  if (base_offset > subject_len) return result;
   subject_len -= base_offset;
   if (opts < 0) opts = 0;
   pcre2_match_data* md = pcre2_match_data_create_from_pattern(self->re, NULL);
