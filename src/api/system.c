@@ -1033,10 +1033,6 @@ static int f_set_clipboard(lua_State *L) {
     return 0;
   }
 
-  if (!SDL_GetCurrentVideoDriver()) {
-    return luaL_error(L, "SDL video subsystem is not initialized");
-  }
-
   const char *single_mime_type = NULL;
   const char **mime_types = NULL;
   size_t mime_count = 0;
@@ -1097,6 +1093,14 @@ static int f_set_clipboard(lua_State *L) {
   }
 
   if (!ok) {
+    // SDL_SetClipboardData returns before taking ownership of userdata when
+    // the video subsystem is not initialized, so avoid leaking data.
+    // Issue reported to upstream SDL project:
+    // https://github.com/libsdl-org/SDL/issues/16650
+    if (!SDL_GetCurrentVideoDriver()) {
+      SDL_free(header);
+    }
+
     // SDL owns userdata after this call; the cleanup callback releases it.
     return luaL_error(L, "could not set clipboard data: %s", SDL_GetError());
   }
