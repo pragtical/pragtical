@@ -344,6 +344,7 @@ keymap.add_direct {
   ["ctrl+i"] = "find-replace:toggle-sensitivity",
   ["ctrl+shift+i"] = "find-replace:toggle-regex",
   ["ctrl+g"] = "doc:go-to-line",
+  ["alt+v"] = "doc:center-cursor",
   ["ctrl+s"] = "doc:save",
   ["ctrl+shift+s"] = "doc:save-as",
 
