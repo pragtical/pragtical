@@ -442,28 +442,57 @@ static int f_draw_poly(lua_State *L) {
   RenColor color = luaXL_checkcolor(L, 2, 255);
   lua_settop(L, 2);
 
-  int len = luaL_len(L, 1);
-  RenPoint *points = NULL; int npoints = 0;
-  for (int i = 1; i <= len; i++) {
-    lua_rawgeti(L, 1, i); luaL_checktype(L, -1, LUA_TTABLE);
-    const char *current_tag = NULL; int coord_len = luaL_len(L, -1);
+  luaL_checkstack(L, 3, "not enough stack slots for polygon");
+  /* Read arrays directly so no Lua callback can bypass native cleanup. */
+  size_t len = lua_rawlen(L, 1);
+  if (len > MAX_POLY_POINTS) return luaL_error(L, "too many points");
+  /* Each array entry contributes at most four points. Reserve once. */
+  size_t capacity = len > MAX_POLY_POINTS / 4 ? MAX_POLY_POINTS : len * 4;
+  RenPoint *points = len ? SDL_malloc(capacity * sizeof(*points)) : NULL;
+  if (len && !points) return luaL_error(L, "polygon allocation failed");
+  int npoints = 0;
+  for (size_t i = 1; i <= len; i++) {
+    lua_rawgeti(L, 1, i);
+    if (!lua_istable(L, -1)) {
+      SDL_free(points);
+      return luaL_error(L, "polygon point must be a table");
+    }
+    const char *current_tag;
+    size_t coord_len = lua_rawlen(L, -1);
     switch (coord_len) {
       case 2: current_tag = normal_tag;       break; // 1 curve point
       case 6: current_tag = conic_bezier_tag; break; // a conic bezier with 2 curve points and 1 control point
       case 8: current_tag = cubic_bezier_tag; break; // a cubic bezier with 2 curve points and 2 control points
-      default: return luaL_error(L, "invalid number of points, expected 2, 6 and 8, got %d", coord_len);
+      default:
+        SDL_free(points);
+        return luaL_error(L, "invalid number of points, expected 2, 6 and 8, got %d", (int)coord_len);
     }
-    if (npoints + coord_len / 2 > MAX_POLY_POINTS) return luaL_error(L, "too many points");
-    points = SDL_realloc(points, (npoints + coord_len / 2) * sizeof(RenPoint));
-    for (int lidx = 1; lidx <= coord_len; lidx += 2) {
-      points[npoints].x = (lua_rawgeti(L, -1, lidx),   luaL_checknumber(L, -1));
-      points[npoints].y = (lua_rawgeti(L, -2, lidx+1), luaL_checknumber(L, -1));
-      points[npoints++].tag = current_tag[(lidx-1)/2];
-      lua_pop(L, 2);
+    if (coord_len / 2 > MAX_POLY_POINTS - npoints) {
+      SDL_free(points);
+      return luaL_error(L, "too many points");
     }
+    int table_idx = lua_gettop(L);
+    for (int j = 1; j <= coord_len; j += 2) {
+      lua_rawgeti(L, table_idx, j);
+      if (!lua_isnumber(L, -1)) {
+        SDL_free(points);
+        return luaL_error(L, "polygon coordinate must be a number");
+      }
+      points[npoints].x = lua_tonumber(L, -1);
+      lua_pop(L, 1);
+      lua_rawgeti(L, table_idx, j + 1);
+      if (!lua_isnumber(L, -1)) {
+        SDL_free(points);
+        return luaL_error(L, "polygon coordinate must be a number");
+      }
+      points[npoints].y = lua_tonumber(L, -1);
+      lua_pop(L, 1);
+      points[npoints++].tag = current_tag[(j - 1) / 2];
+    }
+    lua_pop(L, 1);
   }
   RenRect res = rencache_draw_poly(&window->cache, points, npoints, color);
-  if (points) SDL_free(points);
+  SDL_free(points);
   lua_pushinteger(L, res.x);     lua_pushinteger(L, res.y);
   lua_pushinteger(L, res.width); lua_pushinteger(L, res.height);
   return 4;

@@ -20,6 +20,13 @@ typedef struct {
   int lenA, lenB;
 } DiffState;
 
+static int diff_state_gc(lua_State *L) {
+  DiffState *state = lua_touserdata(L, 1);
+  SDL_free(state->pairs);
+  state->pairs = NULL;
+  return 0;
+}
+
 static bool is_token_char(char c) {
   return ((unsigned char)c >= 0x80) || // UTF-8 lead/continuation byte
          ((c >= 'a' && c <= 'z') ||
@@ -505,7 +512,10 @@ static int f_diff_iter(lua_State *L) {
   luaL_checktype(L, 2, LUA_TTABLE);
   double threshold = luaL_optnumber(L, 3, 0.75);
 
-  DiffState *state = SDL_malloc(sizeof(DiffState));
+  DiffState *state = lua_newuserdata(L, sizeof(DiffState));
+  memset(state, 0, sizeof(*state));
+  luaL_setmetatable(L, "DiffState");
+  int state_idx = lua_gettop(L);
   state->lenA = (int)lua_rawlen(L, 1);
   state->lenB = (int)lua_rawlen(L, 2);
   state->ai = 1;
@@ -516,7 +526,7 @@ static int f_diff_iter(lua_State *L) {
   /* Push tables and state to closure */
   lua_pushvalue(L, 1);
   lua_pushvalue(L, 2);
-  lua_pushlightuserdata(L, state);
+  lua_pushvalue(L, state_idx);
 
   lua_pushcclosure(L, diff_iterator, 3);
   return 1;
@@ -533,6 +543,10 @@ static const struct luaL_Reg lib[] = {
 
 
 int luaopen_diff(lua_State *L) {
+  luaL_newmetatable(L, "DiffState");
+  lua_pushcfunction(L, diff_state_gc);
+  lua_setfield(L, -2, "__gc");
+  lua_pop(L, 1);
   luaL_newlib(L, lib);
   return 1;
 }
