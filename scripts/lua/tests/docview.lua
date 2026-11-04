@@ -3,6 +3,7 @@ local core = require "core"
 local config = require "core.config"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local command = require "core.command"
 local style = require "core.style"
 
 local function make_view(text)
@@ -395,5 +396,71 @@ test.describe("docview", function()
       local x = width * (i / 10)
       test.equal(view:get_x_offset_col(1, x), scan_x_offset_col(view, 1, x))
     end
+  end)
+end)
+
+test.describe("docview centering", function()
+  local function make_tall_view(line_count)
+    local doc = Doc(nil, nil, true)
+    local lines = {}
+    for i = 1, line_count do
+      lines[i] = string.format("line %d with some text to wrap\n", i)
+    end
+    doc.lines = lines
+    doc.cache.col_x = {}
+    doc.cache.ulen = {}
+    doc.highlighter:reset()
+
+    local view = DocView(doc)
+    view.position.x = 0
+    view.position.y = 0
+    view.size.x = 320
+    view.size.y = 200
+    view.indentguide_indents = {}
+    view.indentguide_indent_active = {}
+    return view
+  end
+
+  -- Distance in pixels between the middle of the visual row containing
+  -- (line, col) and the middle of the visible area (above the h-scrollbar).
+  local function center_error(view, line, col)
+    local _, y = view:get_line_screen_position(line, col)
+    local _, _, _, scroll_h = view.h_scrollbar:get_track_rect()
+    local row_center = y + view:get_line_height() / 2
+    local view_center = view.position.y + (view.size.y - scroll_h) / 2
+    return math.abs(row_center - view_center)
+  end
+
+  test.test("scroll_to_line centers the middle of the line", function()
+    local view = make_tall_view(200)
+    view:scroll_to_line(100, false, true)
+    test.ok(center_error(view, 100) <= 1)
+  end)
+
+  test.test("scroll_to_line centers the wrapped row containing col", function()
+    local view = make_tall_view(200)
+    view.get_line_wraps = function(_, line)
+      return line == 100 and { 1, 6, 11, 16 } or nil
+    end
+    view:invalidate_visual_lines()
+
+    view:scroll_to_line(100, false, true, 17)
+    test.ok(center_error(view, 100, 17) <= 1)
+    -- the first row of the line ends up well above center
+    test.ok(center_error(view, 100, 1) >= view:get_line_height() * 2)
+  end)
+
+  test.test("doc:center-cursor centers the caret, not the selection start", function()
+    local view = make_tall_view(200)
+    view.get_line_wraps = function(_, line)
+      return line == 100 and { 1, 6, 11, 16 } or nil
+    end
+    view:invalidate_visual_lines()
+    -- caret at (100, 17), anchor at (20, 1): selection extended downward
+    view.doc:set_selection(100, 17, 20, 1)
+
+    command.map["doc:center-cursor"].perform(view)
+    view.scroll.y = view.scroll.to.y
+    test.ok(center_error(view, 100, 17) <= 1)
   end)
 end)

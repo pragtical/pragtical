@@ -875,17 +875,22 @@ end
 
 
 ---Scroll to center a line in the viewport.
+---When `col` is given, the visual row containing that column is centered,
+---which matters when a line is wrapped across multiple rows.
 ---@param line integer Line number to scroll to
 ---@param ignore_if_visible? boolean Don't scroll if line already visible
 ---@param instant? boolean Jump immediately without animation
-function DocView:scroll_to_line(line, ignore_if_visible, instant)
+---@param col? integer Column whose visual row should be centered (default 1)
+function DocView:scroll_to_line(line, ignore_if_visible, instant, col)
+  col = col or 1
   local min, max = self:get_visible_line_range()
-  local row = self:visual_row_from_position(line, 1)
+  local row = self:visual_row_from_position(line, col)
   if not (ignore_if_visible and row > min and row < max) then
-    local x, y = self:get_line_screen_position(line)
-    local ox, oy = self:get_content_offset()
+    local _, y = self:get_line_screen_position(line, col)
+    local _, oy = self:get_content_offset()
+    local lh = self:get_line_height()
     local _, _, _, scroll_h = self.h_scrollbar:get_track_rect()
-    self.scroll.to.y = math.max(0, y - oy - (self.size.y - scroll_h) / 2)
+    self.scroll.to.y = math.max(0, y - oy - (self.size.y - scroll_h) / 2 + lh / 2)
     if instant then
       self.scroll.y = self.scroll.to.y
     end
