@@ -101,6 +101,33 @@ test.describe("widget mouse events", function()
     test.equal(#child.animations, 0)
   end)
 
+  test.test("a newly drawable child repaints once and then settles", function(context)
+    local root = root_widget(context)
+    local child = Widget(root)
+    child:set_size(0, 40)
+    root:update()
+    local paints = 0
+    local child_draw = child.draw
+    function child:draw()
+      local painted = child_draw(self)
+      if painted then paints = paints + 1 end
+      return painted
+    end
+    draw(root)
+    test.equal(paints, 0)
+
+    -- Parent layout may assign a usable width after updating its children.
+    child:set_size(180, 40)
+    core.redraw = false
+    root:update()
+    if core.redraw then draw(root) end
+    test.equal(paints, 1, "the ready child must repaint without another input event")
+
+    core.redraw = false
+    root:update()
+    test.not_ok(core.redraw, "a settled widget must stop requesting frames")
+  end)
+
   test.test("leave reaches nested controls once when switching containers or leaving the view", function(context)
     local root = root_widget(context)
     local first_container = child_widget(root)
