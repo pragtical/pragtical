@@ -55,7 +55,7 @@ static int font_get_options(
           return luaL_error(
             L,
             "error in font options, unknown hinting option: \"%s\"",
-            hinting
+            hinting_str
           );
         }
       }
