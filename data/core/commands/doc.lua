@@ -650,6 +650,11 @@ local commands = {
     })
   end,
 
+  ["doc:center-cursor"] = function(dv)
+    local line, col = dv.doc:get_selection()
+    dv:scroll_to_line(line, false, false, col)
+  end,
+
   ["doc:toggle-line-ending"] = function(dv)
     dv.doc.crlf = not dv.doc.crlf
   end,
