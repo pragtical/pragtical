@@ -388,6 +388,24 @@ config.draw_whitespace = false
 ---@type boolean
 config.borderless = true
 
+---Draws an outline around restored borderless windows on all platforms.
+---Hidden when maximized or fullscreen. Defaults to true.
+---@type boolean
+config.borderless_outline = true
+
+---Borderless outline color while the application has keyboard focus.
+---@type renderer.color
+config.outline_focused = { common.color "#568DDE" }
+
+---Borderless outline color while the application is unfocused.
+---@type renderer.color
+config.outline_unfocused = { common.color "#77767B" }
+
+---Overlay covering the built-in title bar while the application is unfocused.
+---The fourth component sets opacity from 0 to 255; use 0 to disable it.
+---@type renderer.color
+config.borderless_unfocused_overlay = { 0, 0, 0, 64 }
+
 ---Shows/hides the close buttons on tabs.
 ---When hidden, users can close tabs via keyboard shortcuts or commands.
 ---

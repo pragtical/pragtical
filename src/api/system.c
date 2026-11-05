@@ -20,6 +20,7 @@
   #include <direct.h>
   #include <io.h>
   #include <windows.h>
+  #include <dwmapi.h>
   #include <fileapi.h>
   #include "../utfconv.h"
   #define fileno _fileno
@@ -257,7 +258,8 @@ top:
       ** events on focus so these are discarded */
       SDL_FlushEvent(SDL_EVENT_KEY_DOWN);
       system_flush_events(SDL_EVENT_KEY_DOWN);
-      goto top;
+      lua_pushstring(L, "focusgained");
+      return 1;
 
 
     case SDL_EVENT_DROP_FILE:
@@ -599,6 +601,14 @@ static int f_set_window_bordered(lua_State *L) {
     SDL_MaximizeWindow(win);
   } else {
     SDL_SetWindowBordered(win, bordered);
+  }
+  // Retain DWM's shadow around our custom frame without adding a title bar.
+  HWND hwnd = SDL_GetPointerProperty(SDL_GetWindowProperties(win),
+    SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+  if (hwnd) {
+    int border = bordered ? 0 : 1;
+    MARGINS margins = { border, border, border, border };
+    DwmExtendFrameIntoClientArea(hwnd, &margins);
   }
 #else
   SDL_SetWindowBordered(win, bordered);

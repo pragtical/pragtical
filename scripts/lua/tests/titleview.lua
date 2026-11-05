@@ -16,10 +16,18 @@ local function settle(frames)
 end
 
 ---Draw final node geometry so TitleView can synchronize its native hit regions.
-local function draw_frame()
-  renderer.begin_frame(core.window)
+---@param window? renwindow Optional separate render target
+local function draw_frame(window)
+  renderer.begin_frame(window or core.window)
+  local clip_stack = core.clip_rect_stack
+  if window then
+    local width, height = window:get_size()
+    core.clip_rect_stack = { { 0, 0, width, height } }
+    renderer.set_clip_rect(0, 0, width, height)
+  end
   core.root_view:draw()
   renderer.end_frame()
+  core.clip_rect_stack = clip_stack
 end
 
 test.describe("borderless application menu", function()
@@ -33,6 +41,11 @@ test.describe("borderless application menu", function()
     context.redraw = core.redraw
     context.scale, context.font, context.icons, context.padding = SCALE, style.font, style.icon_font, style.padding
     context.native, context.draw_text = system.set_window_hit_test, common.draw_text
+    context.focus, context.overlay = system.window_has_focus, config.borderless_unfocused_overlay
+    context.platform, context.borderless, context.mode = PLATFORM, config.borderless, core.window_mode
+    context.outline = config.borderless_outline
+    context.focused_outline = config.outline_focused
+    context.unfocused_outline = config.outline_unfocused
     context.push_clip = core.push_clip_rect
     context.calls = {}
     system.set_window_hit_test = function(...)
@@ -62,6 +75,11 @@ test.describe("borderless application menu", function()
     core.fps, config.fps = context.fps, context.config_fps
     SCALE, style.font, style.icon_font, style.padding = context.scale, context.font, context.icons, context.padding
     system.set_window_hit_test, common.draw_text = context.native, context.draw_text
+    system.window_has_focus, config.borderless_unfocused_overlay = context.focus, context.overlay
+    PLATFORM, config.borderless, core.window_mode = context.platform, context.borderless, context.mode
+    config.borderless_outline = context.outline
+    config.outline_focused = context.focused_outline
+    config.outline_unfocused = context.unfocused_outline
     core.push_clip_rect = context.push_clip
     core.redraw = context.redraw
   end)
@@ -258,5 +276,94 @@ test.describe("borderless application menu", function()
     core.menu_view:update()
     core.title_view:update()
     test.not_ok(core.redraw)
+  end)
+
+  test.test("focus changes overlay the entire title bar and leave idle updates asleep", function()
+    local focused = true
+    system.window_has_focus = function() return focused end
+    config.borderless_outline = false
+    local window = renwindow.create("title-overlay-test", 1100, 700)
+    config.borderless_unfocused_overlay = { 10, 20, 30, 128 }
+    core.title_view.focused = false
+    local baseline
+    for _, state in ipairs { true, false, true } do
+      focused = state
+      core.redraw = false
+      core.title_view:update()
+      test.ok(core.redraw)
+      draw_frame(window)
+      local width, height = 1100, math.floor(core.title_view.size.y)
+      local pixels = renderer.to_canvas(window, 0, 0, width, height):get_pixels()
+      if not baseline then
+        baseline = pixels
+      elseif focused then
+        test.equal(pixels, baseline, "focus gain must restore the complete title bar")
+      else
+        -- Sample the logo, menus, title, and controls across the entire title bar.
+        for y = 0, height - 1, 3 do
+          for x = 0, width - 1, 7 do
+            local offset = (y * width + x) * 4
+            for channel = 1, 3 do
+              local expected = baseline:byte(offset + channel) * 127 / 255
+                + config.borderless_unfocused_overlay[channel] * 128 / 255
+              test.ok(math.abs(pixels:byte(offset + channel) - expected) <= 1,
+                "inactive overlay must cover the entire title bar")
+            end
+          end
+        end
+      end
+      core.redraw = false
+      core.title_view:update()
+      test.not_ok(core.redraw, "unchanged focus must allow the editor to sleep")
+    end
+    config.borderless_unfocused_overlay[4], focused = 0, false
+    core.title_view:update()
+    draw_frame(window)
+    local pixels = renderer.to_canvas(window, 0, 0, 1100, math.floor(core.title_view.size.y)):get_pixels()
+    test.equal(pixels, baseline, "zero alpha must disable the overlay")
+  end)
+
+  test.test("toggles borderless outlines on every platform above floating content", function()
+    local focused = true
+    system.window_has_focus = function() return focused end
+    config.outline_focused = { 20, 170, 255, 255 }
+    config.outline_unfocused = { 90, 100, 110, 255 }
+    local window = renwindow.create("window-outline-test", 1100, 700)
+    local overlay = View()
+    overlay:set_floating(true, { interactive = false, focus = "none" })
+    overlay:set_floating_bounds(0, 0, 1100, 700)
+    local overlay_color = { 1, 2, 3, 255 }
+    function overlay:draw()
+      renderer.draw_rect(0, 0, 1100, 700, overlay_color)
+    end
+    overlay:show_floating()
+    settle()
+    for _, platform in ipairs { "Windows", "Linux", "Mac OS X" } do
+      PLATFORM = platform
+      for _, case in ipairs {
+        { true, true, "normal", true },
+        { true, false, "normal", false },
+        { true, true, "maximized", false },
+        { true, true, "fullscreen", false },
+        { false, true, "normal", false },
+        { true, true, "normal", true }
+      } do
+        config.borderless, config.borderless_outline, core.window_mode = table.unpack(case)
+        for _, state in ipairs { true, false, true } do
+          focused = state
+          draw_frame(window)
+          local color = focused and config.outline_focused
+            or config.outline_unfocused
+          local expected = case[4] and color or overlay_color
+          for _, point in ipairs { {0, 100}, {1099, 100}, {100, 0}, {100, 699} } do
+            test.same(window:get_color(point[1], point[2]), expected)
+          end
+          test.same(window:get_color(100, 100), overlay_color)
+        end
+        test.equal(core.root_view.size.x, 1100)
+        test.equal(core.root_view.size.y, 700)
+      end
+    end
+    overlay:hide_floating()
   end)
 end)

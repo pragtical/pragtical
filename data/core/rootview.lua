@@ -1,5 +1,6 @@
 local core = require "core"
 local common = require "core.common"
+local config = require "core.config"
 local style = require "core.style"
 local Node = require "core.node"
 local View = require "core.view"
@@ -1216,6 +1217,19 @@ function RootView:draw()
   self:draw_drag_overlay(self.drag_overlay_tab)
   if self.dragged_node and self.dragged_node.dragging then
     self:draw_grabbed_tab()
+  end
+  -- Draw inside the existing resize strip, after popups and drag overlays.
+  if config.borderless and config.borderless_outline and core.window_mode == "normal" then
+    local x, y = self.position.x, self.position.y
+    local w, h = self.size.x, self.size.y
+    local border = math.min(style.divider_size, w / 2, h / 2)
+    local color = system.window_has_focus(core.window)
+      and config.outline_focused
+      or config.outline_unfocused
+    renderer.draw_rect(x, y, w, border, color)
+    renderer.draw_rect(x, y + h - border, w, border, color)
+    renderer.draw_rect(x, y + border, border, h - border * 2, color)
+    renderer.draw_rect(x + w - border, y + border, border, h - border * 2, color)
   end
   if core.cursor_change_req then
     system.set_cursor(core.cursor_change_req)

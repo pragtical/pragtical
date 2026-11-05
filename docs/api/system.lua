@@ -55,6 +55,7 @@ system = {}
 --- * "enterfullscreen"
 --- * "leavefullscreen"
 --- * "focuslost"
+--- * "focusgained"
 ---
 ---File events:
 --- * "filedropped" -> filename, x, y

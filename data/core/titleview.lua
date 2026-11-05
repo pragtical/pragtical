@@ -1,5 +1,6 @@
 local core = require "core"
 local common = require "core.common"
+local config = require "core.config"
 local style = require "core.style"
 local View = require "core.view"
 
@@ -29,6 +30,7 @@ local title_commands = {
 ---@overload fun():core.titleview
 ---@field super core.view
 ---@field visible boolean Whether built-in window decorations are shown
+---@field focused boolean Whether the application window has keyboard focus
 ---@field hit_test_enabled? boolean Whether native window hit testing is installed
 ---@field hit_test_bounds? table<string, number> Last supplied native geometry, including the interactive rectangle
 local TitleView = View:extend()
@@ -52,6 +54,7 @@ end
 function TitleView:new()
   TitleView.super.new(self)
   self.visible = true
+  self.focused = true
 end
 
 ---Get the menu/title area between the application logo and window controls.
@@ -121,8 +124,13 @@ function TitleView:on_scale_change()
   self:configure_hit_test(self.visible)
 end
 
----Keep the title height and maximize/restore button synchronized with the window.
+---Keep title geometry, focus state, and window controls synchronized.
 function TitleView:update()
+  local focused = system.window_has_focus(core.window)
+  if self.focused ~= focused then
+    self.focused = focused
+    core.redraw = true
+  end
   self.size.y = self.visible and title_view_height() or 0
   title_commands[2] = core.window_mode == "maximized"
     and restore_command
@@ -252,7 +260,8 @@ function TitleView:on_mouse_moved(px, py, ...)
 end
 
 
----Draw the shared title/menu row and synchronize its final laid-out native bounds.
+---Draw the title/menu row, controls, and the inactive overlay over them.
+---Synchronize the final laid-out native hit regions too.
 function TitleView:draw()
   self:update_menu_bounds()
   self:configure_hit_test(self.visible)
@@ -260,6 +269,12 @@ function TitleView:draw()
   self:draw_window_title()
   if core.menu_view.bounds then core.menu_view:draw() end
   self:draw_window_controls()
+  if not self.focused then
+    renderer.draw_rect(
+      self.position.x, self.position.y, self.size.x, self.size.y,
+      config.borderless_unfocused_overlay
+    )
+  end
 end
 
 return TitleView
