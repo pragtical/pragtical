@@ -143,6 +143,7 @@ message('lua-compat-5.3 needed: @0@'.format(lua_compat_needed))
 
 pragtical_rc = []
 if host_machine.system() == 'windows'
+    pragtical_deps += cc.find_library('dwmapi', required: true)
     windows = import('windows')
     pragtical_rc += windows.compile_resources('../resources/icons/icon.rc')
     pragtical_rc += windows.compile_resources('../resources/windows/manifest.rc')

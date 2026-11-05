@@ -502,6 +502,34 @@ settings.add("User Interface",
       end
     },
     {
+      label = "Borderless Outline",
+      description = "Draw a thin border around borderless windows. Hidden when maximized or fullscreen.",
+      path = "borderless_outline",
+      type = settings.type.TOGGLE,
+      default = true
+    },
+    {
+      label = "Focused Outline Color",
+      description = "Borderless outline color when the window has keyboard focus.",
+      path = "outline_focused",
+      type = settings.type.COLOR,
+      default = table.pack(table.unpack(config.outline_focused))
+    },
+    {
+      label = "Unfocused Outline Color",
+      description = "Borderless outline color when the window loses focus.",
+      path = "outline_unfocused",
+      type = settings.type.COLOR,
+      default = table.pack(table.unpack(config.outline_unfocused))
+    },
+    {
+      label = "Inactive Title Bar Overlay",
+      description = "Tint the entire built-in title bar when the window loses focus. Set alpha to 0 to disable it.",
+      path = "borderless_unfocused_overlay",
+      type = settings.type.COLOR,
+      default = { 0, 0, 0, 64 }
+    },
+    {
       label = "Show Menu Bar",
       description = "Show the application menu bar on the top or inside the title bar in borderless mode.",
       path = "show_menubar",
