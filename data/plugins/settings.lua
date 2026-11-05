@@ -1444,7 +1444,7 @@ end
 local function merge_font_settings(option, path, saved_value)
   local font_options = saved_value.options or {
     size = 15,
-    antialiasing = "supixel",
+    antialiasing = "subpixel",
     hinting = "slight"
   }
   font_options.size = font_options.size or 15
@@ -1824,7 +1824,7 @@ local function add_control(pane, option, context)
 
       local font_options = option_value.options or {
         size = 15,
-        antialiasing = "supixel",
+        antialiasing = "subpixel",
         hinting = "slight"
       }
       font_options.size = font_options.size or 15
