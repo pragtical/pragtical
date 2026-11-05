@@ -394,12 +394,14 @@ config.borderless = true
 config.borderless_outline = true
 
 ---Borderless outline color while the application has keyboard focus.
----@type renderer.color
-config.outline_focused = { common.color "#568DDE" }
+---Leave unset to use the current theme's style.caret color.
+---@type renderer.color?
+config.outline_focused = nil
 
 ---Borderless outline color while the application is unfocused.
----@type renderer.color
-config.outline_unfocused = { common.color "#77767B" }
+---Leave unset to use the current theme's style.dim color.
+---@type renderer.color?
+config.outline_unfocused = nil
 
 ---Overlay covering the built-in title bar while the application is unfocused.
 ---The fourth component sets opacity from 0 to 255; use 0 to disable it.

@@ -16,7 +16,8 @@ local DocView = require "core.docview"
 ---Enable the utilization of a custom line color.
 ---@field use_custom_color boolean
 ---Applied when `use_custom_color` is enabled.
----@field custom_color renderer.color
+---When unset, use the current theme's selection color.
+---@field custom_color renderer.color?
 config.plugins.lineguide = common.merge({
   enabled = false,
   width = 2,
@@ -27,7 +28,7 @@ config.plugins.lineguide = common.merge({
     config.line_limit
   },
   use_custom_color = false,
-  custom_color = style.selection,
+  custom_color = nil,
   -- The config specification used by gui generators
   config_spec = {
     name = "Line Guide",
@@ -89,7 +90,8 @@ config.plugins.lineguide = common.merge({
       description = "Applied when the above toggle is enabled.",
       path = "custom_color",
       type = "color",
-      default = style.selection
+      default = nil,
+      get_value = function(value) return value or style.selection end
     },
   }
 }, config.plugins.lineguide)
@@ -117,7 +119,7 @@ function DocView:draw_overlay(...)
     local line_x = self:get_line_screen_position(1)
     local character_width = self:get_font():get_width("n")
     local ruler_width = config.plugins.lineguide.width
-    local ruler_color = conf.use_custom_color and conf.custom_color
+    local ruler_color = conf.use_custom_color and (conf.custom_color or style.selection)
       or (style.guide or style.selection)
 
     for k,v in ipairs(config.plugins.lineguide.rulers) do
