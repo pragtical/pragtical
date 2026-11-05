@@ -15,6 +15,10 @@ local WidgetList = require "widget.widgetlist"
 local NumberBox = require "widget.numberbox"
 local ListBox = require "widget.listbox"
 local RootView = require "core.rootview"
+local ColorPicker = require "widget.colorpicker"
+local FilePicker = require "widget.filepicker"
+local FontsList = require "widget.fontslist"
+local ItemsList = require "widget.itemslist"
 local style = require "core.style"
 local SettingsView = getmetatable(settings.ui)
 
@@ -27,6 +31,426 @@ local function find_child(view, class)
     if child:is(class) then return child end
   end
 end
+
+test.describe("setting resets", function()
+  test.before_each(function(c)
+    c.userdir, c.saved, c.plugin = USERDIR, settings.config, rawget(config.plugins, "settings_reset")
+    c.root, c.active, c.last, c.next = core.root_view, core.active_view, core.last_active_view, core.next_active_view
+    c.scale, c.error, c.open = SCALE, core.error, io.open
+    c.wheel = config.mouse_wheel_scroll
+    c.outline_focused, c.outline_unfocused = config.outline_focused, config.outline_unfocused
+    c.tree_size, c.tree_target = config.plugins.treeview.size, tree.target_size
+    c.tree_default, c.tree_scale = tree.default_size, tree.current_scale
+    c.views = {}
+    USERDIR = core.temp_filename()
+    test.ok(common.mkdirp(USERDIR))
+    settings.config = { keep = "untouched" }
+    rawset(config.plugins, "settings_reset", {})
+    core.root_view = RootView()
+    core.root_view.root_node.is_primary_node = true
+    core.root_view.size.x, core.root_view.size.y = 900, 650
+    core.active_view = core.root_view.root_node.active_view
+    core.error = function(fmt, ...) c.message = string.format(fmt, ...) end
+  end)
+
+  test.after_each(function(c)
+    io.open, core.error, SCALE = c.open, c.error, c.scale
+    config.mouse_wheel_scroll = c.wheel
+    config.outline_focused, config.outline_unfocused = c.outline_focused, c.outline_unfocused
+    config.plugins.treeview.size, tree.target_size = c.tree_size, c.tree_target
+    tree.default_size, tree.current_scale = c.tree_default, c.tree_scale
+    for _, view in ipairs(c.views) do view:destroy() end
+    core.root_view, core.active_view, core.last_active_view, core.next_active_view = c.root, c.active, c.last, c.next
+    rawset(config.plugins, "settings_reset", c.plugin)
+    settings.config = c.saved
+    local directory = USERDIR
+    USERDIR = c.userdir
+    test.ok(common.rm(directory, true))
+  end)
+
+  ---Create an isolated generated control with matching saved and live overrides.
+  local function control(c, option, class, value)
+    option.label, option.path = option.label or "Example", option.path or "value"
+    config.plugins.settings_reset[option.path] = value
+    settings.config.plugins = { settings_reset = { [option.path] = value } }
+    local file = assert(io.open(USERDIR .. "/user_settings.lua", "w"))
+    file:write("return {config=", common.serialize(settings.config), "}")
+    file:close()
+    local view = settings.show_config("Reset Tests", { option }, "settings_reset")
+    c.views[#c.views + 1] = view
+    view:set_size(800, 600)
+    for _ = 1, 10 do view:update() end
+    local widget = find_child(view, class)
+    test.not_nil(widget)
+    test.not_nil(widget.reset_button)
+    return widget, view
+  end
+
+  local cases = {
+    { "number", NumberBox, 3, 8, function(w) return w:get_value() end },
+    { "toggle", Toggle, false, true, function(w) return w:is_toggled() end },
+    { "string", TextBox, "original", "custom", function(w) return w:get_text() end },
+    { "selection", SelectBox, false, "custom", function(w) return w:get_selected_data() end },
+    { "file", FilePicker, nil, DATADIR .. "/example", function(w) return w:get_path() end },
+    { "directory", FilePicker, "", DATADIR, function(w) return w:get_path() or "" end },
+    { "color", ColorPicker, {32, 64, 96, 128}, {5, 10, 15, 255}, function(w) return w:get_color() end },
+    { "list_strings", ItemsList, {"first", "second"}, {"custom"}, function(w) return w:get_items() end }
+  }
+  for _, entry in ipairs(cases) do
+    local case = entry
+    test.it("restores " .. case[1] .. " values and removes the saved override", function(c)
+      local option = {
+        type = case[1], default = case[3],
+        values = { {"Default", false}, {"Custom", "custom"} }
+      }
+      local original = common.serialize(option.default)
+      local widget = control(c, option, case[2], case[4])
+      test.ok(widget.reset_button.enabled)
+      widget.reset_button:on_click()
+      test.same(config.plugins.settings_reset.value, case[3])
+      if case[1] == "color" then
+        local actual = case[5](widget)
+        for index = 1, 4 do test.ok(math.abs(actual[index] - case[3][index]) <= 1) end
+      else
+        test.same(case[5](widget), case[3])
+      end
+      test.is_nil(settings.config.plugins)
+      test.same(dofile(USERDIR .. "/user_settings.lua").config, { keep = "untouched" })
+      test.not_ok(widget.reset_button.enabled)
+      test.equal(common.serialize(option.default), original)
+      widget.reset_button:on_click()
+      test.equal(common.serialize(option.default), original)
+    end)
+  end
+
+  test.it("removes saved false defaults and keeps ordinary default-valued edits", function(c)
+    local applied = 0
+    local widget = control(c, {
+      type = "toggle", default = false,
+      on_apply = function() applied = applied + 1 end
+    }, Toggle, false)
+    widget.reset_button:on_click()
+    test.equal(applied, 1)
+    widget.reset_button:on_click()
+    test.equal(applied, 1)
+    widget:set_toggle(false)
+    test.equal(settings.config.plugins.settings_reset.value, false)
+    test.ok(widget.reset_button.enabled)
+    widget.reset_button:on_click()
+    test.is_nil(settings.config.plugins)
+    test.equal(applied, 3)
+  end)
+
+  test.it("resolves current theme colors on reset without sharing the source", function(c)
+    local colors, calls, applied = { dim = { 12, 34, 56, 78 } }, 0, 0
+    local widget, view = control(c, {
+      type = "color",
+      default = function() calls = calls + 1; return colors.dim end,
+      on_apply = function() applied = applied + 1 end
+    }, ColorPicker, { 90, 100, 110, 255 })
+    test.equal(calls, 1)
+    colors.dim = { 56, 78, 90, 123 }
+    for _ = 1, 5 do view:update() end
+    test.equal(calls, 1)
+    widget.reset_button:on_click()
+    test.equal(calls, 2)
+    test.equal(applied, 1)
+    test.same(config.plugins.settings_reset.value, colors.dim)
+    test.not_equal(config.plugins.settings_reset.value, colors.dim)
+    test.is_nil(settings.config.plugins)
+    widget.reset_button:on_click()
+    test.equal(calls, 2)
+    config.plugins.settings_reset.value[1] = 255
+    test.equal(colors.dim[1], 56)
+    widget:on_change({ 1, 2, 3, 255 })
+    colors.dim[1] = 44
+    widget.reset_button:on_click()
+    test.equal(config.plugins.settings_reset.value[1], 44)
+    test.equal(calls, 3)
+  end)
+
+  test.it("resolves dynamic fallbacks when constructing controls", function(c)
+    local color = { 24, 48, 72, 96 }
+    local widget = control(c, {
+      type = "color", default = function() return color end
+    }, ColorPicker, nil)
+    local actual = widget:get_color()
+    for index = 1, 4 do test.ok(math.abs(actual[index] - color[index]) <= 1) end
+    test.not_ok(widget.reset_button.enabled)
+    test.is_nil(config.plugins.settings_reset.value)
+    test.same(color, { 24, 48, 72, 96 })
+  end)
+
+  test.it("resolves false and nil defaults without retaining the initial value", function(c)
+    local value = true
+    local widget = control(c, {
+      type = "toggle", default = function() return value end
+    }, Toggle, true)
+    value = false
+    widget.reset_button:on_click()
+    test.equal(config.plugins.settings_reset.value, false)
+    test.not_ok(widget:is_toggled())
+    value = DATADIR
+    widget = control(c, {
+      type = "file", default = function() return value end
+    }, FilePicker, DATADIR)
+    value = nil
+    widget.reset_button:on_click()
+    test.is_nil(config.plugins.settings_reset.value)
+    test.is_nil(widget:get_path())
+  end)
+
+  test.it("preserves an override if resolving its default fails", function(c)
+    local fail = false
+    local widget = control(c, {
+      type = "string", default = function()
+        if fail then error("unavailable default") end
+        return "original"
+      end
+    }, TextBox, "custom")
+    fail = true
+    widget.reset_button:on_click()
+    test.equal(widget:get_text(), "custom")
+    test.equal(config.plugins.settings_reset.value, "custom")
+    test.equal(dofile(USERDIR .. "/user_settings.lua").config.plugins.settings_reset.value, "custom")
+    test.ok(widget.reset_button.enabled)
+    test.contains(c.message, "unavailable default")
+  end)
+
+  test.it("shows effective outline colors while resets restore theme inheritance", function(c)
+    for _, option in ipairs(settings.core["User Interface"]) do
+      if option.path == "outline_focused" or option.path == "outline_unfocused" then
+        local expected = option.path == "outline_focused" and style.caret or style.dim
+        test.is_nil(option.default)
+        test.equal(option.get_value(nil), expected)
+        config[option.path] = { 1, 2, 3, 255 }
+        settings.config[option.path] = config[option.path]
+        local view = settings.show_config("Outline Color", { option })
+        c.views[#c.views + 1] = view
+        local widget = find_child(view, ColorPicker)
+        widget.reset_button:on_click()
+        test.is_nil(config[option.path])
+        test.is_nil(settings.config[option.path])
+        local actual = widget:get_color()
+        for index = 1, 4 do test.ok(math.abs(actual[index] - (expected[index] or 255)) <= 1) end
+      end
+    end
+  end)
+
+  test.it("shows the theme color for an unset Line Guide override", function()
+    for _, option in ipairs(config.plugins.lineguide.config_spec) do
+      if option.path == "custom_color" then
+        test.is_nil(option.default)
+        test.equal(option.get_value(nil), style.selection)
+      end
+    end
+  end)
+
+  test.it("restores nested values without removing sibling overrides", function(c)
+    local applied
+    local widget = control(c, { type = "string", default = "original" }, TextBox, "custom")
+    local view = settings.show_config("Nested", {
+      path_prefix = "plugins.settings_reset.project",
+      { label = "Name", path = "name", type = "string", default = "Demo",
+        on_apply = function(value) applied = value end }
+    })
+    c.views[#c.views + 1] = view
+    local nested = find_child(view, TextBox)
+    nested:on_change("Website")
+    settings.config.plugins.settings_reset.project.sibling = false
+    nested.reset_button:on_click()
+    test.equal(applied, "Demo")
+    test.equal(config.plugins.settings_reset.project.name, "Demo")
+    local saved = dofile(USERDIR .. "/user_settings.lua").config.plugins.settings_reset
+    test.equal(saved.value, "custom")
+    test.same(saved.project, { sibling = false })
+    test.ok(widget.reset_button.enabled)
+  end)
+
+  test.it("converts defaults once and applies the resulting runtime value", function(c)
+    SCALE = 1.25
+    local converted, applied = 0, 0
+    local widget = control(c, {
+      type = "number", default = 200,
+      get_value = function(value) return value / SCALE end,
+      set_value = function(value) converted = converted + 1; return value * SCALE end,
+      on_apply = function(value) applied = applied + 1; test.equal(value, 250) end
+    }, NumberBox, 500)
+    widget.reset_button:on_click()
+    test.equal(converted, 1)
+    test.equal(applied, 1)
+    test.equal(config.plugins.settings_reset.value, 250)
+    test.equal(widget:get_value(), 200)
+    test.is_nil(settings.config.plugins)
+  end)
+
+  test.it("uses escaped text defaults through the existing conversion hooks", function(c)
+    local option
+    for _, candidate in ipairs(settings.core.Editor) do
+      if candidate.path == "non_word_chars" then option = common.merge({}, candidate) end
+    end
+    option.path = "value"
+    local widget = control(c, option, TextBox, "custom")
+    widget.reset_button:on_click()
+    test.contains(config.plugins.settings_reset.value, "\t\n")
+    test.equal(widget:get_text(), option.default)
+    test.is_nil(settings.config.plugins)
+  end)
+
+  test.it("resets actual scaled Treeview and mouse-wheel settings", function(c)
+    local width_option, wheel_option
+    for _, option in ipairs(config.plugins.treeview.config_spec) do
+      if option.path == "size" then width_option = option end
+    end
+    for _, option in ipairs(settings.core["User Interface"]) do
+      if option.path == "mouse_wheel_scroll" then wheel_option = option end
+    end
+    for _, factor in ipairs { 1.25, 2 } do
+      SCALE = factor
+      config.plugins.treeview.size = 500 * SCALE
+      settings.config.plugins = { treeview = { size = 500 } }
+      local view = settings.show_config("Tree Size", { width_option }, "treeview")
+      c.views[#c.views + 1] = view
+      local number = find_child(view, NumberBox)
+      number.reset_button:on_click()
+      test.equal(config.plugins.treeview.size, 200 * SCALE)
+      test.equal(tree.target_size, 200 * SCALE)
+      test.equal(number:get_value(), 200)
+      test.is_nil(settings.config.plugins)
+
+      config.mouse_wheel_scroll = 210 * SCALE
+      settings.config.mouse_wheel_scroll = 210
+      view = settings.show_config("Wheel Rate", { wheel_option })
+      c.views[#c.views + 1] = view
+      number = find_child(view, NumberBox)
+      number.reset_button:on_click()
+      test.equal(config.mouse_wheel_scroll, 70 * SCALE)
+      test.equal(number:get_value(), 70)
+      test.is_nil(settings.config.mouse_wheel_scroll)
+    end
+  end)
+
+  test.it("resets through a real pointer click beside the label", function(c)
+    local widget, view = control(c, { type = "toggle", default = false }, Toggle, true)
+    for _ = 1, 10 do core.root_view:update() end
+    local button = widget.reset_button
+    test.equal(button.parent, widget.parent)
+    test.ok(button.position.x >= widget.position.x + widget:get_width())
+    local x = button.position.x + button:get_width() / 2
+    local y = button.position.y + button:get_height() / 2
+    core.on_event("mousemoved", x, y, 0, 0)
+    core.on_event("mousepressed", "left", x, y, 1)
+    core.on_event("mousereleased", "left", x, y)
+    test.not_ok(widget:is_toggled())
+    test.is_nil(settings.config.plugins)
+    test.not_ok(button.enabled)
+  end)
+
+  test.it("keeps a rejected reset and the current displayed value", function(c)
+    local widget = control(c, {
+      type = "selection", default = false,
+      values = { {"Default", false}, {"Custom", "custom"} },
+      set_value = function(value)
+        if value == false then return nil, "cannot reset" end
+        return value
+      end
+    }, SelectBox, "custom")
+    widget.reset_button:on_click()
+    test.equal(widget:get_selected_data(), "custom")
+    test.equal(config.plugins.settings_reset.value, "custom")
+    test.equal(dofile(USERDIR .. "/user_settings.lua").config.plugins.settings_reset.value, "custom")
+    test.ok(widget.reset_button.enabled)
+    test.contains(c.message, "cannot reset")
+  end)
+
+  test.it("reports save errors without clearing the in-memory override", function(c)
+    local widget = control(c, { type = "string", default = "original" }, TextBox, "custom")
+    io.open = function(path, mode)
+      if path == USERDIR .. "/user_settings.lua" and mode == "w" then return nil, "read-only profile" end
+      return c.open(path, mode)
+    end
+    widget.reset_button:on_click()
+    test.equal(config.plugins.settings_reset.value, "custom")
+    test.equal(settings.config.plugins.settings_reset.value, "custom")
+    test.equal(widget:get_text(), "custom")
+    test.ok(widget.reset_button.enabled)
+    test.contains(c.message, "read-only profile")
+  end)
+
+  for _, valid in ipairs { true, false } do
+    test.it(valid and "restores portable font defaults without mutating metadata"
+      or "preserves the font override when default fonts cannot load", function(c)
+      local target = { font = style.font }
+      local original_font = target.font
+      local defaults = {
+        fonts = { {name = "Default", path = valid and "{datadir}/fonts/FiraSans-Regular.ttf" or "/missing/reset-font.ttf"} },
+        options = { size = 15, antialiasing = "grayscale", hinting = "slight" }
+      }
+      local serialized = common.serialize(defaults)
+      local custom = {
+        fonts = { {name = "Custom", path = "{datadir}/fonts/JetBrainsMono-Regular.ttf"} },
+        options = { size = 19, antialiasing = "grayscale", hinting = "slight" }
+      }
+      local widget = control(c, {
+        type = "font", path = "font", default = defaults, fonts_list = target
+      }, FontsList, custom)
+      widget.reset_button:on_click()
+      test.equal(common.serialize(defaults), serialized)
+      test.equal(custom.fonts[1].path, "{datadir}/fonts/JetBrainsMono-Regular.ttf")
+      if valid then
+        test.equal(target.font:get_size(), 15 * SCALE)
+        test.equal(widget:get_fonts()[1].path, DATADIR .. "/fonts/FiraSans-Regular.ttf")
+        test.equal(widget:get_options().size, 15)
+        test.is_nil(settings.config.plugins)
+        test.not_ok(widget.reset_button.enabled)
+      else
+        test.equal(target.font, original_font)
+        test.equal(widget:get_options().size, 19)
+        test.equal(settings.config.plugins.settings_reset.font.options.size, 19)
+        test.ok(widget.reset_button.enabled)
+        test.not_nil(c.message)
+      end
+    end)
+  end
+
+  test.it("refreshes custom list rows while keeping their filter and defaults", function(c)
+    local builds = 0
+    local defaults = { Alpha = false, Beta = false }
+    local widget, view = control(c, {
+      type = "list_widgets", default = defaults, visible_rows = 1,
+      items = {"Alpha", "Beta"},
+      build_item = function(row, item, value, commit)
+        builds = builds + 1
+        local toggle = Toggle(row, item, value[item])
+        function toggle:on_change(enabled) value[item] = enabled; commit(value) end
+      end
+    }, WidgetList, { Alpha = true, Beta = true })
+    local filter = find_child(view, TextBox)
+    filter:set_text("Beta")
+    widget:filter("Beta")
+    widget.reset_button:on_click()
+    test.equal(builds, 4)
+    test.equal(filter:get_text(), "Beta")
+    test.equal(widget.filter_value, "Beta")
+    test.not_ok(find_child(widget.items[2].row, Toggle):is_toggled())
+    test.same(defaults, { Alpha = false, Beta = false })
+    test.is_nil(settings.config.plugins)
+    for _ = 1, 10 do view:update() end
+    core.redraw = false
+    for _ = 1, 5 do view:update() end
+    test.equal(builds, 4)
+    test.not_ok(core.redraw)
+  end)
+
+  test.it("does not add resets to action or subconfiguration buttons", function(c)
+    local view = settings.show_config("Actions", {
+      { label = "Action", path = "unused", type = "button" },
+      { label = "More", type = "subconfig", spec = {} }
+    })
+    c.views[#c.views + 1] = view
+    for _, child in ipairs(view.childs) do test.is_nil(child.reset_button) end
+  end)
+end)
 
 test.describe("settings scrolling", function()
   test.before_each(function(context)
@@ -92,6 +516,30 @@ test.describe("settings scrolling", function()
           scroller.scroll.y, scroller.scroll.to.y = pair[2], pair[2]
           view:update()
           test.ok(capture() == before, name .. " moved within a single scroll pixel")
+        end
+        core.redraw = false
+        for _ = 1, 5 do view:update() end
+        test.not_ok(core.redraw)
+      end
+      for _, width in ipairs { 430, 900 } do
+        view:set_size(width, 650)
+        for _ = 1, 10 do view:update() end
+        for _, section in ipairs(view.core_sections.panes) do
+          for _, widget in ipairs(section.container.childs) do
+            local reset = widget.reset_button
+            if reset then
+              local heading = reset.heading
+              if reset.position.ry == heading.position.ry then
+                test.ok(reset.position.rx >= heading:get_right())
+              else
+                test.ok(reset.position.ry >= heading:get_bottom())
+              end
+              test.ok(reset:get_right() <= section.container:get_width() - 10)
+              if widget ~= heading then
+                test.ok(widget.position.ry >= math.max(heading:get_bottom(), reset:get_bottom()))
+              end
+            end
+          end
         end
         core.redraw = false
         for _ = 1, 5 do view:update() end
@@ -353,6 +801,25 @@ test.describe("settings renderer preference", function()
     config.renderer = "surface"
     test.equal(control():get_selected_data(), "sdlgpu")
     test.equal(read_preference(), "  sdlgpu\n")
+  end)
+
+  test.it("Reset removes the renderer preference and its saved GUI override", function(context)
+    local select = control()
+    select:set_selected(2)
+    test.equal(read_preference(), "surface\n")
+    local writes = 0
+    io.open = function(path, mode)
+      if path == USERDIR .. "/user_settings.lua" and mode == "w" then writes = writes + 1 end
+      return context.open(path, mode)
+    end
+    select.reset_button:on_click()
+    test.equal(writes, 1)
+    test.equal(select:get_selected_data(), "default")
+    test.equal(config.renderer, "default")
+    test.is_nil(settings.config.renderer)
+    test.is_nil(dofile(USERDIR .. "/user_settings.lua").config.renderer)
+    test.is_nil(system.get_file_info(USERDIR .. PATHSEP .. "renderer"))
+    test.not_ok(select.reset_button.enabled)
   end)
 
   test.it("shows Default for missing or invalid preferences without rewriting them", function()

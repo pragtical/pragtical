@@ -366,4 +366,28 @@ test.describe("borderless application menu", function()
     end
     overlay:hide_floating()
   end)
+
+  test.test("uses the current theme for unset outline colors", function()
+    config.outline_focused, config.outline_unfocused = nil, nil
+    config.borderless, config.borderless_outline, core.window_mode = true, true, "normal"
+    local focused = true
+    system.window_has_focus = function() return focused end
+    local window = renwindow.create("themed-outline-test", 1100, 700)
+    local previous_caret, previous_dim = style.caret, style.dim
+    local ok, err = pcall(function()
+      for _, theme in ipairs {
+        { { 15, 30, 45, 255 }, { 20, 40, 60, 255 } },
+        { { 120, 130, 140, 255 }, { 150, 160, 170, 255 } }
+      } do
+        style.caret, style.dim = table.unpack(theme)
+        for _, state in ipairs { true, false } do
+          focused = state
+          draw_frame(window)
+          test.same(window:get_color(0, 100), focused and style.caret or style.dim)
+        end
+      end
+    end)
+    style.caret, style.dim = previous_caret, previous_dim
+    if not ok then error(err) end
+  end)
 end)

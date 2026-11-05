@@ -1224,8 +1224,8 @@ function RootView:draw()
     local w, h = self.size.x, self.size.y
     local border = math.min(style.divider_size, w / 2, h / 2)
     local color = system.window_has_focus(core.window)
-      and config.outline_focused
-      or config.outline_unfocused
+      and (config.outline_focused or style.caret)
+      or (config.outline_unfocused or style.dim)
     renderer.draw_rect(x, y, w, border, color)
     renderer.draw_rect(x, y + h - border, w, border, color)
     renderer.draw_rect(x, y + border, border, h - border * 2, color)

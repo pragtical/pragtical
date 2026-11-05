@@ -88,8 +88,12 @@ settings.type = {
 ---@field public path string
 ---Type of option that will be used to render an appropriate control
 ---@field public type settings.types | integer
----Default value of the option
----@field public default string | number | boolean | table<integer, string> | table<integer, integer>
+---Default edit value, also used by Reset through set_value and on_apply.
+---A function resolves the current default when building the control or resetting,
+---for example `default = function() return style.dim end` for a theme color.
+---Returned tables are copied so editing the setting cannot modify its source.
+---Reset removes the saved GUI override; nil clears an optional value.
+---@field public default string | number | boolean | table | fun():any | nil
 ---Used for NUMBER to indicate the minimum number allowed
 ---@field public min number
 ---Used for NUMBER to indicate the maximum number allowed
@@ -513,14 +517,16 @@ settings.add("User Interface",
       description = "Borderless outline color when the window has keyboard focus.",
       path = "outline_focused",
       type = settings.type.COLOR,
-      default = table.pack(table.unpack(config.outline_focused))
+      default = nil,
+      get_value = function(value) return value or style.caret end
     },
     {
       label = "Unfocused Outline Color",
       description = "Borderless outline color when the window loses focus.",
       path = "outline_unfocused",
       type = settings.type.COLOR,
-      default = table.pack(table.unpack(config.outline_unfocused))
+      default = nil,
+      get_value = function(value) return value or style.dim end
     },
     {
       label = "Inactive Title Bar Overlay",
@@ -1173,7 +1179,7 @@ local function get_config_value(conf, path, default)
 
   local element = conf
   for _, section in ipairs(sections) do
-    if type(element[section]) ~= "nil" then
+    if type(element) == "table" and type(element[section]) ~= "nil" then
       element = element[section]
     else
       return default
@@ -1218,6 +1224,43 @@ local function set_config_value(conf, path, value)
   end
 
   element[sections[sections_count]] = value
+end
+
+---Copy setting data without sharing mutable defaults or widget values.
+---@param value any
+---@return any copy
+local function copy_setting_value(value)
+  if type(value) ~= "table" then return value end
+  local result = {}
+  for key, item in pairs(value) do result[key] = copy_setting_value(item) end
+  return result
+end
+
+---Resolve a static or dynamic default without sharing mutable source tables.
+---@param option settings.option
+---@return any default
+local function get_default_value(option)
+  local value = option.default
+  if type(value) == "function" then value = value() end
+  return copy_setting_value(value)
+end
+
+---Remove a saved override and prune its empty parents, preserving siblings.
+---@param conf table
+---@param path string
+local function remove_config_value(conf, path)
+  local parents, keys = {}, {}
+  local current = conf
+  for key in path:gmatch("[^.]+") do
+    if type(current) ~= "table" then return end
+    parents[#parents + 1], keys[#keys + 1] = current, key
+    current = current[key]
+  end
+  for index = #keys, 1, -1 do
+    local parent, key = parents[index], keys[index]
+    parent[key] = nil
+    if next(parent) ~= nil then break end
+  end
 end
 
 ---Resolve a settings option path from a render context.
@@ -1381,9 +1424,11 @@ local function load_settings()
   end
 end
 
----Save current config options into the USERDIR user_settings.lua
+---Save current config options into USERDIR/user_settings.lua and report errors.
+---@return boolean saved Whether writing and closing the file succeeded
 local function save_settings()
-  local fp = io.open(USERDIR .. "/user_settings.lua", "w")
+  local filename = USERDIR .. "/user_settings.lua"
+  local fp, err = io.open(filename, "w")
   if fp then
     local output = "{\n  [\"config\"] = "
       .. common.serialize(
@@ -1391,9 +1436,13 @@ local function save_settings()
         { pretty = true, escape = true, sort = true, initial_indent = 1 }
       ):gsub("^%s+", "")
       .. "\n}\n"
-    fp:write("return ", output)
-    fp:close()
+    local written, write_err = fp:write("return ", output)
+    local closed, close_err = fp:close()
+    if written and closed then return true end
+    err = write_err or close_err
   end
+  core.error("Could not save settings to %s: %s", filename, err)
+  return false
 end
 
 ---Apply a keybinding and optionally save it.
@@ -1465,12 +1514,12 @@ local function apply_keybinding(cmd, bindings, skip_save)
   return row_value
 end
 
----Load the saved fonts into the config path or fonts_list table.
----@param option settings.option
----@param path string
----@param saved_value any
-local function merge_font_settings(option, path, saved_value)
-  local font_options = saved_value.options or {
+---Copy font metadata, fill missing options, and expand portable font paths.
+---@param value table
+---@return table metadata
+local function prepare_font_settings(value)
+  value = copy_setting_value(value)
+  local font_options = value.options or {
     size = 15,
     antialiasing = "subpixel",
     hinting = "slight"
@@ -1479,35 +1528,62 @@ local function merge_font_settings(option, path, saved_value)
   font_options.antialiasing = font_options.antialiasing or "subpixel"
   font_options.hinting = font_options.hinting or "slight"
 
-  local fonts = {}
-  local font_loaded = true
-  for _, font in ipairs(saved_value.fonts) do
-    local font_data = nil
-    if string.find(font.path, "{datadir}", 1, true) then
-      font.path = string.gsub(font.path, "{datadir}", DATADIR, 1)
-    elseif string.find(font.path, "{userdir}", 1, true) then
-      font.path = string.gsub(font.path, "{userdir}", USERDIR, 1)
-    end
-    font_loaded = core.try(function()
-      font_data = renderer.font.load(
-        font.path, font_options.size * SCALE, font_options
-      )
-    end)
-    if font_loaded then
-      table.insert(fonts, font_data)
-    else
-      option.font_error = true
-      core.error("Settings: could not load %s\n'%s - %s'", path, font.name, font.path)
-      break
+  value.options = font_options
+  for _, font in ipairs(value.fonts) do
+    for token, directory in pairs { ["{datadir}"] = DATADIR, ["{userdir}"] = USERDIR } do
+      if font.path:sub(1, #token) == token then
+        font.path = directory .. font.path:sub(#token + 1)
+        break
+      end
     end
   end
+  return value
+end
 
-  if font_loaded then
-    if option.fonts_list then
-      set_config_value(option.fonts_list, option.path, renderer.font.group(fonts))
-    else
-      set_config_value(config, path, renderer.font.group(fonts))
+---Load a font group before modifying live or saved configuration.
+---@param value table
+---@return renderer.font? group
+---@return string? error
+local function load_font_settings(value)
+  local fonts = {}
+  value = prepare_font_settings(value)
+  for _, font in ipairs(value.fonts) do
+    local ok, data = pcall(renderer.font.load,
+      font.path, value.options.size * SCALE, value.options)
+    if not ok then return nil, data end
+    fonts[#fonts + 1] = data
+  end
+  return renderer.font.group(fonts)
+end
+
+---Keep saved font metadata portable without modifying the live control data.
+---@param value table
+---@return table saved
+local function serialize_font_settings(value)
+  value = copy_setting_value(value)
+  for _, font in ipairs(value.fonts) do
+    for token, directory in pairs { ["{datadir}"] = DATADIR, ["{userdir}"] = USERDIR } do
+      if font.path:sub(1, #directory) == directory then
+        font.path = token .. font.path:sub(#directory + 1)
+        break
+      end
     end
+  end
+  return value
+end
+
+---Load saved fonts into the config path or fonts_list table.
+---@param option settings.option
+---@param path string
+---@param saved_value table
+local function merge_font_settings(option, path, saved_value)
+  local group, err = load_font_settings(saved_value)
+  option.font_error = not group or nil
+  if group then
+    set_config_value(option.fonts_list or config,
+      option.fonts_list and option.path or path, group)
+  else
+    core.error("Settings: could not load %s: %s", path, err)
   end
 end
 
@@ -1690,6 +1766,76 @@ function Settings:new()
   self:load_keymap_settings()
 end
 
+---Compact action beside a setting label, inactive without a saved override.
+---@class plugins.settings.resetbutton : widget.button
+---@field enabled boolean Whether a saved override can be removed
+---@field heading widget The option's label or toggle
+---@field layout_width number? Last available width used to wrap the heading
+local ResetButton = Button:extend()
+
+---Create a reset action without changing the general Widget button API.
+---@param parent widget
+---@param heading widget
+---@param path string
+function ResetButton:new(parent, heading, path)
+  ResetButton.super.new(self, parent, "Reset")
+  self.heading = heading
+  self.border.width = 0
+  self.padding.x, self.padding.y = style.padding.x / 2, 0
+  self:toggle_background(false)
+  self:set_label("Reset")
+  self:set_tooltip("Restore default and remove saved override")
+  self:set_enabled(get_config_value(settings.config, path) ~= nil)
+end
+
+---Refresh availability after editing or resetting, including saved false values.
+---@param enabled boolean
+function ResetButton:set_enabled(enabled)
+  if self.enabled == enabled then return end
+  self.enabled = enabled
+  if not enabled then self.hover_text, self.hover_back = nil, nil end
+  core.redraw = true
+end
+
+---Highlight the reset action only when it can be used.
+---@param ... any Mouse position and deltas
+function ResetButton:on_mouse_enter(...)
+  if self.enabled then ResetButton.super.on_mouse_enter(self, ...) end
+end
+
+---Draw disabled actions in the current theme's dim color.
+---@return boolean drawn
+function ResetButton:draw()
+  self.foreground_color = self.enabled and style.text or style.dim
+  return ResetButton.super.draw(self)
+end
+
+---Rebuild only a custom setting list, retaining its filter and valid scroll.
+---@param list widget.widgetlist
+---@param option settings.option
+---@param value any
+local function populate_widget_list(list, option, value)
+  local filter = list.filter_value
+  local scroll, target = list.scroll.y, list.scroll.to.y
+  list:clear()
+  local items = type(option.items) == "function"
+    and option.items(value) or option.items or {}
+  for _, item in ipairs(items) do
+    local text = option.item_text and option.item_text(item) or tostring(item)
+    list:add_item(item, function(row, data)
+      if option.build_item then
+        option.build_item(row, data, value, function(new_value)
+          list:on_change(new_value)
+        end)
+      end
+    end, text)
+  end
+  list:filter(filter)
+  list:set_visible_row_count(option.visible_rows or 8)
+  local maximum = math.max(0, list:get_scrollable_size() - list.size.y)
+  list.scroll.y, list.scroll.to.y = math.min(scroll, maximum), math.min(target, maximum)
+end
+
 ---Helper function to add control for core, plugin, and standalone settings.
 ---@param pane widget
 ---@param option settings.option
@@ -1697,9 +1843,11 @@ end
 local function add_control(pane, option, context)
   local found = false
   local path = resolve_option_path(option, context)
+  local heading
+  local default_value = get_default_value(option)
   local option_value = nil
   if type(path) ~= "nil" then
-    option_value = get_config_value(config, path, option.default)
+    option_value = copy_setting_value(get_config_value(config, path, default_value))
   end
 
   if option.get_value then
@@ -1715,7 +1863,7 @@ local function add_control(pane, option, context)
 
   if option.type == settings.type.NUMBER then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.numberbox
     local number = NumberBox(
       pane, option_value, option.min, option.max, option.step
@@ -1726,12 +1874,13 @@ local function add_control(pane, option, context)
   elseif option.type == settings.type.TOGGLE then
     ---@type widget.toggle
     local toggle = Toggle(pane, option.label, option_value)
+    heading = toggle
     widget = toggle
     found = true
 
   elseif option.type == settings.type.STRING then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.textbox
     local string = TextBox(pane, option_value or "")
     widget = string
@@ -1739,7 +1888,7 @@ local function add_control(pane, option, context)
 
   elseif option.type == settings.type.SELECTION then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.selectbox
     local select = SelectBox(pane)
     for _, data in pairs(option.values) do
@@ -1785,7 +1934,7 @@ local function add_control(pane, option, context)
 
   elseif option.type == settings.type.LIST_STRINGS then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.itemslist
     local list = ItemsList(pane)
     if type(option_value) == "table" then
@@ -1798,7 +1947,7 @@ local function add_control(pane, option, context)
 
   elseif option.type == settings.type.LIST_WIDGETS then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.textbox?
     local filter
     if option.filterable ~= false then
@@ -1810,19 +1959,7 @@ local function add_control(pane, option, context)
     end
     ---@type widget.widgetlist
     local list = WidgetList(pane)
-    local items = type(option.items) == "function"
-      and option.items(option_value) or option.items or {}
-    for _, item in ipairs(items) do
-      local text = option.item_text and option.item_text(item) or tostring(item)
-      list:add_item(item, function(row, data)
-        if option.build_item then
-          option.build_item(row, data, option_value, function(value)
-            list:on_change(value)
-          end)
-        end
-      end, text)
-    end
-    list:set_visible_row_count(option.visible_rows or 8)
+    populate_widget_list(list, option, option_value)
     if filter then
       function filter:on_change(value)
         list:filter(value)
@@ -1835,37 +1972,30 @@ local function add_control(pane, option, context)
     --get fonts without conversion to renderer.font
     if type(path) ~= "nil" then
       if not option.font_error then
-        option_value = get_config_value(settings.config, path, option.default)
+        option_value = get_config_value(settings.config, path, default_value)
       else
         --fallback to default fonts if error loading user defined ones
-        option_value = option.default
+        option_value = default_value
       end
     end
      ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.fontslist
     local fonts = FontsList(pane)
     if type(option_value) == "table" then
+      option_value = prepare_font_settings(option_value)
       for _, font in ipairs(option_value.fonts) do
         fonts:add_font(font)
       end
 
-      local font_options = option_value.options or {
-        size = 15,
-        antialiasing = "subpixel",
-        hinting = "slight"
-      }
-      font_options.size = font_options.size or 15
-      font_options.antialiasing = font_options.antialiasing or "subpixel"
-      font_options.hinting = font_options.hinting or "slight"
-      fonts:set_options(font_options)
+      fonts:set_options(option_value.options)
     end
     widget = fonts
     found = true
 
   elseif option.type == settings.type.FILE then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.filepicker
     local file = FilePicker(pane, option_value or "")
     if option.exists then
@@ -1879,7 +2009,7 @@ local function add_control(pane, option, context)
 
   elseif option.type == settings.type.DIRECTORY then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.filepicker
     local file = FilePicker(pane, option_value or "")
     if option.exists then
@@ -1893,7 +2023,7 @@ local function add_control(pane, option, context)
 
   elseif option.type == settings.type.COLOR then
     ---@type widget.label
-    Label(pane, option.label .. ":", true)
+    heading = Label(pane, option.label .. ":", true)
     ---@type widget.colorpicker
     local color = ColorPicker(pane, option_value)
     widget = color
@@ -1903,78 +2033,145 @@ local function add_control(pane, option, context)
   if widget and type(path) ~= "nil" then
     local previous_selection = widget:is(SelectBox) and widget:get_selected()
     local restoring = false
-    function widget:on_change(value)
-      if restoring then return end
-      if self:is(SelectBox) then
-        value = self:get_selected_data()
-      elseif self:is(ItemsList) then
-        value = self:get_items()
-      elseif self:is(FontsList) then
-        value = {
-          fonts = self:get_fonts(),
-          options = self:get_options()
-        }
-      end
+    local reset
 
+    ---Refresh one setting without saving changes emitted by its widget setters.
+    ---@param font_value? table Metadata for a font control instead of its runtime group
+    local function refresh_control(font_value)
+      local value = copy_setting_value(get_config_value(config, path, default_value))
+      if widget:is(FontsList) then
+        value = font_value and prepare_font_settings(font_value)
+      elseif option.get_value then
+        value = option.get_value(value)
+      end
+      restoring = true
+      if widget:is(NumberBox) then widget:set_value(value)
+      elseif widget:is(Toggle) then widget:set_toggle(value)
+      elseif widget:is(TextBox) then widget:set_text(value or "")
+      elseif widget:is(SelectBox) then
+        widget:set_selected(0)
+        for index in ipairs(widget.list.rows) do
+          if widget.list:get_row_data(index) == value then
+            widget:set_selected(index - 1)
+            break
+          end
+        end
+      elseif widget:is(ItemsList) then
+        widget.list:clear()
+        for _, item in ipairs(value or {}) do widget:add_item(item) end
+      elseif widget:is(WidgetList) then
+        populate_widget_list(widget, option, value)
+      elseif widget:is(FontsList) then
+        widget.list:clear()
+        for _, font in ipairs(value and value.fonts or {}) do widget:add_font(font) end
+        if value then widget:set_options(value.options) end
+      elseif widget:is(FilePicker) then widget:set_path(value)
+      elseif widget:is(ColorPicker) then widget:set_color(value)
+      end
+      restoring = false
+      if widget:is(SelectBox) then previous_selection = widget:get_selected() end
+      core.redraw = true
+    end
+
+    ---Apply edited values or a reset through the same conversions and callbacks.
+    ---@param value any Value in the control's edit representation
+    ---@param resetting? boolean Remove the saved override instead of saving the value
+    ---@return boolean applied
+    local function apply_value(value, resetting)
       if option.set_value then
-        local err
-        value, err = option.set_value(value)
-        if value == nil and err then
+        local ok, result, err = pcall(option.set_value, value)
+        if not ok or result == nil and err then
+          err = ok and err or result
           core.error("Could not save %s: %s", option.label, err)
-          if self:is(SelectBox) then
+          if widget:is(SelectBox) then
             restoring = true
-            self:set_selected(previous_selection)
+            widget:set_selected(previous_selection)
             restoring = false
           end
-          return
+          return false
         end
+        value = result
       end
 
-      if self:is(FontsList) then
-        local fonts = {}
-        for _, font in ipairs(value.fonts) do
-          table.insert(fonts, renderer.font.load(
-            font.path, value.options.size * SCALE, value.options
-          ))
+      local live_value = copy_setting_value(value)
+      if widget:is(FontsList) and value ~= nil then
+        local err
+        live_value, err = load_font_settings(value)
+        if not live_value then
+          core.error("Could not load %s: %s", option.label, err)
+          return false
         end
-        if option.fonts_list then
-          set_config_value(option.fonts_list, path, renderer.font.group(fonts))
-        else
-          set_config_value(config, path, renderer.font.group(fonts))
-        end
-        fonts = {}
-        for _, font in ipairs(value.fonts) do
-          local font_path = font.path
-          if string.find(font.path, DATADIR, 1, true) then
-            font_path = string.gsub(font.path, DATADIR, "{datadir}", 1)
-          elseif string.find(font.path, USERDIR, 1, true) then
-            font_path = string.gsub(font.path, USERDIR, "{userdir}", 1)
-          end
-          table.insert(fonts, {name = font.name, path = font_path})
-        end
-        value.fonts = fonts
+        value = serialize_font_settings(value)
+      end
+
+      local previous_saved = get_config_value(settings.config, path)
+      if resetting or value == nil then
+        remove_config_value(settings.config, path)
       else
-        set_config_value(config, path, value)
+        set_config_value(settings.config, path, copy_setting_value(value))
+      end
+      if not save_settings() then
+        if previous_saved == nil then remove_config_value(settings.config, path)
+        else set_config_value(settings.config, path, previous_saved) end
+        return false
       end
 
-      set_config_value(settings.config, path, value)
-      save_settings()
+      if widget:is(FontsList) then
+        set_config_value(option.fonts_list or config,
+          option.fonts_list and option.path or path, live_value)
+        option.font_error = nil
+      else
+        set_config_value(config, path, live_value)
+      end
       if option.on_apply then
         option.on_apply(value)
       end
-      if self:is(SelectBox) then previous_selection = self:get_selected() end
+      if resetting then refresh_control(value) end
+      if widget:is(SelectBox) then previous_selection = widget:get_selected() end
+      if reset then reset:set_enabled(get_config_value(settings.config, path) ~= nil) end
+      return true
+    end
+
+    ---Save user edits while ignoring callbacks from a programmatic refresh.
+    ---@param value any New widget value
+    function widget:on_change(value)
+      if restoring then return end
+      if self:is(SelectBox) then value = self:get_selected_data()
+      elseif self:is(ItemsList) then value = self:get_items()
+      elseif self:is(FontsList) then
+        value = { fonts = self:get_fonts(), options = self:get_options() }
+      end
+      apply_value(value)
+    end
+
+    if heading then
+      reset = ResetButton(pane, heading, path)
+      heading.settings_reset = reset
+      widget.reset_button = reset
+      ---Restore a fresh declared default and remove the persisted override.
+      function reset:on_click()
+        self:set_enabled(get_config_value(settings.config, path) ~= nil)
+        if not self.enabled then return end
+        local ok, value = pcall(get_default_value, option)
+        if not ok then
+          core.error("Could not reset %s: %s", option.label, value)
+          return
+        end
+        default_value = value
+        apply_value(copy_setting_value(default_value), true)
+      end
     end
   end
 
-  if (option.description or option.default) and found then
+  if (option.description or default_value ~= nil) and found then
     local text = option.description or ""
     local default = ""
-    local default_type = type(option.default)
+    local default_type = type(default_value)
     if default_type ~= "table" and default_type ~= "nil" then
       if text ~= "" then
         text = text .. " "
       end
-      default = string.format("(default: %s)", option.default)
+      default = string.format("(default: %s)", default_value)
     end
      ---@type widget.label
     local description = Label(pane, text .. default, true)
@@ -2383,31 +2580,53 @@ local function layout_settings_childs(childs, width)
   local prev_child = nil
   for pos=#childs, 1, -1 do
     local child = childs[pos]
-    local x, y = 10, (10 * SCALE)
-    if prev_child then
-      if
-        (prev_child:is(Label) and not prev_child.desc)
-        or
-        (child:is(Label) and child.desc)
-        or
-        (prev_child:is(TextBox) and child:is(WidgetList))
-      then
-        y = prev_child:get_bottom() + (10 * SCALE)
-      elseif not child:is(Line) then
-        y = prev_child:get_bottom() + (30 * SCALE)
+    if child:is(ResetButton) then
+      local heading = child.heading
+      local x = heading:get_right() + style.padding.x / 2
+      local y = heading.position.ry
+      if x + child:get_width() > width - 10 then
+        x, y = 10, heading:get_bottom() + 5 * SCALE
+        prev_child = child
       end
+      child:set_position(x, y)
+    else
+      local x, y = 10, (10 * SCALE)
+      if prev_child then
+        if
+          (prev_child:is(Label) and not prev_child.desc)
+          or
+          (child:is(Label) and child.desc)
+          or
+          (prev_child:is(TextBox) and child:is(WidgetList))
+        then
+          y = prev_child:get_bottom() + (10 * SCALE)
+        elseif not child:is(Line) then
+          y = prev_child:get_bottom() + (30 * SCALE)
+        end
+      end
+      if child:is(Line) then
+        x = 0
+      elseif
+        child:is(ItemsList) or child:is(WidgetList) or child:is(FilePicker)
+        or
+        child:is(TextBox) or child:is(Container)
+      then
+        child:set_size(width - 20)
+      end
+      if child:is(Label) and child.settings_reset then
+        local reset, font = child.settings_reset, child:get_font()
+        if reset.layout_width ~= width or child.last_wrap_font ~= font
+          or child.last_wrap_font_size ~= font:get_size()
+        then
+          local available = math.max(1, width - 20 - reset:get_width() - style.padding.x / 2)
+          child:set_size(math.min(font:get_width(child.original_label), available))
+          child:wrap_text()
+          reset.layout_width = width
+        end
+      end
+      child:set_position(x, y)
+      prev_child = child
     end
-    if child:is(Line) then
-      x = 0
-    elseif
-      child:is(ItemsList) or child:is(WidgetList) or child:is(FilePicker)
-      or
-      child:is(TextBox) or child:is(Container)
-    then
-      child:set_size(width - 20)
-    end
-    child:set_position(x, y)
-    prev_child = child
   end
 end
 
