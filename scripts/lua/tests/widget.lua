@@ -53,6 +53,7 @@ test.describe("widget mouse events", function()
     context.grab = core.root_view.grab
     context.transitions = config.transitions
     context.redraw = core.redraw
+    context.add_thread = core.add_thread
     config.transitions = false
     core.root_view.grab = nil
     context.roots = {}
@@ -62,6 +63,7 @@ test.describe("widget mouse events", function()
     for _, root in ipairs(context.roots) do root:destroy() end
     config.transitions = context.transitions
     core.redraw = context.redraw
+    core.add_thread = context.add_thread
     core.root_view.grab = context.grab
     core.active_view = context.active_view
     core.last_active_view = context.last_active_view
@@ -87,6 +89,30 @@ test.describe("widget mouse events", function()
       test.equal(calls, 1)
     end)
   end
+
+  test.test("number inputs do not replay valid text during deferred correction", function(context)
+    local number = NumberBox(root_widget(context), 5)
+    local pending, changes = {}, 0
+    core.add_thread = function(fn) pending[#pending + 1] = fn end
+    function number:on_change() changes = changes + 1 end
+    number:set_value(12)
+    local immediate_changes = changes
+    for _, fn in ipairs(pending) do fn() end
+    test.equal(number:get_value(), 12)
+    test.equal(changes, immediate_changes)
+    test.not_ok(number.coroutine_run)
+  end)
+
+  test.test("number inputs still restore invalid text to the last valid value", function(context)
+    local number = NumberBox(root_widget(context), 5)
+    local pending = {}
+    core.add_thread = function(fn) pending[#pending + 1] = fn end
+    number.textbox:set_text("invalid")
+    for _, fn in ipairs(pending) do fn() end
+    test.equal(number.textbox:get_text(), "5")
+    test.equal(number:get_value(), 5)
+    test.not_ok(number.coroutine_run)
+  end)
 
   test.test("queuing a widget animation requests its first update", function(context)
     local root = root_widget(context)
