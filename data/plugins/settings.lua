@@ -1353,7 +1353,12 @@ local function get_installed_colors()
         filename:match("%.lua$")
       then
         -- read colors
-        local contents = io.open(dir .. "/" .. filename):read("*a")
+        local file = io.open(dir .. "/" .. filename, "r")
+        local contents = ""
+        if file then
+          contents = file:read("*a") or ""
+          file:close()
+        end
         local colors = {}
         for r, g, b in contents:gmatch("#(%x%x)(%x%x)(%x%x)") do
           r = tonumber(r, 16)

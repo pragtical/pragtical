@@ -11,6 +11,7 @@ local Label = require "widget.label"
 local SelectBox = require "widget.selectbox"
 local TextBox = require "widget.textbox"
 local Toggle = require "widget.toggle"
+local Widget = require "widget"
 local WidgetList = require "widget.widgetlist"
 local NumberBox = require "widget.numberbox"
 local ListBox = require "widget.listbox"
@@ -512,6 +513,71 @@ test.describe("setting resets", function()
     c.views[#c.views + 1] = view
     for _, child in ipairs(view.childs) do test.is_nil(child.reset_button) end
   end)
+end)
+
+test.describe("settings color previews", function()
+  test.before_each(function(c)
+    c.open = io.open
+    c.files, c.open_count, c.peak = {}, 0, 0
+    c.path = DATADIR .. "/colors/default.lua"
+    c.colors = Widget(nil, false)
+    io.open = function(path, mode)
+      if path == c.path and c.fail_open then return nil, "test open failure" end
+      local file, err, code = c.open(path, mode)
+      if not file or not path:match("/colors/[^/]+%.lua$") then return file, err, code end
+      c.files[#c.files + 1] = file -- Keep handles alive so GC cannot mask missing closes.
+      c.open_count = c.open_count + 1
+      c.peak = math.max(c.peak, c.open_count)
+      return {
+        read = function(_, ...)
+          if path == c.path and c.fail_read then return nil, "test read failure" end
+          return file:read(...)
+        end,
+        close = function()
+          local ok, close_err = file:close()
+          if ok then c.open_count = c.open_count - 1 end
+          return ok, close_err
+        end
+      }
+    end
+  end)
+
+  test.after_each(function(c)
+    io.open = c.open
+    for _, file in ipairs(c.files) do
+      if io.type(file) == "file" then file:close() end
+    end
+    c.colors:destroy()
+  end)
+
+  test.it("closes each theme before reading the next preview", function(c)
+    SettingsView.load_color_settings({ colors = c.colors })
+    test.ok(#c.files > 1)
+    test.equal(c.open_count, 0)
+    test.equal(c.peak, 1)
+    for _, file in ipairs(c.files) do test.equal(io.type(file), "closed file") end
+  end)
+
+  for _, failure in ipairs { "open", "read" } do
+    test.it("keeps an empty preview when a theme fails to " .. failure, function(c)
+      c["fail_" .. failure] = true
+      SettingsView.load_color_settings({ colors = c.colors })
+      local list = find_child(c.colors, ListBox)
+      local found, other = false, false
+      for index in ipairs(list.rows) do
+        local data = list:get_row_data(index)
+        if data.name == "default" then
+          found = true
+          test.equal(#data.colors, 0)
+        elseif #data.colors > 0 then
+          other = true
+        end
+      end
+      test.ok(found)
+      test.ok(other)
+      test.equal(c.open_count, 0)
+    end)
+  end
 end)
 
 test.describe("settings search", function()
