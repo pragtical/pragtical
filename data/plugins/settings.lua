@@ -1747,7 +1747,7 @@ function SettingsSections:new(parent, placeholder)
   self.border.width = 0
   self.all_panes, self.entries, self.expansion = self.panes, {}, {}
   self.filter_value = ""
-  self.search = TextBox(parent, "", placeholder)
+  self.search = TextBox(parent, "", placeholder, { clearable = true })
   self.empty = Label(parent, "No settings match your search.", true)
   self.empty:hide()
   local sections = self
@@ -2399,7 +2399,7 @@ function Settings:load_color_settings()
   local colors = get_installed_colors()
 
   ---@type widget.textbox
-  local textbox = TextBox(self.colors, "", "filter colors...")
+  local textbox = TextBox(self.colors, "", "filter colors...", { clearable = true })
 
   ---@type widget.listbox
   local listbox = ListBox(self.colors)
@@ -2675,7 +2675,7 @@ function Settings:load_keymap_settings()
   table.sort(ordered)
 
   ---@type widget.textbox
-  local textbox = TextBox(self.keybinds, "", "filter bindings...")
+  local textbox = TextBox(self.keybinds, "", "filter bindings...", { clearable = true })
 
   ---@type widget.listbox
   local listbox = ListBox(self.keybinds)

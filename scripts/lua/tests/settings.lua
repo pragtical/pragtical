@@ -567,6 +567,38 @@ test.describe("settings search", function()
     test.fail("missing setting: " .. label)
   end
 
+  for _, tab in ipairs { "core", "plugins", "colors", "keybindings" } do
+    test.it("clears the " .. tab .. " search through its internal icon", function(c)
+      c.view.notebook:set_pane(tab)
+      local book = tab == "core" and c.view.core_sections
+        or tab == "plugins" and c.view.plugin_sections
+      local pane = book or (tab == "colors" and c.view.colors or c.view.keybinds)
+      local search = book and book.search or find_child(pane, TextBox)
+      local list = not book and find_child(pane, ListBox)
+      local total = book and #book.panes or #list.rows
+      search:set_text("no matching setting or command")
+      for _ = 1, 10 do core.root_view:update() end
+      if book then test.equal(#book.panes, 0)
+      else test.equal(#list.rows, 0) end
+      test.ok(search.clearable)
+      local x, y, w, h = search:get_clear_button_bounds()
+      test.not_nil(x)
+      x, y = x + w / 2, y + h / 2
+      core.on_event("mousemoved", x, y, 0, 0)
+      core.on_event("mousepressed", "left", x, y, 1)
+      core.on_event("mousereleased", "left", x, y)
+      for _ = 1, 10 do core.root_view:update() end
+      test.equal(search:get_text(), "")
+      test.equal(core.active_view, search.textview)
+      test.is_nil(search:get_clear_button_bounds())
+      if book then test.equal(#book.panes, total)
+      else test.equal(#list.rows, total) end
+      core.redraw = false
+      for _ = 1, 5 do core.root_view:update() end
+      test.not_ok(core.redraw)
+    end)
+  end
+
   test.it("matches Core labels, descriptions and paths while restoring collapsed sections", function(c)
     local book = c.view.core_sections
     local clicks = option(book, "General", "Maximum Clicks")
