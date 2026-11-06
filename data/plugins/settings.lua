@@ -1353,7 +1353,12 @@ local function get_installed_colors()
         filename:match("%.lua$")
       then
         -- read colors
-        local contents = io.open(dir .. "/" .. filename):read("*a")
+        local file = io.open(dir .. "/" .. filename, "r")
+        local contents = ""
+        if file then
+          contents = file:read("*a") or ""
+          file:close()
+        end
         local colors = {}
         for r, g, b in contents:gmatch("#(%x%x)(%x%x)(%x%x)") do
           r = tonumber(r, 16)
@@ -1705,14 +1710,175 @@ local function store_default_keybindings()
   end
 end
 
+---Widgets belonging to one searchable setting, kept together while filtering.
+---@class plugins.settings.optiongroup
+---@field text string Lowercase section, label, description and config path
+---@field controls widget[] Existing controls, including the label and description
+---@field reset plugins.settings.resetbutton?
+
+---Search metadata for a section container.
+---@class plugins.settings.section
+---@field name string Lowercase section name
+---@field options plugins.settings.optiongroup[]
+
+---Match every query word literally, without treating punctuation as patterns.
+---@param text string Lowercase searchable text
+---@param words string[] Lowercase query words
+---@return boolean matched
+local function matches_settings(text, words)
+  for _, word in ipairs(words) do
+    if not text:find(word, 1, true) then return false end
+  end
+  return true
+end
+
+---Settings-owned section filtering using FoldingBook's existing pane registry.
+---@class plugins.settings.sections : widget.foldingbook
+---@overload fun(parent:widget, placeholder:string):plugins.settings.sections
+---@field all_panes widget.foldingbook.pane[] Complete registry, including filtered panes
+---@field entries table<widget, plugins.settings.section>
+---@field expansion table<widget.foldingbook.pane, boolean> Expansion before searching
+---@field filter_value string Normalized query, evaluated only when changed
+---@field search widget.textbox Fixed search field above the scrolling sections
+---@field empty widget.label Message displayed when the query has no matches
+---@field installed_list widget.widgetlist? Plugin enable/disable rows
+local SettingsSections = FoldingBook:extend()
+
+---Create a scrolling section list with a fixed search field.
+---@param parent widget
+---@param placeholder string
+function SettingsSections:new(parent, placeholder)
+  SettingsSections.super.new(self, parent)
+  self.border.width = 0
+  self.all_panes, self.entries, self.expansion = self.panes, {}, {}
+  self.filter_value = ""
+  self.search = TextBox(parent, "", placeholder, { clearable = true })
+  self.empty = Label(parent, "No settings match your search.", true)
+  self.empty:hide()
+  local sections = self
+  ---Filter on text edits without evaluating queries during update or drawing.
+  ---@param value string
+  function self.search:on_change(value) sections:filter(value) end
+end
+
+---Look up sections even when they are excluded from the current search.
+---@param name string
+---@return widget.foldingbook.pane?
+function SettingsSections:get_pane(name)
+  for _, pane in ipairs(self.all_panes) do
+    if pane.name == name then return pane end
+  end
+end
+
+---Register a section in the complete list without disturbing filtered results.
+---@param name string
+---@param label string
+---@return widget container
+function SettingsSections:add_pane(name, label)
+  local visible = self.panes
+  self.panes = self.all_panes
+  local container = SettingsSections.super.add_pane(self, name, label)
+  self.panes = visible
+  self.entries[container] = { name = label:lower(), options = {} }
+  return container
+end
+
+---Remove a plugin section and refresh the active query without rebuilding others.
+---@param name string
+---@return boolean removed
+function SettingsSections:delete_pane(name)
+  local pane = self:get_pane(name)
+  if not pane then return false end
+  self.panes = self.all_panes
+  local removed = SettingsSections.super.delete_pane(self, name)
+  self.entries[pane.container], self.expansion[pane] = nil, nil
+  self:filter(self.filter_value, true)
+  return removed
+end
+
+---Filter existing option groups and plugin rows, restoring expansion on clear.
+---@param value string Search words matched against cached option metadata
+---@param force? boolean Reapply after registering or removing plugin options
+function SettingsSections:filter(value, force)
+  local query = value:lower():match("^%s*(.-)%s*$")
+  if query == self.filter_value and not force then return end
+  local words, visible = {}, {}
+  for word in query:gmatch("%S+") do words[#words + 1] = word end
+  for _, pane in ipairs(self.all_panes) do
+    local entry = self.entries[pane.container]
+    local found = query == ""
+    for _, group in ipairs(entry.options) do
+      local matched = matches_settings(group.text, words)
+      found = found or matched
+      for _, child in ipairs(group.controls) do
+        local show = matched
+        if child == group.reset then
+          child.filter_matches = matched
+          show = matched and child.enabled
+          if child.visible ~= show then child.layout_width = nil end
+        end
+        if child.visible ~= show then
+          if show then child:show() else child:hide() end
+        end
+      end
+    end
+    local list = self.installed_list
+    if list and list.parent == pane.container then
+      local matching, count = {}, 0
+      local section_matches = matches_settings(entry.name, words)
+      for _, item in ipairs(list.items) do
+        local matched = section_matches or matches_settings(item.filter_text:lower(), words)
+        matching[item.data] = matched
+        found = found or matched
+        if matched then count = count + 1 end
+      end
+      list:filter(function(data) return matching[data] end)
+      list:set_visible_row_count(query == "" and 10 or math.max(1, math.min(10, count)))
+    end
+    if query ~= "" then
+      if self.expansion[pane] == nil then self.expansion[pane] = pane.expanded end
+      pane.expanded = found
+    elseif self.expansion[pane] ~= nil then
+      pane.expanded = self.expansion[pane]
+    end
+    -- Search updates are immediate; ordinary section clicks retain their slides.
+    pane.container.animations = {}
+    pane.container.animating = false
+    pane.container.first_hide = true
+    if found then
+      visible[#visible + 1] = pane
+      pane.tab:show()
+      if pane.expanded then pane.container:show() else pane.container:hide() end
+    else
+      pane.tab:hide()
+      pane.container:hide()
+    end
+    pane.tab:set_icon(pane.expanded and "-" or "+")
+  end
+  self.panes, self.filter_value = visible, query
+  if query == "" then self.expansion = {} end
+  self.scroll.y, self.scroll.to.y = 0, 0
+  if #visible == 0 then self.empty:show() else self.empty:hide() end
+  core.redraw = true
+end
+
+---Keep section separators inside the scrolling viewport below the search field.
+---@return boolean drawn
+function SettingsSections:draw()
+  core.push_clip_rect(self.position.x, self.position.y, self.size.x, self.size.y)
+  local drawn = SettingsSections.super.draw(self)
+  core.pop_clip_rect()
+  return drawn
+end
+
 ---@class settings.ui : widget
 ---@field private notebook widget.notebook
 ---@field private core widget
 ---@field private colors widget
 ---@field private plugins widget
 ---@field private keybinds widget
----@field private core_sections widget.foldingbook
----@field private plugin_sections widget.foldingbook
+---@field private core_sections plugins.settings.sections
+---@field private plugin_sections plugins.settings.sections
 local Settings = Widget:extend()
 
 ---Constructor
@@ -1735,19 +1901,15 @@ function Settings:new()
   self.colors = self.notebook:add_pane("colors", "Colors")
   self.plugins = self.notebook:add_pane("plugins", "Plugins")
   self.keybinds = self.notebook:add_pane("keybindings", "Keybindings")
+  self.core.scrollable, self.plugins.scrollable = false, false
 
   self.notebook:set_pane_icon("core", "A")
   self.notebook:set_pane_icon("colors", "E")
   self.notebook:set_pane_icon("plugins", "p")
   self.notebook:set_pane_icon("keybindings", "k")
 
-  self.core_sections = FoldingBook(self.core)
-  self.core_sections.border.width = 0
-  self.core_sections.scrollable = false
-
-  self.plugin_sections = FoldingBook(self.plugins)
-  self.plugin_sections.border.width = 0
-  self.plugin_sections.scrollable = false
+  self.core_sections = SettingsSections(self.core, "filter settings...")
+  self.plugin_sections = SettingsSections(self.plugins, "filter plugins and settings...")
 
   if command.is_valid("plugin-manager:show") then
     ---@type widget.button
@@ -1764,13 +1926,16 @@ function Settings:new()
   self:load_color_settings()
   self:load_plugin_settings()
   self:load_keymap_settings()
+  self.core_sections:filter("", true)
+  self.plugin_sections:filter("", true)
 end
 
----Compact action beside a setting label, inactive without a saved override.
+---Compact action beside a setting label, visible only for saved overrides.
 ---@class plugins.settings.resetbutton : widget.button
 ---@field enabled boolean Whether a saved override can be removed
 ---@field heading widget The option's label or toggle
 ---@field layout_width number? Last available width used to wrap the heading
+---@field filter_matches boolean? Whether the option matches the active search
 local ResetButton = Button:extend()
 
 ---Create a reset action without changing the general Widget button API.
@@ -1788,26 +1953,19 @@ function ResetButton:new(parent, heading, path)
   self:set_enabled(get_config_value(settings.config, path) ~= nil)
 end
 
----Refresh availability after editing or resetting, including saved false values.
+---Refresh visibility after editing or resetting, including saved false values.
 ---@param enabled boolean
 function ResetButton:set_enabled(enabled)
   if self.enabled == enabled then return end
   self.enabled = enabled
-  if not enabled then self.hover_text, self.hover_back = nil, nil end
+  self.layout_width = nil
+  if enabled and self.filter_matches ~= false then
+    self:show()
+  else
+    self.hover_text, self.hover_back = nil, nil
+    self:hide()
+  end
   core.redraw = true
-end
-
----Highlight the reset action only when it can be used.
----@param ... any Mouse position and deltas
-function ResetButton:on_mouse_enter(...)
-  if self.enabled then ResetButton.super.on_mouse_enter(self, ...) end
-end
-
----Draw disabled actions in the current theme's dim color.
----@return boolean drawn
-function ResetButton:draw()
-  self.foreground_color = self.enabled and style.text or style.dim
-  return ResetButton.super.draw(self)
 end
 
 ---Rebuild only a custom setting list, retaining its filter and valid scroll.
@@ -1841,6 +1999,7 @@ end
 ---@param option settings.option
 ---@param context? string|table Plugin name or standalone render context.
 local function add_control(pane, option, context)
+  local child_count = #pane.childs
   local found = false
   local path = resolve_option_path(option, context)
   local heading
@@ -2177,6 +2336,18 @@ local function add_control(pane, option, context)
     local description = Label(pane, text .. default, true)
     description.desc = true
   end
+  if pane.parent and pane.parent:is(SettingsSections) then
+    local entry = pane.parent.entries[pane]
+    ---@type plugins.settings.optiongroup
+    local group = {
+      text = table.concat({ entry.name, option.label, option.description or "", path or "" }, " "):lower(),
+      controls = {}, reset = widget and widget.reset_button
+    }
+    for index = 1, #pane.childs - child_count do
+      group.controls[#group.controls + 1] = pane.childs[index]
+    end
+    entry.options[#entry.options + 1] = group
+  end
 end
 
 ---Generate all the widgets for core settings.
@@ -2233,7 +2404,7 @@ function Settings:load_color_settings()
   local colors = get_installed_colors()
 
   ---@type widget.textbox
-  local textbox = TextBox(self.colors, "", "filter colors...")
+  local textbox = TextBox(self.colors, "", "filter colors...", { clearable = true })
 
   ---@type widget.listbox
   local listbox = ListBox(self.colors)
@@ -2269,12 +2440,12 @@ function Settings:load_color_settings()
 
   ---@param self widget
   function self.colors:update_positions()
-    textbox:set_position(0, 0)
-    textbox:set_size(self:get_width() - self.border.width * 2)
+    textbox:set_position(style.padding.x / 2, style.padding.y)
+    textbox:set_size(math.max(0, self.size.x - style.padding.x))
     listbox:set_position(0, textbox:get_bottom())
     listbox:set_size(
       self:get_width() - self.border.width * 2,
-      self:get_height() - textbox:get_height()
+      math.max(0, self.size.y - textbox:get_bottom())
     )
   end
 end
@@ -2365,6 +2536,7 @@ function Settings:enable_plugin(plugin)
   if loaded then
     core.log("Loaded '%s' plugin", plugin)
   end
+  self.plugin_sections:filter(self.plugin_sections.search:get_text(), true)
 end
 
 ---Generate all the widgets for plugin settings.
@@ -2386,8 +2558,8 @@ function Settings:load_plugin_settings()
 
   Line(pane, 2, 10)
 
-  local filter = TextBox(pane, "", "filter plugins...")
   local list = WidgetList(pane)
+  self.plugin_sections.installed_list = list
 
   local plugins = get_installed_plugins()
   for _, plugin in ipairs(plugins) do
@@ -2447,9 +2619,6 @@ function Settings:load_plugin_settings()
     end
   end
   list:set_visible_row_count(10)
-  function filter:on_change(value)
-    list:filter(value)
-  end
 
   table.sort(settings.plugin_sections)
 
@@ -2511,7 +2680,7 @@ function Settings:load_keymap_settings()
   table.sort(ordered)
 
   ---@type widget.textbox
-  local textbox = TextBox(self.keybinds, "", "filter bindings...")
+  local textbox = TextBox(self.keybinds, "", "filter bindings...", { clearable = true })
 
   ---@type widget.listbox
   local listbox = ListBox(self.keybinds)
@@ -2563,12 +2732,12 @@ function Settings:load_keymap_settings()
 
   ---@param self widget
   function self.keybinds:update_positions()
-    textbox:set_position(0, 0)
-    textbox:set_size(self:get_width() - self.border.width * 2)
+    textbox:set_position(style.padding.x / 2, style.padding.y)
+    textbox:set_size(math.max(0, self.size.x - style.padding.x))
     listbox:set_position(0, textbox:get_bottom())
     listbox:set_size(
       self:get_width() - self.border.width * 2,
-      self:get_height() - textbox:get_height()
+      math.max(0, self.size.y - textbox:get_bottom())
     )
   end
 end
@@ -2581,15 +2750,17 @@ local function layout_settings_childs(childs, width)
   for pos=#childs, 1, -1 do
     local child = childs[pos]
     if child:is(ResetButton) then
-      local heading = child.heading
-      local x = heading:get_right() + style.padding.x / 2
-      local y = heading.position.ry
-      if x + child:get_width() > width - 10 then
-        x, y = 10, heading:get_bottom() + 5 * SCALE
-        prev_child = child
+      if child.visible then
+        local heading = child.heading
+        local x = heading:get_right() + style.padding.x / 2
+        local y = heading.position.ry
+        if x + child:get_width() > width - 10 then
+          x, y = 10, heading:get_bottom() + 5 * SCALE
+          prev_child = child
+        end
+        child:set_position(x, y)
       end
-      child:set_position(x, y)
-    else
+    elseif child.visible then
       local x, y = 10, (10 * SCALE)
       if prev_child then
         if
@@ -2618,7 +2789,8 @@ local function layout_settings_childs(childs, width)
         if reset.layout_width ~= width or child.last_wrap_font ~= font
           or child.last_wrap_font_size ~= font:get_size()
         then
-          local available = math.max(1, width - 20 - reset:get_width() - style.padding.x / 2)
+          local reserved = reset.visible and (reset:get_width() + style.padding.x / 2) or 0
+          local available = math.max(1, width - 20 - reserved)
           child:set_size(math.min(font:get_width(child.original_label), available))
           child:wrap_text()
           reset.layout_width = width
@@ -2632,15 +2804,25 @@ end
 
 ---Layout settings controls inside a folding book.
 ---@param section widget.foldingbook
-local function layout_settings_section(section)
+---@param top? number Top edge below a fixed search field
+local function layout_settings_section(section, top)
+  local height = top and math.max(0, section.parent.size.y - top) or section:get_real_height()
   section:set_size(
     section.parent.size.x - style.padding.x,
-    section:get_real_height()
+    height
   )
-  section:set_position(style.padding.x / 2, 0)
+  section:set_position(style.padding.x / 2, top or 0)
 
   for _, pane in ipairs(section.panes) do
-    layout_settings_childs(pane.container.childs, pane.container:get_width())
+    local width = pane.container:get_width()
+    if top then
+      -- Keep nested controls outside the section scrollbar's expanded hit area.
+      width = width - math.max(
+        style.scrollbar_size + style.contracted_scrollbar_margin,
+        style.expanded_scrollbar_size + style.expanded_scrollbar_margin
+      )
+    end
+    layout_settings_childs(pane.container.childs, width)
   end
 end
 
@@ -2758,15 +2940,21 @@ function Settings:update()
 
   for _, section in ipairs({self.core_sections, self.plugin_sections}) do
     if section.parent:is_visible() then
-      if section == self.plugin_sections and command.is_valid("plugin-manager:show") then
-        -- accomodate plugin manager button
+      local margin = style.padding.x / 2
+      local width = section.parent.size.x - margin * 2
+      if section == self.plugin_sections and self.plugin_button then
+        width = width - self.plugin_button:get_width() - style.padding.x
         self.plugin_button:set_position(
-          self:get_width() - self.plugin_button:get_width() - style.padding.x,
-          style.padding.y * 1.2
+          section.parent.size.x - self.plugin_button:get_width() - margin,
+          style.padding.y + (section.search:get_height() - self.plugin_button:get_height()) / 2
         )
       end
-
-      layout_settings_section(section)
+      section.search:set_position(margin, style.padding.y)
+      section.search:set_size(math.max(0, width))
+      local top = section.search:get_bottom() + style.padding.y
+      section.empty:set_position(style.padding.x, top + style.padding.y)
+      section.empty:set_size(math.max(0, section.parent.size.x - style.padding.x * 2))
+      layout_settings_section(section, top)
     end
   end
 

@@ -11,6 +11,7 @@ local Label = require "widget.label"
 local SelectBox = require "widget.selectbox"
 local TextBox = require "widget.textbox"
 local Toggle = require "widget.toggle"
+local Widget = require "widget"
 local WidgetList = require "widget.widgetlist"
 local NumberBox = require "widget.numberbox"
 local ListBox = require "widget.listbox"
@@ -37,6 +38,7 @@ test.describe("setting resets", function()
     c.userdir, c.saved, c.plugin = USERDIR, settings.config, rawget(config.plugins, "settings_reset")
     c.root, c.active, c.last, c.next = core.root_view, core.active_view, core.last_active_view, core.next_active_view
     c.scale, c.error, c.open = SCALE, core.error, io.open
+    c.add_thread = core.add_thread
     c.wheel = config.mouse_wheel_scroll
     c.outline_focused, c.outline_unfocused = config.outline_focused, config.outline_unfocused
     c.tree_size, c.tree_target = config.plugins.treeview.size, tree.target_size
@@ -55,6 +57,7 @@ test.describe("setting resets", function()
 
   test.after_each(function(c)
     io.open, core.error, SCALE = c.open, c.error, c.scale
+    core.add_thread = c.add_thread
     config.mouse_wheel_scroll = c.wheel
     config.outline_focused, config.outline_unfocused = c.outline_focused, c.outline_unfocused
     config.plugins.treeview.size, tree.target_size = c.tree_size, c.tree_target
@@ -106,6 +109,7 @@ test.describe("setting resets", function()
       local original = common.serialize(option.default)
       local widget = control(c, option, case[2], case[4])
       test.ok(widget.reset_button.enabled)
+      test.ok(widget.reset_button.visible)
       widget.reset_button:on_click()
       test.same(config.plugins.settings_reset.value, case[3])
       if case[1] == "color" then
@@ -117,6 +121,7 @@ test.describe("setting resets", function()
       test.is_nil(settings.config.plugins)
       test.same(dofile(USERDIR .. "/user_settings.lua").config, { keep = "untouched" })
       test.not_ok(widget.reset_button.enabled)
+      test.not_ok(widget.reset_button.visible)
       test.equal(common.serialize(option.default), original)
       widget.reset_button:on_click()
       test.equal(common.serialize(option.default), original)
@@ -131,14 +136,56 @@ test.describe("setting resets", function()
     }, Toggle, false)
     widget.reset_button:on_click()
     test.equal(applied, 1)
+    test.not_ok(widget.reset_button.visible)
     widget.reset_button:on_click()
     test.equal(applied, 1)
     widget:set_toggle(false)
     test.equal(settings.config.plugins.settings_reset.value, false)
     test.ok(widget.reset_button.enabled)
+    test.ok(widget.reset_button.visible)
     widget.reset_button:on_click()
     test.is_nil(settings.config.plugins)
     test.equal(applied, 3)
+  end)
+
+  test.it("shows Reset only after saving an override", function(c)
+    local widget = control(c, {
+      type = "string", default = "original"
+    }, TextBox, nil)
+    test.not_ok(widget.reset_button.visible)
+    widget:set_text("custom")
+    test.ok(widget.reset_button.visible)
+    widget.reset_button:on_click()
+    test.equal(widget:get_text(), "original")
+    test.not_ok(widget.reset_button.visible)
+    test.is_nil(settings.config.plugins)
+  end)
+
+  test.it("returns heading space when Reset disappears without rebuilding controls", function(c)
+    local widget, view = control(c, {
+      label = "An option label with several words", type = "string", default = "original"
+    }, TextBox, "custom")
+    local reset, heading = widget.reset_button, widget.reset_button.heading
+    view:set_size(heading:get_font():get_width(heading.original_label) + 20, 500)
+    for _ = 1, 10 do view:update() end
+    local height, input_y, input_width = heading:get_height(), widget.position.ry, widget:get_width()
+    local children = #view.childs
+    test.ok(height > heading:get_font():get_height())
+    reset:on_click()
+    for _ = 1, 10 do view:update() end
+    test.not_ok(reset.visible)
+    test.equal(heading:get_height(), heading:get_font():get_height())
+    test.ok(widget.position.ry < input_y)
+    test.equal(widget:get_width(), input_width)
+    widget:set_text("custom again")
+    for _ = 1, 10 do view:update() end
+    test.ok(reset.visible)
+    test.equal(heading:get_height(), height)
+    test.equal(widget.position.ry, input_y)
+    test.equal(#view.childs, children)
+    core.redraw = false
+    for _ = 1, 5 do view:update() end
+    test.not_ok(core.redraw)
   end)
 
   test.it("resolves current theme colors on reset without sharing the source", function(c)
@@ -346,6 +393,22 @@ test.describe("setting resets", function()
     test.not_ok(button.enabled)
   end)
 
+  test.it("keeps numeric Reset disabled after deferred input validation", function(c)
+    local number = control(c, {
+      label = "Maximum Clicks", type = "number", default = 3
+    }, NumberBox, 8)
+    local pending = {}
+    core.add_thread = function(fn) pending[#pending + 1] = fn end
+    number.reset_button:on_click()
+    test.equal(number:get_value(), 3)
+    test.not_ok(number.reset_button.enabled)
+    for _, fn in ipairs(pending) do fn() end
+    test.equal(number:get_value(), 3)
+    test.not_ok(number.reset_button.enabled)
+    test.is_nil(settings.config.plugins)
+    test.same(dofile(USERDIR .. "/user_settings.lua").config, { keep = "untouched" })
+  end)
+
   test.it("keeps a rejected reset and the current displayed value", function(c)
     local widget = control(c, {
       type = "selection", default = false,
@@ -452,6 +515,281 @@ test.describe("setting resets", function()
   end)
 end)
 
+test.describe("settings color previews", function()
+  test.before_each(function(c)
+    c.open = io.open
+    c.files, c.open_count, c.peak = {}, 0, 0
+    c.path = DATADIR .. "/colors/default.lua"
+    c.colors = Widget(nil, false)
+    io.open = function(path, mode)
+      if path == c.path and c.fail_open then return nil, "test open failure" end
+      local file, err, code = c.open(path, mode)
+      if not file or not path:match("/colors/[^/]+%.lua$") then return file, err, code end
+      c.files[#c.files + 1] = file -- Keep handles alive so GC cannot mask missing closes.
+      c.open_count = c.open_count + 1
+      c.peak = math.max(c.peak, c.open_count)
+      return {
+        read = function(_, ...)
+          if path == c.path and c.fail_read then return nil, "test read failure" end
+          return file:read(...)
+        end,
+        close = function()
+          local ok, close_err = file:close()
+          if ok then c.open_count = c.open_count - 1 end
+          return ok, close_err
+        end
+      }
+    end
+  end)
+
+  test.after_each(function(c)
+    io.open = c.open
+    for _, file in ipairs(c.files) do
+      if io.type(file) == "file" then file:close() end
+    end
+    c.colors:destroy()
+  end)
+
+  test.it("closes each theme before reading the next preview", function(c)
+    SettingsView.load_color_settings({ colors = c.colors })
+    test.ok(#c.files > 1)
+    test.equal(c.open_count, 0)
+    test.equal(c.peak, 1)
+    for _, file in ipairs(c.files) do test.equal(io.type(file), "closed file") end
+  end)
+
+  for _, failure in ipairs { "open", "read" } do
+    test.it("keeps an empty preview when a theme fails to " .. failure, function(c)
+      c["fail_" .. failure] = true
+      SettingsView.load_color_settings({ colors = c.colors })
+      local list = find_child(c.colors, ListBox)
+      local found, other = false, false
+      for index in ipairs(list.rows) do
+        local data = list:get_row_data(index)
+        if data.name == "default" then
+          found = true
+          test.equal(#data.colors, 0)
+        elseif #data.colors > 0 then
+          other = true
+        end
+      end
+      test.ok(found)
+      test.ok(other)
+      test.equal(c.open_count, 0)
+    end)
+  end
+end)
+
+test.describe("settings search", function()
+  test.before_each(function(c)
+    c.root, c.active, c.last, c.next = core.root_view, core.active_view, core.last_active_view, core.next_active_view
+    c.saved, c.plugins, c.sections = settings.config, settings.plugins, settings.plugin_sections
+    c.plugin = rawget(config.plugins, "search_fixture")
+    c.preload, c.loaded = package.preload["plugins.search_fixture"], package.loaded["plugins.search_fixture"]
+    c.userdir, c.transitions, c.clip = USERDIR, config.transitions, core.clip_rect_stack
+    USERDIR = core.temp_filename()
+    test.ok(common.mkdirp(USERDIR))
+    config.transitions = false
+    settings.config, settings.plugins, settings.plugin_sections = {}, {}, {}
+    c.defaults = 0
+    local spec = {
+      name = "Connection Tools",
+      { label = "Endpoint Address", description = "Server URL", path = "endpoint", type = "string",
+        default = function() c.defaults = c.defaults + 1; return "original" end },
+      { label = "Retry Limit", description = "Network connection retry budget", path = "retry_limit",
+        type = "number", default = 2 }
+    }
+    rawset(config.plugins, "search_fixture", { endpoint = "kept", retry_limit = 8, config_spec = spec })
+    package.preload["plugins.search_fixture"] = function() return {} end
+    settings.add(spec.name, spec, "search_fixture")
+    core.root_view = RootView()
+    core.root_view.root_node.is_primary_node = true
+    core.root_view.size.x, core.root_view.size.y = 900, 650
+    core.active_view = core.root_view.root_node.active_view
+    c.view = SettingsView()
+    c.view:show()
+    core.root_view.root_node:add_view(c.view)
+    for _ = 1, 20 do core.root_view:update() end
+  end)
+
+  test.after_each(function(c)
+    c.view:destroy()
+    core.root_view, core.active_view, core.last_active_view, core.next_active_view = c.root, c.active, c.last, c.next
+    settings.config, settings.plugins, settings.plugin_sections = c.saved, c.plugins, c.sections
+    rawset(config.plugins, "search_fixture", c.plugin)
+    package.preload["plugins.search_fixture"], package.loaded["plugins.search_fixture"] = c.preload, c.loaded
+    config.transitions, core.clip_rect_stack = c.transitions, c.clip
+    local directory = USERDIR
+    USERDIR = c.userdir
+    test.ok(common.rm(directory, true))
+  end)
+
+  ---Find an existing option by the label shared with its Reset action.
+  local function option(book, section, label)
+    for _, child in ipairs(book:get_pane(section).container.childs) do
+      local reset = child.reset_button
+      if reset and (reset.heading.original_label or reset.heading.label) == label .. ":" then return child end
+    end
+    test.fail("missing setting: " .. label)
+  end
+
+  for _, tab in ipairs { "core", "plugins", "colors", "keybindings" } do
+    test.it("clears the " .. tab .. " search through its internal icon", function(c)
+      c.view.notebook:set_pane(tab)
+      local book = tab == "core" and c.view.core_sections
+        or tab == "plugins" and c.view.plugin_sections
+      local pane = book or (tab == "colors" and c.view.colors or c.view.keybinds)
+      local search = book and book.search or find_child(pane, TextBox)
+      local list = not book and find_child(pane, ListBox)
+      local total = book and #book.panes or #list.rows
+      search:set_text("no matching setting or command")
+      for _ = 1, 10 do core.root_view:update() end
+      if book then test.equal(#book.panes, 0)
+      else test.equal(#list.rows, 0) end
+      test.ok(search.clearable)
+      local x, y, w, h = search:get_clear_button_bounds()
+      test.not_nil(x)
+      x, y = x + w / 2, y + h / 2
+      core.on_event("mousemoved", x, y, 0, 0)
+      core.on_event("mousepressed", "left", x, y, 1)
+      core.on_event("mousereleased", "left", x, y)
+      for _ = 1, 10 do core.root_view:update() end
+      test.equal(search:get_text(), "")
+      test.equal(core.active_view, search.textview)
+      test.is_nil(search:get_clear_button_bounds())
+      if book then test.equal(#book.panes, total)
+      else test.equal(#list.rows, total) end
+      core.redraw = false
+      for _ = 1, 5 do core.root_view:update() end
+      test.not_ok(core.redraw)
+    end)
+  end
+
+  test.it("matches Core labels, descriptions and paths while restoring collapsed sections", function(c)
+    local book = c.view.core_sections
+    local clicks = option(book, "General", "Maximum Clicks")
+    local size = option(book, "General", "File Size Limit")
+    book:toggle_pane("General", true)
+    book.search:set_text(" MAX_CLICKS ")
+    test.equal(#book.panes, 1)
+    test.equal(book.panes[1].name, "General")
+    test.ok(clicks.visible)
+    test.not_ok(size.visible)
+    book.search:set_text("megabytes")
+    test.ok(size.visible)
+    test.not_ok(clicks.visible)
+    book.search:set_text("editor non_word_chars")
+    test.equal(#book.panes, 1)
+    test.equal(book.panes[1].name, "Editor")
+    test.ok(book.panes[1].expanded)
+    book.search:set_text("")
+    test.equal(#book.panes, #book.all_panes)
+    test.ok(book:get_pane("General").expanded)
+    test.not_ok(book:get_pane("Editor").expanded)
+    test.ok(clicks.visible)
+    test.ok(size.visible)
+  end)
+
+  test.it("handles literal punctuation, no matches and independent tab queries", function(c)
+    local core_book, plugins = c.view.core_sections, c.view.plugin_sections
+    core_book.search:set_text("[.*")
+    test.equal(#core_book.panes, 0)
+    test.ok(core_book.empty.visible)
+    c.view.notebook:set_pane("plugins")
+    plugins.search:set_text("retry_limit")
+    test.equal(#plugins.panes, 1)
+    test.equal(plugins.panes[1].name, "Connection Tools")
+    test.not_ok(plugins.empty.visible)
+    test.equal(core_book.search:get_text(), "[.*")
+    core_book.search:set_text("   ")
+    test.not_ok(core_book.empty.visible)
+    test.equal(#core_book.panes, #core_book.all_panes)
+    test.equal(plugins.search:get_text(), "retry_limit")
+  end)
+
+  test.it("filters plugin names and option groups without rebuilding or evaluating defaults", function(c)
+    local book = c.view.plugin_sections
+    c.view.notebook:set_pane("plugins")
+    local endpoint = option(book, "Connection Tools", "Endpoint Address")
+    local retry = option(book, "Connection Tools", "Retry Limit")
+    local count = #book:get_pane("Connection Tools").container.childs
+    book.search:set_text("SEARCH_FIXTURE")
+    test.ok(endpoint.visible)
+    test.ok(retry.visible)
+    endpoint:set_text("edited")
+    test.ok(endpoint.reset_button.visible)
+    book.search:set_text("retry budget")
+    test.not_ok(endpoint.visible)
+    test.not_ok(endpoint.reset_button.visible)
+    test.ok(retry.visible)
+    book.search:set_text("connection tools")
+    test.ok(endpoint.visible)
+    test.ok(endpoint.reset_button.visible)
+    test.equal(endpoint:get_text(), "edited")
+    test.equal(option(book, "Connection Tools", "Endpoint Address"), endpoint)
+    test.equal(#book:get_pane("Connection Tools").container.childs, count)
+    test.equal(c.defaults, 1)
+    for _ = 1, 20 do core.root_view:update() end
+    core.redraw = false
+    for _ = 1, 5 do core.root_view:update() end
+    test.not_ok(core.redraw)
+    test.equal(c.defaults, 1)
+  end)
+
+  test.it("filters the Installed rows with the same Plugins search field", function(c)
+    local book = c.view.plugin_sections
+    c.view.notebook:set_pane("plugins")
+    book.search:set_text("lineguide")
+    for _ = 1, 20 do core.root_view:update() end
+    local list, found = book.installed_list, 0
+    for _, item in ipairs(list.items) do
+      if item.matched then test.equal(item.data.plugin, "lineguide"); found = found + 1 end
+    end
+    test.equal(found, 1)
+    test.equal(list.visible_row_count, 1)
+    test.ok(book:get_pane("enable_disable").tab.visible)
+    test.not_ok(book:get_pane("Connection Tools").tab.visible)
+    book.search:set_text("")
+    test.equal(list.visible_row_count, 10)
+  end)
+
+  test.it("reapplies an active search when plugin sections are removed or enabled", function(c)
+    local book = c.view.plugin_sections
+    book.search:set_text("retry_limit")
+    c.view:disable_plugin("search_fixture")
+    test.is_nil(book:get_pane("Connection Tools"))
+    test.ok(book.empty.visible)
+    c.view:enable_plugin("search_fixture")
+    test.equal(book.search:get_text(), "retry_limit")
+    test.equal(#book.panes, 1)
+    test.ok(option(book, "Connection Tools", "Retry Limit").visible)
+    test.not_ok(option(book, "Connection Tools", "Endpoint Address").visible)
+  end)
+
+  test.it("keeps the Core search field fixed and clean while its sections scroll", function(c)
+    local book = c.view.core_sections
+    for _, pane in ipairs(book.panes) do pane.expanded = true end
+    for _ = 1, 40 do core.root_view:update() end
+    test.ok(book:get_scrollable_size() > book.size.y + 80)
+    local window = renwindow.create("Settings search", 900, 650)
+    local search_y = book.search.position.y
+    local function capture()
+      core.clip_rect_stack = { { 0, 0, 900, 650 } }
+      renderer.begin_frame(window)
+      renderer.set_clip_rect(0, 0, 900, 650)
+      c.view:draw()
+      renderer.end_frame()
+      return renderer.to_canvas(window, 0, math.floor(search_y), 900, math.floor(book.search:get_height())):get_pixels()
+    end
+    capture()
+    local header = capture()
+    book.scroll.y, book.scroll.to.y = 80, 80
+    core.root_view:update()
+    test.equal(book.search.position.y, search_y)
+    test.equal(capture(), header)
+  end)
+end)
+
 test.describe("settings scrolling", function()
   test.before_each(function(context)
     context.scale = SCALE
@@ -505,7 +843,8 @@ test.describe("settings scrolling", function()
           for _, pane in ipairs(view.core_sections.panes) do pane.expanded = true end
         end
         for _ = 1, 40 do view:update() end
-        local pane = name == "keybindings" and view.keybinds or view[name]
+        local pane = name == "keybindings" and view.keybinds
+          or name == "core" and view.core_sections or view[name]
         local scroller = find_child(pane, ListBox) or pane
         test.ok(scroller:get_scrollable_size() > scroller.size.y + 31)
         capture()
@@ -527,7 +866,7 @@ test.describe("settings scrolling", function()
         for _, section in ipairs(view.core_sections.panes) do
           for _, widget in ipairs(section.container.childs) do
             local reset = widget.reset_button
-            if reset then
+            if reset and reset.visible then
               local heading = reset.heading
               if reset.position.ry == heading.position.ry then
                 test.ok(reset.position.rx >= heading:get_right())
@@ -572,7 +911,7 @@ test.describe("installed plugin layout", function()
       local view = context.view
       local pane = view.plugin_sections:get_pane("enable_disable")
       local list = find_child(pane.container, WidgetList)
-      local parent_bar, child_bar = view.plugins.v_scrollbar, list.v_scrollbar
+      local parent_bar, child_bar = view.plugin_sections.v_scrollbar, list.v_scrollbar
       parent_bar:set_forced_status(status == "expanded" and status or false)
       view:update()
       local x, y, w, h = child_bar:get_thumb_rect()
@@ -635,7 +974,7 @@ test.describe("installed plugin layout", function()
       local view = context.view
       local pane = view.plugin_sections:get_pane("enable_disable")
       local list = find_child(pane.container, WidgetList)
-      local parent_bar, child_bar = view.plugins.v_scrollbar, list.v_scrollbar
+      local parent_bar, child_bar = view.plugin_sections.v_scrollbar, list.v_scrollbar
       parent_bar:set_forced_status(status == "expanded" and status or false)
       view:update()
       local x, y, w, h = parent_bar:get_thumb_rect()
@@ -649,14 +988,14 @@ test.describe("installed plugin layout", function()
       view:on_mouse_moved(x, y, 0, 0)
       test.not_ok(parent_bar.hovering.track)
       test.ok(child_bar.hovering.thumb)
-      local parent_scroll = view.plugins.scroll.to.y
+      local parent_scroll = view.plugin_sections.scroll.to.y
       view:on_mouse_pressed("left", x, y, 1)
       test.equal(view.captured_widget, list)
       test.ok(child_bar.dragging)
       test.not_ok(parent_bar.dragging)
       view:on_mouse_moved(x, y + 60, 0, 60)
       test.ok(list.scroll.to.y > 0)
-      test.equal(view.plugins.scroll.to.y, parent_scroll)
+      test.equal(view.plugin_sections.scroll.to.y, parent_scroll)
       view:on_mouse_released("left", 900, 700)
       test.not_ok(child_bar.dragging)
       test.is_nil(view.captured_widget)
