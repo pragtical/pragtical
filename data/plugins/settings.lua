@@ -2435,12 +2435,12 @@ function Settings:load_color_settings()
 
   ---@param self widget
   function self.colors:update_positions()
-    textbox:set_position(0, 0)
-    textbox:set_size(self:get_width() - self.border.width * 2)
+    textbox:set_position(style.padding.x / 2, style.padding.y)
+    textbox:set_size(math.max(0, self.size.x - style.padding.x))
     listbox:set_position(0, textbox:get_bottom())
     listbox:set_size(
       self:get_width() - self.border.width * 2,
-      self:get_height() - textbox:get_height()
+      math.max(0, self.size.y - textbox:get_bottom())
     )
   end
 end
@@ -2727,12 +2727,12 @@ function Settings:load_keymap_settings()
 
   ---@param self widget
   function self.keybinds:update_positions()
-    textbox:set_position(0, 0)
-    textbox:set_size(self:get_width() - self.border.width * 2)
+    textbox:set_position(style.padding.x / 2, style.padding.y)
+    textbox:set_size(math.max(0, self.size.x - style.padding.x))
     listbox:set_position(0, textbox:get_bottom())
     listbox:set_size(
       self:get_width() - self.border.width * 2,
-      self:get_height() - textbox:get_height()
+      math.max(0, self.size.y - textbox:get_bottom())
     )
   end
 end
@@ -2935,15 +2935,16 @@ function Settings:update()
 
   for _, section in ipairs({self.core_sections, self.plugin_sections}) do
     if section.parent:is_visible() then
-      local width = section.parent.size.x
+      local margin = style.padding.x / 2
+      local width = section.parent.size.x - margin * 2
       if section == self.plugin_sections and self.plugin_button then
         width = width - self.plugin_button:get_width() - style.padding.x
         self.plugin_button:set_position(
-          self:get_width() - self.plugin_button:get_width() - style.padding.x,
-          (section.search:get_height() - self.plugin_button:get_height()) / 2
+          section.parent.size.x - self.plugin_button:get_width() - margin,
+          style.padding.y + (section.search:get_height() - self.plugin_button:get_height()) / 2
         )
       end
-      section.search:set_position(0, 0)
+      section.search:set_position(margin, style.padding.y)
       section.search:set_size(math.max(0, width))
       local top = section.search:get_bottom() + style.padding.y
       section.empty:set_position(style.padding.x, top + style.padding.y)
