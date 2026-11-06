@@ -12,8 +12,8 @@
 #define RENCACHE_CELL_SIZE 60 /* common divisor of width and height */
 /* 128 X cells */
 #define RENCACHE_CELLS_X (7680 / RENCACHE_CELL_SIZE)
-/* 72 Y cells with additional 1 cell padding to prevent hash crash */
-#define RENCACHE_CELLS_Y ((4320 + RENCACHE_CELL_SIZE) / RENCACHE_CELL_SIZE)
+/* 72 Y cells; larger targets use full-frame replay. */
+#define RENCACHE_CELLS_Y (4320 / RENCACHE_CELL_SIZE)
 
 typedef struct RenCache RenCache;
 typedef struct RenBackend RenBackend;
@@ -39,6 +39,7 @@ struct RenCache {
   unsigned *cells;
   RenRect rect_buf[RENCACHE_CELLS_X * RENCACHE_CELLS_Y / 2];
   bool resize_issue;
+  bool invalidated;
   RenRect screen_rect;
   RenRect last_clip_rect;
   void *target;
@@ -50,6 +51,12 @@ struct RenCache {
   uint64_t revision;
   const RenBackend *backend;
   RenSurface rensurface;
+  /* Large window lists retain one deterministic command snapshot. Comparing
+   * it avoids grid hashing for unchanged or densely changing frames. */
+  uint8_t *previous_command_buf;
+  size_t previous_command_size;
+  size_t previous_command_capacity;
+  bool cells_valid;
 };
 
 void rencache_init(RenCache *rc);

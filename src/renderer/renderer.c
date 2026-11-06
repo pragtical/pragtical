@@ -143,6 +143,7 @@ typedef struct RenFont {
   float size, space_advance, color_scale;
   unsigned short baseline, height, tab_size;
   unsigned short underline_thickness;
+  RenRect glyph_bounds;
   ERenFontAntialiasing antialiasing;
   ERenFontHinting hinting;
   unsigned char style;
@@ -1266,6 +1267,23 @@ static int font_set_face_metrics(RenFont *font, FT_Face face) {
   if(!font->underline_thickness)
     font->underline_thickness = ceil((double) font->height / 14.0);
 
+  /* Account for synthetic slant and leave room for hinting/emboldening. */
+  double scale = face->units_per_EM ? font->size / face->units_per_EM : 1.0 / 64.0;
+  double slant = font->style & FONT_STYLE_ITALIC ? 0.25 : 0;
+  double left = floor((face->bbox.xMin + slant * face->bbox.yMin) * scale) - 2;
+  double top = floor(-face->bbox.yMax * scale) - 2;
+  font->glyph_bounds = (RenRect) { left, top,
+    ceil((face->bbox.xMax + slant * face->bbox.yMax) * scale) + 2 - left,
+    ceil(-face->bbox.yMin * scale) + 2 - top
+  };
+  if (!FT_IS_SCALABLE(face)) {
+    font->glyph_bounds = (RenRect) {
+      -font->size, -font->baseline - 1,
+      fmax(font->size, face->size->metrics.max_advance / 64.0) + font->size + 1,
+      font->height + font->baseline + 2
+    };
+  }
+
   if ((err = FT_Load_Char(face, ' ', (font_set_load_options(font) | FT_LOAD_BITMAP_METRICS_ONLY | FT_LOAD_NO_HINTING) & ~FT_LOAD_FORCE_AUTOHINT)) != 0)
     return err;
   font->space_advance = face->glyph->advance.x / 64.0f;
@@ -1576,6 +1594,19 @@ void ren_font_group_set_size(RenFont **fonts, float size) {
 
 int ren_font_group_get_height(RenFont **fonts) {
   return fonts[0]->height;
+}
+
+RenRect ren_font_group_get_text_bounds(RenFont **fonts, double x, double y, double width) {
+  double left = 0, top = 0, right = 0;
+  double bottom = fonts[0]->height + fonts[0]->underline_thickness;
+  for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
+    RenRect bounds = fonts[i]->glyph_bounds;
+    left = SDL_min(left, bounds.x);
+    top = SDL_min(top, fonts[0]->baseline + bounds.y);
+    right = SDL_max(right, bounds.x + bounds.width);
+    bottom = SDL_max(bottom, fonts[0]->baseline + bounds.y + bounds.height);
+  }
+  return (RenRect) { x + left, y + top, width + right - left, bottom - top };
 }
 
 int ren_font_group_get_style(RenFont **fonts) {

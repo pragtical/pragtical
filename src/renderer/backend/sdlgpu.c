@@ -5672,10 +5672,11 @@ static size_t gpu_full_frame_command_threshold(void) {
   return threshold > (unsigned long long) SIZE_MAX ? SIZE_MAX : (size_t) threshold;
 }
 
-static bool gpu_use_full_frame_regions(RenCache *rc) {
+static bool gpu_use_full_frame_regions(RenCache *rc, bool *force) {
   if (!rc || !rc->window_target || !gpu_direct_replay_enabled())
     return false;
-  if (gpu_full_frame_regions_enabled())
+  *force = gpu_full_frame_regions_enabled();
+  if (*force)
     return true;
 
   size_t threshold = gpu_full_frame_command_threshold();
