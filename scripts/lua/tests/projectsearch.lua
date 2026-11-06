@@ -298,6 +298,7 @@ test.describe("projectsearch", function()
       end
       if context.old_begin_search then global.begin_search = context.old_begin_search end
       projectsearch.hide()
+      for _ = 1, 80 do core.root_view:update() end
     end
     config.plugins.projectsearch.live_search = context.old_live_search
     config.plugins.projectsearch.threading.workers = context.old_workers
@@ -309,7 +310,7 @@ test.describe("projectsearch", function()
     end
     projectsearch.set_position(context.old_position)
     treeview:set_toolbar_position(context.old_toolbar_position)
-    treeview.visible = context.old_tree_visible
+    treeview:set_visible(context.old_tree_visible)
     core.root_view.size.x, core.root_view.size.y = context.root_size.x, context.root_size.y
     config.transitions = context.old_transitions
     config.animation_type, config.animation_rate = context.old_animation_type, context.old_animation_rate
@@ -804,7 +805,7 @@ test.describe("projectsearch", function()
   end)
   ---Prepare a global search without launching workers and optionally populate matches.
   ---@param context table Temporary project fixture
-  ---@param position "left"|"right"|"center" Requested placement
+  ---@param position "left"|"right"|"top"|"bottom"|"center" Requested placement
   ---@param results? boolean Populate two files with one match each
   ---@return plugins.projectsearch.resultsview view Shown global search
   ---@return core.docview source Original document view
@@ -833,53 +834,59 @@ test.describe("projectsearch", function()
   end
 
   for _, animation_type in ipairs { "linear", "constant" } do
-    for _, position in ipairs { "left", "right" } do
-      test.test(animation_type .. " " .. position .. " search shortcut animates opening and closing", function(context)
-        treeview.visible = true
-        treeview:set_toolbar_position("right")
-        local view, source = global_search(context, position, true)
+    for _, position in ipairs { "left", "right", "top", "bottom" } do
+      test.test(animation_type .. " " .. position .. " search shortcut animates its Widget size", function(context)
+        local view, source = global_search(context, position)
         local root = core.root_view
-        view:set_target_size("x", 460 * SCALE)
-        root:update()
-        local width, items = view:get_width(), view.results_list.items
+        local axis = (position == "left" or position == "right") and "x" or "y"
+        local target = (axis == "x" and 420 or 300) * SCALE
+        root:set_dock_size(position, target)
         projectsearch.hide()
+        treeview:set_visible(true)
+        root:update()
+        local replacement_size = position == "left" and treeview.dock_size.x * SCALE or 0
         config.transitions, config.animation_type, config.animation_rate = true, animation_type, 1
         config.fps, core.fps = 60, 60
-        local function toggle()
-          keymap.modkeys = { [split_click_modifier] = true, shift = true }
-          core.on_event("keypressed", "f")
-          keymap.modkeys = {}
-        end
-        toggle()
+        core.set_active_view(source)
+        keymap.modkeys = { [split_click_modifier] = true, shift = true }
+        core.on_event("keypressed", "f")
+        keymap.modkeys = {}
         root:update()
-        test.ok(view.size.x > 0 and view:get_width() < width)
-        local opening_width = view.size.x
+        local dock = root:get_dock(position)
+        test.equal(dock.active_view, view)
+        test.ok(dock.size[axis] > 0 and dock.size[axis] < target)
+        local extent = view.size[axis]
         projectsearch.show()
-        test.near(view.size.x, opening_width, 0.01)
         root:update()
-        test.ok(view.size.x > opening_width)
+        test.ok(view.size[axis] > extent)
         for _ = 1, 80 do root:update() end
-        test.near(view:get_width(), width, 0.01)
+        test.near(dock.size[axis], target, 0.01)
+        test.near(view.dock_size[axis], target / SCALE, 0.01)
         test.equal(#view.animations, 0)
         settle_focus(view, view.find_text.textview)
-        toggle()
+        projectsearch.hide()
         test.equal(core.active_view, source)
         root:update()
-        test.ok(view:is_visible())
-        test.ok(view.size.x > 0 and view:get_width() < width)
-        for _ = 1, 80 do root:update() end
+        test.ok(dock.size[axis] > 0 and dock.size[axis] < target)
+        local previous = dock.size[axis]
+        for _ = 1, 80 do
+          root:update()
+          test.ok(dock.size[axis] >= replacement_size - 0.01)
+          test.ok(dock.size[axis] <= previous + 0.01)
+          previous = dock.size[axis]
+        end
         test.not_ok(view:is_visible())
-        test.equal(view.size.x, 0)
-        test.equal(treeview.size.x, common.round(treeview.target_size))
+        test.is_nil(root:get_dock_for_view(view))
+        test.near(view.dock_size[axis], target / SCALE, 0.01)
         test.equal(#view.animations, 0)
-        test.near(view:get_width(), width, 0.01)
-        test.equal(view.results_list.items, items)
-        toggle()
+        if position == "left" then
+          test.equal(dock.active_view, treeview)
+          test.near(dock.size.x, replacement_size, 0.01)
+        end
+        projectsearch.show()
+        root:update()
+        test.ok(dock.size[axis] > 0 and dock.size[axis] < target)
         for _ = 1, 80 do root:update() end
-        test.ok(view:is_visible())
-        test.near(view:get_width(), width, 0.01)
-        test.equal(#view.animations, 0)
-        test.equal(view.results_list.items, items)
       end)
     end
   end
@@ -947,6 +954,45 @@ test.describe("projectsearch", function()
       test.is_nil(view.floating_transition)
     end)
   end
+
+  test.test("docked search retains inherited Widget resizing and placement", function(context)
+    local view = global_search(context, "left")
+    local root = core.root_view
+    root:set_dock_size("left", 420 * SCALE)
+    config.transitions, config.animation_type, config.animation_rate = true, "linear", 1
+    config.fps, core.fps = 60, 60
+    root:update()
+    test.near(view.dock_size.x, 420, 0.01)
+    test.equal(#view.animations, 0)
+    root:set_dock_size("left", 360 * SCALE)
+    root:update()
+    test.equal(#view.animations, 0)
+    test.near(root:get_dock("left").size.x, 360 * SCALE, 0.01)
+    root:move_dock_view(view, "bottom")
+    root:update()
+    test.equal(#view.animations, 0)
+    test.near(view.dock_size.x, 360, 0.01)
+    test.near(root:get_dock("bottom").size.y, view.dock_size.y * SCALE, 0.01)
+  end)
+
+  test.test("a constrained Widget reveal retains its requested width for a larger viewport", function(context)
+    local view = global_search(context, "right")
+    local root = core.root_view
+    root:set_dock_size("right", 420 * SCALE)
+    projectsearch.hide()
+    root.size.x = 300 * SCALE
+    root:update()
+    config.transitions, config.animation_type, config.animation_rate = true, "linear", 1
+    config.fps, core.fps = 60, 60
+    projectsearch.show()
+    for _ = 1, 80 do root:update() end
+    test.equal(view.dock_size.x, 420)
+    test.ok(view:get_width() < 420 * SCALE)
+    test.equal(#view.animations, 0)
+    root.size.x = 1400 * SCALE
+    root:update()
+    test.near(view:get_width(), 420 * SCALE, 0.01)
+  end)
 
   test.test("centered live search keeps its surface and border visible between results", function(context)
     local view = global_search(context, "center", true)
@@ -1111,12 +1157,12 @@ test.describe("projectsearch", function()
     local items, input = view.results_list.items, view.find_text
     view.filters_toggle:set_toggle(true)
     view.includes_text:set_text("src/**")
-    treeview.visible = true
+    treeview:set_visible(true)
     projectsearch.hide()
     projectsearch.show({ text = "needle" })
     settle_focus(view, input.textview)
-    test.not_ok(treeview.visible)
-    for _, position in ipairs { "right", "center", "left", "center", "right", "left" } do
+    test.ok(treeview.visible)
+    for _, position in ipairs { "right", "top", "bottom", "center", "left", "center", "right", "left" } do
       projectsearch.set_position(position)
       core.root_view:update(); core.root_view:update()
       test.equal(view.display_position, position)
@@ -1127,15 +1173,17 @@ test.describe("projectsearch", function()
       test.equal(view.results_list.selected, 2)
       test.equal(core.root_view.root_node:get_node_for_view(source), editor_node)
       test.equal(not not view.floating_visible, position == "center")
-      test.equal(treeview.visible, position ~= "left")
+      test.ok(treeview.visible)
       local node = core.root_view.root_node:get_node_for_view(view)
       if position == "center" then
         test.is_nil(node)
       else
         test.not_nil(node)
-        test.near(view:get_width(), sidebar_width, 0.01)
-        local parent = node:get_parent_node(core.root_view.root_node)
-        test.equal(position == "left" and parent.a or parent.b, node)
+        local dock = core.root_view:get_dock_for_view(view)
+        test.equal(dock.dock_side, position)
+        test.equal(dock.active_view, view)
+        test.near(view:get_width(), dock.size.x, 0.01)
+        test.near(view:get_height() + (dock:should_show_tabs() and dock.dock_header.height or 0), dock.size.y, 0.01)
       end
     end
     local selector
@@ -1154,7 +1202,7 @@ test.describe("projectsearch", function()
   test.test("side placement survives toolbar docking changes", function(context)
     local view, source = global_search(context, "left", true)
     local editor = core.root_view.root_node:get_node_for_view(source)
-    for _, side in ipairs { "left", "right" } do
+    for _, side in ipairs { "left", "right", "top", "bottom" } do
       projectsearch.set_position(side)
       for _, position in ipairs { "left", "top", "bottom", "right" } do
         treeview:set_toolbar_position(position)
@@ -1165,6 +1213,34 @@ test.describe("projectsearch", function()
         test.not_nil(core.root_view.root_node:get_node_for_view(treeview.toolbar))
       end
     end
+  end)
+
+  test.test("tree focus selects its dock layout and returns to the previous search input", function(context)
+    local view = global_search(context, "left")
+    local query, items, focused = view.find_text:get_text(), view.results_list.items, core.active_view
+    local dock = core.root_view:get_dock("left")
+    test.equal(dock.active_view, view)
+    test.ok(command.perform("treeview:toggle-focus"))
+    core.root_view:update(); core.root_view:update()
+    test.equal(dock.active_view, treeview)
+    test.equal(core.active_view, treeview)
+    test.ok(view.visible)
+    test.not_ok(view:is_visible())
+    test.ok(command.perform("treeview:toggle-focus"))
+    core.root_view:update(); core.root_view:update()
+    test.equal(dock.active_view, view)
+    test.equal(core.active_view, focused)
+    test.equal(view.find_text:get_text(), query)
+    test.equal(view.results_list.items, items)
+    projectsearch.set_position("right")
+    projectsearch.show()
+    settle_focus(view, view.find_text.textview)
+    test.ok(command.perform("treeview:toggle-focus"))
+    core.root_view:update(); core.root_view:update()
+    test.ok(view:is_visible())
+    test.equal(core.root_view:get_dock("right").active_view, view)
+    test.equal(core.root_view:get_dock("left").active_view, treeview)
+    test.equal(core.active_view, treeview)
   end)
 
   test.test("centered search focuses input when empty and results when reopening", function(context)

@@ -11,12 +11,28 @@ local View = require "core.view"
 ---@field y boolean
 
 ---@alias core.node.type "leaf" | "hsplit" | "vsplit"
+---@alias core.node.dock_side "top" | "right" | "bottom" | "left"
+
+---Cached dock header labels and geometry; menu entries are built only on opening.
+---@class core.node.dock_header
+---@field labels string[] View titles in registration order
+---@field views core.view[] View identities corresponding to the cached titles
+---@field widths number[] Natural tab widths in pixels
+---@field font renderer.font Measured title font
+---@field font_size number Font size at measurement time
+---@field scale number Interface scale at measurement time
+---@field padding number Horizontal title padding
+---@field padding_y number Vertical title padding
+---@field width number Available dock width
+---@field height number Header height
+---@field button number Hide button width
+---@field compact boolean Use an active title and selector instead of tabs
 
 ---Represents a container in the UI layout tree.
 ---Nodes can be either "leaf" (contains views/tabs) or split (contains two child nodes).
 ---The root node forms a binary tree structure that defines the editor's layout.
 ---@class core.node : core.object
----@overload fun(type?: string):core.node
+---@overload fun(type?: string, empty?: boolean):core.node
 ---@field type core.node.type
 ---@field position core.view.position
 ---@field size core.view.position
@@ -35,19 +51,30 @@ local View = require "core.view"
 ---@field resizable boolean?
 ---@field is_primary_node boolean?
 ---@field move_towards function
+---@field dock_side? core.node.dock_side Predefined workspace dock, never a document pane
+---@field dock_visible? boolean Requested area visibility
+---@field dock_extent? number Initial thickness for views without a requested size, in scale-independent units
+---@field dock_limit? number Thickness available in the current layout, in pixels
+---@field dock_structure? boolean Preserve this workspace branch during document closure
+---@field dock_workspace? boolean Fit dock requests before laying out this workspace branch
+---@field dock_header? core.node.dock_header Cached dock labels, widths, and header geometry
+---@field dock_menu? core.contextmenu Header selector or movement menu
+---@field dock_layouts? table<core.view, core.node> Independent split tree for each registered view
+---@field dock_content? boolean Node inside a dock view layout
 local Node = Object:extend()
 
 function Node:__tostring() return "Node" end
 
 ---Constructor - creates a new node.
 ---@param type? string Node type: "leaf" (contains views), "hsplit", or "vsplit"
-function Node:new(type)
+---@param empty? boolean Leave a leaf empty when constructing a managed dock
+function Node:new(type, empty)
   self.type = type or "leaf"
   self.position = { x = 0, y = 0 }
   self.size = { x = 0, y = 0 }
   self.views = {}
   self.divider = 0.5
-  if self.type == "leaf" then
+  if self.type == "leaf" and not empty then
     self:add_view(EmptyView())
   end
   self.hovered_close = 0
@@ -127,20 +154,28 @@ local type_map = { up="vsplit", down="vsplit", left="hsplit", right="hsplit" }
 ---Split this leaf node in a direction, creating two child nodes.
 ---Converts this node from "leaf" to "hsplit" or "vsplit" containing two children.
 ---The original content stays in one child, new view (if provided) goes in the other.
+---On a dock, splits its active registered view's layout instead of the shared area.
 ---@param dir string Direction to split: "up", "down", "left", or "right"
 ---@param view? core.view Optional view to add to the new split
 ---@param locked? table Optional {x=boolean, y=boolean} to lock the new node's size
 ---@param resizable? boolean If true, locked node can be resized by user (needs set_target_size)
 ---@return core.node new_node The newly created child node
 function Node:split(dir, view, locked, resizable)
+  if self.dock_side then
+    assert(self.active_view, "Cannot split an empty dock")
+    return self.dock_layouts[self.active_view]:get_node_for_view(self.active_view)
+      :split(dir, view, locked, resizable)
+  end
+  local dock_content = self.dock_content
   assert(self.type == "leaf", "Tried to split non-leaf node")
   local node_type = assert(type_map[dir], "Invalid direction")
   local last_active = core.active_view
-  local child = Node()
+  local child = Node("leaf", true)
   child:consume(self)
   self:consume(Node(node_type))
   self.a = child
   self.b = Node()
+  if dock_content then self.dock_content, self.a.dock_content, self.b.dock_content = true, true, true end
   if view then self.b:add_view(view) end
   if locked then
     assert(type(locked) == 'table')
@@ -162,6 +197,8 @@ end
 ---@param root core.node The root node of the tree
 ---@param view core.view View to remove
 function Node:remove_view(root, view)
+  local dock = core.root_view:get_dock_for_view(view)
+  if dock and dock:get_view_idx(view) then return core.root_view:remove_dock_view(view) end
   if #self.views > 1 then
     local idx = self:get_view_idx(view)
     if idx < self.tab_offset then
@@ -240,7 +277,7 @@ function Node:add_view(view, idx)
   )
   if view.floating then view:set_floating(false) end
   assert(self.type == "leaf", "Tried to add view to non-leaf node")
-  assert(not self.locked, "Tried to add view to locked node")
+  assert(not self.locked, "Use RootView:add_dock_view() for docks and locked panels")
   if self.views[1] and self.views[1]:is(EmptyView) then
     table.remove(self.views)
     if idx and idx > 1 then
@@ -257,6 +294,7 @@ end
 ---Updates global active view and notifies the previously active view.
 ---@param view core.view View to make active
 function Node:set_active_view(view)
+  if self.dock_side then return core.root_view:activate_dock_view(view) end
   assert(self.type == "leaf", "Tried to set active view on non-leaf node")
   local last_active_view = self.active_view
   self.active_view = view
@@ -282,6 +320,13 @@ end
 ---@param view core.view View to search for
 ---@return core.node? node The node containing the view, or nil if not found
 function Node:get_node_for_view(view)
+  if self.dock_side then
+    for _, registered in ipairs(self.views) do
+      local node = self.dock_layouts[registered]:get_node_for_view(view)
+      if node then return node end
+    end
+    return
+  end
   for _, v in ipairs(self.views) do
     if v == view then return self end
   end
@@ -290,11 +335,39 @@ function Node:get_node_for_view(view)
   end
 end
 
+---Find a leaf containing a view or its container descendant without building a view list.
+---@param target core.view Focus target to locate
+---@return core.node? node Containing leaf, or nil when absent
+function Node:get_node_for_owned_view(target)
+  if self.dock_side then
+    for _, view in ipairs(self.views) do
+      local node = self.dock_layouts[view]:get_node_for_owned_view(target)
+      if node then return node end
+    end
+  else
+    for _, view in ipairs(self.views) do
+      if view == target or view:owns_view(target) then return self end
+    end
+    if self.type ~= "leaf" then
+      return self.a:get_node_for_owned_view(target) or self.b:get_node_for_owned_view(target)
+    end
+  end
+end
+
 
 ---Find the parent node of this node in the tree.
 ---@param root core.node Root node to search from
 ---@return core.node? parent The parent node, or nil if this is root or not found
 function Node:get_parent_node(root)
+  if root.dock_side then
+    for _, view in ipairs(root.views) do
+      local layout = root.dock_layouts[view]
+      if layout == self then return root end
+      local parent = self:get_parent_node(layout)
+      if parent then return parent end
+    end
+    return
+  end
   if root.a == self or root.b == self then
     return root
   elseif root.type ~= "leaf" then
@@ -309,6 +382,10 @@ end
 ---@return table views List of all views in this subtree
 function Node:get_children(t)
   t = t or {}
+  if self.dock_side then
+    for _, view in ipairs(self.views) do self.dock_layouts[view]:get_children(t) end
+    return t
+  end
   for _, view in ipairs(self.views) do
     table.insert(t, view)
   end
@@ -336,6 +413,10 @@ end
 ---@return core.node? node The node whose divider is under the point, or nil
 function Node:get_divider_overlapping_point(px, py)
   if self.size.x <= 0 or self.size.y <= 0 then return end
+  if self.dock_side then
+    local layout = self.dock_visible and self.active_view and self.dock_layouts[self.active_view]
+    return layout and layout:get_divider_overlapping_point(px, py)
+  end
   if self.type ~= "leaf" then
     local axis = self.type == "hsplit" and "x" or "y"
     if self.a:is_resizable(axis) and self.b:is_resizable(axis) then
@@ -367,6 +448,17 @@ end
 ---@param py number Screen y coordinate
 ---@return integer? idx Tab index, or nil if not over any tab
 function Node:get_tab_overlapping_point(px, py)
+  if self.dock_side then
+    local header = self.dock_header
+    if not self:should_show_tabs() or not header or header.compact then return end
+    if py < self.position.y or py >= self.position.y + header.height then return end
+    local x = self.position.x
+    for i, width in ipairs(header.widths) do
+      if px >= x and px < x + width then return i end
+      x = x + width
+    end
+    return
+  end
   if not self:should_show_tabs() then return nil end
   local tabs_number = self:get_visible_tabs_number()
   local x1, y1, w, h = self:get_tab_rect(self.tab_offset)
@@ -381,6 +473,8 @@ end
 ---Based on config settings, number of views, and drag state.
 ---@return boolean show True if tabs should be displayed
 function Node:should_show_tabs()
+  if self.dock_side then return self.dock_visible and #self.views > 1 end
+  if self.dock_content then return #self.views > 1 end
   if self.locked then return false end
   local dn = core.root_view.dragged_node
   if config.hide_tabs then
@@ -413,6 +507,7 @@ end
 ---@param py number Screen y coordinate
 ---@return integer? idx Button index (1=left, 2=right), or nil
 function Node:get_scroll_button_index(px, py)
+  if self.dock_side then return end
   if #self.views == 1 then return end
   for i = 1, 2 do
     local x, y, w, h = self:get_scroll_button_rect(i)
@@ -433,6 +528,7 @@ function Node:tab_hovered_update(px, py)
   if not self:should_show_tabs() then self.hovered_tab = nil return end
   local tab_index = self:get_tab_overlapping_point(px, py)
   self.hovered_tab = tab_index
+  if self.dock_side then return end
   if tab_index then
     local x, y, w, h = self:get_tab_rect(tab_index)
     local cx, cw = close_button_location(x, w)
@@ -451,8 +547,15 @@ end
 ---@param y number Screen y coordinate
 ---@return core.node node The leaf node at this point
 function Node:get_child_overlapping_point(x, y)
+  if (self.dock_side or self.dock_structure or self.dock_content)
+    and (self.size.x <= 0 or self.size.y <= 0) then return end
   local child
   if self.type == "leaf" then
+    if self.dock_side then
+      if not self.active_view or not self.dock_visible then return end
+      if self:is_in_tab_area(x, y) then return self end
+      return self.dock_layouts[self.active_view]:get_child_overlapping_point(x, y)
+    end
     return self
   elseif self.type == "hsplit" then
     child = (x < self.b.position.x) and self.a or self.b
@@ -531,6 +634,13 @@ end
 ---@return number? sx Locked width, or nil if not locked on x-axis
 ---@return number? sy Locked height, or nil if not locked on y-axis
 function Node:get_locked_size()
+  if self.dock_side then
+    local axis = self.locked.x and "x" or "y"
+    local extent = self.dock_visible and self.active_view
+      and (self.dock_limit or self.active_view.dock_size[axis] * SCALE) or 0
+    if self.dock_side == "left" or self.dock_side == "right" then return extent end
+    return nil, extent
+  end
   if self.type == "leaf" then
     if self.locked then
       local size = self.active_view.size
@@ -558,6 +668,64 @@ function Node:get_locked_size()
       sx = x1 or x2
     end
     return sx, sy
+  end
+end
+
+---Find the visible view that would replace a departing registered owner.
+---Prefer the next entry, then preceding entries, without revealing hidden views.
+---@private
+---@param view core.view Departing registered owner
+---@return core.view? replacement Next eligible view, or nil when the dock will close
+function Node:get_dock_replacement(view)
+  local index = self:get_view_idx(view)
+  if not index then return end
+  local axis = self.locked.x and "x" or "y"
+  for i = index + 1, #self.views do
+    local candidate = self.views[i]
+    self:sync_dock_size(candidate)
+    if candidate.visible ~= false and candidate.dock_size[axis] > 0 then return candidate end
+  end
+  for i = index - 1, 1, -1 do
+    local candidate = self.views[i]
+    self:sync_dock_size(candidate)
+    if candidate.visible ~= false and candidate.dock_size[axis] > 0 then return candidate end
+  end
+end
+
+---Resolve a dock's current request, keeping a closing handoff within its replacement's size.
+---The outgoing view continues its own animation; only the allocated dock thickness is bounded.
+---@private
+---@return number extent Requested outer thickness in pixels
+function Node:get_dock_request()
+  local view = self.active_view
+  if not view then return 0 end
+  self:sync_dock_size(view)
+  if not self.dock_visible then return 0 end
+  local layout = view.dock_layout
+  local replacement = layout.destination == 0 and self:get_dock_replacement(view)
+  if replacement and view.size[layout.axis] == 0 then
+    core.root_view:activate_dock_view(replacement, false)
+    view = replacement
+  end
+  local visible = not view.is_visible or view:is_visible()
+  local extent = visible and view.dock_size[layout.axis] * SCALE or 0
+  if replacement then extent = math.max(extent, replacement.dock_size[layout.axis] * SCALE) end
+  return extent
+end
+
+---Remember explicit or animated size changes without mistaking layout constraints for requests.
+---@private
+---@param view core.view Registered owner whose size may have changed since layout
+function Node:sync_dock_size(view)
+  local layout = view.dock_layout
+  if not layout then return end
+  local size = view.size[layout.axis]
+  if size ~= layout.size then
+    local _, _, width, height = view:get_floating_bounds()
+    local outer_size = layout.axis == "x" and width or height
+    local extent = math.max(0, layout.extent + outer_size - layout.outer_size)
+    view.dock_size[layout.axis] = extent / SCALE
+    layout.size, layout.outer_size, layout.extent = size, outer_size, extent
   end
 end
 
@@ -601,9 +769,32 @@ end
 ---Recursively calculates layout for the entire subtree.
 ---Accounts for tabs, locked sizes, and divider positions.
 function Node:update_layout()
+  if self.dock_workspace then core.root_view:fit_docks(self.size.x, self.size.y) end
   if self.type == "leaf" then
     local av = self.active_view
-    if self:should_show_tabs() then
+    if self.dock_side then
+      self:update_dock_header()
+      if not av or not self.dock_visible then return end
+      if self.size[self.locked.x and "x" or "y"] <= 0 then return end
+      local header = self:should_show_tabs() and self.dock_header.height or 0
+      local layout = self.dock_layouts[av]
+      layout.position.x, layout.position.y = self.position.x, self.position.y + header
+      layout.size.x, layout.size.y = self.size.x, math.max(0, self.size.y - header)
+      layout:update_layout()
+      local _, _, width, height = av:get_floating_bounds()
+      av.dock_layout.size = av.size[av.dock_layout.axis]
+      av.dock_layout.outer_size = av.dock_layout.axis == "x" and width or height
+      av.dock_layout.extent = self.size[av.dock_layout.axis]
+      return
+    end
+    if not av then return end
+    if self.dock_content then
+      local header = self:should_show_tabs() and select(4, self:get_tab_rect(1)) or 0
+      local x, y, w, h = self.position.x, self.position.y + header,
+        self.size.x, math.max(0, self.size.y - header)
+      local bx, by, bw, bh = av:get_floating_bounds()
+      if x ~= bx or y ~= by or w ~= bw or h ~= bh then av:set_floating_bounds(x, y, w, h) end
+    elseif self:should_show_tabs() then
       local _, _, _, th = self:get_tab_rect(1)
       th = math.min(th, self.size.y)
       av.position.x, av.position.y = self.position.x, self.position.y + th
@@ -686,6 +877,14 @@ end
 ---For split nodes: recursively updates both children.
 function Node:update()
   if self.type == "leaf" then
+    if self.dock_side then
+      if not self.dock_visible or not self.active_view then return end
+      -- Only an animation run during this update may constrain a closing handoff.
+      self.active_view.dock_layout.destination = nil
+      self.dock_layouts[self.active_view]:update()
+      self:tab_hovered_update(core.root_view.mouse.x, core.root_view.mouse.y)
+      return
+    end
     self:scroll_tabs_to_visible()
     local view = self.active_view
     view:update()
@@ -840,13 +1039,19 @@ end
 function Node:draw()
   if self.size.x <= 0 or self.size.y <= 0 then return end
   if self.type == "leaf" then
+    if self.dock_side and (not self.dock_visible or not self.active_view) then return end
     if self:should_show_tabs() then
-      self:draw_tabs()
+      if self.dock_side then self:draw_dock_header() else self:draw_tabs() end
+    end
+    if self.dock_side then
+      self.dock_layouts[self.active_view]:draw()
+      return
     end
     local view = self.active_view
     local pos, size = view.position, view.size
     if view._core_step_first_update and size.x > 0 and size.y > 0 then
-      core.push_clip_rect(pos.x, pos.y, size.x, size.y)
+      if self.dock_content then core.push_clip_rect(self.position.x, self.position.y, self.size.x, self.size.y)
+      else core.push_clip_rect(pos.x, pos.y, size.x, size.y) end
       view:draw()
       core.pop_clip_rect()
     end
@@ -874,6 +1079,11 @@ end
 ---@param y number Screen y coordinate
 ---@return boolean in_tabs True if point is over the tab bar
 function Node:is_in_tab_area(x, y)
+  if self.dock_side then
+    return self:should_show_tabs() and self.dock_header
+      and x >= self.position.x and x < self.position.x + self.size.x
+      and y >= self.position.y and y < self.position.y + self.dock_header.height
+  end
   if not self:should_show_tabs() then return false end
   local _, ty, _, th = self:get_scroll_button_rect(1)
   return y >= ty and y < ty + th
@@ -884,6 +1094,17 @@ end
 ---Used when closing a project. May collapse empty nodes.
 ---@param keep_active boolean If true, keep the active view open
 function Node:close_all_docviews(keep_active)
+  if self.dock_side then
+    for i = #self.views, 1, -1 do
+      local view = self.views[i]
+      if view.context == "session" and (not keep_active or not view:owns_view(core.active_view)) then
+        core.root_view:remove_dock_view(view)
+      elseif view.context ~= "session" then
+        self.dock_layouts[view]:close_all_docviews(keep_active)
+      end
+    end
+    return
+  end
   local node_active_view = self.active_view
   local lost_active_view = false
   if self.type == "leaf" then
@@ -914,9 +1135,9 @@ function Node:close_all_docviews(keep_active)
   else
     self.a:close_all_docviews(keep_active)
     self.b:close_all_docviews(keep_active)
-    if self.a:is_empty() and not self.a.is_primary_node then
+    if self.a:is_empty() and not self.a.is_primary_node and not self.dock_structure then
       self:consume(self.b)
-    elseif self.b:is_empty() and not self.b.is_primary_node then
+    elseif self.b:is_empty() and not self.b.is_primary_node and not self.dock_structure then
       self:consume(self.a)
     end
   end
@@ -956,6 +1177,13 @@ function Node:resize(axis, value)
   -- placements of view elements, like the scrollbar, we round the value to be
   -- an integer.
   value = math.floor(value)
+  if self.dock_side then
+    if self.locked[axis] then
+      core.root_view:set_dock_size(self.dock_side, math.max(1, value))
+      return true
+    end
+    return
+  end
   if self.type == 'leaf' then
     -- If it is not locked we don't accept the
     -- resize operation here because for proportional panes the resize is
@@ -1062,6 +1290,133 @@ function Node:get_drag_overlay_tab_position(x, y, dragged_node, dragged_index)
     tab_x = tab_x - tab_w
   end
   return tab_index, tab_x, tab_y + margin_y, tab_w, tab_h - margin_y
+end
+
+---Refresh dock title measurements only when labels, font metrics, or width change.
+---Opening menus uses a snapshot; this cache never evaluates command predicates.
+function Node:update_dock_header()
+  if not self.dock_side then return end
+  local header = self.dock_header or { labels = {}, widths = {}, views = {} }
+  local changed = header.font ~= style.font or header.font_size ~= style.font:get_size()
+    or header.scale ~= SCALE or header.padding ~= style.padding.x
+    or header.padding_y ~= style.padding.y
+    or #header.labels ~= #self.views or header.width ~= self.size.x
+  for i, view in ipairs(self.views) do
+    local label = view:get_name() or "View"
+    if header.labels[i] ~= label or header.views[i] ~= view then changed = true end
+    header.labels[i], header.views[i] = label, view
+  end
+  for i = #header.labels, #self.views + 1, -1 do header.labels[i], header.views[i] = nil, nil end
+  if changed then
+    header.font, header.font_size = style.font, style.font:get_size()
+    header.scale, header.padding, header.width = SCALE, style.padding.x, self.size.x
+    header.padding_y = style.padding.y
+    header.height = style.font:get_height() + style.padding.y * 2
+    header.button = header.height
+    header.widths = {}
+    local total = 0
+    for i, label in ipairs(header.labels) do
+      local width = style.font:get_width(label) + style.padding.x * 2
+      header.widths[i], total = width, total + width
+    end
+    header.compact = total > math.max(0, self.size.x - header.button)
+    if self.dock_menu then self.dock_menu:hide() end
+    core.redraw = true
+  end
+  self.dock_header = header
+end
+
+---Open a snapshot of the dock's view selector or movement actions.
+---@param movement? boolean Show placement actions instead of registered views
+function Node:show_dock_menu(movement)
+  local ContextMenu = require "core.contextmenu"
+  if not self.dock_menu then self.dock_menu = ContextMenu() end
+  local root, items, active = core.root_view, {}, self.active_view
+  if not active then return end
+  if movement then
+    local positions = {}
+    for _, side in ipairs { "top", "right", "bottom", "left" } do
+      local target = side
+      positions[#positions + 1] = {
+        text = side:gsub("^%l", string.upper), checked = side == self.dock_side,
+        command = function() root:move_dock_view(active, target) end
+      }
+    end
+    items = {
+      { text = "Move Active View", items = positions },
+      { text = "Hide Dock", command = function() root:set_dock_visible(self.dock_side, false) end }
+    }
+  else
+    for i, view in ipairs(self.views) do
+      local target = view
+      items[#items + 1] = {
+        text = self.dock_header.labels[i], checked = view == active,
+        command = function() root:activate_dock_view(target) end
+      }
+    end
+  end
+  self.dock_menu:show_items(items, self.position.x, self.position.y + self.dock_header.height, {
+    owner = active, disabled = true
+  })
+end
+
+---Consume header clicks without forwarding them to the view or tab dragging.
+---@param button core.view.mousebutton Pressed mouse button
+---@param x number Screen x coordinate
+---@param y number Screen y coordinate
+---@return boolean handled Whether the point belongs to this dock's header
+function Node:on_dock_header_pressed(button, x, y)
+  if not self:is_in_tab_area(x, y) then return false end
+  if button == "right" then
+    self:show_dock_menu(true)
+  elseif button == "left" then
+    if x >= self.position.x + self.size.x - self.dock_header.button then
+      core.root_view:set_dock_visible(self.dock_side, false)
+    elseif self.dock_header.compact then
+      self:show_dock_menu()
+    else
+      local idx = self:get_tab_overlapping_point(x, y)
+      if idx then core.root_view:activate_dock_view(self.views[idx]) end
+    end
+  end
+  return true
+end
+
+---Draw title tabs or a compact selector, with one button to hide the area.
+function Node:draw_dock_header()
+  local header, x, y = self.dock_header, self.position.x, self.position.y
+  local width, height = self.size.x, self.dock_header.height
+  core.push_clip_rect(x, y, width, math.min(height, self.size.y))
+  renderer.draw_rect(x, y, width, height, style.background2)
+  renderer.draw_rect(x, y + height - style.divider_size, width, style.divider_size, style.divider)
+  local content_width = math.max(0, width - header.button)
+  core.push_clip_rect(x, y, content_width, height)
+  if header.compact then
+    local label = header.labels[self:get_view_idx(self.active_view)] or ""
+    core.push_clip_rect(x, y, math.max(0, content_width - header.button), height)
+    common.draw_text(style.font, style.text, label, nil,
+      x + style.padding.x, y, math.max(0, content_width - header.button - style.padding.x), height)
+    core.pop_clip_rect()
+    renderer.draw_poly({
+      { x + content_width - header.button * .7, y + height * .45 },
+      { x + content_width - header.button * .3, y + height * .45 },
+      { x + content_width - header.button * .5, y + height * .65 }
+    }, style.text)
+  else
+    for i, tab_width in ipairs(header.widths) do
+      if self.views[i] == self.active_view then
+        renderer.draw_rect(x, y, tab_width, height, style.background)
+      end
+      common.draw_text(style.font, (self.views[i] == self.active_view or i == self.hovered_tab)
+        and style.text or style.dim, header.labels[i], nil,
+        x + style.padding.x, y, tab_width - style.padding.x * 2, height)
+      x = x + tab_width
+    end
+  end
+  core.pop_clip_rect()
+  common.draw_text(style.icon_font, style.dim, "C", "center",
+    self.position.x + content_width, y, header.button, height)
+  core.pop_clip_rect()
 end
 
 return Node

@@ -78,13 +78,18 @@ command.add(function()
   local node = core.root_view.root_node:get_node_for_view(core.active_view)
   if not node then return false end
   local sx, sy = node:get_locked_size()
-  return not sx and not sy, node
+  return not core.root_view:get_dock_for_view(core.active_view) and not sx and not sy, node
 end, t)
 
 command.add(function()
   local root = core.root_view
   local floating = root:get_floating_view_for_view(core.active_view)
   if floating then return true, floating end
+  local dock = root:get_dock_for_view(core.active_view)
+  if dock then
+    local node = root.root_node:get_node_for_view(core.active_view)
+    return true, node and node.active_view or dock.active_view
+  end
   local node = root:get_active_node()
   local sx, sy = node:get_locked_size()
   return not sx and not sy, node.active_view
@@ -154,7 +159,8 @@ command.add(nil, {
 command.add(function(node)
     if not Node:is_extended_by(node) then node = nil end
     -- No node was specified, use the active one
-    node = node or core.root_view.root_node:get_node_for_view(core.active_view)
+    node = node or core.root_view:get_dock_for_view(core.active_view)
+      or core.root_view.root_node:get_node_for_view(core.active_view)
     if not node then return false end
     return true, node
   end,
@@ -210,9 +216,30 @@ command.add(function()
 -- double clicking the tab bar should open a new doc
 command.add(function(x, y)
   local node = x and y and core.root_view.root_node:get_child_overlapping_point(x, y)
-  return node and node:is_in_tab_area(x, y)
+  return node and not node.dock_side and not node.dock_content and node:is_in_tab_area(x, y)
 end, {
   ["tabbar:new-doc"] = function()
     command.perform("core:new-doc")
   end
 })
+
+for _, side in ipairs { "top", "right", "bottom", "left" } do
+  local target = side
+  command.add(function()
+    local dock = core.root_view:get_dock(target)
+    return #dock.views > 0, dock
+  end, {
+    ["dock:toggle-" .. side] = function(dock)
+      local shown = dock.dock_visible and dock.size[dock.locked.x and "x" or "y"] > 0
+      core.root_view:set_dock_visible(target, not shown)
+    end
+  })
+  command.add(function()
+    local dock = core.root_view:get_dock_for_view(core.active_view)
+    return dock ~= nil, dock and dock.active_view
+  end, {
+    ["dock:move-to-" .. side] = function(view)
+      core.root_view:move_dock_view(view, target)
+    end
+  })
+end
