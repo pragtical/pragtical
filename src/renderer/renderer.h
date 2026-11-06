@@ -58,6 +58,8 @@ float ren_font_group_get_size(RenFont **font);
 void ren_font_group_set_size(RenFont **font, float size);
 void ren_font_group_set_tab_size(RenFont **font, int n);
 double ren_font_group_get_width(RenFont **font, const char *text, size_t len, RenTab tab, int *x_offset);
+/* Conservative ink bounds, including fallback glyphs and decorations. */
+RenRect ren_font_group_get_text_bounds(RenFont **fonts, double x, double y, double width);
 double ren_draw_text(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab);
 double ren_draw_text_cb(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab, RenGlyphDrawFn glyph_fn, void *userdata);
 double ren_draw_text_cb_ex(RenSurface *rs, RenFont **font, const char *text, size_t len, float x, float y, RenColor color, RenTab tab, RenGlyphDrawFn glyph_fn, void *userdata, bool draw_decorations);

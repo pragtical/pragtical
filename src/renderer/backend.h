@@ -16,7 +16,8 @@ struct RenBackend {
   bool (*available)(void); /* NULL = always available */
   void (*get_renderer_info)(RenWindow *window, RenRendererInfo *info);
   const RenCacheDrawOps *draw_ops;
-  bool (*use_full_frame_regions)(RenCache *cache);
+  /* force requests full regions even for sparse damage, but not unchanged frames. */
+  bool (*use_full_frame_regions)(RenCache *cache, bool *force);
   void (*begin_frame)(RenCache *cache, RenRect *rects, int count);
   void (*end_frame)(RenCache *cache, RenRect *rects, int count);
   void (*begin_region)(RenCache *cache, RenRect rect, bool native_only);
