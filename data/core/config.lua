@@ -302,7 +302,7 @@ config.keep_newline_whitespace = false
 ---@type "crlf" | "lf"
 config.line_endings = PLATFORM == "Windows" and "crlf" or "lf"
 
----Maximum number of characters per-line for the line guide.
+---Column limit used by line guides and optional soft wrapping.
 ---
 ---Defaults to 80.
 ---@type number
