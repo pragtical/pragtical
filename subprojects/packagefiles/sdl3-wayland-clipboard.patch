@@ -1,0 +1,23 @@
+Subject: [PATCH] wayland: preserve owned clipboard data on focus loss
+
+Losing keyboard focus invalidates receiving offers, but not the selection
+source that other applications still use. Reporting an external clipboard
+update here cancels the current clipboard data and frees the source's
+callback userdata before ownership is actually relinquished.
+
+diff --git a/src/video/wayland/SDL_waylandevents.c b/src/video/wayland/SDL_waylandevents.c
+--- a/src/video/wayland/SDL_waylandevents.c
++++ b/src/video/wayland/SDL_waylandevents.c
+@@ -2156,6 +2156,11 @@ static void keyboard_handle_leave(void *data, struct wl_keyboard *keyboard,
+     if (seat->data_device->selection_offer) {
+         Wayland_data_offer_destroy(seat->data_device->selection_offer);
+         seat->data_device->selection_offer = NULL;
+-        Wayland_data_offer_notify_from_mimes(NULL, false);
++        // Losing the receiving offer does not release our selection source.
++        // An external clipboard update would free its callback userdata while
++        // other applications can still request the data.
++        if (!seat->data_device->selection_source) {
++            Wayland_data_offer_notify_from_mimes(NULL, false);
++        }
+     }
+ }
