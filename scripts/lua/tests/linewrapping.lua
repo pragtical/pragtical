@@ -81,6 +81,172 @@ local function with_draw_rect(fn)
   if not ok then error(err, 0) end
 end
 
+---Create a wide document view for exercising automatic wrapping widths.
+---@param context table Test state retaining documents for cleanup
+---@return core.docview view
+local function make_width_view(context)
+  local view = make_view(("n"):rep(201) .. "\n")
+  context.docs[#context.docs + 1] = view.doc
+  view.size.x = view:get_gutter_width() + style.expanded_scrollbar_size
+    + view:get_font():get_width("n") * 160
+  view.wrapping_enabled = true
+  return view
+end
+
+---Apply a width change and finish its existing resize debounce deterministically.
+---@param view core.docview
+local function settle_wrap_width(view)
+  LineWrapping.update_docview_breaks(view)
+  if view.wrapped_pending_width then
+    view.wrapped_rebuild_at = system.get_time() - 1
+    LineWrapping.update_docview_breaks(view)
+  end
+end
+
+test.describe("linewrapping widths", function()
+  test.before_each(function(context)
+    local options = config.plugins.linewrapping
+    context.line_limit = config.line_limit
+    context.wrap_at_line_limit, context.width_override = options.wrap_at_line_limit, options.width_override
+    context.mode, context.guide = options.mode, options.guide
+    context.require_tokenization = options.require_tokenization
+    context.reconstruct_breaks = LineWrapping.reconstruct_breaks
+    context.docs = {}
+    config.line_limit = 80
+    options.wrap_at_line_limit, options.width_override = true, nil
+    options.require_tokenization, options.guide = false, true
+  end)
+
+  test.after_each(function(context)
+    local options = config.plugins.linewrapping
+    config.line_limit = context.line_limit
+    options.wrap_at_line_limit, options.width_override = context.wrap_at_line_limit, context.width_override
+    options.mode, options.guide = context.mode, context.guide
+    options.require_tokenization = context.require_tokenization
+    LineWrapping.reconstruct_breaks = context.reconstruct_breaks
+    for _, doc in ipairs(context.docs) do doc:on_close() end
+  end)
+
+  test.test("automatic wrapping uses the configured limit in letter and word modes", function(context)
+    for _, mode in ipairs { "letter", "word" } do
+      config.plugins.linewrapping.mode = mode
+      for _, columns in ipairs { 80, 40 } do
+        config.line_limit = columns
+        local view = make_width_view(context)
+        settle_wrap_width(view)
+        test.near(view.wrapped_settings.width, view:get_font():get_width("n") * columns)
+        test.equal(view:get_line_wraps(1)[2], columns + 1)
+      end
+    end
+  end)
+
+  test.test("narrow viewports account for the gutter and scrollbar and stay positive", function(context)
+    local view = make_width_view(context)
+    view.get_gutter_width = function() return 120, 20 end
+    view.v_scrollbar.expanded_size = 30
+    local available = view:get_font():get_width("n") * 24
+    view.size.x = view:get_gutter_width() + view.v_scrollbar.expanded_size + available
+    settle_wrap_width(view)
+    test.near(view.wrapped_settings.width, available)
+    test.equal(view:get_line_wraps(1)[2], 25)
+    view.size.x = 0
+    settle_wrap_width(view)
+    test.equal(view.wrapped_settings.width, 1)
+  end)
+
+  test.test("disabling the limit restores viewport wrapping in an existing view", function(context)
+    local view = make_width_view(context)
+    settle_wrap_width(view)
+    test.equal(view:get_line_wraps(1)[2], 81)
+    config.plugins.linewrapping.wrap_at_line_limit = false
+    settle_wrap_width(view)
+    test.near(view.wrapped_settings.width, view.size.x - view:get_gutter_width()
+      - style.expanded_scrollbar_size)
+    test.equal(view:get_line_wraps(1)[2], 161)
+    config.plugins.linewrapping.wrap_at_line_limit = true
+    settle_wrap_width(view)
+    test.equal(view:get_line_wraps(1)[2], 81)
+  end)
+
+  test.test("custom pixel widths and functions take precedence over automatic limits", function(context)
+    local options = config.plugins.linewrapping
+    local view = make_width_view(context)
+    local width = view:get_font():get_width("n") * 200
+    for _, limited in ipairs { true, false } do
+      options.wrap_at_line_limit = limited
+      options.width_override = width
+      settle_wrap_width(view)
+      test.equal(view.wrapped_settings.width, width)
+      local received
+      options.width_override = function(docview)
+        received = docview
+        return width / 2
+      end
+      settle_wrap_width(view)
+      test.equal(received, view)
+      test.equal(view.wrapped_settings.width, width / 2)
+      options.width_override = math.huge
+      settle_wrap_width(view)
+      test.is_nil(view.wrapped_settings)
+      test.is_nil(view.wrapped_lines)
+    end
+  end)
+
+  test.test("existing views rewrap when the column limit or font scale changes", function(context)
+    local view = make_width_view(context)
+    local font = view:get_font():copy(view:get_font():get_size())
+    view.get_font = function() return font end
+    settle_wrap_width(view)
+    config.line_limit = 40
+    settle_wrap_width(view)
+    test.equal(view:get_line_wraps(1)[2], 41)
+    local size = font:get_size()
+    for _, scale in ipairs { 1.25, 2, 1 } do
+      font:set_size(size * scale)
+      settle_wrap_width(view)
+      test.near(view.wrapped_settings.width, font:get_width("n") * 40)
+      test.equal(view:get_line_wraps(1)[2], 41)
+    end
+  end)
+
+  test.test("the wrapping guide follows the same column position as Line Guide", function(context)
+    local view = make_width_view(context)
+    view.position.x, view.position.y = 37, 19
+    view.scroll.x = 7.25
+    settle_wrap_width(view)
+    local expected_x = view:get_line_screen_position(1)
+      + config.line_limit * view:get_font():get_width("n")
+    with_draw_rect(function(calls)
+      LineWrapping.draw_guide(view)
+      test.equal(#calls, 1)
+      test.near(calls[1].x, expected_x)
+    end)
+    local rows = view.wrapped_lines
+    config.plugins.linewrapping.guide = false
+    with_draw_rect(function(calls)
+      LineWrapping.draw_guide(view)
+      test.equal(#calls, 0)
+    end)
+    settle_wrap_width(view)
+    test.equal(view.wrapped_lines, rows)
+  end)
+
+  test.test("unchanged column widths reuse cached rows even as a wide viewport grows", function(context)
+    local view = make_width_view(context)
+    settle_wrap_width(view)
+    local rows, rebuilds = view.wrapped_lines, 0
+    LineWrapping.reconstruct_breaks = function(...)
+      rebuilds = rebuilds + 1
+      return context.reconstruct_breaks(...)
+    end
+    view.size.x = view.size.x + 100
+    for _ = 1, 100 do LineWrapping.update_docview_breaks(view) end
+    test.equal(rebuilds, 0)
+    test.equal(view.wrapped_lines, rows)
+    test.is_nil(view.wrapped_pending_width)
+  end)
+end)
+
 test.describe("linewrapping", function()
   test.test("draw_line_text keeps final wrapped segment", function()
     local view = make_view("abcdef")

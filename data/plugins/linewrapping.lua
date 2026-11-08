@@ -25,8 +25,10 @@ end
 ---@class config.plugins.linewrapping
 ---The type of wrapping to perform. Can be "letter" or "word".
 ---@field mode "letter" | "word"
----If nil, uses the DocView's size, otherwise, uses this exact width. Can be a function.
----@field width_override? number | function():number
+---Limit automatic wrapping to config.line_limit columns, or the viewport if narrower.
+---@field wrap_at_line_limit boolean
+---Override the automatic pixel width with a number or a function of the DocView.
+---@field width_override? number | fun(view:core.docview):number
 ---Whether or not to draw a guide
 ---@field guide boolean
 ---Whether or not we should indent ourselves like the first line of a wrapped block.
@@ -36,11 +38,13 @@ end
 ---Requires tokenization
 ---@field require_tokenization boolean
 config.plugins.linewrapping = common.merge({
-	-- The type of wrapping to perform. Can be "letter" or "word".
+  -- The type of wrapping to perform. Can be "letter" or "word".
   mode = "letter",
-	-- If nil, uses the DocView's size, otherwise, uses this exact width. Can be a function.
+  -- Use the shared column limit unless the viewport is narrower.
+  wrap_at_line_limit = true,
+  -- Override the automatic pixel width. Can be a function of the DocView.
   width_override = nil,
-	-- Whether or not to draw a guide
+  -- Whether or not to draw a guide
   guide = true,
   -- Whether or not we should indent ourselves like the first line of a wrapped block.
   indent = true,
@@ -63,8 +67,15 @@ config.plugins.linewrapping = common.merge({
       }
     },
     {
-      label = "Guide",
-      description = "Whether or not to draw a guide.",
+      label = "Wrap at Line Limit",
+      description = "Limit wrapping to the Line Limit configured under Core > Editor, or the viewport if narrower.",
+      path = "wrap_at_line_limit",
+      type = "toggle",
+      default = true
+    },
+    {
+      label = "Draw Wrapping Guide",
+      description = "Draw a guide at the current wrapping boundary.",
       path = "guide",
       type = "toggle",
       default = true
@@ -319,12 +330,20 @@ function LineWrapping.update_breaks(docview, old_line1, old_line2, net_lines)
   docview:invalidate_visual_lines(old_line1)
 end
 
+---Resolve a custom width or fit automatic wrapping to the viewport and column limit.
+---@param docview core.docview
+---@return number width Text width in pixels
 local function get_wrap_width(docview)
-  local scrollbar_width = docview.v_scrollbar.expanded_size or style.expanded_scrollbar_size
   local width_override = config.plugins.linewrapping.width_override
-  return (type(width_override) == "function" and width_override(docview))
-    or width_override
-    or (docview.size.x - docview:get_gutter_width() - scrollbar_width)
+  if width_override then
+    return (type(width_override) == "function" and width_override(docview)) or width_override
+  end
+  local scrollbar_width = docview.v_scrollbar.expanded_size or style.expanded_scrollbar_size
+  local width = docview.size.x - docview:get_gutter_width() - scrollbar_width
+  if config.plugins.linewrapping.wrap_at_line_limit then
+    width = math.min(width, config.line_limit * docview:get_font():get_width("n"))
+  end
+  return math.max(1, width)
 end
 
 local function schedule_resize_rebuild(docview, width)

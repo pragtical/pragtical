@@ -791,7 +791,7 @@ settings.add("Editor",
     },
     {
       label = "Line Limit",
-      description = "Amount of characters at which the line breaking column will be drawn.",
+      description = "Column limit used by line guides and soft wrapping.",
       path = "line_limit",
       type = settings.type.NUMBER,
       default = 80,
