@@ -1,5 +1,5 @@
 #Requires -Version 7.3
-# Temporary UCRT64 PR checks; run the actual packages without MSYS2 on PATH.
+# Temporary UCRT64 PR checks for standalone packages and the full Lua suite.
 param(
   [Parameter(Mandatory = $true)]
   [string]$Archive,
@@ -12,17 +12,25 @@ Set-StrictMode -Version Latest
 
 $archivePath = (Resolve-Path -LiteralPath $Archive).Path
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
+$sourceDir = Split-Path $PSScriptRoot -Parent
 $testsPath = Join-Path $PSScriptRoot 'lua/tests'
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pragtical-ucrt-$([guid]::NewGuid())"
 
 function Invoke-PackageProgram([string]$Executable, [string[]]$Arguments,
-                               [int]$Timeout = 120) {
+                               [int]$Timeout = 120, [switch]$TestSuite) {
   $start = [System.Diagnostics.ProcessStartInfo]::new($Executable)
   $start.UseShellExecute = $false
-  $start.WorkingDirectory = $testRoot
+  $start.WorkingDirectory = if ($TestSuite) { $sourceDir } else { $testRoot }
   foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
-  # Missing bundled DLLs must not be supplied by the CI build environment.
-  $start.Environment['PATH'] = "$env:SystemRoot\System32;$env:SystemRoot"
+  # Missing bundled DLLs must not be supplied by the build environment.
+  $runtimePath = "$env:SystemRoot\System32;$env:SystemRoot"
+  if ($TestSuite) {
+    if (-not $env:pythonLocation) {
+      throw 'The full Lua suite requires native Python from actions/setup-python.'
+    }
+    $runtimePath = "$env:pythonLocation;$runtimePath"
+  }
+  $start.Environment['PATH'] = $runtimePath
   $start.Environment['SDL_VIDEO_DRIVER'] = 'dummy'
   $start.Environment['SDL_AUDIO_DRIVER'] = 'dummy'
   $start.Environment['PRAGTICAL_RENDERER'] = 'surface'
@@ -77,7 +85,6 @@ print("Packaged editor smoke test passed")
   $packagePath = Join-Path $portablePath 'pragtical'
   Write-Host 'Testing the extracted portable ZIP without MSYS2 on PATH'
   Test-Package $packagePath
-  Invoke-PackageProgram (Join-Path $packagePath 'pragtical.com') @('test', $testsPath) 600
 
   $installPath = Join-Path $testRoot 'installed'
   Invoke-PackageProgram $installerPath @(
@@ -89,6 +96,10 @@ print("Packaged editor smoke test passed")
     }
     Write-Host 'Testing the installed editor without MSYS2 on PATH'
     Test-Package $installPath
+    # A portable user/ overrides PRAGTICAL_USERDIR in child-process tests.
+    # Use the normal installation so child processes can select their profiles.
+    Write-Host 'Running the full Lua suite with checkout assets and test tools'
+    Invoke-PackageProgram (Join-Path $installPath 'pragtical.com') @('test', $testsPath) 600 -TestSuite
   } finally {
     Invoke-PackageProgram (Join-Path $installPath 'unins000.exe') @(
       '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')

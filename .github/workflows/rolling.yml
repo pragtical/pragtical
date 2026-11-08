@@ -262,6 +262,11 @@ jobs:
         run: bash scripts/package.sh --version ${INSTALL_REF} --addons --debug --binary --release
       - name: Build Installer
         run: bash scripts/innosetup/innosetup.sh --debug --version ${INSTALL_REF}
+      - name: Setup Python for package tests
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
       - name: Test PR packages
         if: github.event_name == 'pull_request'
         shell: pwsh
