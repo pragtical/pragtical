@@ -334,7 +334,8 @@ main() {
     source scripts/appdmg.sh "${package_name}"
   fi
   if [[ $innosetup == true ]]; then
-    source scripts/innosetup/innosetup.sh $flags
+    source scripts/innosetup/innosetup.sh \
+      --builddir "$build_dir" --destdir "$dest_dir" --version "${version#-}"
   fi
 }
 

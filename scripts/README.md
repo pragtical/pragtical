@@ -19,6 +19,10 @@ shell's `MINGW_PACKAGE_PREFIX`. MSYS2 is [deprecating MINGW64][5].
 - **innosetup.sh**: Creates a 32/64 bit [InnoSetup][3] installer package.
 - **package.sh**:   Creates all binary / DMG image / installer / source packages.
 
+The Windows installer accepts `--destdir` to select a staged package directory
+(default: `pragtical`). It excludes staged user settings and creates a fresh
+`user/` directory when Portable Mode is selected during installation.
+
 ### Utility
 
 - **common.sh**:               Common functions used by other scripts.

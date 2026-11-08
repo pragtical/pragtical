@@ -15,6 +15,7 @@ show_help() {
   echo
   echo "-b --builddir DIRNAME     Sets the name of the build directory (not path)."
   echo "                          Default: '$(get_default_build_dir)'."
+  echo "-d --destdir DIRNAME      Sets the staged package directory. Default: 'pragtical'."
   echo "-v --version VERSION      Sets the version on the package name."
   echo "   --debug                Debug this script."
   echo
@@ -22,6 +23,9 @@ show_help() {
 
 main() {
   local build_dir=$(get_default_build_dir)
+  local dest_dir=pragtical
+  local package_dir
+  local output_dir
   local arch
   local arch_file
   local version
@@ -64,6 +68,11 @@ main() {
         shift
         shift
         ;;
+      -d|--destdir)
+        dest_dir="$2"
+        shift
+        shift
+        ;;
       --debug)
         set -x
         shift
@@ -80,16 +89,13 @@ main() {
     exit 1
   fi
 
-  # remove portable user settings directory since this is a fixed install
-  mv "pragtical/user" .
-
-  # generate setup
+  # The installer excludes staged user settings without altering the package.
+  package_dir=$(cygpath -aw "$dest_dir")
+  output_dir=$(cygpath -aw .)
   output="Pragtical${version}-${arch_file}-setup"
-  "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" -dARCH=$arch //F"${output}" "${build_dir}/scripts/innosetup.iss"
-  pushd "${build_dir}/scripts"; mv Pragtical*.exe "./../../"; popd
-
-  # recreate user settings directory after generating setup
-  mv user "pragtical/"
+  "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
+    "-dArch=$arch" "-dPackageDir=$package_dir" "-O$output_dir" \
+    "-F$output" "${build_dir}/scripts/innosetup.iss"
 }
 
 main "$@"

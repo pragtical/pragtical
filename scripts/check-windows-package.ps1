@@ -93,7 +93,19 @@ print("Packaged editor smoke test passed")
     Invoke-PackageProgram (Join-Path $installPath 'unins000.exe') @(
       '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART')
   }
-  Write-Host 'Verified the portable ZIP and installer'
+  $portableInstallPath = Join-Path $testRoot 'installed-portable'
+  Invoke-PackageProgram $installerPath @(
+    '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER',
+    '/TASKS=portablemode', "/DIR=$portableInstallPath")
+  if (-not (Test-Path -LiteralPath (Join-Path $portableInstallPath 'user') -PathType Container)) {
+    throw 'The portable installer did not create its user directory.'
+  }
+  if (Test-Path -LiteralPath (Join-Path $portableInstallPath 'unins000.exe')) {
+    throw 'The portable installer unexpectedly enabled uninstall support.'
+  }
+  Write-Host 'Testing the portable installer without MSYS2 on PATH'
+  Test-Package $portableInstallPath
+  Write-Host 'Verified the portable ZIP and both installer modes'
 } finally {
   Remove-Item -LiteralPath $testRoot -Recurse -Force
 }
