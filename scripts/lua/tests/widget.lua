@@ -154,6 +154,70 @@ test.describe("widget mouse events", function()
     test.not_ok(core.redraw, "a settled widget must stop requesting frames")
   end)
 
+  test.test("resizing converges nested layout before drawing stops", function(context)
+    local root = root_widget(context)
+    local parent = child_widget(root)
+    local child = child_widget(parent)
+    function root:update()
+      Widget.update(self)
+      parent:set_size(self.size.x - 40, 100)
+    end
+    function parent:update()
+      Widget.update(self)
+      child:set_size(self.size.x - 20, 40)
+    end
+    local painted_width
+    local child_draw = child.draw
+    function child:draw()
+      local painted = child_draw(self)
+      if painted then painted_width = self.size.x end
+      return painted
+    end
+    for _ = 1, 5 do root:update() end
+    draw(root)
+
+    for _, width in ipairs { 300, 700 } do
+      root.size.x = width
+      core.redraw = true -- The final divider input requests one frame.
+      for _ = 1, 10 do
+        root:update()
+        if not core.redraw then break end
+        core.redraw = false
+        draw(root)
+      end
+      test.equal(painted_width, child.size.x,
+        "the last frame must contain the final child layout")
+      test.equal(child:get_width(), parent.size.x - 20)
+      core.redraw = false
+      root:update()
+      test.not_ok(core.redraw, "settled layout must stop requesting frames")
+    end
+  end)
+
+  test.test("moving a widget repaints its positioned children", function(context)
+    local root = root_widget(context)
+    local child = child_widget(root)
+    root:update()
+    draw(root)
+    local painted_x, painted_y
+    local child_draw = child.draw
+    function child:draw()
+      if child_draw(self) then
+        painted_x, painted_y = self.position.x, self.position.y
+        return true
+      end
+    end
+    root:set_position(80, 100)
+    core.redraw = false
+    root:update()
+    if core.redraw then draw(root) end
+    test.equal(painted_x, child.position.x)
+    test.equal(painted_y, child.position.y)
+    core.redraw = false
+    root:update()
+    test.not_ok(core.redraw)
+  end)
+
   test.test("leave reaches nested controls once when switching containers or leaving the view", function(context)
     local root = root_widget(context)
     local first_container = child_widget(root)
