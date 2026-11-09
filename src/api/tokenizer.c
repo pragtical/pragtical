@@ -1982,7 +1982,7 @@ static bool tokenizer_find_text(
       return false;
     }
     current_end = out->values[1];
-    if (!close) return true;
+    /* Escapes apply to opening delimiters too, matching the Lua tokenizer. */
     if (!tokenizer_match_is_escaped(text, out->values[0], &pattern->escape)) {
       return true;
     }

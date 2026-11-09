@@ -330,3 +330,97 @@ test.describe("language tokenizer fixtures", function()
     end)
   end
 end)
+
+for _, native in ipairs { false, true } do
+  test.describe("Markdown multiline links native=" .. tostring(native), function()
+    test.before_each(function(context)
+      context.native = tokenizer.is_using_native()
+      context.syntax = deep_copy(syntax.get("fixture.md"))
+      tokenizer.set_use_native(native)
+    end)
+
+    test.after_each(function(context)
+      tokenizer.clear_native_cache(context.syntax)
+      tokenizer.set_use_native(context.native)
+    end)
+
+    test.test("link and image labels retain their colors across lines", function(context)
+      for _, prefix in ipairs { "", "!" } do
+        local first = prefix .. "[This is some very\n"
+        local tokens, state = tokenize_line(tokenizer, context.syntax, "\0", first)
+        test.ok(state ~= "\0")
+        assert_range_type("opening delimiter", tokens, 1, #prefix + 1, "function")
+        assert_range_type("first label line", tokens, #prefix + 2, #first - 1, "string")
+        local last = "long link text](https://example.com/) tail\n"
+        tokens, state = tokenize_line(tokenizer, context.syntax, state, last)
+        test.equal(state, "\0")
+        local url_first, url_last = last:find("https://example.com/", 1, true)
+        assert_range_type("last label line", tokens, 1, 14, "string")
+        assert_range_type("closing bracket and parenthesis", tokens, 15, url_first - 1, "function")
+        assert_range_type("destination", tokens, url_first, url_last, "number")
+        assert_range_type("closing parenthesis", tokens, url_last + 1, url_last + 1, "function")
+        local tail = assert(last:find("tail", 1, true))
+        assert_range_type("text after link", tokens, tail, tail + 3, "normal")
+      end
+    end)
+
+    test.test("labels can span several lines with escaped brackets and Unicode", function(context)
+      local _, state = tokenize_line(tokenizer, context.syntax, "\0", "[café \\] text\r\n")
+      test.ok(state ~= "\0")
+      local middle = "日本語 and \\[brackets\\]\r\n"
+      local tokens
+      tokens, state = tokenize_line(tokenizer, context.syntax, state, middle)
+      assert_range_type("continued UTF-8 label", tokens, 1, #middle - 2, "string")
+      test.ok(state ~= "\0")
+      tokens, state = tokenize_line(tokenizer, context.syntax, state, "last](url)\r\n")
+      test.equal(state, "\0")
+      assert_range_type("last label", tokens, 1, 4, "string")
+      assert_range_type("destination", tokens, 7, 9, "number")
+    end)
+
+    test.test("unfinished labels stop at blank lines or their first closing bracket", function(context)
+      for _, blank in ipairs { "\n", " \t\r\n" } do
+        local _, state = tokenize_line(tokenizer, context.syntax, "\0", "[unfinished label\n")
+        local tokens
+        tokens, state = tokenize_line(tokenizer, context.syntax, state, blank)
+        test.equal(state, "\0")
+        tokens, state = tokenize_line(tokenizer, context.syntax, state, "# Heading\n")
+        assert_range_type("heading after broken link", tokens, 1, 9, "keyword")
+      end
+      local _, state = tokenize_line(tokenizer, context.syntax, "\0", "[plain bracketed\n")
+      local tokens
+      tokens, state = tokenize_line(tokenizer, context.syntax, state, "text] ordinary text\n")
+      test.equal(state, "\0")
+      assert_range_type("text after ordinary closing bracket", tokens, 7, 19, "normal")
+    end)
+
+    test.test("escaped openings and other bracket constructs keep their existing behavior", function(context)
+      for _, line in ipairs {
+        "\\[escaped opening\n", "[[unfinished wiki\n", "[^unfinished footnote\n"
+      } do
+        local _, state = tokenize_line(tokenizer, context.syntax, "\0", line)
+        test.equal(state, "\0", line)
+      end
+      local single = "[label](url) [key::value] [[wiki]] [^note]\n"
+      local tokens, state = tokenize_line(tokenizer, context.syntax, "\0", single)
+      test.equal(state, "\0")
+      assert_range_type("single-line label", tokens, 2, 6, "string")
+      assert_range_type("single-line destination", tokens, 9, 11, "number")
+      local metadata = assert(single:find("key", 1, true))
+      assert_range_type("inline metadata", tokens, metadata, metadata + 2, "string")
+      local wiki = assert(single:find("wiki", 1, true))
+      assert_range_type("wikilink", tokens, wiki, wiki + 3, "number")
+    end)
+
+    test.test("code fences keep link-like text inside their code region", function(context)
+      local _, state = tokenize_line(tokenizer, context.syntax, "\0", "```\n")
+      for _, line in ipairs { "[text on\n", "two lines](url)\n" } do
+        local tokens
+        tokens, state = tokenize_line(tokenizer, context.syntax, state, line)
+        assert_range_type("fenced text", tokens, 1, #line, "string")
+      end
+      local _, final_state = tokenize_line(tokenizer, context.syntax, state, "```\n")
+      test.equal(final_state, "\0")
+    end)
+  end)
+end
