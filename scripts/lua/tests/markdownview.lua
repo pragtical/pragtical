@@ -1821,6 +1821,67 @@ Second line
     test.ok(inline_image.height > 0)
   end)
 
+  test.test("inline code backgrounds leave surrounding whitespace outside the span", function()
+    local original_draw_rect = renderer.draw_rect
+    local original_draw_text = renderer.draw_text
+    local original_push_clip_rect = core.push_clip_rect
+    local original_pop_clip_rect = core.pop_clip_rect
+    local rectangles, text_runs
+    renderer.draw_rect = function(x, _, width, _, color)
+      if color == style.background2 then
+        rectangles[#rectangles + 1] = { x = x, width = width }
+      end
+    end
+    renderer.draw_text = function(font, text, x, _, _, options)
+      local width = font:get_width(text, options)
+      text_runs[#text_runs + 1] = { text = text, x = x, width = width }
+      return x + width
+    end
+    core.push_clip_rect = function() end
+    core.pop_clip_rect = function() end
+
+    local ok, err = pcall(function()
+      for _, scale in ipairs { 1, 1.25, 2 } do
+        local font = scale ~= 1 and style.code_font:copy(style.code_font:get_size() * scale) or nil
+        for _, width in ipairs { 90, 420 } do
+          for _, sample in ipairs {
+            { text = "text `code` text", code = { "code" } },
+            { text = "text(`code`),`other` text", code = { "code", "other" } },
+            { text = "text ``code ` span`` text", code = { "code ` span" } },
+            { text = "text `  code  ` text", code = { " code " } },
+            { text = "text `  ` text", code = { "  " } }
+          } do
+            local view = MarkdownView({ text = sample.text, font = font })
+            rectangles, text_runs = {}, {}
+            view:draw_at(37, 19, width, 400)
+            local code_runs, code_texts = {}, {}
+            for _, run in ipairs(text_runs) do
+              for _, text in ipairs(sample.code) do
+                if run.text == text then
+                  code_runs[#code_runs + 1] = run
+                  code_texts[#code_texts + 1] = run.text
+                  break
+                end
+              end
+            end
+            test.same(code_texts, sample.code)
+            test.equal(#rectangles, #code_runs)
+            for i, run in ipairs(code_runs) do
+              test.near(rectangles[i].x, run.x, 1e-6, sample.text .. " background start")
+              test.near(rectangles[i].width, run.width, 1e-6, sample.text .. " background width")
+            end
+          end
+        end
+      end
+    end)
+
+    renderer.draw_rect = original_draw_rect
+    renderer.draw_text = original_draw_text
+    core.push_clip_rect = original_push_clip_rect
+    core.pop_clip_rect = original_pop_clip_rect
+    if not ok then error(err, 0) end
+  end)
+
   test.test("supports multi-backtick code spans and link titles", function()
     local view = MarkdownView("``code ` span`` and [link](https://example.com/a_(b) \"Title\")")
     view.size.x = 420
