@@ -1,6 +1,9 @@
 local test = require "core.test"
+local core = require "core"
+local command = require "core.command"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local translate = require "core.doc.translate"
 local LineWrapping = require "plugins.linewrapping"
 local common = require "core.common"
 local config = require "core.config"
@@ -725,6 +728,134 @@ test.describe("linewrapping", function()
     end
 
     config.plugins.linewrapping.mode = previous_mode
+  end)
+end)
+
+test.describe("linewrapping hit testing", function()
+  test.before_each(function(context)
+    local options = config.plugins.linewrapping
+    context.mode, context.indent = options.mode, options.indent
+    context.tokenization = options.require_tokenization
+    context.active_view = core.active_view
+    context.docs = {}
+    options.mode, options.indent, options.require_tokenization = "letter", true, true
+  end)
+
+  test.after_each(function(context)
+    local options = config.plugins.linewrapping
+    options.mode, options.indent = context.mode, context.indent
+    options.require_tokenization = context.tokenization
+    core.active_view = context.active_view
+    for _, doc in ipairs(context.docs) do doc:on_close() end
+  end)
+
+  local function make_hit_view(context, lines, columns)
+    local view = make_view_lines(lines)
+    context.docs[#context.docs + 1] = view.doc
+    view.position.x, view.position.y = 31, 17
+    view.size.x, view.size.y = 640, 400
+    LineWrapping.reconstruct_breaks(view, view:get_font(), view:get_font():get_width("n") * columns)
+    return view
+  end
+
+  local function assert_hit(view, line, col, dx, dy)
+    local x, y = view:get_line_screen_position(line, col)
+    local actual_line, actual_col = view:resolve_screen_position(
+      x + (dx or 0), y + view:get_line_height() / 2 + (dy or 0)
+    )
+    test.same({ actual_line, actual_col }, { line, col })
+  end
+
+  test.test("clicking after text reaches the end of every logical line", function(context)
+    for _, mode in ipairs { "letter", "word" } do
+      config.plugins.linewrapping.mode = mode
+      for _, columns in ipairs { 4, 80 } do
+        for _, text in ipairs { "x\n", "some text\n", "\ttext é界🙂\n", "\n" } do
+          local view = make_hit_view(context, { "first line\n", text }, columns)
+          for line, content in ipairs(view.doc.lines) do
+            assert_hit(view, line, #content, 1)
+            assert_hit(view, line, #content, 100)
+          end
+        end
+      end
+    end
+  end)
+
+  test.test("soft wrap hit testing stays on the target row at UTF-8 boundaries", function(context)
+    for _, mode in ipairs { "letter", "word" } do
+      config.plugins.linewrapping.mode = mode
+      local view = make_hit_view(context, { "\té界🙂 abc def ghij\n", "tail\n" }, 8)
+      for row = 1, view:visual_line_count() - 1 do
+        local line, col = view:visual_position_from_row(row)
+        local next_line, next_col = view:visual_position_from_row(row + 1)
+        local expected = #view.doc.lines[line]
+        if next_line == line then
+          local _, previous_col = translate.previous_char(view.doc, line, next_col)
+          expected = previous_col
+        end
+        local x, y = view:get_line_screen_position(line, col)
+        local hit_line, hit_col = view:resolve_screen_position(x + 500, y + view:get_line_height() / 2)
+        test.same({ hit_line, hit_col }, { line, expected })
+        test.equal(view:visual_row_from_position(hit_line, hit_col), row)
+      end
+    end
+  end)
+
+  test.test("clicks choose the nearest caret position across syntax tokens", function(context)
+    local view = make_hit_view(context, { "abé界🙂\n", "tail\n" }, 80)
+    view.doc.syntax = {
+      patterns = {
+        { pattern = "ab", type = "keyword" },
+        { pattern = "é", type = "string" },
+        { pattern = "界", type = "number" }
+      },
+      symbols = {}
+    }
+    view.doc.highlighter:reset()
+    local col = 1
+    for char in common.utf8_chars(view.doc.lines[1]) do
+      if char == "\n" then break end
+      local start_x = view:get_col_x_offset(1, col)
+      local end_x = view:get_col_x_offset(1, col + #char)
+      assert_hit(view, 1, col, (end_x - start_x) * 0.25)
+      assert_hit(view, 1, col + #char, -(end_x - start_x) * 0.25)
+      col = col + #char
+    end
+  end)
+
+  test.test("horizontal offset helpers return a column rather than a line number", function(context)
+    local view = make_hit_view(context, { "first\n", "second\n", "\n" }, 80)
+    local offset = view:get_col_x_offset(2, 4)
+    test.same({ view:get_x_offset_col(2, offset) }, { 4 })
+  end)
+
+  test.test("clicks follow composed visual rows when preceding lines are hidden", function(context)
+    local view = make_hit_view(context, { "a\n", ("hidden"):rep(8) .. "\n", "\té界🙂 abc def\n", "tail\n" }, 8)
+    view.get_hidden_lines = function() return { [2] = true } end
+    view:invalidate_visual_lines()
+    local starts = view:get_line_wraps(3)
+    test.ok(#starts > 1)
+    for _, col in ipairs(starts) do assert_hit(view, 3, col) end
+  end)
+
+  test.test("clicks above and below the document use the nearest visual row", function(context)
+    local view = make_hit_view(context, { "abcdef\n", "uvwxyz\n" }, 4)
+    assert_hit(view, 1, 2, 0, -view:get_line_height() * 2)
+    assert_hit(view, 2, 6, 0, view:get_line_height() * 2)
+  end)
+
+  test.test("mouse cursor commands reach a newly typed final line", function(context)
+    local view = make_hit_view(context, { "\n" }, 4)
+    core.active_view = view
+    view.doc:text_input("first")
+    view.doc:text_input("\n")
+    view.doc:text_input("some text é界🙂")
+    local first_x, first_y = view:get_line_screen_position(1, 1)
+    test.ok(command.perform("doc:set-cursor", first_x + 1, first_y + view:get_line_height() / 2))
+    local last_col = #view.doc.lines[2]
+    local x, y = view:get_line_screen_position(2, last_col)
+    test.ok(command.perform("doc:set-cursor", x + 1, y + view:get_line_height() / 2))
+    test.same({ view.doc:get_selection() }, { 2, last_col, 2, last_col })
   end)
 end)
 
