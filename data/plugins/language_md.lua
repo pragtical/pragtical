@@ -6,6 +6,14 @@ local core = require "core"
 local in_squares_match = "^%[%]"
 local in_parenthesis_match = "^%(%)"
 
+-- Closing lines are matched before this syntax consumes the remaining label text.
+local link_text_syntax = {
+  patterns = {
+    { pattern = ".+", type = "string" }
+  },
+  symbols = {}
+}
+
 syntax.add {
   name = "Markdown",
   files = { "%.md$", "%.markdown$" },
@@ -343,6 +351,19 @@ syntax.add {
     {
       pattern = "%[%^()[" .. in_squares_match .. "]+()%]",
       type = { "comment", "normal", "comment" },
+    },
+    -- Keep incomplete wikilinks out of continued link labels.
+    { pattern = "!?%[%[", type = "normal" },
+    -- A label can continue onto later lines, but cannot cross a paragraph break.
+    -- Match the entire closing line's prefix so ^ only ends genuinely blank lines.
+    {
+      regex = {
+        [=[()!?\[(?![\[\^])(?=(?:\\[^\r\n]|[^\[\]\\\r\n])*\r?\n)()()]=],
+        [=[^(?|(?:\\[^\r\n]|[^\]\\\r\n])*()\]\(()[^()\r\n]*()\)|(?:\\[^\r\n]|[^\]\\\r\n])*()\]()()|[ \t]*\r?\n()()())]=],
+        "\\"
+      },
+      type = { "string", "function", "number", "function" },
+      syntax = link_text_syntax
     },
     -- [example]
     {

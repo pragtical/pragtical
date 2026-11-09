@@ -544,17 +544,47 @@ for _, native in ipairs { false, true } do
       end
     end
 
-    if not native then
-      test.test("escaped first-line openers are skipped before a valid opener", function()
-        local syn = { patterns = {
-          { pattern = { "@", "@", "\\" }, first_line = true, type = "string" },
-        }, symbols = {} }
-        local text = "\\@x@body@"
-        local tokens, state = tokenizer.tokenize(syn, text, nil, { first_line = true })
-        test.same(tokens, { "normal", "\\@x", "string", "@body@" })
-        test.equal(state, string.char(0))
-        test.same(tokenizer.tokenize(syn, text), { "normal", text })
-      end)
+    test.test("escaped first-line openers are skipped before a valid opener", function()
+      local syn = { patterns = {
+        { pattern = { "@", "@", "\\" }, first_line = true, type = "string" },
+      }, symbols = {} }
+      local text = "\\@x@body@"
+      local tokens, state = tokenizer.tokenize(syn, text, nil, { first_line = true })
+      test.same(tokens, { "normal", "\\@x", "string", "@body@" })
+      test.equal(state, string.char(0))
+      test.same(tokenizer.tokenize(syn, text), { "normal", text })
+    end)
+
+    for _, matcher in ipairs { "pattern", "regex" } do
+      for _, embedded in ipairs { false, true } do
+        test.test(matcher .. " honors escaped openers and closers, embedded=" .. tostring(embedded), function()
+          local syn = { patterns = {
+            {
+              [matcher] = { "@", "@", "\\" }, type = "string",
+              syntax = embedded and {
+                patterns = { { pattern = "%a+", type = "keyword" } }, symbols = {}
+              } or nil
+            }
+          }, symbols = {} }
+          for _, prefix in ipairs { "", "café " } do
+            for escapes = 0, 3 do
+              local text = prefix .. ("\\"):rep(escapes) .. "@body\n"
+              local tokens, state = tokenizer.tokenize(syn, text, "\0")
+              if escapes % 2 == 1 then
+                test.same(tokens, { "normal", text })
+                test.equal(state, "\0")
+              else
+                test.equal(state:byte(1), 1)
+                test.contains(tokens, embedded and "keyword" or "string")
+                tokens, state = tokenizer.tokenize(syn, "\\@still@tail\n", state)
+                test.equal(state, "\0")
+                test.equal(tokens[#tokens - 1], "normal")
+                test.equal(tokens[#tokens], "tail\n")
+              end
+            end
+          end
+        end)
+      end
     end
 
     test.test("nested syntaxes inherit document position", function()
