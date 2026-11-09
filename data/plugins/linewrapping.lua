@@ -485,7 +485,12 @@ function DocView:get_visual_line_col_from_x(row, x)
   if not self.wrapped_settings then
     return self:get_x_offset_col(self:visual_position_from_row(row), x)
   end
-  local _, col = get_line_col_from_index_and_x(self, row, x)
+  -- Visual rows omit folded lines; wrapping indices still include them.
+  row = common.clamp(row, 1, self:visual_line_count())
+  local line = self:visual_position_from_row(row)
+  local first_row = self:visual_rows_for_line(line)
+  local idx = self.wrapped_line_to_idx[line] + row - first_row
+  local _, col = get_line_col_from_index_and_x(self, idx, x)
   return col
 end
 
@@ -493,29 +498,31 @@ function get_line_col_from_index_and_x(docview, idx, x)
   local doc = docview.doc
   local line, col = get_idx_line_col(docview, idx)
   if idx < 1 then return 1, 1 end
-  local next_line, next_col = get_idx_line_col(docview, idx + 1)
+  local next_offset = idx * 2 + 1
   local row_end_col = #doc.lines[line]
-  if next_line == line then
+  -- Only an actual following row on the same logical line is a soft wrap.
+  if docview.wrapped_lines[next_offset] == line then
+    local next_col = docview.wrapped_lines[next_offset + 1]
     local _, previous_col = translate.previous_char(doc, line, next_col)
     row_end_col = previous_col
   end
-  local xoffset, last_i, i = (col ~= 1 and docview.wrapped_line_offsets[line] or 0), col, 1
+  local xoffset, i = (col ~= 1 and docview.wrapped_line_offsets[line] or 0), 1
   if x < xoffset then return line, col end
   local default_font = docview:get_font()
   local _, indent_size = doc:get_indent_info()
   default_font:set_tab_size(indent_size)
   for _, type, text in doc.highlighter:each_token(line) do
-    local font, w = get_font(default_font, type, indent_size), 0
+    local font = get_font(default_font, type, indent_size)
     for char in common.utf8_chars(text) do
       if i >= col then
         if i > row_end_col then return line, row_end_col end
-        if xoffset >= x then
-          return line, (xoffset - x > (w / 2) and last_i or i)
+        local w = get_width(font, char, xoffset)
+        if xoffset + w >= x then
+          local hit_col = x <= xoffset + w / 2 and i or i + #char
+          return line, math.min(hit_col, row_end_col)
         end
-        w = get_width(font, char, xoffset)
         xoffset = xoffset + w
       end
-      last_i = i
       i = i + #char
     end
   end
@@ -659,7 +666,8 @@ local old_get_x_offset_col = DocView.get_x_offset_col
 function DocView:get_x_offset_col(line, x)
   if not self.wrapped_settings then return old_get_x_offset_col(self, line, x) end
   local idx = get_line_idx_col_count(self, line)
-  return get_line_col_from_index_and_x(self, idx, x)
+  local _, col = get_line_col_from_index_and_x(self, idx, x)
+  return col
 end
 
 -- If line end is true, returns the end of the previous line, in a multi-line break.
