@@ -8,7 +8,6 @@ local tokenizer = require "core.tokenizer"
 local View = require "core.view"
 local http
 
-local INLINE_CODE_PADDING_X = common.round(4 * SCALE)
 local INLINE_CODE_PADDING_Y = common.round(1 * SCALE)
 local BLOCK_PADDING_X = style.padding.x
 local BLOCK_PADDING_Y = style.padding.y
@@ -2937,9 +2936,9 @@ local function draw_layout_commands(commands, start_x, start_y, clip_x, clip_y, 
             local draw_y = y + (command.height - font_height) / 2
             if fragment.background and phase ~= "foreground" then
               renderer.draw_rect(
-                cursor_x - INLINE_CODE_PADDING_X,
+                cursor_x,
                 draw_y - INLINE_CODE_PADDING_Y,
-                fragment.width + INLINE_CODE_PADDING_X * 2,
+                fragment.width,
                 font_height + INLINE_CODE_PADDING_Y * 2,
                 resolve_color(fragment.background)
               )
