@@ -1,0 +1,5 @@
+[wrap-git]
+url = https://github.com/winlibs/libiconv.git
+revision = accac417318a3eef7402685a268cab8037e62ba1
+depth = 1
+patch_directory = libiconv

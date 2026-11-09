@@ -1,5 +1,12 @@
 # Licenses
 
+## GNU libiconv (Windows MSVC packages)
+
+Copyright (C) 1999-2026 Free Software Foundation, Inc.
+
+GNU libiconv is licensed under the GNU Lesser General Public License,
+version 2.1 or later. See `libiconv-COPYING.LIB` in the package's `doc` directory.
+
 ## rxi/lite
 
 Copyright (c) 2020 rxi

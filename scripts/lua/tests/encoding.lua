@@ -61,6 +61,24 @@ test.describe("encoding", function()
     test.is_nil(err)
   end)
 
+  test.test("strict conversion rejects invalid and incomplete gb18030", function()
+    for _, text in ipairs({ "\255", "\129" }) do
+      local converted, err = encoding.convert("UTF-8", "GB18030", text, {
+        strict = true
+      })
+      test.is_nil(converted)
+      test.type(err, "string")
+    end
+  end)
+
+  test.test("strict conversion rejects unrepresentable characters", function()
+    local converted, err = encoding.convert("ASCII", "UTF-8", "€", {
+      strict = true
+    })
+    test.is_nil(converted)
+    test.type(err, "string")
+  end)
+
   test.test("detects utf16 files through the patched fallback", function(context)
     local path = context.temp_root .. PATHSEP .. "utf16le.txt"
     local file = io.open(path, "wb")

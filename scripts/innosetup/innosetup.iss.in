@@ -6,6 +6,10 @@
 #define BuildDir       "@PROJECT_BUILD_DIR@"
 #define SourceDir      "@PROJECT_SOURCE_DIR@"
 
+#ifndef PackageDir
+  #define PackageDir SourceDir + "/pragtical"
+#endif
+
 ; Use /dArch option to create a setup for a different architecture, e.g.:
 ; iscc /dArch=x86 innosetup.iss
 #ifndef Arch
@@ -78,7 +82,7 @@ Name: "portablemode"; Description: "Portable Mode"; Flags: unchecked
 Name: "envPath"; Description: "Add to PATH variable"
 
 [Files]
-Source: "{#SourceDir}/pragtical/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
+Source: "{#PackageDir}/*"; DestDir: "{app}"; Excludes: "user\*"; Flags: ignoreversion recursesubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
 [Icons]
@@ -154,8 +158,13 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep = ssPostInstall) and WizardIsTaskSelected('envPath')
-  then EnvAddPath(ExpandConstant('{app}'));
+  if CurStep = ssPostInstall then
+  begin
+    if WizardIsTaskSelected('portablemode') then
+      ForceDirectories(ExpandConstant('{app}\user'));
+    if WizardIsTaskSelected('envPath') then
+      EnvAddPath(ExpandConstant('{app}'));
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

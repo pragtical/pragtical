@@ -109,114 +109,23 @@ jobs:
           name: macOS DMG ${{ matrix.config.arch }}
           path: ${{ env.INSTALL_NAME }}.dmg
 
-  build_windows_msys2:
-    name: Windows
-    runs-on: windows-2022
-    strategy:
-      matrix:
-        config:
-          # - {msystem: MINGW32, arch: i686, target: x86}
-          - {msystem: MINGW64, arch: x86_64, target: x64}
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-        with: { fetch-depth: 0 }
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: ${{ matrix.config.msystem }}
-          install: >-
-            base-devel
-            git
-            zip
-            unzip
-            mingw-w64-${{ matrix.config.arch }}-gcc
-            mingw-w64-${{ matrix.config.arch }}-python-pip
-            mingw-w64-${{ matrix.config.arch }}-ninja
-            mingw-w64-${{ matrix.config.arch }}-cmake
-            mingw-w64-${{ matrix.config.arch }}-ca-certificates
-            mingw-w64-${{ matrix.config.arch }}-ntldd
-      - name: Setup Meson
-        run: |
-          pip install meson --break-system-packages
-      - name: Set Environment Variables
-        run: |
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "INSTALL_REF=${GITHUB_REF##*/}" >> "$GITHUB_ENV"
-          if [[ "${MSYSTEM}" == "MINGW64" ]]; then
-            echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-windows-x86_64" >> "$GITHUB_ENV"
-          else
-            echo "INSTALL_NAME=pragtical-${GITHUB_REF##*/}-windows-i686" >> "$GITHUB_ENV"
-          fi
-      - name: Install Dependencies
-        if: false
-        run: bash scripts/install-dependencies.sh --debug
-      - name: Build
-        run: |
-          bash --version
-          bash scripts/build.sh --debug --forcefallback
-      - name: Check EXE version info
-        shell: pwsh
-        run: ./scripts/check-windows-version-info.ps1 -BuildDir build-windows-${{ matrix.config.arch }}
-      - name: Run Tests
-        run: |
-          source scripts/common.sh
-          SDL_VIDEO_DRIVER=dummy SDL_AUDIO_DRIVER=dummy ./scripts/run-local "$(get_default_build_dir)" test scripts/lua/tests
-      - name: Package
-        run: bash scripts/package.sh --version ${INSTALL_REF} --debug --binary
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: Windows (MSYS) ${{ matrix.config.target }}
-          path: ${{ env.INSTALL_NAME }}.zip
-
   build_windows_msvc:
     name: Windows (MSVC)
     runs-on: windows-2022
-    strategy:
-      matrix:
-        arch:
-          # - { target: x86, name: i686 }
-          - { target: x64, name: x86_64 }
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - name: Setup Developer Command Prompt
-        uses: TheMrMilchmann/setup-msvc-dev@v4
+      - name: Build Windows packages
+        uses: ./.github/actions/windows-build
         with:
-          arch: ${{ matrix.arch.target }}
-      - name: Python Setup
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.x'
-      - name: Install meson and ninja
-        run: pip install meson ninja
-      - name: Setup cmake
-        uses: jwlawson/actions-setup-cmake@v2
-      - name: Set up environment variables
-        run: |
-          "INSTALL_NAME=pragtical-$($env:GITHUB_REF -replace ".*/")-windows-msvc-${{ matrix.arch.name }}" >> $env:GITHUB_ENV
-          "INSTALL_REF=$($env:GITHUB_REF -replace ".*/")" >> $env:GITHUB_ENV
-          "LUA_SUBPROJECT_PATH=subprojects/lua-5.4.6" >> $env:GITHUB_ENV
-      - name: Configure
-        run: |
-          meson setup --wrap-mode=forcefallback -Dppm=false build
-      - name: Build
-        run: |
-          meson compile -j 1 -C build
-          meson install -C build --destdir="../pragtical"
-      - name: Check EXE version info
-        run: ./scripts/check-windows-version-info.ps1 -BuildDir build
-      - name: Package
-        run: |
-          Remove-Item -Recurse -Force -Path "pragtical/lib","pragtical/include"
-          Compress-Archive -Path pragtical -DestinationPath "$env:INSTALL_NAME.zip"
+          configuration: pr
+          version: ${{ github.event.pull_request.number || github.run_number }}
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: Windows (MSVC) ${{ matrix.arch.target }}
-          path: ${{ env.INSTALL_NAME }}.zip
+          name: Windows MSVC x64
+          path: |
+            artifacts/windows/*.zip
+            artifacts/windows/*-setup.exe
+          if-no-files-found: error
