@@ -146,6 +146,20 @@ if not get_option('source-only')
     libdl = cc.find_library('dl', required : false)
     librt = cc.find_library('rt', required : false)
 
+    if host_machine.system() == 'windows'
+        if cc.get_argument_syntax() == 'msvc'
+            iconv_dep = dependency('iconv', required: true,
+                fallback: ['libiconv', 'libiconv_dep'])
+            if iconv_dep.type_name() == 'internal'
+                libiconv_project = subproject('libiconv')
+                install_data(libiconv_project.get_variable('libiconv_license'),
+                    install_dir: pragtical_docdir, rename: 'libiconv-COPYING.LIB')
+            endif
+        else
+            iconv_dep = cc.find_library('iconv', required: false)
+        endif
+    endif
+
     default_fallback_options = ['warning_level=0', 'werror=false']
 
     if not use_system_lua and not lua_jit_found
@@ -335,8 +349,41 @@ if not get_option('source-only')
         endif
 
         if host_machine.system() == 'windows'
+            if cc.get_argument_syntax() == 'msvc'
+                # Meson's CRT option is not forwarded to CMake subprojects.
+                # SDL must probe and compile against the editor's runtime.
+                sdl_debug_crt = sdl_build_type == 'Debug' ? 'Debug' : ''
+                sdl_auto_crt = get_option('buildtype') == 'plain' ? '' : 'MultiThreaded' + sdl_debug_crt
+                sdl_crt_options = {
+                    'none': '',
+                    'md': 'MultiThreadedDLL',
+                    'mdd': 'MultiThreadedDebugDLL',
+                    'mt': 'MultiThreaded',
+                    'mtd': 'MultiThreadedDebug',
+                    'from_buildtype': sdl_auto_crt == '' ? '' : sdl_auto_crt + 'DLL',
+                    'static_from_buildtype': sdl_auto_crt,
+                }
+                sdl_options.add_cmake_defines({
+                    'CMAKE_MSVC_RUNTIME_LIBRARY': sdl_crt_options[get_option('b_vscrt')],
+                    # SDL's MSVC cache assumes iconv.h is absent. Probe the
+                    # actual environment so external GNU libiconv is enabled.
+                    'SDL_PRESEED': 'OFF',
+                })
+                if iconv_dep.type_name() == 'internal'
+                    sdl_options.add_cmake_defines({
+                        'CMAKE_PROJECT_SDL3_INCLUDE': meson.current_source_dir() / 'scripts/cmake/meson-iconv.cmake',
+                        # SDL also includes iconv.h in its libc symbol probes.
+                        'CMAKE_REQUIRED_INCLUDES': iconv_dep.get_variable('includedir'),
+                    })
+                    # CMake-to-Meson translation drops sibling subproject
+                    # include directories, so pass the headers explicitly.
+                    sdl_options.append_compile_args('c',
+                        '/I' + iconv_dep.get_variable('includedir'), target: 'SDL3-static')
+                endif
+            endif
+
             # warn about the implications of missing iconv
-            if not cc.find_library('iconv', required: false).found()
+            if not iconv_dep.found()
                 warning('LIBICONV not found, various encoding conversions may fail')
             endif
         endif

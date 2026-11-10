@@ -160,7 +160,7 @@ if host_machine.system() == 'windows'
         pragtical_deps += cc.find_library('imm32', required: true)
         pragtical_deps += cc.find_library('setupapi', required: true)
         pragtical_deps += cc.find_library('version', required: true)
-        pragtical_deps += cc.find_library('iconv', required: false)
+        pragtical_deps += iconv_dep
     endif
 
     if cc.get_id() == 'gcc' and get_option('b_pgo') == 'generate'
@@ -239,13 +239,31 @@ if get_option('net')
     pragtical_cargs += '-DPRAGTICAL_NET'
 endif
 
+msvc_pgo = get_option('msvc_pgo')
+if msvc_pgo != 'off'
+    if cc.get_id() != 'msvc' or not get_option('b_lto') or get_option('b_pgo') != 'off'
+        error('msvc_pgo requires MSVC with b_lto=true and b_pgo=off')
+    endif
+    # Meson 1.12 puts b_pgo's /link flags into compile commands too.
+    # MSVC instruments at link time, so apply its flags only to the editor.
+    pragtical_link_args += msvc_pgo == 'generate' ? '/GENPROFILE' : '/USEPROFILE'
+endif
+
+msvc_pgo_enabled = cc.get_id() == 'msvc' and (msvc_pgo != 'off' or get_option('b_pgo') != 'off')
+pragtical_exe_link_args = pragtical_link_args
+if msvc_pgo_enabled
+    # The GUI and console executables share a basename, but their PGO
+    # databases must remain separate for instrumentation and profile use.
+    pragtical_exe_link_args += '/PGD:' + (meson.current_build_dir() / 'pragtical.pgd')
+endif
+
 executable('pragtical',
     pragtical_sources + pragtical_rc,
     include_directories: pragtical_includes,
     dependencies: pragtical_deps,
     c_args: pragtical_cargs,
     objc_args: pragtical_cargs,
-    link_args: pragtical_link_args,
+    link_args: pragtical_exe_link_args,
     link_whole: pragtical_link_whole,
     install_dir: pragtical_bindir,
     install: true,
@@ -259,6 +277,9 @@ if host_machine.system() == 'windows'
     pragtical_com_link_args = pragtical_link_args
     if cc.get_id() == 'msvc' or cc.get_id() == 'clang-cl'
         pragtical_com_link_args += '/IMPLIB:pragtical_com.lib'
+    endif
+    if msvc_pgo_enabled
+        pragtical_com_link_args += '/PGD:' + (meson.current_build_dir() / 'pragtical_com.pgd')
     endif
     executable('pragtical',
         pragtical_sources + pragtical_rc,

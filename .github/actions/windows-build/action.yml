@@ -1,0 +1,37 @@
+name: Build Windows packages
+description: Build and test Pragtical with MSVC, then create ZIP and Inno Setup packages
+inputs:
+  configuration:
+    description: Build configuration (pr, rolling, or release)
+    required: true
+  version:
+    description: Version used in package filenames
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Setup Developer Command Prompt
+      uses: TheMrMilchmann/setup-msvc-dev@v4
+      with:
+        arch: x64
+    - name: Python Setup
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.x'
+    - name: Setup cmake
+      uses: jwlawson/actions-setup-cmake@v2
+    - name: Install Meson and Ninja
+      shell: pwsh
+      run: python -m pip install 'meson>=1.12' ninja
+    - name: Build, test, and package
+      shell: pwsh
+      env:
+        CC: cl
+        CXX: cl
+        BUILD_CONFIGURATION: ${{ inputs.configuration }}
+        PACKAGE_VERSION: ${{ inputs.version }}
+      run: >-
+        ./scripts/build-windows.ps1
+        -Configuration $env:BUILD_CONFIGURATION
+        -Version $env:PACKAGE_VERSION
+        -TestInstaller
