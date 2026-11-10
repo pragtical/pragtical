@@ -93,6 +93,21 @@ static const char *utf8_prev(const char *s, const char *e) {
   return s < e ? e - 1 : s;
 }
 
+bool Lutf8_isvalid(const char *s, size_t len) {
+  const char *end = s + len;
+  while (s < end) {
+    unsigned char ch = (unsigned char) *s;
+    if (ch < 0x80) { s++; continue; }
+    size_t size = ch >= 0xC2 && ch < 0xE0 ? 2 :
+      ch >= 0xE0 && ch < 0xF0 ? 3 : ch >= 0xF0 && ch <= 0xF4 ? 4 : 0;
+    if (size == 0 || (size_t) (end - s) < size) return false;
+    const char *next = utf8_decode(s, NULL, 1);
+    if (!next) return false;
+    s = next;
+  }
+  return true;
+}
+
 static const char *utf8_next(const char *s, const char *e) {
   while (s < e && iscont(s + 1)) ++s;
   return s < e ? s + 1 : e;
@@ -717,6 +732,7 @@ typedef struct MatchState {
   utf8_pattern_result_t *result;
   const char *errmsg;
   int level;  /* total number of captures (finished or unfinished) */
+  bool byte_offsets;
   struct {
     const char *init;
     ptrdiff_t len;
@@ -1248,7 +1264,8 @@ static bool pattern_push_captures_filtered(
       return false;
     }
     if (l == CAP_POSITION) {
-      int idx = pattern_get_index(ms->capture[i].init, ms->src_init, ms->src_end);
+      int64_t idx = ms->byte_offsets ? ms->capture[i].init - ms->src_init :
+        pattern_get_index(ms->capture[i].init, ms->src_init, ms->src_end);
       if (!pattern_write_offset(result, writer, writer_ctx, idx + 1, errmsg)) return false;
     } else if (!offsets_only) {
       if (!pattern_write_string(result, ms->capture[i].init, l, errmsg)) return false;
@@ -1383,12 +1400,12 @@ bool Lutf8_find_noalloc(
   );
 }
 
-bool Lutf8_find_noalloc_from_byte(
+static bool Lutf8_find_from_byte(
   const char* s, size_t len,
   const char* pattern, size_t pattern_len,
   size_t byte_offset, bool plain, bool find,
   utf8_pattern_offset_writer_t writer, void* writer_ctx,
-  const char** errmsg
+  const char** errmsg, bool byte_offsets
 ) {
   const char *es = s + len;
   const char *p = pattern;
@@ -1410,10 +1427,10 @@ bool Lutf8_find_noalloc_from_byte(
     if (s2) {
       const char *e2 = s2 + (ep - p);
       if (e2 < es && iscont(e2)) e2 = utf8_next(e2, es);
-      int64_t offset = pattern_get_index(s2, s, es) + 1;
+      int64_t offset = (byte_offsets ? s2 - s : pattern_get_index(s2, s, es)) + 1;
       if (!pattern_write_offset(NULL, writer, writer_ctx, offset, errmsg) ||
           !pattern_write_offset(NULL, writer, writer_ctx,
-            offset + pattern_get_index(e2, s2, es) - 1, errmsg)) {
+            offset + (byte_offsets ? e2 - s2 : pattern_get_index(e2, s2, es)) - 1, errmsg)) {
         return false;
       }
       return true;
@@ -1424,6 +1441,7 @@ bool Lutf8_find_noalloc_from_byte(
   MatchState ms;
   memset(&ms, 0, sizeof(ms));
   ms.result = NULL;
+  ms.byte_offsets = byte_offsets;
   int anchor = (*p == '^');
   if (anchor) p++;
   ms.matchdepth = MAXCCALLS;
@@ -1439,10 +1457,10 @@ bool Lutf8_find_noalloc_from_byte(
     if (ms.errmsg) break;
     if (res != NULL) {
       if (find) {
-        int64_t offset = pattern_get_index(init, s, es) + 1;
+        int64_t offset = (byte_offsets ? init - s : pattern_get_index(init, s, es)) + 1;
         if (!pattern_write_offset(NULL, writer, writer_ctx, offset, errmsg) ||
             !pattern_write_offset(NULL, writer, writer_ctx,
-              offset + utf8_length(init, res) - 1, errmsg) ||
+              offset + (byte_offsets ? (size_t) (res - init) : utf8_length(init, res)) - 1, errmsg) ||
             !pattern_push_captures_filtered(
               &ms, NULL, NULL, NULL, writer, writer_ctx, true, errmsg
             )) {
@@ -1462,6 +1480,27 @@ bool Lutf8_find_noalloc_from_byte(
 
   if (ms.errmsg && errmsg) *errmsg = ms.errmsg;
   return false;
+}
+
+bool Lutf8_find_noalloc_from_byte(
+  const char* s, size_t len,
+  const char* pattern, size_t pattern_len,
+  size_t byte_offset, bool plain, bool find,
+  utf8_pattern_offset_writer_t writer, void* writer_ctx,
+  const char** errmsg
+) {
+  return Lutf8_find_from_byte(s, len, pattern, pattern_len, byte_offset,
+    plain, find, writer, writer_ctx, errmsg, false);
+}
+
+bool Lutf8_find_byte_offsets(
+  const char* s, size_t len,
+  const char* pattern, size_t pattern_len, size_t byte_offset,
+  utf8_pattern_offset_writer_t writer, void* writer_ctx,
+  const char** errmsg
+) {
+  return Lutf8_find_from_byte(s, len, pattern, pattern_len, byte_offset,
+    false, true, writer, writer_ctx, errmsg, true);
 }
 
 utf8_pattern_result_result_t Lutf8_match(

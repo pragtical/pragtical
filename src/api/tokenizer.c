@@ -15,6 +15,7 @@
 
 #define API_TYPE_TOKENIZER_SYNTAX "TokenizerSyntax"
 #define API_TYPE_TOKENIZER_ARENA "TokenizerArena"
+#define API_TYPE_TOKENIZER_RESUME "TokenizerResume"
 #define TOKENIZER_SYNTAX_CACHE_FIELD "_tokenizer_native_cache"
 #define TOKENIZER_TEXT_ARENA_FIELD "_tokenizer_native_text_arena"
 #define TOKENIZER_TOKEN_ARENA_FIELD "_tokenizer_native_token_arena"
@@ -118,6 +119,7 @@ typedef struct {
   size_t char_len;
   size_t *char_offsets;
   bool is_ascii;
+  bool utf8_valid;
 } TokenizerText;
 
 typedef struct {
@@ -152,6 +154,17 @@ typedef struct {
   size_t count;
   size_t cap;
 } TokenizerTokenBuffer;
+
+/* Only unfinished lines own an index between calls. Token prefixes stay in
+ * the public result table; the last span is all we need to continue merging. */
+typedef struct {
+  TokenizerText text;
+  lua_Integer next;
+  lua_Integer last_start;
+  lua_Integer last_end;
+  size_t complete_count;
+  size_t result_count;
+} TokenizerResume;
 
 static bool tokenizer_text_is_space(const char *text, size_t len);
 static const char *tokenizer_symbol_or_type(
@@ -278,6 +291,13 @@ static int tokenizer_arena_gc(lua_State *L) {
   return 0;
 }
 
+static int tokenizer_resume_gc(lua_State *L) {
+  TokenizerResume *resume = luaL_checkudata(L, 1, API_TYPE_TOKENIZER_RESUME);
+  free(resume->text.char_offsets);
+  memset(&resume->text, 0, sizeof(resume->text));
+  return 0;
+}
+
 static size_t utf8_char_size(unsigned char c) {
   if (c < 0x80) return 1;
   if ((c & 0xE0) == 0xC0) return 2;
@@ -315,6 +335,7 @@ static bool tokenizer_text_init(
     byte_pos++;
   }
 
+  self->utf8_valid = self->is_ascii || Lutf8_isvalid(text, byte_len);
   if (self->is_ascii) {
     self->char_len = byte_len;
     return true;
@@ -644,19 +665,27 @@ static void tokenizer_token_buffer_push_tokens(
 static int tokenizer_token_buffer_to_lua(
   lua_State *L,
   const TokenizerTokenBuffer *buffer,
-  const TokenizerText *text
+  const TokenizerText *text,
+  int existing,
+  size_t prefix
 ) {
-  lua_newtable(L);
+  if (existing) lua_pushvalue(L, existing);
+  else lua_newtable(L);
   int table_idx = lua_gettop(L);
+  size_t old_count = lua_rawlen(L, table_idx);
   for (size_t i = 0; i < buffer->count; i++) {
     const TokenizerTokenSpan *span = &buffer->items[i];
     const char *segment = NULL;
     size_t segment_len = 0;
     tokenizer_text_slice(text, span->start, span->end, &segment, &segment_len);
     lua_pushstring(L, span->type);
-    lua_rawseti(L, table_idx, (int) (i * 2) + 1);
+    lua_rawseti(L, table_idx, (int) (prefix + i * 2) + 1);
     lua_pushlstring(L, segment, segment_len);
-    lua_rawseti(L, table_idx, (int) (i * 2) + 2);
+    lua_rawseti(L, table_idx, (int) (prefix + i * 2) + 2);
+  }
+  for (size_t i = prefix + buffer->count * 2 + 1; i <= old_count; i++) {
+    lua_pushnil(L);
+    lua_rawseti(L, table_idx, (int) i);
   }
   return table_idx;
 }
@@ -1925,43 +1954,33 @@ static bool tokenizer_find_text(
       tokenizer_text_has_ascii_at(text, next)
     ) {
       return false;
-    } else if (!pattern->is_regex) {
-        ((TokenizerPattern *) pattern)->fallback_match_calls++;
-        const TokenizerString *code = anchored ? &pattern->anchored_code[part] : &pattern->code[part];
-        bool found = Lutf8_find_noalloc_from_byte(
-          text->text,
-          text->byte_len,
-          code->data,
-          code->len,
-          tokenizer_text_byte_at(text, next),
-          false,
-          true,
-          tokenizer_find_results_push_int64,
-          out,
-          NULL
-        );
-        if (!found || out->count == 0) {
-          return false;
-        }
     } else {
       ((TokenizerPattern *) pattern)->fallback_match_calls++;
       tokenizer_find_results_reset(scratch);
-      bool found = regex_pattern_find_noalloc(
-        (regex_pattern *) &pattern->regex[part],
-        text->text,
-        text->byte_len,
-        (int64_t) tokenizer_text_byte_at(text, next),
-        anchored ? REGEX_OPTION_ANCHORED : 0,
-        tokenizer_find_results_push_size,
-        scratch,
-        NULL
-      );
+      bool found;
+      if (!pattern->is_regex) {
+        const TokenizerString *code = anchored ? &pattern->anchored_code[part] : &pattern->code[part];
+        found = Lutf8_find_byte_offsets(
+          text->text, text->byte_len, code->data, code->len,
+          tokenizer_text_byte_at(text, next),
+          tokenizer_find_results_push_int64, scratch, NULL
+        );
+      } else {
+        RegexOption options = anchored ? REGEX_OPTION_ANCHORED : 0;
+        if (text->utf8_valid) options |= REGEX_OPTION_NO_UTF_CHECK;
+        found = regex_pattern_find_noalloc(
+          (regex_pattern *) &pattern->regex[part],
+          text->text, text->byte_len,
+          (int64_t) tokenizer_text_byte_at(text, next), options,
+          tokenizer_find_results_push_size, scratch, NULL
+        );
+      }
       if (!found || scratch->count < 2) {
         return false;
       }
 
       lua_Integer start_char =
-        (lua_Integer) tokenizer_text_char_from_byte(text, scratch->values[0]);
+        (lua_Integer) tokenizer_text_char_from_boundary(text, scratch->values[0]);
       lua_Integer end_char = scratch->values[1] < scratch->values[0]
         ? start_char - 1
         : (lua_Integer) tokenizer_text_char_from_byte(text, scratch->values[1]);
@@ -2100,6 +2119,93 @@ static int f_tokenizer_get_syntax_stats(lua_State *L) {
   return 1;
 }
 
+/* Validate the private cache without trusting optional fields supplied by Lua.
+ * Legacy resumes and changed inputs continue through the ordinary import path. */
+static TokenizerResume *tokenizer_resume_get(
+  lua_State *L, int resume_idx, const char *text, size_t len, int *cache_idx
+) {
+  if (!resume_idx) return NULL;
+  lua_getfield(L, resume_idx, "_native");
+  int idx = lua_gettop(L);
+  TokenizerResume *cache = luaL_testudata(L, idx, API_TYPE_TOKENIZER_RESUME);
+  if (!cache || cache->text.text != text || cache->text.byte_len != len) {
+    lua_pop(L, 1);
+    return NULL;
+  }
+  lua_getfield(L, resume_idx, "i");
+  bool valid = lua_isnumber(L, -1) && lua_tointeger(L, -1) == cache->next;
+  lua_pop(L, 1);
+  lua_getuservalue(L, idx);
+  int refs = lua_gettop(L);
+  lua_getfield(L, resume_idx, "res");
+  int res_idx = lua_gettop(L);
+  lua_rawgeti(L, refs, 2);
+  valid = valid && lua_rawequal(L, -1, res_idx) &&
+    lua_rawlen(L, res_idx) == cache->result_count;
+  lua_pop(L, 1);
+  lua_getfield(L, resume_idx, "state");
+  lua_rawgeti(L, refs, 3);
+  valid = valid && lua_rawequal(L, -1, -2);
+  lua_pop(L, 2);
+  if (valid && cache->complete_count) {
+    lua_rawgeti(L, res_idx, (int) cache->complete_count - 1);
+    lua_rawgeti(L, refs, 4);
+    valid = lua_rawequal(L, -1, -2);
+    lua_pop(L, 2);
+    lua_rawgeti(L, res_idx, (int) cache->complete_count);
+    lua_rawgeti(L, refs, 5);
+    valid = valid && lua_rawequal(L, -1, -2);
+    lua_pop(L, 2);
+  }
+  lua_pop(L, 2); /* refs, res */
+  if (!valid) {
+    lua_pop(L, 1);
+    return NULL;
+  }
+  *cache_idx = idx;
+  return cache;
+}
+
+static void tokenizer_resume_save(
+  lua_State *L, int resume_idx, int result_idx, int cache_idx,
+  const TokenizerText *text, lua_Integer next,
+  size_t complete_count, const TokenizerTokenSpan *last
+) {
+  if (!cache_idx) {
+    TokenizerResume *cache = lua_newuserdata(L, sizeof(*cache));
+    memset(cache, 0, sizeof(*cache));
+    cache_idx = lua_gettop(L);
+    luaL_setmetatable(L, API_TYPE_TOKENIZER_RESUME);
+    cache->text = *text;
+    cache->text.char_offsets = NULL;
+    if (text->char_offsets) {
+      size_t bytes = sizeof(size_t) * (text->char_len + 2);
+      cache->text.char_offsets = malloc(bytes);
+      if (!cache->text.char_offsets) luaL_error(L, "failed to save tokenizer text offsets");
+      memcpy(cache->text.char_offsets, text->char_offsets, bytes);
+    }
+  }
+  TokenizerResume *cache = lua_touserdata(L, cache_idx);
+  cache->next = next;
+  cache->complete_count = complete_count;
+  cache->result_count = lua_rawlen(L, result_idx);
+  cache->last_start = last ? last->start : 0;
+  cache->last_end = last ? last->end : 0;
+  lua_newtable(L);
+  lua_pushvalue(L, 2); lua_rawseti(L, -2, 1); /* keep text alive */
+  lua_pushvalue(L, result_idx); lua_rawseti(L, -2, 2);
+  lua_getfield(L, resume_idx, "state"); lua_rawseti(L, -2, 3);
+  if (complete_count) {
+    lua_rawgeti(L, result_idx, (int) complete_count - 1); lua_rawseti(L, -2, 4);
+    lua_rawgeti(L, result_idx, (int) complete_count); lua_rawseti(L, -2, 5);
+  }
+  lua_setuservalue(L, cache_idx);
+  lua_pushvalue(L, cache_idx);
+  lua_setfield(L, resume_idx, "_native");
+  /* A newly allocated cache sits above the returned resume table. */
+  if (cache_idx > resume_idx) lua_pop(L, 1);
+}
+
 static int f_tokenizer_tokenize(lua_State *L) {
   luaL_checktype(L, 1, LUA_TTABLE);
   int resume_idx = 0;
@@ -2126,6 +2232,13 @@ static int f_tokenizer_tokenize(lua_State *L) {
   }
   TokenizerSyntax *incoming_syntax = tokenizer_get_syntax_cache(L, 1);
 
+  size_t text_len_bytes = 0;
+  const char *text_value = luaL_checklstring(L, 2, &text_len_bytes);
+  int cache_idx = 0;
+  TokenizerResume *cache = tokenizer_resume_get(
+    L, resume_idx, text_value, text_len_bytes, &cache_idx
+  );
+
   TokenizerArenaUserdata *text_arena = tokenizer_push_runtime_arena(
     L,
     TOKENIZER_TEXT_ARENA_FIELD,
@@ -2150,10 +2263,10 @@ static int f_tokenizer_tokenize(lua_State *L) {
   arena_reset(&token_arena->arena);
   lua_pop(L, 1);
 
-  size_t text_len_bytes = 0;
-  const char *text_value = luaL_checklstring(L, 2, &text_len_bytes);
   TokenizerText text;
-  if (!tokenizer_text_init(&text, &text_arena->arena, text_value, text_len_bytes)) {
+  if (cache) {
+    text = cache->text;
+  } else if (!tokenizer_text_init(&text, &text_arena->arena, text_value, text_len_bytes)) {
     return luaL_error(L, "failed to allocate tokenizer text offsets");
   }
 
@@ -2171,7 +2284,7 @@ static int f_tokenizer_tokenize(lua_State *L) {
       (lua_Integer) text.char_len,
       tokenizer_text_is_space(text.text, text.byte_len)
     );
-    tokenizer_token_buffer_to_lua(L, &tokens, &text);
+    tokenizer_token_buffer_to_lua(L, &tokens, &text, 0, 0);
     tokenizer_state_push(L, &state);
     tokenizer_state_uninit(&state);
     tokenizer_text_uninit(&text);
@@ -2179,6 +2292,8 @@ static int f_tokenizer_tokenize(lua_State *L) {
   }
 
   lua_Integer i = 1;
+  int existing_result = 0;
+  size_t prefix = 0;
   if (resume_idx) {
     lua_getfield(L, resume_idx, "res");
     int res_idx = lua_gettop(L);
@@ -2190,7 +2305,22 @@ static int f_tokenizer_tokenize(lua_State *L) {
     tokenizer_state_init_from_lua(L, -1, &state, true);
     lua_pop(L, 1);
     tokenizer_token_buffer_init(&tokens, &token_arena->arena);
-    tokenizer_token_buffer_init_from_resume(L, &tokens, &text, res_idx);
+    if (cache) {
+      existing_result = res_idx;
+      if (cache->complete_count) {
+        prefix = cache->complete_count - 2;
+        lua_rawgeti(L, res_idx, (int) cache->complete_count - 1);
+        const char *type = lua_tostring(L, -1);
+        lua_rawgeti(L, res_idx, (int) cache->complete_count);
+        size_t len;
+        const char *segment = lua_tolstring(L, -1, &len);
+        tokenizer_token_buffer_append(&tokens, type, cache->last_start,
+          cache->last_end, tokenizer_text_is_space(segment, len));
+        lua_pop(L, 2);
+      }
+    } else {
+      tokenizer_token_buffer_init_from_resume(L, &tokens, &text, res_idx);
+    }
   } else {
     tokenizer_token_buffer_init(&tokens, &token_arena->arena);
   }
@@ -2208,8 +2338,11 @@ static int f_tokenizer_tokenize(lua_State *L) {
     if (text.char_len > 200 || i - starting_i > 200) {
       starting_i = i;
       if (tokenizer_get_time() - start_time > max_time) {
+        size_t complete_count = prefix + tokens.count * 2;
+        TokenizerTokenSpan last = {0};
+        if (tokens.count) last = tokens.items[tokens.count - 1];
         tokenizer_token_buffer_push(&tokens, &text, "incomplete", i, (lua_Integer) text.char_len);
-        tokenizer_token_buffer_to_lua(L, &tokens, &text);
+        int result_idx = tokenizer_token_buffer_to_lua(L, &tokens, &text, existing_result, prefix);
         lua_pushliteral(L, "\0");
         lua_newtable(L);
         lua_pushvalue(L, -3);
@@ -2220,6 +2353,8 @@ static int f_tokenizer_tokenize(lua_State *L) {
         lua_setfield(L, -2, "state");
         lua_pushboolean(L, first_line);
         lua_setfield(L, -2, "first_line");
+        tokenizer_resume_save(L, lua_gettop(L), result_idx, cache_idx,
+          &text, i, complete_count, complete_count ? &last : NULL);
         tokenizer_find_results_uninit(&find_results);
         tokenizer_find_results_uninit(&raw_find_results);
         tokenizer_state_uninit(&state);
@@ -2393,7 +2528,13 @@ static int f_tokenizer_tokenize(lua_State *L) {
     }
   }
 
-  tokenizer_token_buffer_to_lua(L, &tokens, &text);
+  tokenizer_token_buffer_to_lua(L, &tokens, &text, existing_result, prefix);
+  if (cache) {
+    free(cache->text.char_offsets);
+    memset(&cache->text, 0, sizeof(cache->text));
+    lua_newtable(L);
+    lua_setuservalue(L, cache_idx);
+  }
   tokenizer_state_push(L, &state);
   tokenizer_find_results_uninit(&find_results);
   tokenizer_find_results_uninit(&raw_find_results);
@@ -2410,6 +2551,11 @@ int luaopen_tokenizer(lua_State *L) {
 
   luaL_newmetatable(L, API_TYPE_TOKENIZER_ARENA);
   lua_pushcfunction(L, tokenizer_arena_gc);
+  lua_setfield(L, -2, "__gc");
+  lua_pop(L, 1);
+
+  luaL_newmetatable(L, API_TYPE_TOKENIZER_RESUME);
+  lua_pushcfunction(L, tokenizer_resume_gc);
   lua_setfield(L, -2, "__gc");
   lua_pop(L, 1);
 

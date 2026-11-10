@@ -758,3 +758,169 @@ test.describe("regex starter fallback", function()
     test.equal(stats.has_unknown_starters, false)
   end)
 end)
+
+test.describe("native tokenizer long lines", function()
+  test.before_each(function(context)
+    context.native = tokenizer.is_using_native()
+    context.max_time = core.co_max_time
+    tokenizer.set_use_native(true)
+  end)
+
+  test.after_each(function(context)
+    core.co_max_time = context.max_time
+    tokenizer.set_use_native(context.native)
+  end)
+
+  local function compare(syn, text)
+    core.co_max_time = 3600
+    tokenizer.set_use_native(false)
+    local expected, expected_state = tokenizer.tokenize(syn, text)
+    tokenizer.set_use_native(true)
+    local tokens, state, resume = tokenizer.tokenize(syn, text)
+    test.same(tokens, expected)
+    test.equal(state, expected_state)
+    test.is_nil(resume)
+  end
+
+  test.test("byte offsets preserve Unicode captures and frontier context", function()
+    local syn = { patterns = {
+      { pattern = "%f[%a]word()%s+()next", type = { "keyword", "normal", "keyword2" } },
+      { pattern = "%f[%a]word", type = "keyword" },
+      { pattern = "xword", type = "symbol" },
+      { pattern = { "«", "»", "\\" }, type = "string" },
+      { regex = [[\d+()\s*()$]], type = { "number", "normal", "normal" } },
+    }, symbols = {} }
+    compare(syn, string.rep("é🙂 xword word next «内容\\»末» ", 100) .. "42  ")
+  end)
+
+  test.test("regex lookahead and anchors see the full line", function()
+    local syn = { patterns = {
+      { regex = [[x(?=.{256}END)]], type = "keyword" },
+      { regex = [[\d+$]], type = "number" },
+      { pattern = ".", type = "normal" },
+    }, symbols = {} }
+    compare(syn, "éx" .. string.rep("a", 256) .. "END123 tail456")
+  end)
+
+  test.test("empty closing matches retain the boundary after the last character", function()
+    for _, matcher in ipairs { "pattern", "regex" } do
+      local syn = { patterns = {
+        { [matcher] = { "<", "$" }, type = "string" },
+      }, symbols = {} }
+      for _, text in ipairs { "<abc", "<é🙂内容" } do
+        compare(syn, text)
+        local tokens, state = tokenizer.tokenize(syn, text)
+        test.same(tokens, { "string", text })
+        test.equal(state, string.char(0))
+      end
+    end
+  end)
+
+  test.test("invalid UTF-8 keeps checked regex matching", function()
+    local syn = { patterns = {
+      { regex = [[\d+]], type = "number" },
+    }, symbols = {} }
+    for _, invalid in ipairs {
+      "\255", "\128", "\192\175", "\237\160\128", "\244\144\128\128", "\226\130",
+    } do
+      local tokens = tokenizer.tokenize(syn, "123" .. invalid)
+      test.same(tokens, { "normal", "123" .. invalid })
+    end
+    compare(syn, "é🙂 123 中 456")
+  end)
+
+  -- Seed a legacy resume to force a deterministic yield after a known prefix,
+  -- without depending on the native clock's resolution or machine speed.
+  local function pending(syn, prefix, tail)
+    core.co_max_time = 3600
+    local tokens, state = tokenizer.tokenize(syn, prefix)
+    local text = prefix .. tail
+    core.co_max_time = -1
+    local _, _, resume = tokenizer.tokenize(syn, text, nil, {
+      res = tokens, i = prefix:ulen() + 1, state = state,
+    })
+    test.type(resume, "table")
+    return text, resume
+  end
+
+  local function finish(syn, text, resume)
+    core.co_max_time = 3600
+    local tokens, state, next_resume = tokenizer.tokenize(syn, text, nil, resume)
+    local expected, expected_state = tokenizer.tokenize(syn, text)
+    test.same(tokens, expected)
+    test.equal(state, expected_state)
+    test.is_nil(next_resume)
+    return tokens
+  end
+
+  test.test("cached resumes retain token prefixes and merge the last span", function()
+    local syn = { patterns = {
+      { pattern = "%d+", type = "number" },
+      { pattern = "%a+", type = "symbol" },
+    }, symbols = {} }
+    for _, prefix in ipairs { "é🙂 abc 12", "é🙂 abc ", "é🙂 abc!" } do
+      local text, resume = pending(syn, prefix, string.rep("123 abc! ", 100))
+      local previous = resume.res
+      local _, _, next_resume = tokenizer.tokenize(syn, text, nil, { resume = resume })
+      test.equal(next_resume.res, previous)
+      finish(syn, text, next_resume)
+    end
+  end)
+
+  test.test("cached indexes survive interleaved lines, collection and cache clearing", function()
+    local syn = { patterns = {
+      { pattern = { '"', '"', "\\" }, type = "string" },
+      { regex = [[\d+]], type = "number" },
+    }, symbols = {} }
+    local text1, resume1 = pending(syn, "é🙂 12\"open", string.rep("inside ", 100) .. '\" 34')
+    local text2, resume2 = pending(syn, "中 56", string.rep(" 78", 200))
+    collectgarbage("collect")
+    tokenizer.clear_native_cache(syn)
+    finish(syn, text2, resume2)
+    finish(syn, text1, resume1)
+  end)
+
+  test.test("repeated time-sliced calls agree with uninterrupted tokenization", function()
+    local syn = { patterns = {
+      { regex = [[\d+]], type = "number" },
+      { pattern = "%a+", type = "symbol" },
+    }, symbols = {} }
+    local text = "é🙂 " .. string.rep("123+abc! ", 5000)
+    core.co_max_time = 3600
+    local expected, expected_state = tokenizer.tokenize(syn, text)
+    core.co_max_time = 0.001
+    local tokens, state, resume
+    local calls = 0
+    repeat
+      tokens, state, resume = tokenizer.tokenize(syn, text, state, resume)
+      calls = calls + 1
+      test.ok(calls < 5000, "tokenization must finish despite time slicing")
+      if resume then collectgarbage("collect") end
+    until not resume
+    test.same(tokens, expected)
+    test.equal(state, expected_state)
+  end)
+
+  test.test("legacy and changed resumes safely fall back to importing tokens", function()
+    local syn = { patterns = {
+      { regex = [[\d+]], type = "number" },
+      { pattern = "%a+", type = "symbol" },
+    }, symbols = {} }
+    for _, mode in ipairs { "legacy", "text", "tokens", "position" } do
+      local text, resume = pending(syn, "é 123!", string.rep("456 abc! ", 100))
+      if mode == "legacy" then resume._native = nil end
+      if mode == "text" then text = text:gsub("456", "789") end
+      if mode == "tokens" then
+        local copy = {}
+        for i, value in ipairs(resume.res) do copy[i] = value end
+        resume.res = copy
+      end
+      if mode == "position" then
+        resume.i = resume.i + 1
+        -- Supply the corresponding completed prefix for this new position.
+        resume.res = tokenizer.tokenize(syn, text:usub(1, resume.i - 1))
+      end
+      finish(syn, text, resume)
+    end
+  end)
+end)
