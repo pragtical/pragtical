@@ -1006,7 +1006,7 @@ settings.add("Development",
     },
     {
       label = "Native Tokenizer",
-      description = "Provides up to 24X better performance, disable if working with Lua based one.",
+      description = "Benchmarks show 7-35x faster tokenization than Lua on regular files and over 400x on long lines.",
       path = "native_tokenizer",
       type = settings.type.TOGGLE,
       default = true,

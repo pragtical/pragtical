@@ -136,6 +136,14 @@ bool Lutf8_find_noalloc_from_byte(
   utf8_pattern_offset_writer_t writer, void* writer_ctx,
   const char** errmsg
 );
+/* Tokenizer interface: byte offsets in and out, preserving the full subject. */
+bool Lutf8_find_byte_offsets(
+  const char* s, size_t len,
+  const char* pattern, size_t pattern_len, size_t byte_offset,
+  utf8_pattern_offset_writer_t writer, void* writer_ctx,
+  const char** errmsg
+);
+bool Lutf8_isvalid(const char* s, size_t len);
 utf8_pattern_result_result_t Lutf8_match(
   const char* s, size_t len,
   const char* pattern, size_t pattern_len,
