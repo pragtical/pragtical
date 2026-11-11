@@ -13,6 +13,7 @@
 #include FT_TRUETYPE_IDS_H
 #include FT_SFNT_NAMES_H
 #include FT_SYSTEM_H
+#include FT_MULTIPLE_MASTERS_H
 #include <hb.h>
 #include <hb-ft.h>
 
@@ -23,6 +24,8 @@
 #include "renderer/backend.h"
 #include "renderer/renderer.h"
 #include "renderer/window.h"
+#include "fallbackfont.h"
+#include "grapheme.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -77,9 +80,9 @@ typedef struct {
 
 // maximum unicode codepoint supported (https://stackoverflow.com/a/52203901)
 #define MAX_UNICODE 0x10FFFF
-// number of rows and columns in the codepoint map
-#define CHARMAP_ROW 128
-#define CHARMAP_COL ((unsigned int)ceil((float)MAX_UNICODE / CHARMAP_ROW))
+// Smaller, lazily allocated pages keep sparse scripts inexpensive to cache.
+#define CHARMAP_COL 1024
+#define CHARMAP_ROW (MAX_UNICODE / CHARMAP_COL + 1)
 
 // number of shaped width entries cached per font
 #define SHAPED_WIDTH_CACHE_MAX 512
@@ -91,15 +94,27 @@ typedef struct {
 // maximum shaped run byte length to copy into the run cache
 #define SHAPED_RUN_CACHE_MAX_TEXT 256
 
+#define FONT_CLUSTER_CACHE_MAX 512
+#define FONT_CLUSTER_CACHE_MAX_TEXT 256
+
+/* Small selected-run cache, separate from glyph/atlas storage. Each record is
+ * capped at 1 KiB; ASCII uses the direct path and allocates no layout entries.
+ */
+#define FONT_LAYOUT_CACHE_MAX 64
+#define FONT_LAYOUT_CACHE_MAX_TEXT 512
+#define FONT_LAYOUT_CACHE_MAX_BYTES 1024
+
 // maps codepoints -> glyph IDs
 typedef struct {
-  unsigned int *rows[CHARMAP_ROW];
+  unsigned int *first;
+  unsigned int **rows;
 } CharMap;
 
 // maps glyph IDs -> glyph metrics
 typedef struct {
-  // accessed with metrics[bitmap_idx][glyph_id / nrow][glyph_id - (row * ncol)]
-  GlyphMetric *metrics[SUBPIXEL_BITMAPS_CACHED][GLYPHMAP_ROW];
+  // accessed with metrics[bitmap_idx][glyph_id / GLYPHMAP_COL][glyph_id % GLYPHMAP_COL]
+  GlyphMetric **metrics[SUBPIXEL_BITMAPS_CACHED];
+  size_t row_count;
   RenAtlas atlas;
   size_t metrics_bytesize;
 } GlyphMap;
@@ -131,6 +146,46 @@ typedef struct {
   uint64_t age;
 } ShapedRunCacheEntry;
 
+/* Keep each lazy shaping cache's counters beside its entries. */
+typedef struct {
+  uint64_t age;
+  size_t count;
+  ShapedWidthCacheEntry entries[SHAPED_WIDTH_CACHE_MAX];
+} ShapedWidthCache;
+
+typedef struct {
+  uint64_t age;
+  size_t count;
+  ShapedRunCacheEntry entries[SHAPED_RUN_CACHE_MAX];
+} ShapedRunCache;
+
+/* The same bounded cache holds either coverage results or native selections.
+ * A matching entry with a NULL font caches a failed lookup as well.
+ */
+typedef struct {
+  char *text;
+  size_t len;
+  RenFont *font;
+} FontClusterCacheEntry;
+
+typedef struct {
+  RenFont *font;
+  size_t end;
+  bool shaped;
+} FontTextRun;
+
+typedef struct {
+  char *text;
+  size_t len, count;
+  uint64_t group;
+  FontTextRun *runs;
+} FontTextLayout;
+
+typedef struct {
+  uint64_t role;
+  RenFont *font;
+} FontFallbackRole;
+
 typedef struct RenFont {
   struct RenFont *next_loaded;
   struct RenFont *prev_loaded;
@@ -148,19 +203,34 @@ typedef struct RenFont {
   ERenFontHinting hinting;
   unsigned char style;
   bool ligatures;
+  bool system_fallback;
+  bool resolver_initialized;
+  FallbackFontResolver *resolver;
+  struct RenFont *fallback_fonts, *next_fallback;
+  RenFont **fallback_index;
+  size_t fallback_count;
+  FontFallbackRole *fallback_roles;
+  size_t fallback_role_count;
+  /* Native scalar selections: 0 unknown, 1 missing, otherwise pool index + 2.
+   * Sparse Unicode rows avoid eviction when a document uses many characters.
+   */
+  CharMap fallback_characters;
+  FontTextLayout *layouts;
+  uint64_t identity;
+  float fallback_scale;
+  uint32_t variation_hash;
+  FontClusterCacheEntry *coverage_cache, *fallback_cache;
   uint32_t generation;
-  uint64_t shaped_width_age;
-  size_t shaped_width_count;
-  ShapedWidthCacheEntry shaped_width_cache[SHAPED_WIDTH_CACHE_MAX];
-  uint64_t shaped_run_age;
-  size_t shaped_run_count;
-  ShapedRunCacheEntry shaped_run_cache[SHAPED_RUN_CACHE_MAX];
+  ShapedWidthCache *shaped_width_cache;
+  ShapedRunCache *shaped_run_cache;
   char path[];
 } RenFont;
 
 static RenFont *loaded_fonts = NULL;
+static uint64_t next_font_identity;
 
 static void font_link_loaded(RenFont *font) {
+  font->identity = ++next_font_identity;
   font->next_loaded = loaded_fonts;
   font->prev_loaded = NULL;
   if (loaded_fonts)
@@ -180,20 +250,13 @@ static void font_unlink_loaded(RenFont *font) {
 }
 
 static const char* utf8_to_codepoint(const char *p, const char *endp, unsigned *dst) {
-  const unsigned char *up = (unsigned char*)p;
-  unsigned res, n;
-  switch (*p & 0xf0) {
-    case 0xf0 :  res = *up & 0x07;  n = 3;  break;
-    case 0xe0 :  res = *up & 0x0f;  n = 2;  break;
-    case 0xd0 :
-    case 0xc0 :  res = *up & 0x1f;  n = 1;  break;
-    default   :  res = *up;         n = 0;  break;
+  if ((unsigned char)*p < 0x80) {
+    *dst = (unsigned char)*p;
+    return p + 1;
   }
-  while (up < (const unsigned char *)endp && n--) {
-    res = (res << 6) | (*(++up) & 0x3f);
-  }
-  *dst = res;
-  return (const char*)up + 1;
+  size_t remaining = endp - p;
+  *dst = SDL_StepUTF8(&p, &remaining);
+  return p;
 }
 
 static int font_set_load_options(RenFont* font) {
@@ -239,18 +302,38 @@ static int font_set_style(FT_Outline* outline, int x_translation, unsigned char 
   return 0;
 }
 
+/* Both glyph IDs and native font selections use the same sparse Unicode map. */
+static inline unsigned int *font_charmap_entry(CharMap *map, unsigned int codepoint) {
+  unsigned int **page;
+  if (codepoint < CHARMAP_COL) {
+    page = &map->first;
+  } else {
+    if (!map->rows)
+      map->rows = check_alloc(SDL_calloc(CHARMAP_ROW - 1, sizeof(*map->rows)));
+    page = &map->rows[codepoint / CHARMAP_COL - 1];
+  }
+  if (!*page) *page = check_alloc(SDL_calloc(CHARMAP_COL, sizeof(unsigned int)));
+  return &(*page)[codepoint % CHARMAP_COL];
+}
+
+static void font_clear_charmap(CharMap *map) {
+  SDL_free(map->first);
+  map->first = NULL;
+  if (!map->rows) return;
+  for (size_t i = 0; i < CHARMAP_ROW - 1; i++) SDL_free(map->rows[i]);
+  SDL_free(map->rows);
+  map->rows = NULL;
+}
+
 static unsigned int font_get_glyph_id(RenFont *font, unsigned int codepoint) {
   if (codepoint > MAX_UNICODE) return 0;
-  size_t row = codepoint / CHARMAP_COL;
-  size_t col = codepoint - (row * CHARMAP_COL);
-  if (!font->charmap.rows[row]) font->charmap.rows[row] = check_alloc(SDL_calloc(sizeof(unsigned int), CHARMAP_COL));
-  if (font->charmap.rows[row][col] == 0) {
+  unsigned int *entry = font_charmap_entry(&font->charmap, codepoint);
+  if (*entry == 0) {
     unsigned int glyph_id = FT_Get_Char_Index(font->face, codepoint);
-    // use -1 as a sentinel value for "glyph not available", a bit risky, but OpenType
-    // uses uint16 to store glyph IDs. In theory this cannot ever be reached
-    font->charmap.rows[row][col] = glyph_id ? glyph_id : (unsigned int) -1;
+    // Keep zero for uncached codepoints and use -1 for a cached missing glyph.
+    *entry = glyph_id ? glyph_id : (unsigned int) -1;
   }
-  return font->charmap.rows[row][col] == (unsigned int) -1 ? 0 : font->charmap.rows[row][col];
+  return *entry == (unsigned int) -1 ? 0 : *entry;
 }
 
 #define FONT_IS_SUBPIXEL(F) ((F)->antialiasing == FONT_ANTIALIASING_SUBPIXEL)
@@ -860,6 +943,8 @@ static SDL_Surface *font_load_colr_bitmap(RenFont *font, unsigned int glyph_id, 
 }
 
 static GlyphMetric *font_load_glyph_metric(RenFont *font, unsigned int glyph_id, unsigned int bitmap_idx) {
+  if (glyph_id >= (unsigned long)font->face->num_glyphs || bitmap_idx >= FONT_BITMAP_COUNT(font))
+    return NULL;
   unsigned int load_option = font_set_load_options(font);
   int row = glyph_id / GLYPHMAP_COL, col = glyph_id - (row * GLYPHMAP_COL);
   int bitmaps = FONT_BITMAP_COUNT(font);
@@ -998,43 +1083,6 @@ static inline int is_whitespace(unsigned int codepoint) {
   return (codepoint >= 0x9 && codepoint <= 0xD) || (codepoint >= 0x2000 && codepoint <= 0x200A);
 }
 
-static RenFont *font_group_get_glyph(RenFont **fonts, unsigned int codepoint, int subpixel_idx, SDL_Surface **surface, GlyphMetric **metric) {
-  if (subpixel_idx < 0) subpixel_idx += SUBPIXEL_BITMAPS_CACHED;
-  RenFont *font = NULL;
-  unsigned int glyph_id = 0;
-  bool white_space = is_whitespace(codepoint);
-  for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
-    font = fonts[i]; glyph_id = font_get_glyph_id(fonts[i], codepoint);
-    // use the first font that has representation for the glyph ID, but for whitespaces always use the first font
-    if (glyph_id || white_space) break;
-  }
-  // load the glyph if it is not loaded
-  subpixel_idx = FONT_IS_SUBPIXEL(font) ? subpixel_idx : 0;
-  GlyphMetric *m = font_load_glyph_metric(font, glyph_id, subpixel_idx);
-  // try the box drawing character (0x25A1) if the requested codepoint is not a whitespace, and we cannot load the .notdef glyph
-  if ((!m || !m->flags) && codepoint != 0x25A1 && !white_space)
-    return font_group_get_glyph(fonts, 0x25A1, subpixel_idx, surface, metric);
-  if (metric && m) *metric = m;
-  // skip all white space since empty on most fonts causing redundant load tries
-  // also we are already skipping them too on ren_draw_text
-  if (surface && m && !white_space)
-    *surface = font_load_glyph_bitmap(font, glyph_id, subpixel_idx, m);
-  return font;
-}
-
-static RenFont *font_group_find_font(RenFont **fonts, unsigned int codepoint, unsigned int *glyph_id) {
-  bool white_space = is_whitespace(codepoint);
-  for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
-    unsigned int gid = font_get_glyph_id(fonts[i], codepoint);
-    if (gid || white_space) {
-      if (glyph_id) *glyph_id = gid;
-      return fonts[i];
-    }
-  }
-  if (glyph_id) *glyph_id = 0;
-  return fonts[0];
-}
-
 static RenFont *font_get_glyph_by_id(RenFont *font, unsigned int glyph_id, int subpixel_idx, SDL_Surface **surface, GlyphMetric **metric) {
   if (subpixel_idx < 0) subpixel_idx += SUBPIXEL_BITMAPS_CACHED;
   subpixel_idx = FONT_IS_SUBPIXEL(font) ? subpixel_idx : 0;
@@ -1046,22 +1094,24 @@ static RenFont *font_get_glyph_by_id(RenFont *font, unsigned int glyph_id, int s
 }
 
 static void font_clear_shaped_width_cache(RenFont *font) {
-  for (size_t i = 0; i < font->shaped_width_count; i++) {
-    SDL_free(font->shaped_width_cache[i].text);
-    font->shaped_width_cache[i].text = NULL;
+  if (!font->shaped_width_cache) return;
+  for (size_t i = 0; i < font->shaped_width_cache->count; i++) {
+    SDL_free(font->shaped_width_cache->entries[i].text);
+    font->shaped_width_cache->entries[i].text = NULL;
   }
-  font->shaped_width_count = 0;
-  font->shaped_width_age = 0;
+  SDL_free(font->shaped_width_cache);
+  font->shaped_width_cache = NULL;
 }
 
 static ShapedWidthCacheEntry *font_lookup_shaped_width_cache(RenFont *font, const char *text, size_t len, uint32_t hash_value) {
-  for (size_t i = 0; i < font->shaped_width_count; i++) {
-    ShapedWidthCacheEntry *entry = &font->shaped_width_cache[i];
+  if (!font->shaped_width_cache) return NULL;
+  for (size_t i = 0; i < font->shaped_width_cache->count; i++) {
+    ShapedWidthCacheEntry *entry = &font->shaped_width_cache->entries[i];
     if (entry->generation == font->generation
         && entry->hash == hash_value
         && entry->len == len
         && memcmp(entry->text, text, len) == 0) {
-      entry->age = ++font->shaped_width_age;
+      entry->age = ++font->shaped_width_cache->age;
       return entry;
     }
   }
@@ -1069,22 +1119,24 @@ static ShapedWidthCacheEntry *font_lookup_shaped_width_cache(RenFont *font, cons
 }
 
 static void font_store_shaped_width_cache(RenFont *font, const char *text, size_t len, uint32_t hash_value, double width, int x_offset, bool has_x_offset) {
-  size_t idx = font->shaped_width_count;
+  if (!font->shaped_width_cache)
+    font->shaped_width_cache = check_alloc(SDL_calloc(1, sizeof(ShapedWidthCache)));
+  size_t idx = font->shaped_width_cache->count;
   if (idx < SHAPED_WIDTH_CACHE_MAX) {
-    font->shaped_width_count++;
+    font->shaped_width_cache->count++;
   } else {
     idx = 0;
-    uint64_t oldest = font->shaped_width_cache[0].age;
+    uint64_t oldest = font->shaped_width_cache->entries[0].age;
     for (size_t i = 1; i < SHAPED_WIDTH_CACHE_MAX; i++) {
-      if (font->shaped_width_cache[i].age < oldest) {
-        oldest = font->shaped_width_cache[i].age;
+      if (font->shaped_width_cache->entries[i].age < oldest) {
+        oldest = font->shaped_width_cache->entries[i].age;
         idx = i;
       }
     }
-    SDL_free(font->shaped_width_cache[idx].text);
+    SDL_free(font->shaped_width_cache->entries[idx].text);
   }
 
-  ShapedWidthCacheEntry *entry = &font->shaped_width_cache[idx];
+  ShapedWidthCacheEntry *entry = &font->shaped_width_cache->entries[idx];
   entry->text = check_alloc(SDL_malloc(len));
   memcpy(entry->text, text, len);
   entry->len = len;
@@ -1093,28 +1145,30 @@ static void font_store_shaped_width_cache(RenFont *font, const char *text, size_
   entry->width = width;
   entry->x_offset = x_offset;
   entry->has_x_offset = has_x_offset;
-  entry->age = ++font->shaped_width_age;
+  entry->age = ++font->shaped_width_cache->age;
 }
 
 static void font_clear_shaped_run_cache(RenFont *font) {
-  for (size_t i = 0; i < font->shaped_run_count; i++) {
-    SDL_free(font->shaped_run_cache[i].text);
-    font->shaped_run_cache[i].text = NULL;
-    SDL_free(font->shaped_run_cache[i].glyphs);
-    font->shaped_run_cache[i].glyphs = NULL;
+  if (!font->shaped_run_cache) return;
+  for (size_t i = 0; i < font->shaped_run_cache->count; i++) {
+    SDL_free(font->shaped_run_cache->entries[i].text);
+    font->shaped_run_cache->entries[i].text = NULL;
+    SDL_free(font->shaped_run_cache->entries[i].glyphs);
+    font->shaped_run_cache->entries[i].glyphs = NULL;
   }
-  font->shaped_run_count = 0;
-  font->shaped_run_age = 0;
+  SDL_free(font->shaped_run_cache);
+  font->shaped_run_cache = NULL;
 }
 
 static ShapedRunCacheEntry *font_lookup_shaped_run_cache(RenFont *font, const char *text, size_t len, uint32_t hash_value) {
-  for (size_t i = 0; i < font->shaped_run_count; i++) {
-    ShapedRunCacheEntry *entry = &font->shaped_run_cache[i];
+  if (!font->shaped_run_cache) return NULL;
+  for (size_t i = 0; i < font->shaped_run_cache->count; i++) {
+    ShapedRunCacheEntry *entry = &font->shaped_run_cache->entries[i];
     if (entry->generation == font->generation
         && entry->hash == hash_value
         && entry->len == len
         && memcmp(entry->text, text, len) == 0) {
-      entry->age = ++font->shaped_run_age;
+      entry->age = ++font->shaped_run_cache->age;
       return entry;
     }
   }
@@ -1122,23 +1176,25 @@ static ShapedRunCacheEntry *font_lookup_shaped_run_cache(RenFont *font, const ch
 }
 
 static ShapedRunCacheEntry *font_store_shaped_run_cache(RenFont *font, const char *text, size_t len, uint32_t hash_value, hb_glyph_info_t *infos, hb_glyph_position_t *positions, unsigned int glyph_count) {
-  size_t idx = font->shaped_run_count;
+  if (!font->shaped_run_cache)
+    font->shaped_run_cache = check_alloc(SDL_calloc(1, sizeof(ShapedRunCache)));
+  size_t idx = font->shaped_run_cache->count;
   if (idx < SHAPED_RUN_CACHE_MAX) {
-    font->shaped_run_count++;
+    font->shaped_run_cache->count++;
   } else {
     idx = 0;
-    uint64_t oldest = font->shaped_run_cache[0].age;
+    uint64_t oldest = font->shaped_run_cache->entries[0].age;
     for (size_t i = 1; i < SHAPED_RUN_CACHE_MAX; i++) {
-      if (font->shaped_run_cache[i].age < oldest) {
-        oldest = font->shaped_run_cache[i].age;
+      if (font->shaped_run_cache->entries[i].age < oldest) {
+        oldest = font->shaped_run_cache->entries[i].age;
         idx = i;
       }
     }
-    SDL_free(font->shaped_run_cache[idx].text);
-    SDL_free(font->shaped_run_cache[idx].glyphs);
+    SDL_free(font->shaped_run_cache->entries[idx].text);
+    SDL_free(font->shaped_run_cache->entries[idx].glyphs);
   }
 
-  ShapedRunCacheEntry *entry = &font->shaped_run_cache[idx];
+  ShapedRunCacheEntry *entry = &font->shaped_run_cache->entries[idx];
   entry->text = check_alloc(SDL_malloc(len));
   memcpy(entry->text, text, len);
   entry->len = len;
@@ -1152,13 +1208,13 @@ static ShapedRunCacheEntry *font_store_shaped_run_cache(RenFont *font, const cha
     entry->glyphs[i].y_offset = positions[i].y_offset;
     entry->glyphs[i].x_advance = positions[i].x_advance;
   }
-  entry->age = ++font->shaped_run_age;
+  entry->age = ++font->shaped_run_cache->age;
   return entry;
 }
 
 static void font_clear_glyph_metrics(RenFont *font) {
   for (int subpixel_idx = 0; subpixel_idx < FONT_BITMAP_COUNT(font); subpixel_idx++) {
-    for (int glyphmap_row = 0; glyphmap_row < GLYPHMAP_ROW; glyphmap_row++) {
+    for (size_t glyphmap_row = 0; glyphmap_row < font->glyphs.row_count; glyphmap_row++) {
       SDL_free(font->glyphs.metrics[subpixel_idx][glyphmap_row]);
       font->glyphs.metrics[subpixel_idx][glyphmap_row] = NULL;
     }
@@ -1172,6 +1228,24 @@ static void font_clear_glyph_cache(RenFont* font) {
   font->generation++;
   ren_atlas_clear(&font->glyphs.atlas);
   font_clear_glyph_metrics(font);
+}
+
+/* Cache entries never own fonts; the primary font owns its native instances. */
+static void font_clear_cluster_cache(FontClusterCacheEntry **cache) {
+  if (!*cache) return;
+  for (size_t i = 0; i < FONT_CLUSTER_CACHE_MAX; i++) SDL_free((*cache)[i].text);
+  SDL_free(*cache);
+  *cache = NULL;
+}
+
+static void font_clear_layouts(RenFont *font) {
+  if (!font->layouts) return;
+  for (size_t i = 0; i < FONT_LAYOUT_CACHE_MAX; i++) {
+    SDL_free(font->layouts[i].text);
+    SDL_free(font->layouts[i].runs);
+  }
+  SDL_free(font->layouts);
+  font->layouts = NULL;
 }
 
 void ren_font_reset_loaded_atlases(void) {
@@ -1190,7 +1264,7 @@ void ren_font_reset_loaded_atlases(void) {
 static unsigned long font_file_read(FT_Stream stream, unsigned long offset, unsigned char *buffer, unsigned long count) {
   uint64_t amount;
   SDL_IOStream *file = (SDL_IOStream *) stream->descriptor.pointer;
-  SDL_SeekIO(file, (int) offset, SDL_IO_SEEK_SET);
+  SDL_SeekIO(file, offset, SDL_IO_SEEK_SET);
   if (count == 0)
     return 0;
   amount = SDL_ReadIO(file, buffer, sizeof(char) * count);
@@ -1294,56 +1368,99 @@ static int font_set_face_metrics(RenFont *font, FT_Face face) {
   return 0;
 }
 
-RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style, bool ligatures) {
-  FT_Error err = FT_Err_Ok;
-  SDL_IOStream *file = NULL; RenFont *font = NULL;
-  FT_Face face = NULL; FT_Stream stream = NULL;
+/* Open through SDL so Unicode paths also work on Windows. */
+static FT_Error font_open_face(const char *path, FT_Long index, FT_Face *face) {
+  SDL_IOStream *file = SDL_IOFromFile(path, "rb");
+  if (!file) return FT_Err_Cannot_Open_Resource;
+  FT_Stream stream = check_alloc(SDL_calloc(1, sizeof(FT_StreamRec)));
+  stream->read = font_file_read;
+  stream->close = font_file_close;
+  stream->descriptor.pointer = file;
+  stream->size = (unsigned long)SDL_GetIOSize(file);
+  FT_Open_Args args = { .flags = FT_OPEN_STREAM, .stream = stream };
+  FT_Error err = FT_Open_Face(library, &args, index, face);
+  /* FreeType closes the stream on failure as well as on FT_Done_Face. */
+  return err;
+}
 
-  file = SDL_IOFromFile(path, "rb");
-  if (!file) return NULL; // error set by SDL_IOFromFile
-
-  int len = strlen(path);
-  font = check_alloc(SDL_calloc(1, sizeof(RenFont) + len + 1));
+/* Load the exact native face, rather than assuming face zero of a collection. */
+static RenFont *font_load_face(const char *path, float size,
+  ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style,
+  bool ligatures, bool system_fallback, const FallbackFontMatch *match) {
+  FT_Face face = NULL;
+  FT_Error err = font_open_face(path, match && match->face_index >= 0 ? match->face_index : 0, &face);
+  if (err) { SDL_SetError("%s", get_ft_error(err)); return NULL; }
+  if (match && match->face_index < 0 && match->postscript_name) {
+    FT_Long count = face->num_faces;
+    FT_Long index = 0;
+    while (count > 1 && (!FT_Get_Postscript_Name(face)
+        || strcmp(FT_Get_Postscript_Name(face), match->postscript_name))) {
+      FT_Done_Face(face);
+      face = NULL;
+      if (++index >= count || (err = font_open_face(path, index, &face))) {
+        if (err) SDL_SetError("%s", get_ft_error(err));
+        return NULL;
+      }
+    }
+  }
+  if (match && match->axis_count && FT_HAS_MULTIPLE_MASTERS(face)) {
+    FT_MM_Var *variation = NULL;
+    if (!FT_Get_MM_Var(face, &variation)) {
+      FT_Fixed *coords = check_alloc(SDL_malloc(variation->num_axis * sizeof(*coords)));
+      for (FT_UInt i = 0; i < variation->num_axis; i++) {
+        coords[i] = variation->axis[i].def;
+        for (size_t j = 0; j < match->axis_count; j++) {
+          if (variation->axis[i].tag == match->axes[j].tag)
+            coords[i] = (FT_Fixed)SDL_clamp(match->axes[j].value * 65536.0,
+              variation->axis[i].minimum, variation->axis[i].maximum);
+        }
+      }
+      err = FT_Set_Var_Design_Coordinates(face, variation->num_axis, coords);
+      SDL_free(coords);
+      FT_Done_MM_Var(library, variation);
+      if (err) { FT_Done_Face(face); return NULL; }
+    }
+  }
+  RenFont *font = check_alloc(SDL_calloc(1, sizeof(RenFont) + strlen(path) + 1));
   strcpy(font->path, path);
   font->size = size;
   font->antialiasing = antialiasing;
   font->hinting = hinting;
   font->style = style;
+  /* Do not synthesize a style already supplied by the native face. */
+  if (match && (face->style_flags & FT_STYLE_FLAG_BOLD)) font->style &= ~FONT_STYLE_BOLD;
+  if (match && (face->style_flags & FT_STYLE_FLAG_ITALIC)) font->style &= ~FONT_STYLE_ITALIC;
   font->ligatures = ligatures;
+  font->system_fallback = system_fallback;
   font->tab_size = 2;
+  font->fallback_scale = match ? match->scale : 1;
+  if ((err = font_set_face_metrics(font, face))) {
+    FT_Done_Face(face);
+    SDL_free(font);
+    SDL_SetError("%s", get_ft_error(err));
+    return NULL;
+  }
+  font->glyphs.row_count = ((size_t)face->num_glyphs + GLYPHMAP_COL - 1) / GLYPHMAP_COL;
+  for (int i = 0; i < FONT_BITMAP_COUNT(font); i++)
+    font->glyphs.metrics[i] = check_alloc(SDL_calloc(font->glyphs.row_count, sizeof(GlyphMetric *)));
   renbackend_current()->init_atlas(&font->glyphs.atlas);
-
-  stream = check_alloc(SDL_calloc(1, sizeof(FT_StreamRec)));
-  if (!stream) goto stream_failure;
-  stream->read = &font_file_read;
-  stream->close = &font_file_close;
-  stream->descriptor.pointer = file;
-  stream->pos = 0;
-  stream->size = (unsigned long) SDL_GetIOSize(file);
-
-  if ((err = FT_Open_Face(library, &(FT_Open_Args) { .flags = FT_OPEN_STREAM, .stream = stream }, 0, &face)) != 0)
-    goto failure;
-  if ((err = font_set_face_metrics(font, face)) != 0)
-    goto failure;
   font_link_loaded(font);
   return font;
-
-stream_failure:
-  if (file) SDL_CloseIO(file);
-failure:
-  if (err != FT_Err_Ok) SDL_SetError("%s", get_ft_error(err));
-  if (face) FT_Done_Face(face);
-  if (font) SDL_free(font);
-  return NULL;
 }
 
-RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style, int ligatures) {
+RenFont* ren_font_load(const char* path, float size, ERenFontAntialiasing antialiasing,
+  ERenFontHinting hinting, unsigned char style, bool ligatures, bool system_fallback) {
+  return font_load_face(path, size, antialiasing, hinting, style, ligatures, system_fallback, NULL);
+}
+
+RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing,
+  ERenFontHinting hinting, int style, int ligatures, int system_fallback) {
   antialiasing = antialiasing == -1 ? font->antialiasing : antialiasing;
   hinting = hinting == -1 ? font->hinting : hinting;
   style = style == -1 ? font->style : style;
   ligatures = ligatures == -1 ? font->ligatures : ligatures;
-
-  return ren_font_load(font->path, size, antialiasing, hinting, style, ligatures); // SDL_SetError() will be called appropriately
+  system_fallback = system_fallback == -1 ? font->system_fallback : system_fallback;
+  return ren_font_load(font->path, size, antialiasing, hinting, style, ligatures, system_fallback);
 }
 
 const char* ren_font_get_path(RenFont *font) {
@@ -1351,13 +1468,24 @@ const char* ren_font_get_path(RenFont *font) {
 }
 
 void ren_font_free(RenFont* font) {
+  while (font->fallback_fonts) {
+    RenFont *child = font->fallback_fonts;
+    font->fallback_fonts = child->next_fallback;
+    ren_font_free(child);
+  }
+  fallback_font_free(font->resolver);
+  font_clear_cluster_cache(&font->coverage_cache);
+  font_clear_cluster_cache(&font->fallback_cache);
+  font_clear_layouts(font);
+  SDL_free(font->fallback_index);
+  SDL_free(font->fallback_roles);
   font_unlink_loaded(font);
   font_clear_glyph_cache(font);
   ren_atlas_free(&font->glyphs.atlas);
+  for (int i = 0; i < SUBPIXEL_BITMAPS_CACHED; i++) SDL_free(font->glyphs.metrics[i]);
   // free codepoint cache as well
-  for (int i = 0; i < CHARMAP_ROW; i++) {
-    SDL_free(font->charmap.rows[i]);
-  }
+  font_clear_charmap(&font->charmap);
+  font_clear_charmap(&font->fallback_characters);
   if (font->hb_font)
     hb_font_destroy(font->hb_font);
   FT_Done_Face(font->face);
@@ -1589,6 +1717,19 @@ void ren_font_group_set_size(RenFont **fonts, float size) {
     fonts[i]->size = size;
     fonts[i]->tab_size = 2;
     font_set_face_metrics(fonts[i], fonts[i]->face);
+    font_clear_cluster_cache(&fonts[i]->coverage_cache);
+    font_clear_cluster_cache(&fonts[i]->fallback_cache);
+    font_clear_layouts(fonts[i]);
+    font_clear_charmap(&fonts[i]->fallback_characters);
+    fallback_font_free(fonts[i]->resolver);
+    fonts[i]->resolver = NULL;
+    fonts[i]->resolver_initialized = false;
+    for (RenFont *child = fonts[i]->fallback_fonts; child; child = child->next_fallback) {
+      font_clear_glyph_cache(child);
+      font_clear_cluster_cache(&child->coverage_cache);
+      child->size = size * child->fallback_scale;
+      font_set_face_metrics(child, child->face);
+    }
   }
 }
 
@@ -1600,11 +1741,13 @@ RenRect ren_font_group_get_text_bounds(RenFont **fonts, double x, double y, doub
   double left = 0, top = 0, right = 0;
   double bottom = fonts[0]->height + fonts[0]->underline_thickness;
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
-    RenRect bounds = fonts[i]->glyph_bounds;
-    left = SDL_min(left, bounds.x);
-    top = SDL_min(top, fonts[0]->baseline + bounds.y);
-    right = SDL_max(right, bounds.x + bounds.width);
-    bottom = SDL_max(bottom, fonts[0]->baseline + bounds.y + bounds.height);
+    for (RenFont *font = fonts[i]; font; font = font == fonts[i] ? font->fallback_fonts : font->next_fallback) {
+      RenRect bounds = font->glyph_bounds;
+      left = SDL_min(left, bounds.x);
+      top = SDL_min(top, fonts[0]->baseline + bounds.y);
+      right = SDL_max(right, bounds.x + bounds.width);
+      bottom = SDL_max(bottom, fonts[0]->baseline + bounds.y + bounds.height);
+    }
   }
   return (RenRect) { x + left, y + top, width + right - left, bottom - top };
 }
@@ -1663,25 +1806,366 @@ static bool text_needs_shaping(const char *text, const char *end) {
   return false;
 }
 
-static const char *next_shaped_run(RenFont **fonts, const char *text, const char *end, RenFont *font) {
-  const char *p = text;
-  while (p < end) {
-    const char *char_start = p;
-    unsigned int codepoint, glyph_id = 0;
-    p = utf8_to_codepoint(p, end, &codepoint);
-    RenFont *next_font = font_group_find_font(fonts, codepoint, &glyph_id);
-    if (is_whitespace(codepoint) || next_font != font || !next_font->ligatures || !glyph_id)
-      return char_start;
-  }
-  return end;
+/* Single-byte ASCII has no grapheme work unless followed by a non-ASCII mark. */
+static const char *font_cluster_end(const char *text, const char *end) {
+  if ((unsigned char)*text < 0x80 && (text + 1 == end || (unsigned char)text[1] < 0x80))
+    return text + 1;
+  const char *next = Lutf8_grapheme_next(text, end);
+  if (next) return next;
+  unsigned int cp;
+  return utf8_to_codepoint(text, end, &cp);
 }
 
-static double unshaped_run_get_width(RenFont **fonts, const char *text, const char *end, double width, RenTab tab, int *x_offset, bool *set_x_offset) {
+static FontClusterCacheEntry *font_cluster_cache_entry(FontClusterCacheEntry **cache,
+                                                       const char *text, size_t len) {
+  if (len > FONT_CLUSTER_CACHE_MAX_TEXT) return NULL;
+  if (!*cache) *cache = check_alloc(SDL_calloc(FONT_CLUSTER_CACHE_MAX, sizeof(**cache)));
+  return &(*cache)[hash_bytes(text, len) % FONT_CLUSTER_CACHE_MAX];
+}
+
+static bool font_cluster_cache_matches(FontClusterCacheEntry *entry, const char *text, size_t len) {
+  return entry && entry->text && entry->len == len && !memcmp(entry->text, text, len);
+}
+
+static void font_cluster_cache_store(FontClusterCacheEntry *entry, const char *text, size_t len, RenFont *font) {
+  if (!entry) return;
+  SDL_free(entry->text);
+  entry->text = check_alloc(SDL_malloc(len));
+  memcpy(entry->text, text, len);
+  entry->len = len;
+  entry->font = font;
+}
+
+static bool font_text_is_emoji(const char *text, const char *end) {
+  bool emoji = false;
+  while (text < end) {
+    unsigned int cp;
+    text = utf8_to_codepoint(text, end, &cp);
+    if (cp == 0xFE0E) return false;
+    if (cp == 0xFE0F || cp == 0x20E3 || (cp >= 0x1F000 && cp <= 0x1FAFF)) emoji = true;
+  }
+  return emoji;
+}
+
+/* Required shaping does not depend on the optional programming ligature flag.
+ * Keep emoji substitutions and complex-script shaping; suppress optional Latin
+ * ligatures/contextual alternates when the user has disabled them.
+ */
+static void font_shape(hb_buffer_t *buffer, RenFont *font, const char *text, size_t len) {
+  hb_buffer_clear_contents(buffer);
+  hb_buffer_add_utf8(buffer, text, len, 0, len);
+  hb_buffer_guess_segment_properties(buffer);
+  hb_feature_t features[] = {
+    { HB_TAG('l','i','g','a'), 0, 0, (unsigned)-1 },
+    { HB_TAG('c','l','i','g'), 0, 0, (unsigned)-1 },
+    { HB_TAG('c','a','l','t'), 0, 0, (unsigned)-1 }
+  };
+  hb_script_t script = hb_buffer_get_script(buffer);
+  bool disable = !font->ligatures && !font_text_is_emoji(text, text + len)
+    && (script == HB_SCRIPT_LATIN || script == HB_SCRIPT_GREEK
+        || script == HB_SCRIPT_CYRILLIC || script == HB_SCRIPT_COMMON);
+  hb_shape(font->hb_font, buffer, disable ? features : NULL, disable ? SDL_arraysize(features) : 0);
+}
+
+/* Coverage includes shaping and presentation selectors, not just cmap entries. */
+static bool font_supports_cluster(RenFont *font, const char *text, const char *end) {
+  unsigned int cp;
+  const char *next = utf8_to_codepoint(text, end, &cp);
+  if (next == end)
+    return Lutf8_isdefaultignorable(cp) || font_get_glyph_id(font, cp) != 0;
+  size_t len = end - text;
+  FontClusterCacheEntry *entry = font_cluster_cache_entry(&font->coverage_cache, text, len);
+  if (font_cluster_cache_matches(entry, text, len)) return entry->font != NULL;
+  unsigned int previous = 0;
+  bool supported = true, emoji_sequence = false;
+  for (const char *p = text; p < end;) {
+    p = utf8_to_codepoint(p, end, &cp);
+    if (cp == 0xFE0F && previous && !FT_HAS_COLOR(font->face)
+        && FT_Face_GetCharVariantIsDefault(font->face, previous, cp) < 0) {
+      supported = false;
+      break;
+    }
+    if (cp == 0xFE0E && previous && FT_HAS_COLOR(font->face)
+        && FT_Face_GetCharVariantIsDefault(font->face, previous, cp) < 0) {
+      supported = false;
+      break;
+    }
+    if (!Lutf8_isdefaultignorable(cp) && !font_get_glyph_id(font, cp)) {
+      supported = false;
+      break;
+    }
+    if (cp == 0x200D || (cp >= 0x1F3FB && cp <= 0x1F3FF)
+        || (previous >= 0x1F1E6 && previous <= 0x1F1FF && cp >= 0x1F1E6 && cp <= 0x1F1FF))
+      emoji_sequence = true;
+    previous = cp;
+  }
+  if (supported) {
+    hb_buffer_t *buffer = hb_buffer_create();
+    font_shape(buffer, font, text, len);
+    unsigned int count;
+    hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &count);
+    for (unsigned int i = 0; i < count; i++) {
+      if (!infos[i].codepoint) { supported = false; break; }
+    }
+    if (emoji_sequence && font_text_is_emoji(text, end) && count != 1) supported = false;
+    hb_buffer_destroy(buffer);
+  }
+  font_cluster_cache_store(entry, text, len, supported ? font : NULL);
+  return supported;
+}
+
+typedef struct {
+  RenFont *primary, *selected;
+  const char *text, *end;
+} NativeFontSelection;
+
+static bool font_accept_fallback(void *userdata, const FallbackFontMatch *match) {
+  NativeFontSelection *selection = userdata;
+  RenFont *primary = selection->primary;
+  uint32_t variation_hash = 0;
+  for (size_t i = 0; i < match->axis_count; i++) {
+    variation_hash = (variation_hash ^ hash_bytes(&match->axes[i].tag, sizeof(match->axes[i].tag))) * 16777619u;
+    variation_hash = (variation_hash ^ hash_bytes(&match->axes[i].value, sizeof(match->axes[i].value))) * 16777619u;
+  }
+  for (RenFont *font = primary->fallback_fonts; font; font = font->next_fallback) {
+    if (!strcmp(font->path, match->path) && font->variation_hash == variation_hash
+        && font->fallback_scale == match->scale
+        && (match->face_index >= 0 ? font->face->face_index == match->face_index
+          : font->face->num_faces == 1 || (match->postscript_name && FT_Get_Postscript_Name(font->face)
+            && !strcmp(FT_Get_Postscript_Name(font->face), match->postscript_name)))) {
+      if (font_supports_cluster(font, selection->text, selection->end)) {
+        selection->selected = font;
+        return true;
+      }
+      return false;
+    }
+  }
+  RenFont *font = font_load_face(match->path, primary->size * match->scale,
+    primary->antialiasing, primary->hinting, primary->style, primary->ligatures, false, match);
+  if (!font) return false;
+  if (!font_supports_cluster(font, selection->text, selection->end)) {
+    ren_font_free(font);
+    return false;
+  }
+  font->variation_hash = variation_hash;
+  font->next_fallback = primary->fallback_fonts;
+  primary->fallback_fonts = font;
+  primary->fallback_index = check_alloc(SDL_realloc(primary->fallback_index,
+    (primary->fallback_count + 1) * sizeof(RenFont *)));
+  primary->fallback_index[primary->fallback_count++] = font;
+  selection->selected = font;
+  return true;
+}
+
+static hb_script_t font_cluster_script(const char *text, const char *end);
+
+static RenFont *font_select_cluster(RenFont **fonts, const char *text, const char *end) {
+  unsigned int cp;
+  const char *scalar_end = utf8_to_codepoint(text, end, &cp);
+  if (is_whitespace(cp) || (scalar_end == end && Lutf8_isdefaultignorable(cp))) return fonts[0];
+  for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
+    if (font_supports_cluster(fonts[i], text, end)) return fonts[i];
+  }
+  RenFont *primary = fonts[0];
+  if (!primary->system_fallback) return NULL;
+  size_t len = end - text;
+  unsigned int *character = NULL;
+  FontClusterCacheEntry *entry = NULL;
+  if (scalar_end == end) {
+    character = font_charmap_entry(&primary->fallback_characters, cp);
+    if (*character) return *character == 1 ? NULL : primary->fallback_index[*character - 2];
+  } else {
+    entry = font_cluster_cache_entry(&primary->fallback_cache, text, len);
+    if (font_cluster_cache_matches(entry, text, len)) return entry->font;
+  }
+  /* Reuse faces within the script/presentation for which the OS chose them.
+   * A text-symbol face must not become the emoji font simply because it was
+   * discovered first while opening an unrelated document.
+   */
+  uint64_t role = (uint32_t)font_cluster_script(text, end)
+    | (uint64_t)font_text_is_emoji(text, end) << 32;
+  RenFont *selected = NULL;
+  for (size_t i = 0; i < primary->fallback_role_count; i++) {
+    FontFallbackRole *candidate = &primary->fallback_roles[i];
+    if (candidate->role == role && font_supports_cluster(candidate->font, text, end)) {
+      selected = candidate->font;
+      break;
+    }
+  }
+  if (selected) goto store_selection;
+  if (!primary->resolver_initialized) {
+    primary->resolver_initialized = true;
+    FT_Face face = primary->face;
+    primary->resolver = fallback_font_create(primary->path, face->family_name,
+      FT_Get_Postscript_Name(face), primary->size,
+      (primary->style & FONT_STYLE_BOLD) || (face->style_flags & FT_STYLE_FLAG_BOLD),
+      (primary->style & FONT_STYLE_ITALIC) || (face->style_flags & FT_STYLE_FLAG_ITALIC));
+  }
+  NativeFontSelection selection = {primary, NULL, text, end};
+  fallback_font_resolve(primary->resolver, text, len, font_accept_fallback, &selection);
+  selected = selection.selected;
+  if (selected) {
+    primary->fallback_roles = check_alloc(SDL_realloc(primary->fallback_roles,
+      (primary->fallback_role_count + 1) * sizeof(FontFallbackRole)));
+    primary->fallback_roles[primary->fallback_role_count++] = (FontFallbackRole){role, selected};
+  }
+store_selection:
+  if (character) {
+    *character = 1;
+    for (size_t i = 0; selected && i < primary->fallback_count; i++) {
+      if (primary->fallback_index[i] == selected) { *character = i + 2; break; }
+    }
+  } else {
+    font_cluster_cache_store(entry, text, len, selected);
+  }
+  return selected;
+}
+
+static hb_script_t font_cluster_script(const char *text, const char *end) {
+  while (text < end) {
+    unsigned int cp;
+    text = utf8_to_codepoint(text, end, &cp);
+    hb_script_t script = hb_unicode_script(hb_unicode_funcs_get_default(), cp);
+    if (script != HB_SCRIPT_COMMON && script != HB_SCRIPT_INHERITED) return script;
+  }
+  return HB_SCRIPT_COMMON;
+}
+
+/* Single glyphs in these scripts do not need shaping when optional ligatures
+ * are disabled. Combining sequences and complex scripts still use HarfBuzz.
+ */
+static bool font_needs_shaping(RenFont *font, unsigned int cp, bool single) {
+  if (font->ligatures || !single) return true;
+  return !(cp < 0x530 || (cp >= 0x2E80 && cp <= 0xA4CF)
+    || (cp >= 0xAC00 && cp <= 0xD7A3) || (cp >= 0xF900 && cp <= 0xFAFF)
+    || (cp >= 0x1F000 && cp <= 0x1FAFF) || (cp >= 0x20000 && cp <= 0x323AF));
+}
+
+/* Both width measurement and drawing consume precisely the same selected runs. */
+static const char *font_next_run(RenFont **fonts, const char *text, const char *end,
+                                RenFont **selected, bool *shaped) {
+  /* Preserve the ordinary editor path: scan covered ASCII without Unicode
+   * classification, native lookup or per-character run construction. Leave
+   * ASCII followed by non-ASCII to the grapheme path (it may have a mark).
+   */
+  if ((unsigned char)*text < 0x80 && (text + 1 == end || (unsigned char)text[1] < 0x80)) {
+    RenFont *primary = fonts[0];
+    const char *p = text;
+    bool whitespace = is_whitespace((unsigned char)*p);
+    if (whitespace || font_get_glyph_id(primary, (unsigned char)*p)) {
+      *selected = primary;
+      *shaped = primary->ligatures && !whitespace;
+      if (primary->ligatures && whitespace) return text + 1;
+      do {
+        p++;
+        if (*shaped && (p == end || is_whitespace((unsigned char)*p))) break;
+      } while (p < end && (unsigned char)*p < 0x80
+        && (p + 1 == end || (unsigned char)p[1] < 0x80)
+        && (is_whitespace((unsigned char)*p) || font_get_glyph_id(primary, (unsigned char)*p)));
+      return p;
+    }
+  }
+  unsigned int cp;
+  const char *scalar_end = utf8_to_codepoint(text, end, &cp);
+  const char *next = font_cluster_end(text, end);
+  RenFont *font = font_select_cluster(fonts, text, next);
+  *shaped = false;
+  if (!font) {
+    /* No font can cover the whole cluster. Degrade to configured characters
+     * without recursively requesting the same impossible native match.
+     */
+    font = fonts[0];
+    for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
+      font = fonts[i];
+      if (font_get_glyph_id(font, cp)) break;
+    }
+    *selected = font;
+    return scalar_end;
+  }
+  *selected = font;
+  if (is_whitespace(cp) || (scalar_end == next && Lutf8_isdefaultignorable(cp))) return next;
+  if (!font_needs_shaping(font, cp, next == scalar_end)) {
+    while (next < end) {
+      const char *scalar = utf8_to_codepoint(next, end, &cp);
+      const char *cluster = font_cluster_end(next, end);
+      if (is_whitespace(cp) || Lutf8_isdefaultignorable(cp)
+          || font_needs_shaping(font, cp, cluster == scalar)
+          || font_select_cluster(fonts, next, cluster) != font) break;
+      next = cluster;
+    }
+    return next;
+  }
+  *shaped = true;
+  hb_script_t script = font_cluster_script(text, next);
+  bool emoji = font_text_is_emoji(text, next);
+  while (next < end) {
+    const char *cluster_end = font_cluster_end(next, end);
+    const char *scalar = utf8_to_codepoint(next, cluster_end, &cp);
+    if (is_whitespace(cp) || (scalar == cluster_end && Lutf8_isdefaultignorable(cp))
+        || (!font->ligatures && cp < 0x80 && next + 1 == cluster_end)
+        || font_text_is_emoji(next, cluster_end) != emoji) break;
+    hb_script_t next_script = font_cluster_script(next, cluster_end);
+    if (script != HB_SCRIPT_COMMON && next_script != HB_SCRIPT_COMMON && script != next_script) break;
+    if (font_select_cluster(fonts, next, cluster_end) != font) break;
+    if (script == HB_SCRIPT_COMMON) script = next_script;
+    next = cluster_end;
+  }
+  return next;
+}
+
+/* Cache selected runs without retaining user-supplied fallback fonts. Group
+ * identities and generations are checked before any stored font is used. */
+static FontTextLayout *font_text_layout(RenFont **fonts, const char *text, size_t len) {
+  if (!len || (unsigned char)*text < 0x80 || len > FONT_LAYOUT_CACHE_MAX_TEXT) return NULL;
+  uint64_t group = 14695981039346656037ull;
+  for (size_t i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
+    group = (group ^ fonts[i]->identity) * 1099511628211ull;
+    group = (group ^ fonts[i]->generation) * 1099511628211ull;
+  }
+  RenFont *primary = fonts[0];
+  if (!primary->layouts)
+    primary->layouts = check_alloc(SDL_calloc(FONT_LAYOUT_CACHE_MAX, sizeof(FontTextLayout)));
+  FontTextLayout *layout = &primary->layouts[hash_bytes(text, len) % FONT_LAYOUT_CACHE_MAX];
+  if (layout->text && layout->len == len && layout->group == group && !memcmp(layout->text, text, len))
+    return layout;
+  FontTextRun runs[FONT_LAYOUT_CACHE_MAX_BYTES / sizeof(FontTextRun)];
+  size_t count = 0;
+  const char *p = text;
+  while (p < text + len) {
+    if ((count + 1) * sizeof(FontTextRun) + len > FONT_LAYOUT_CACHE_MAX_BYTES) return NULL;
+    FontTextRun *run = &runs[count++];
+    p = font_next_run(fonts, p, text + len, &run->font, &run->shaped);
+    run->end = p - text;
+  }
+  SDL_free(layout->text);
+  SDL_free(layout->runs);
+  layout->text = check_alloc(SDL_malloc(len));
+  memcpy(layout->text, text, len);
+  layout->len = len;
+  layout->group = group;
+  layout->count = count;
+  layout->runs = check_alloc(SDL_malloc(count * sizeof(FontTextRun)));
+  memcpy(layout->runs, runs, count * sizeof(FontTextRun));
+  return layout;
+}
+
+/* Load a nominal glyph only after the common run selector chose its font. */
+static RenFont *font_get_character(RenFont *font, unsigned int cp, int subpixel_idx,
+                                  SDL_Surface **surface, GlyphMetric **metric) {
+  unsigned int glyph = font_get_glyph_id(font, cp);
+  font_get_glyph_by_id(font, glyph, subpixel_idx, is_whitespace(cp) ? NULL : surface, metric);
+  if (!*metric && cp != 0x25A1)
+    font_get_glyph_by_id(font, font_get_glyph_id(font, 0x25A1), subpixel_idx, surface, metric);
+  return font;
+}
+
+static double unshaped_run_get_width(RenFont **fonts, RenFont *font, const char *text, const char *end, double width, RenTab tab, int *x_offset, bool *set_x_offset) {
   while (text < end) {
     unsigned int codepoint;
     text = utf8_to_codepoint(text, end, &codepoint);
     GlyphMetric *metric = NULL;
-    font_group_get_glyph(fonts, codepoint, 0, NULL, &metric);
+    if (codepoint >= 0xAD && Lutf8_isdefaultignorable(codepoint)) continue;
+    font_get_character(font, codepoint, 0, NULL, &metric);
     width += font_get_xadvance(fonts[0], codepoint, metric, width, tab);
     if (!*set_x_offset && metric) {
       *set_x_offset = true;
@@ -1707,10 +2191,7 @@ static double shaped_run_get_width(hb_buffer_t *buffer, RenFont *font, const cha
     }
   }
 
-  hb_buffer_clear_contents(buffer);
-  hb_buffer_add_utf8(buffer, text, len, 0, len);
-  hb_buffer_guess_segment_properties(buffer);
-  hb_shape(font->hb_font, buffer, NULL, 0);
+  font_shape(buffer, font, text, len);
 
   unsigned int glyph_count = 0;
   hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &glyph_count);
@@ -1742,37 +2223,32 @@ static double shaped_run_get_width(hb_buffer_t *buffer, RenFont *font, const cha
 
 double ren_font_group_get_width(RenFont **fonts, const char *text, size_t len, RenTab tab, int *x_offset) {
   double width = 0;
+  const char *start = text;
   const char* end = text + len;
   hb_buffer_t *hb_buffer = NULL;
+  FontTextLayout *layout = font_text_layout(fonts, text, len);
+  size_t run_index = 0;
 
   bool set_x_offset = x_offset == NULL;
   while (text < end) {
-    unsigned int codepoint;
-    const char *char_start = text;
-    text = utf8_to_codepoint(text, end, &codepoint);
-    unsigned int glyph_id = 0;
-    RenFont *font = font_group_find_font(fonts, codepoint, &glyph_id);
-
-    if (!is_whitespace(codepoint) && font && font->ligatures && font->hb_font && glyph_id) {
-      const char *run_end = next_shaped_run(fonts, text, end, font);
-      if (text_needs_shaping(char_start, run_end)) {
-        if (!hb_buffer)
-          hb_buffer = hb_buffer_create();
-        if (hb_buffer)
-          width += shaped_run_get_width(hb_buffer, font, char_start, run_end - char_start, x_offset, &set_x_offset);
-      } else {
-        width = unshaped_run_get_width(fonts, char_start, run_end, width, tab, x_offset, &set_x_offset);
-      }
-      text = run_end;
+    RenFont *font;
+    bool shaped;
+    const char *run_end;
+    if (layout) {
+      FontTextRun *run = &layout->runs[run_index++];
+      font = run->font;
+      shaped = run->shaped;
+      run_end = start + run->end;
     } else {
-      GlyphMetric *metric = NULL;
-      font_group_get_glyph(fonts, codepoint, 0, NULL, &metric);
-      width += font_get_xadvance(fonts[0], codepoint, metric, width, tab);
-      if (!set_x_offset && metric) {
-        set_x_offset = true;
-        *x_offset = metric->bitmap_left;
-      }
+      run_end = font_next_run(fonts, text, end, &font, &shaped);
     }
+    if (shaped && text_needs_shaping(text, run_end)) {
+      if (!hb_buffer) hb_buffer = hb_buffer_create();
+      width += shaped_run_get_width(hb_buffer, font, text, run_end - text, x_offset, &set_x_offset);
+    } else {
+      width = unshaped_run_get_width(fonts, font, text, run_end, width, tab, x_offset, &set_x_offset);
+    }
+    text = run_end;
   }
   if (hb_buffer)
     hb_buffer_destroy(hb_buffer);
@@ -1944,10 +2420,7 @@ static double draw_shaped_run(hb_buffer_t *buffer, DrawGlyphContext *ctx, RenFon
       return draw_shaped_glyphs(ctx, fonts, font, cached->glyphs, cached->glyph_count, pen_x, y);
   }
 
-  hb_buffer_clear_contents(buffer);
-  hb_buffer_add_utf8(buffer, text, len, 0, len);
-  hb_buffer_guess_segment_properties(buffer);
-  hb_shape(font->hb_font, buffer, NULL, 0);
+  font_shape(buffer, font, text, len);
 
   unsigned int glyph_count = 0;
   hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &glyph_count);
@@ -1975,12 +2448,13 @@ static double draw_shaped_run(hb_buffer_t *buffer, DrawGlyphContext *ctx, RenFon
   return pen_x;
 }
 
-static double draw_unshaped_run(DrawGlyphContext *ctx, RenFont **fonts, const char *text, const char *end, double pen_x, double original_pen_x, double y, RenTab tab) {
+static double draw_unshaped_run(DrawGlyphContext *ctx, RenFont **fonts, RenFont *font, const char *text, const char *end, double pen_x, double original_pen_x, double y, RenTab tab) {
   while (text < end) {
     unsigned int codepoint;
     text = utf8_to_codepoint(text, end, &codepoint);
     SDL_Surface *font_surface = NULL; GlyphMetric *metric = NULL;
-    RenFont *font = font_group_get_glyph(fonts, codepoint, (int)(fmod(pen_x, 1.0) * SUBPIXEL_BITMAPS_CACHED), &font_surface, &metric);
+    if (codepoint >= 0xAD && Lutf8_isdefaultignorable(codepoint)) continue;
+    font_get_character(font, codepoint, (int)(fmod(pen_x, 1.0) * SUBPIXEL_BITMAPS_CACHED), &font_surface, &metric);
     if (!metric)
       break;
     if (!is_whitespace(codepoint))
@@ -2017,6 +2491,9 @@ double ren_draw_text_cb_ex(
   double original_pen_x = pen_x;
   const char* end = text + len;
   hb_buffer_t *hb_buffer = NULL;
+  const char *start = text;
+  FontTextLayout *layout = font_text_layout(fonts, text, len);
+  size_t run_index = 0;
   DrawGlyphContext draw_context = {
     .rs = rs,
     .surface = surface,
@@ -2035,55 +2512,37 @@ double ren_draw_text_cb_ex(
   bool strikethrough = fonts[0]->style & FONT_STYLE_STRIKETHROUGH;
 
   while (text < end) {
-    unsigned int codepoint, glyph_id = 0;
-    const char *char_start = text;
-    text = utf8_to_codepoint(text, end, &codepoint);
-    RenFont *font = font_group_find_font(fonts, codepoint, &glyph_id);
-
-    if (!is_whitespace(codepoint) && font && font->ligatures && font->hb_font && glyph_id) {
-      const char *run_end = next_shaped_run(fonts, text, end, font);
-      if(!last) last = font;
-      else if(font != last) {
-        if (draw_decorations)
-          draw_font_decoration(rs, last, last_pen_x, pen_x, y, color, underline, strikethrough);
-        last = font;
-        last_pen_x = pen_x;
-      }
-      if (text_needs_shaping(char_start, run_end)) {
-        if (!hb_buffer)
-          hb_buffer = hb_buffer_create();
-        if (hb_buffer)
-          pen_x = draw_shaped_run(hb_buffer, &draw_context, fonts, font, char_start, run_end - char_start, pen_x, y);
-      } else {
-        pen_x = draw_unshaped_run(&draw_context, fonts, char_start, run_end, pen_x, original_pen_x, y, tab);
-      }
-      text = run_end;
+    RenFont *font;
+    bool shaped;
+    const char *run_end;
+    if (layout) {
+      FontTextRun *run = &layout->runs[run_index++];
+      font = run->font;
+      shaped = run->shaped;
+      run_end = start + run->end;
     } else {
-      SDL_Surface *font_surface = NULL; GlyphMetric *metric = NULL;
-      font = font_group_get_glyph(fonts, codepoint, (int)(fmod(pen_x, 1.0) * SUBPIXEL_BITMAPS_CACHED), &font_surface, &metric);
-      if (!metric)
-        break;
-      bool white_space = is_whitespace(codepoint);
-      if (!white_space)
-        draw_glyph_bitmap(&draw_context, fonts, font, font_surface, metric, pen_x, y, 0, true);
-      float adv = font_get_xadvance(fonts[0], codepoint, metric, pen_x - original_pen_x, tab);
-
-      if(!last) last = font;
-      else if(font != last) {
-        if (draw_decorations)
-          draw_font_decoration(rs, last, last_pen_x, pen_x, y, color, underline, strikethrough);
-        last = font;
-        last_pen_x = pen_x;
-      }
-
-      pen_x += adv;
+      run_end = font_next_run(fonts, text, end, &font, &shaped);
     }
+    if (!last) last = font;
+    else if (font != last) {
+      if (draw_decorations)
+        draw_font_decoration(rs, fonts[0], last_pen_x, pen_x, y, color, underline, strikethrough);
+      last = font;
+      last_pen_x = pen_x;
+    }
+    if (shaped && text_needs_shaping(text, run_end)) {
+      if (!hb_buffer) hb_buffer = hb_buffer_create();
+      pen_x = draw_shaped_run(hb_buffer, &draw_context, fonts, font, text, run_end - text, pen_x, y);
+    } else {
+      pen_x = draw_unshaped_run(&draw_context, fonts, font, text, run_end, pen_x, original_pen_x, y, tab);
+    }
+    text = run_end;
   }
   if (hb_buffer)
     hb_buffer_destroy(hb_buffer);
   if (last)
     if (draw_decorations)
-      draw_font_decoration(rs, last, last_pen_x, pen_x, y, color, underline, strikethrough);
+      draw_font_decoration(rs, fonts[0], last_pen_x, pen_x, y, color, underline, strikethrough);
   return pen_x;
 }
 
@@ -2282,6 +2741,7 @@ int ren_init(void) {
 }
 
 void ren_free(void) {
+  fallback_font_shutdown();
   SDL_DestroySurface(draw_rect_surface);
   FT_Done_FreeType(library);
 }

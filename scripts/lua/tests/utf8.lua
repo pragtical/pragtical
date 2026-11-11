@@ -86,6 +86,45 @@ test.describe("string utf8 wrappers", function()
 end)
 
 test.describe("utf8extra", function()
+  test.test("keeps extended graphemes together within the supplied byte span", function()
+    for _, cluster in ipairs {
+      "e\204\129", "👨‍💻", "👩🏽‍💻", "🇺🇸", "⚙️", "क्‍ष", "각", "ᅟᅡ", "\r\n"
+    } do
+      local text = "a" .. cluster .. "z"
+      local spans = {}
+      for first, last in utf8extra.grapheme_indices(text) do
+        spans[#spans + 1] = text:sub(first, last)
+      end
+      test.same(spans, { "a", cluster, "z" })
+      local iter = utf8extra.grapheme_indices(text, 2, #text - 1)
+      local first, last = iter()
+      test.equal(first, 2)
+      test.equal(last, #text - 1)
+      test.equal(iter(), nil)
+    end
+    for _, invalid in ipairs { "\240\159", "e\204", "\255", "\237\160\128" } do
+      test.not_ok(pcall(function()
+        for _ in utf8extra.grapheme_indices(invalid) do end
+      end))
+    end
+  end)
+
+  test.test("keeps emoji extensions intact beside ASCII text", function()
+    for _, expected in ipairs {
+      { "a", "🚀", " ", "b" },
+      { "🚀\204\129", " ", "b" },
+      { "a" .. string.uchar(0x1F3FD), " ", "🚀" },
+      { "1️⃣", " ", "🚀" },
+      { "a", "🇺🇸", " ", "b" }
+    } do
+      local text, spans = table.concat(expected), {}
+      for first, last in utf8extra.grapheme_indices(text) do
+        spans[#spans + 1] = text:sub(first, last)
+      end
+      test.same(spans, expected)
+    end
+  end)
+
   test.test("exports the documented helpers", function()
     for _, name in ipairs({
       "byte", "find", "gmatch", "gsub", "lower", "match", "reverse",

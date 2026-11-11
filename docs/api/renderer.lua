@@ -58,6 +58,7 @@ renderer = {}
 ---@field public smoothing boolean
 ---@field public strikethrough boolean
 ---@field public ligatures boolean
+---@field public system_fallback boolean Automatically use installed fonts for missing graphemes (default: true). The first font controls this for groups; configured fonts retain priority.
 
 ---
 ---@class renderer.font

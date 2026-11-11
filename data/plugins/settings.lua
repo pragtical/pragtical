@@ -1532,6 +1532,9 @@ local function prepare_font_settings(value)
   font_options.size = font_options.size or 15
   font_options.antialiasing = font_options.antialiasing or "subpixel"
   font_options.hinting = font_options.hinting or "slight"
+  if font_options.system_fallback == nil then
+    font_options.system_fallback = true
+  end
 
   value.options = font_options
   for _, font in ipairs(value.fonts) do

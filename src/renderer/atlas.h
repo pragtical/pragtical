@@ -14,11 +14,8 @@
 #define FONT_HEIGHT_OVERFLOW_PX 0
 #define FONT_WIDTH_OVERFLOW_PX 9
 
-// the maximum number of glyphs for OpenType
-#define MAX_GLYPHS 65535
-// number of rows and columns in the glyph map
-#define GLYPHMAP_ROW 128
-#define GLYPHMAP_COL ((unsigned int)ceil((float)MAX_GLYPHS / GLYPHMAP_ROW))
+// Sparse glyph metric rows; row count follows the face's actual glyph count.
+#define GLYPHMAP_COL 128
 
 // number of subpixel bitmaps
 #define SUBPIXEL_BITMAPS_CACHED 3
