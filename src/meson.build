@@ -34,6 +34,20 @@ pragtical_sources = [
     'main.c',
 ]
 
+if host_machine.system() == 'windows'
+    # Microsoft's DirectWrite headers expose C++ interfaces only. Keep the
+    # platform implementation in one source file with a public C interface.
+    pragtical_sources += configure_file(
+        input: 'fallbackfont.c', output: 'fallbackfont.cpp', copy: true
+    )
+    pragtical_deps += cc.find_library('dwrite')
+else
+    pragtical_sources += 'fallbackfont.c'
+    if host_machine.system() == 'darwin'
+        pragtical_deps += dependency('appleframeworks', modules: ['CoreText', 'CoreFoundation', 'CoreGraphics'])
+    endif
+endif
+
 if lua_jit_found
     pragtical_sources += 'ffiexports.c'
     if host_machine.system() != 'windows' and host_machine.system() != 'darwin'

@@ -44,8 +44,8 @@ typedef bool (*RenGlyphDrawFn)(void *userdata, const RenGlyphDraw *glyph);
 struct RenWindow;
 typedef struct RenWindow RenWindow;
 
-RenFont* ren_font_load(const char *filename, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style, bool ligatures);
-RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style, int ligatures);
+RenFont* ren_font_load(const char *filename, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, unsigned char style, bool ligatures, bool system_fallback);
+RenFont* ren_font_copy(RenFont* font, float size, ERenFontAntialiasing antialiasing, ERenFontHinting hinting, int style, int ligatures, int system_fallback);
 const char* ren_font_get_path(RenFont *font);
 void ren_font_free(RenFont *font);
 void ren_font_reset_loaded_atlases(void);

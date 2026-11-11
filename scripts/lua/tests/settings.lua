@@ -452,11 +452,12 @@ test.describe("setting resets", function()
       local serialized = common.serialize(defaults)
       local custom = {
         fonts = { {name = "Custom", path = "{datadir}/fonts/JetBrainsMono-Regular.ttf"} },
-        options = { size = 19, antialiasing = "grayscale", hinting = "slight" }
+        options = { size = 19, antialiasing = "grayscale", hinting = "slight", system_fallback = false }
       }
       local widget = control(c, {
         type = "font", path = "font", default = defaults, fonts_list = target
       }, FontsList, custom)
+      test.equal(widget:get_options().system_fallback, false)
       widget.reset_button:on_click()
       test.equal(common.serialize(defaults), serialized)
       test.equal(custom.fonts[1].path, "{datadir}/fonts/JetBrainsMono-Regular.ttf")
@@ -464,11 +465,13 @@ test.describe("setting resets", function()
         test.equal(target.font:get_size(), 15 * SCALE)
         test.equal(widget:get_fonts()[1].path, DATADIR .. "/fonts/FiraSans-Regular.ttf")
         test.equal(widget:get_options().size, 15)
+        test.equal(widget:get_options().system_fallback, true)
         test.is_nil(settings.config.plugins)
         test.not_ok(widget.reset_button.enabled)
       else
         test.equal(target.font, original_font)
         test.equal(widget:get_options().size, 19)
+        test.equal(widget:get_options().system_fallback, false)
         test.equal(settings.config.plugins.settings_reset.font.options.size, 19)
         test.ok(widget.reset_button.enabled)
         test.not_nil(c.message)

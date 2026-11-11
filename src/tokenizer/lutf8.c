@@ -25,6 +25,7 @@
  */
 
 #include "lutf8.h"
+#include "grapheme.h"
 #include "unidata.h"
 
 #include <assert.h>
@@ -1509,4 +1510,214 @@ utf8_pattern_result_result_t Lutf8_match(
   int64_t offset
 ) {
   return Lutf8_find(s, len, pattern, pattern_len, offset, false, false);
+}
+
+/* Shared grapheme boundaries for Lua and font fallback. */
+static int hangul_type (utfint ch) {
+  /* The first Hangul codepoint is U+1100 */
+  if (ch < 0x1100) {
+    return 0;
+  }
+  size_t begin = 0, end = table_size(hangul_table);
+
+  while (begin < end) {
+    size_t mid = (begin + end) / 2;
+    if (hangul_table[mid].last < ch)
+      begin = mid + 1;
+    else if (hangul_table[mid].first > ch)
+      end = mid;
+    else
+      return hangul_table[mid].type;
+  }
+
+  return 0;
+}
+
+static int indic_conjunct_type (utfint ch) {
+  /* The first Indic conjunct codepoint is U+0300 */
+  if (ch < 0x300) {
+    return 0;
+  }
+  size_t begin = 0, end = table_size(indic_table);
+
+  while (begin < end) {
+    size_t mid = (begin + end) / 2;
+    if (indic_table[mid].last < ch)
+      begin = mid + 1;
+    else if (indic_table[mid].first > ch)
+      end = mid;
+    else
+      return indic_table[mid].type;
+  }
+
+  return 0;
+}
+
+
+/* Strict decoding bounded by the caller's span, including non-NUL strings. */
+static const char *grapheme_decode(const char *s, const char *end, utfint *cp) {
+  if (s >= end) return NULL;
+  unsigned char first = (unsigned char)*s;
+  size_t n = first < 0x80 ? 1 : first >= 0xC2 && first <= 0xDF ? 2
+    : first >= 0xE0 && first <= 0xEF ? 3 : first >= 0xF0 && first <= 0xF4 ? 4 : 0;
+  if (!n || (size_t)(end - s) < n) return NULL;
+  return utf8_decode(s, cp, 1);
+}
+
+const char *Lutf8_grapheme_next(const char *s, const char *e) {
+  if (s >= e) return e;
+  utfint ch, next_ch;
+  const char *p = grapheme_decode(s, e, &ch);
+  if (!p) return NULL;
+  while (p < e) {
+    const char *next_p = grapheme_decode(p, e, &next_ch);
+    if (!next_p) return NULL;
+    /* ASCII and emoji are separate graphemes, except when an emoji modifier
+     * extends the preceding character. Avoid Unicode table searches for the
+     * common case of emoji interspersed with spaces or ordinary text.
+     */
+    if ((ch >= 0x1F000 && ch <= 0x1FAFF && next_ch < 0x80)
+        || (ch < 0x80 && next_ch >= 0x1F000 && next_ch <= 0x1FAFF
+          && !(next_ch >= 0x1F3FB && next_ch <= 0x1F3FF))) break;
+    /* Adjacent Han characters (or following ASCII) are always separate
+     * graphemes. This common editor case needs no Unicode table searches.
+     */
+    if (((ch >= 0x3400 && ch <= 0x9FFF) || (ch >= 0x20000 && ch <= 0x323AF))
+        && (next_ch < 0x80 || (next_ch >= 0x3400 && next_ch <= 0x9FFF)
+          || (next_ch >= 0x20000 && next_ch <= 0x323AF))) break;
+    int bind = 0;
+
+    if (ch == '\r') {
+      if (next_ch == '\n') {
+        /* CR binds to following LF */
+        bind = 1;
+      } else {
+        break;
+      }
+    } else if (ch == '\n' || next_ch == '\r' || next_ch == '\n') {
+      /* CR/LF do not bind to any other codepoint or in any other way */
+      break;
+    } else if (find_in_range(cntrl_table, table_size(cntrl_table), ch) && !find_in_range(prepend_table, table_size(prepend_table), ch) && ch != 0x200D) {
+      /* Control characters do not bind to anything */
+      break;
+    } else if (next_ch == 0x200D) {
+      /* U+200D is ZERO WIDTH JOINER, it always binds to preceding char */
+      if (next_p < e && find_in_range(pictographic_table, table_size(pictographic_table), ch)) {
+        /* After an Extended_Pictographic codepoint and ZWJ, we bind to a following Extended_Pictographic */
+        utfint nextnext_ch;
+        const char *probe_ep = grapheme_decode(next_p, e, &nextnext_ch);
+        if (!probe_ep) return NULL;
+        if (find_in_range(pictographic_table, table_size(pictographic_table), nextnext_ch)) {
+          p = probe_ep;
+          ch = nextnext_ch;
+          continue;
+        }
+      }
+      bind = 1;
+    } else if (find_in_range(cntrl_table, table_size(cntrl_table), next_ch) && !find_in_range(prepend_table, table_size(prepend_table), next_ch)) {
+      /* Control characters do not bind to anything */
+      break;
+    } else {
+      if (indic_conjunct_type(ch) == INDIC_CONSONANT) {
+        utfint probed_ch = next_ch;
+        const char *probe = next_p;
+        int indic_type = indic_conjunct_type(probed_ch);
+        int saw_linker = 0;
+        while (indic_type) {
+          /* Consume any number of Extend or Linker codepoints, followed by a single Consonant
+           * The sequence must contain at least one Linker, however! */
+          if (indic_type == INDIC_LINKER) {
+            saw_linker = 1;
+          } else if (indic_type == INDIC_CONSONANT) {
+            if (!saw_linker)
+              break;
+            p = probe;
+            ch = probed_ch;
+            goto next_iteration;
+          }
+          if (probe >= e)
+            break;
+          probe = grapheme_decode(probe, e, &probed_ch);
+          if (!probe) return NULL;
+          indic_type = indic_conjunct_type(probed_ch);
+        }
+      }
+
+      if (find_in_range(compose_table, table_size(compose_table), next_ch) || (next_ch >= 0x1F3FB && next_ch <= 0x1F3FF)) {
+        /* The 2nd codepoint has property Grapheme_Extend, or is an Emoji_Modifier codepoint */
+        if (next_p < e && find_in_range(pictographic_table, table_size(pictographic_table), ch)) {
+          /* Consume any number of 'extend' codepoints, one ZWJ, and following Extended_Pictographic codepoint */
+          utfint probed_ch;
+          const char *probe = next_p;
+          while (probe < e) {
+            probe = grapheme_decode(probe, e, &probed_ch);
+            if (!probe) return NULL;
+            if (probed_ch == 0x200D) {
+              if (probe < e) {
+                probe = grapheme_decode(probe, e, &probed_ch);
+                if (!probe) return NULL;
+                if (find_in_range(pictographic_table, table_size(pictographic_table), probed_ch)) {
+                  next_p = probe;
+                  next_ch = probed_ch;
+                }
+              }
+              break;
+            } else if (find_in_range(compose_table, table_size(compose_table), probed_ch) || (probed_ch >= 0x1F3FB && probed_ch <= 0x1F3FF)) {
+              next_p = probe;
+              next_ch = probed_ch;
+            } else {
+              break;
+            }
+          }
+        }
+        bind = 1;
+      } else if (find_in_range(spacing_mark_table, table_size(spacing_mark_table), next_ch)) {
+        /* The 2nd codepoint is in general category Spacing_Mark */
+        bind = 1;
+      } else if (find_in_range(prepend_table, table_size(prepend_table), ch)) {
+        /* The 1st codepoint has property Prepend_Concatenation_Mark, or is a type of
+         * Indic Syllable which binds to the following codepoint */
+        bind = 1;
+      } else if (ch >= 0x1F1E6 && ch <= 0x1F1FF && next_ch >= 0x1F1E6 && next_ch <= 0x1F1FF) {
+        /* Regional Indicator (flag) emoji bind together; but only in twos */
+        p = next_p;
+        ch = 0xFFFE; /* Set 'ch' to bogus value so we will not re-enter this branch on next iteration */
+        continue;
+      } else {
+        /* Korean Hangul codepoints have their own special rules about when they
+         * are considered a single grapheme cluster */
+        int hangul1 = hangul_type(ch);
+        if (hangul1) {
+          int hangul2 = hangul_type(next_ch);
+          if (hangul2) {
+            if (hangul1 == HANGUL_L) {
+              bind = (hangul2 != HANGUL_T);
+            } else if (hangul1 == HANGUL_LV || hangul1 == HANGUL_V) {
+              bind = (hangul2 == HANGUL_V || hangul2 == HANGUL_T);
+            } else if (hangul1 == HANGUL_LVT || hangul1 == HANGUL_T) {
+              bind = (hangul2 == HANGUL_T);
+            }
+          }
+        }
+      }
+    }
+
+    if (!bind)
+      break;
+    p = next_p;
+    ch = next_ch;
+next_iteration: ;
+  }
+
+  return p;
+}
+
+bool Lutf8_isdefaultignorable(utfint cp) {
+  return cp == 0xAD || cp == 0x34F || cp == 0x61C || cp == 0xFEFF
+    || (cp >= 0x115F && cp <= 0x1160) || (cp >= 0x17B4 && cp <= 0x17B5)
+    || (cp >= 0x180B && cp <= 0x180F) || (cp >= 0x200B && cp <= 0x200F)
+    || (cp >= 0x202A && cp <= 0x202E) || (cp >= 0x2060 && cp <= 0x206F)
+    || cp == 0x3164 || (cp >= 0xFE00 && cp <= 0xFE0F) || cp == 0xFFA0
+    || (cp >= 0xFFF0 && cp <= 0xFFF8) || (cp >= 0x1BCA0 && cp <= 0x1BCA3)
+    || (cp >= 0x1D173 && cp <= 0x1D17A) || (cp >= 0xE0000 && cp <= 0xE0FFF);
 }

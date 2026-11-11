@@ -1295,6 +1295,35 @@ test.describe("owned widget dialogs", function()
     end
   end
 
+  test.test("font preview renders the options shown after initialization and programmatic changes", function(context)
+    local _, fonts = parent_with(context, FontsList)
+    local font = { name = "Fira Sans", path = DATADIR .. "/fonts/FiraSans-Regular.ttf" }
+    fonts:add_font(font)
+    fonts:set_options { size = 18, antialiasing = "subpixel", hinting = "slight" }
+    update()
+    click(fonts.list)
+    click(fonts.list, 2)
+    local dialog = top_popup(fonts, FontDialog)
+    local function pixels(selected)
+      local c = canvas.new(400 * SCALE, 60 * SCALE, {0, 0, 0, 255}, true)
+      c:draw_text(selected, "Font preview", 2, 2, {255, 255, 255, 255})
+      c:render()
+      return c:get_pixels(0, 0, 400 * SCALE, 60 * SCALE)
+    end
+    local function check_preview()
+      local options = dialog:get_options()
+      local expected = renderer.font.load(font.path, options.size * SCALE, options)
+      test.ok(pixels(dialog.preview.font) == pixels(expected),
+        "preview pixels differ from the displayed font options")
+    end
+    test.equal(dialog.antialiasing:get_selected_data(), "subpixel")
+    check_preview()
+    dialog:set_options { antialiasing = "grayscale", hinting = "full", bold = true }
+    check_preview()
+    dialog:set_options { antialiasing = "subpixel", system_fallback = false }
+    check_preview()
+  end)
+
   for _, edit in ipairs { false, true } do
     test.test((edit and "Edit" or "Add") .. " font saves options from its nested text field", function(context)
       local _, fonts = parent_with(context, FontsList)
@@ -1304,6 +1333,9 @@ test.describe("owned widget dialogs", function()
       if edit then click(fonts.list); click(fonts.list, 2) else click(fonts.add) end
       local dialog = top_popup(fonts, FontDialog)
       dialog:set_font(font)
+      test.ok(dialog.system_fallback:is_checked())
+      click(dialog.system_fallback)
+      test.not_ok(dialog:get_options().system_fallback)
       click(dialog.font_size.textbox)
       test.equal(core.active_view, dialog.font_size.textbox.textview)
       command.perform("doc:select-all")
@@ -1311,6 +1343,7 @@ test.describe("owned widget dialogs", function()
       click(dialog.save)
       test.equal(fonts:get_fonts()[1].path, font.path)
       test.equal(fonts:get_options().size, 18)
+      test.equal(fonts:get_options().system_fallback, false)
       test.not_ok(dialog.floating_visible)
       test.not_ok(fonts.dialog)
     end)

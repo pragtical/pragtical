@@ -185,6 +185,54 @@ test.describe("graphics apis", function()
     test.ok(pixels_plain ~= pixels_liga, "ligature-enabled rendering should differ from plain glyph rendering")
   end)
 
+  test.test("keeps Unicode measurement and drawing consistent with font fallback", function()
+    local path = DATADIR .. "/fonts/JetBrainsMono-Regular.ttf"
+    local fallback_font = renderer.font.load(DATADIR .. "/fonts/FiraSans-Regular.ttf", 24 * SCALE)
+    for _, fallback in ipairs { false, true } do
+      for _, ligatures in ipairs { false, true } do
+        local font = renderer.font.load(path, 24 * SCALE, {
+          system_fallback = fallback, ligatures = ligatures, antialiasing = "grayscale"
+        })
+        local copy = font:copy(24 * SCALE)
+        local group = renderer.font.group { font, fallback_font }
+        for _, text in ipairs {
+          "ASCII -> ffi", "é Á", "中文 한글", "👩🏽‍💻 🇺🇸 ⚙️", "العربية", "क्‍ष",
+          "a" .. string.uchar(0x10FFFF) .. "b"
+        } do
+          for _, selected in ipairs { font, copy, group } do
+            local c = canvas.new(600 * SCALE, 70 * SCALE, {0, 0, 0, 255}, true)
+            local width = selected:get_width(text)
+            local pen = c:draw_text(selected, text, 0, 0, {255, 255, 255, 255})
+            test.ok(math.abs(pen - width) < 0.001, "inconsistent width for " .. text)
+            c:render()
+          end
+          test.equal(copy:get_width(text), font:get_width(text))
+        end
+        local resized = font:copy(36 * SCALE)
+        test.ok(resized:get_width("é 中文") > font:get_width("é 中文"))
+      end
+    end
+    collectgarbage("collect")
+  end)
+
+  test.test("keeps emoji fallback independent of previously discovered text fonts", function()
+    local path = DATADIR .. "/fonts/JetBrainsMono-Regular.ttf"
+    local function new_font()
+      return renderer.font.load(path, 24 * SCALE, {antialiasing = "grayscale"})
+    end
+    local function capture(font)
+      local c = canvas.new(600, 70, {0, 0, 0, 255}, true)
+      c:draw_text(font, "😀😉🤩🫡👩‍💻🇺🇸⚙️", 0, 0, {255, 255, 255, 255})
+      c:render()
+      return c:get_pixels(0, 0, 600, 70)
+    end
+    local direct, after_text = new_font(), new_font()
+    local expected = capture(direct)
+    -- These scripts and symbols also occur in CodeMirror's bundled language data.
+    after_text:get_width("خ•␍␤⇚機能フィーチャ기능โครงสร้างหลักಹೆಚ್ಚಳగుణముਮੁਹਾਂਦਰਾरूपरेखाوِیژگیخاصيةתכונהФункціяΛειτουργία")
+    test.equal(capture(after_text), expected)
+  end)
+
   test.test("supports canvas pixel, copy and image loading operations", function(context)
     local c = canvas.new(2, 2, {0, 0, 0, 255}, true)
     local width, height = c:get_size()

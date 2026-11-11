@@ -23,6 +23,7 @@
 #include "renderer/backend.h"
 #include "renderer/cache.h"
 #include "renderer/window.h"
+#include "fallbackfont.h"
 
 /* a cache over the software renderer -- all drawing operations are stored as
 ** commands when issued. At the end of the frame we write the commands to a grid
@@ -677,6 +678,7 @@ void rencache_end_frame(RenCache *ren_cache) {
   }
   ren_cache->command_buf_idx = 0;
   ren_cache->invalidated = false;
+  fallback_font_trim();
 }
 
 RenSurface rencache_get_surface(RenCache *ren_cache) {

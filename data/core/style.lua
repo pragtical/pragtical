@@ -37,7 +37,9 @@ style.margin = {
 -- The antialiasing grayscale with full hinting is interesting for crisp font rendering.
 style.font = renderer.font.load(DATADIR .. "/fonts/FiraSans-Regular.ttf", 15 * SCALE)
 style.big_font = style.font:copy(46 * SCALE)
-style.icon_font = renderer.font.load(DATADIR .. "/fonts/icons.ttf", 16 * SCALE, {antialiasing="grayscale", hinting="full"})
+style.icon_font = renderer.font.load(DATADIR .. "/fonts/icons.ttf", 16 * SCALE, {
+  antialiasing = "grayscale", hinting = "full", system_fallback = false
+})
 style.icon_big_font = style.icon_font:copy(23 * SCALE)
 style.code_font = renderer.font.load(DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", 15 * SCALE)
 
