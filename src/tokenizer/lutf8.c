@@ -1564,6 +1564,13 @@ static const char *grapheme_decode(const char *s, const char *end, utfint *cp) {
   return utf8_decode(s, cp, 1);
 }
 
+static bool grapheme_is_control(utfint ch) {
+  // General-category Cf also contains grapheme extenders, including emoji tags.
+  return ch != 0x200D && find_in_range(cntrl_table, table_size(cntrl_table), ch)
+    && !find_in_range(prepend_table, table_size(prepend_table), ch)
+    && !find_in_range(compose_table, table_size(compose_table), ch);
+}
+
 const char *Lutf8_grapheme_next(const char *s, const char *e) {
   if (s >= e) return e;
   utfint ch, next_ch;
@@ -1597,7 +1604,7 @@ const char *Lutf8_grapheme_next(const char *s, const char *e) {
     } else if (ch == '\n' || next_ch == '\r' || next_ch == '\n') {
       /* CR/LF do not bind to any other codepoint or in any other way */
       break;
-    } else if (find_in_range(cntrl_table, table_size(cntrl_table), ch) && !find_in_range(prepend_table, table_size(prepend_table), ch) && ch != 0x200D) {
+    } else if (grapheme_is_control(ch)) {
       /* Control characters do not bind to anything */
       break;
     } else if (next_ch == 0x200D) {
@@ -1614,7 +1621,7 @@ const char *Lutf8_grapheme_next(const char *s, const char *e) {
         }
       }
       bind = 1;
-    } else if (find_in_range(cntrl_table, table_size(cntrl_table), next_ch) && !find_in_range(prepend_table, table_size(prepend_table), next_ch)) {
+    } else if (grapheme_is_control(next_ch)) {
       /* Control characters do not bind to anything */
       break;
     } else {

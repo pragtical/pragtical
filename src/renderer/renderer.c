@@ -96,6 +96,7 @@ typedef struct {
 
 #define FONT_CLUSTER_CACHE_MAX 512
 #define FONT_CLUSTER_CACHE_MAX_TEXT 256
+#define FONT_CLUSTER_MISS_MAX 16
 
 /* Small selected-run cache, separate from glyph/atlas storage. Each record is
  * capped at 1 KiB; ASCII uses the direct path and allocates no layout entries.
@@ -219,7 +220,8 @@ typedef struct RenFont {
   uint64_t identity;
   float fallback_scale;
   uint32_t variation_hash;
-  FontClusterCacheEntry *coverage_cache, *fallback_cache;
+  FontClusterCacheEntry *coverage_cache, *fallback_cache, *fallback_misses;
+  size_t fallback_miss_index;
   uint32_t generation;
   ShapedWidthCache *shaped_width_cache;
   ShapedRunCache *shaped_run_cache;
@@ -785,7 +787,9 @@ static bool colr_paint_glyph_to_surface(RenFont *font, FT_PaintGlyph *glyph_pain
   FT_Set_Transform(font->face, NULL, NULL);
 
   FT_GlyphSlot slot = font->face->glyph;
-  if (!slot->bitmap.width || !slot->bitmap.rows || !slot->bitmap.buffer || slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
+  if (!slot->bitmap.width || !slot->bitmap.rows || !slot->bitmap.buffer)
+    return true;
+  if (slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY)
     return false;
 
   for (unsigned int row = 0; row < slot->bitmap.rows; row++) {
@@ -818,6 +822,19 @@ static bool colr_paint_to_surface(RenFont *font, FT_OpaquePaint opaque, ColrRend
     return false;
 
   switch (paint.format) {
+    case FT_COLR_PAINTFORMAT_SOLID:
+    case FT_COLR_PAINTFORMAT_LINEAR_GRADIENT:
+    case FT_COLR_PAINTFORMAT_RADIAL_GRADIENT:
+    case FT_COLR_PAINTFORMAT_SWEEP_GRADIENT:
+      // Composite inputs can be unbounded fills, restricted by this clip surface.
+      for (int y = 0; y < ctx->surface->h; y++) {
+        for (int x = 0; x < ctx->surface->w; x++) {
+          RenColor color = colr_paint_pixel(font, &paint, x, y, ctx);
+          if (color.a)
+            colr_blend_pixel(&((uint8_t *)ctx->surface->pixels)[y * ctx->surface->pitch + x * 4], color, 255);
+        }
+      }
+      return true;
     case FT_COLR_PAINTFORMAT_COLR_LAYERS: {
       bool ok = true;
       FT_OpaquePaint layer = { 0 };
@@ -956,6 +973,7 @@ static GlyphMetric *font_load_glyph_metric(RenFont *font, unsigned int glyph_id,
     // the xadvance, so we can save some time by not doing this step multiple times
     if (FT_Load_Glyph(font->face, glyph_id, (load_option | FT_LOAD_BITMAP_METRICS_ONLY | FT_LOAD_NO_HINTING) & ~FT_LOAD_FORCE_AUTOHINT) != 0)
       return NULL;
+    bool has_ink = font->face->glyph->metrics.width > 0 && font->face->glyph->metrics.height > 0;
     for (int i = 0; i < bitmaps; i++) {
       // save the metrics for all subpixel indexes
       if (!font->glyphs.metrics[i][row]) {
@@ -964,6 +982,8 @@ static GlyphMetric *font_load_glyph_metric(RenFont *font, unsigned int glyph_id,
       }
       GlyphMetric *metric = &font->glyphs.metrics[i][row][col];
       metric->flags |= EGlyphXAdvance;
+      if (has_ink || !FT_HAS_COLOR(font->face))
+        metric->flags |= EGlyphInkChecked | (has_ink ? EGlyphHasInk : 0);
       metric->xadvance = font->face->glyph->advance.x / 64.0f;
       if (FT_HAS_COLOR(font->face))
         metric->xadvance *= font->color_scale;
@@ -974,6 +994,7 @@ static GlyphMetric *font_load_glyph_metric(RenFont *font, unsigned int glyph_id,
 
 static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id, unsigned int bitmap_idx, GlyphMetric *metric) {
   if (metric->flags & EGlyphBitmap) return ren_atlas_get_glyph_surface(&font->glyphs.atlas, metric);
+  if (metric->flags & EGlyphBitmapEmpty) return NULL;
 
   // render the glyph for a bitmap_idx
   unsigned int load_option = font_set_load_options(font), render_option = font_set_render_options(font);
@@ -987,16 +1008,20 @@ static SDL_Surface *font_load_glyph_bitmap(RenFont *font, unsigned int glyph_id,
 
   if (FT_Load_Glyph(font->face, glyph_id, load_option) != 0
       || (slot->format == FT_GLYPH_FORMAT_OUTLINE && font_set_style(&slot->outline, bitmap_idx * (64 / SUBPIXEL_BITMAPS_CACHED), font->style) != 0)
-      || FT_Render_Glyph(slot, render_option) != 0)
+      || FT_Render_Glyph(slot, render_option) != 0) {
+    metric->flags |= EGlyphBitmapEmpty;
     return NULL;
+  }
 
   // if this bitmap is empty, or has a format we don't support, just store the xadvance
   if (!slot->bitmap.width || !slot->bitmap.rows || !slot->bitmap.buffer ||
       (slot->bitmap.pixel_mode != FT_PIXEL_MODE_MONO
         && slot->bitmap.pixel_mode != FT_PIXEL_MODE_GRAY
         && slot->bitmap.pixel_mode != FT_PIXEL_MODE_LCD
-        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_BGRA))
+        && slot->bitmap.pixel_mode != FT_PIXEL_MODE_BGRA)) {
+    metric->flags |= EGlyphBitmapEmpty;
     return NULL;
+  }
 
   float bitmap_scale = slot->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA ? font->color_scale : 1.0f;
   unsigned int glyph_width = slot->bitmap.width;
@@ -1231,9 +1256,9 @@ static void font_clear_glyph_cache(RenFont* font) {
 }
 
 /* Cache entries never own fonts; the primary font owns its native instances. */
-static void font_clear_cluster_cache(FontClusterCacheEntry **cache) {
+static void font_clear_cluster_cache(FontClusterCacheEntry **cache, size_t count) {
   if (!*cache) return;
-  for (size_t i = 0; i < FONT_CLUSTER_CACHE_MAX; i++) SDL_free((*cache)[i].text);
+  for (size_t i = 0; i < count; i++) SDL_free((*cache)[i].text);
   SDL_free(*cache);
   *cache = NULL;
 }
@@ -1474,8 +1499,9 @@ void ren_font_free(RenFont* font) {
     ren_font_free(child);
   }
   fallback_font_free(font->resolver);
-  font_clear_cluster_cache(&font->coverage_cache);
-  font_clear_cluster_cache(&font->fallback_cache);
+  font_clear_cluster_cache(&font->coverage_cache, FONT_CLUSTER_CACHE_MAX);
+  font_clear_cluster_cache(&font->fallback_cache, FONT_CLUSTER_CACHE_MAX);
+  font_clear_cluster_cache(&font->fallback_misses, FONT_CLUSTER_MISS_MAX);
   font_clear_layouts(font);
   SDL_free(font->fallback_index);
   SDL_free(font->fallback_roles);
@@ -1717,8 +1743,10 @@ void ren_font_group_set_size(RenFont **fonts, float size) {
     fonts[i]->size = size;
     fonts[i]->tab_size = 2;
     font_set_face_metrics(fonts[i], fonts[i]->face);
-    font_clear_cluster_cache(&fonts[i]->coverage_cache);
-    font_clear_cluster_cache(&fonts[i]->fallback_cache);
+    font_clear_cluster_cache(&fonts[i]->coverage_cache, FONT_CLUSTER_CACHE_MAX);
+    font_clear_cluster_cache(&fonts[i]->fallback_cache, FONT_CLUSTER_CACHE_MAX);
+    font_clear_cluster_cache(&fonts[i]->fallback_misses, FONT_CLUSTER_MISS_MAX);
+    fonts[i]->fallback_miss_index = 0;
     font_clear_layouts(fonts[i]);
     font_clear_charmap(&fonts[i]->fallback_characters);
     fallback_font_free(fonts[i]->resolver);
@@ -1726,7 +1754,7 @@ void ren_font_group_set_size(RenFont **fonts, float size) {
     fonts[i]->resolver_initialized = false;
     for (RenFont *child = fonts[i]->fallback_fonts; child; child = child->next_fallback) {
       font_clear_glyph_cache(child);
-      font_clear_cluster_cache(&child->coverage_cache);
+      font_clear_cluster_cache(&child->coverage_cache, FONT_CLUSTER_CACHE_MAX);
       child->size = size * child->fallback_scale;
       font_set_face_metrics(child, child->face);
     }
@@ -1762,7 +1790,7 @@ int ren_font_group_get_underline_thickness(RenFont **fonts) {
 
 // some fonts provide xadvance for whitespaces (e.g. Unifont), which we need to ignore
 float font_get_xadvance(RenFont *font, unsigned int codepoint, GlyphMetric *metric, double curr_x, RenTab tab) {
-  if (!is_whitespace(codepoint) && metric && metric->xadvance) {
+  if (!is_whitespace(codepoint) && metric) {
     return metric->xadvance;
   }
   if (codepoint != '\t') {
@@ -1867,12 +1895,37 @@ static void font_shape(hb_buffer_t *buffer, RenFont *font, const char *text, siz
   hb_shape(font->hb_font, buffer, disable ? features : NULL, disable ? SDL_arraysize(features) : 0);
 }
 
-/* Coverage includes shaping and presentation selectors, not just cmap entries. */
-static bool font_supports_cluster(RenFont *font, const char *text, const char *end) {
+/* Native candidates may advertise characters using empty placeholder glyphs.
+ * Reuse the existing metric flags; no rasterization or extra per-glyph cache.
+ */
+static bool font_glyph_has_ink(RenFont *font, unsigned int glyph_id) {
+  GlyphMetric *metric = font_load_glyph_metric(font, glyph_id, 0);
+  if (!metric) return false;
+  if (!(metric->flags & EGlyphInkChecked)) {
+    FT_OpaquePaint paint = { 0 };
+    FT_LayerIterator layers = { 0 };
+    FT_UInt layer, color;
+    bool has_ink = FT_Get_Color_Glyph_Paint(font->face, glyph_id, FT_COLOR_NO_ROOT_TRANSFORM, &paint)
+      || FT_Get_Color_Glyph_Layer(font->face, glyph_id, &layer, &color, &layers);
+    for (int i = 0; i < FONT_BITMAP_COUNT(font); i++) {
+      GlyphMetric *m = &font->glyphs.metrics[i][glyph_id / GLYPHMAP_COL][glyph_id % GLYPHMAP_COL];
+      m->flags |= EGlyphInkChecked | (has_ink ? EGlyphHasInk : 0);
+    }
+  }
+  return metric->flags & EGlyphHasInk;
+}
+
+/* Coverage includes shaping and presentation selectors, not just cmap entries.
+ * Ink checks apply only to automatic fallback, preserving configured fonts.
+ */
+static bool font_supports_cluster(RenFont *font, const char *text, const char *end, bool check_ink) {
   unsigned int cp;
   const char *next = utf8_to_codepoint(text, end, &cp);
-  if (next == end)
-    return Lutf8_isdefaultignorable(cp) || font_get_glyph_id(font, cp) != 0;
+  if (next == end) {
+    if (Lutf8_isdefaultignorable(cp)) return true;
+    unsigned int glyph = font_get_glyph_id(font, cp);
+    return glyph && (!check_ink || font_glyph_has_ink(font, glyph));
+  }
   size_t len = end - text;
   FontClusterCacheEntry *entry = font_cluster_cache_entry(&font->coverage_cache, text, len);
   if (font_cluster_cache_matches(entry, text, len)) return entry->font != NULL;
@@ -1894,7 +1947,7 @@ static bool font_supports_cluster(RenFont *font, const char *text, const char *e
       supported = false;
       break;
     }
-    if (cp == 0x200D || (cp >= 0x1F3FB && cp <= 0x1F3FF)
+    if (cp == 0x200D || (cp >= 0x1F3FB && cp <= 0x1F3FF) || (cp >= 0xE0020 && cp <= 0xE007F)
         || (previous >= 0x1F1E6 && previous <= 0x1F1FF && cp >= 0x1F1E6 && cp <= 0x1F1FF))
       emoji_sequence = true;
     previous = cp;
@@ -1904,9 +1957,12 @@ static bool font_supports_cluster(RenFont *font, const char *text, const char *e
     font_shape(buffer, font, text, len);
     unsigned int count;
     hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &count);
+    bool has_ink = !check_ink;
     for (unsigned int i = 0; i < count; i++) {
       if (!infos[i].codepoint) { supported = false; break; }
+      if (!has_ink && font_glyph_has_ink(font, infos[i].codepoint)) has_ink = true;
     }
+    supported = supported && has_ink;
     if (emoji_sequence && font_text_is_emoji(text, end) && count != 1) supported = false;
     hb_buffer_destroy(buffer);
   }
@@ -1933,7 +1989,7 @@ static bool font_accept_fallback(void *userdata, const FallbackFontMatch *match)
         && (match->face_index >= 0 ? font->face->face_index == match->face_index
           : font->face->num_faces == 1 || (match->postscript_name && FT_Get_Postscript_Name(font->face)
             && !strcmp(FT_Get_Postscript_Name(font->face), match->postscript_name)))) {
-      if (font_supports_cluster(font, selection->text, selection->end)) {
+      if (font_supports_cluster(font, selection->text, selection->end, true)) {
         selection->selected = font;
         return true;
       }
@@ -1943,7 +1999,7 @@ static bool font_accept_fallback(void *userdata, const FallbackFontMatch *match)
   RenFont *font = font_load_face(match->path, primary->size * match->scale,
     primary->antialiasing, primary->hinting, primary->style, primary->ligatures, false, match);
   if (!font) return false;
-  if (!font_supports_cluster(font, selection->text, selection->end)) {
+  if (!font_supports_cluster(font, selection->text, selection->end, true)) {
     ren_font_free(font);
     return false;
   }
@@ -1964,7 +2020,7 @@ static RenFont *font_select_cluster(RenFont **fonts, const char *text, const cha
   const char *scalar_end = utf8_to_codepoint(text, end, &cp);
   if (is_whitespace(cp) || (scalar_end == end && Lutf8_isdefaultignorable(cp))) return fonts[0];
   for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
-    if (font_supports_cluster(fonts[i], text, end)) return fonts[i];
+    if (font_supports_cluster(fonts[i], text, end, false)) return fonts[i];
   }
   RenFont *primary = fonts[0];
   if (!primary->system_fallback) return NULL;
@@ -1977,6 +2033,12 @@ static RenFont *font_select_cluster(RenFont **fonts, const char *text, const cha
   } else {
     entry = font_cluster_cache_entry(&primary->fallback_cache, text, len);
     if (font_cluster_cache_matches(entry, text, len)) return entry->font;
+    /* Successful emoji must not evict every failed match while scrolling.
+     * Keep a small separate ring so an unsupported sequence stays cheap.
+     */
+    for (size_t i = 0; primary->fallback_misses && i < FONT_CLUSTER_MISS_MAX; i++) {
+      if (font_cluster_cache_matches(&primary->fallback_misses[i], text, len)) return NULL;
+    }
   }
   /* Reuse faces within the script/presentation for which the OS chose them.
    * A text-symbol face must not become the emoji font simply because it was
@@ -1987,7 +2049,7 @@ static RenFont *font_select_cluster(RenFont **fonts, const char *text, const cha
   RenFont *selected = NULL;
   for (size_t i = 0; i < primary->fallback_role_count; i++) {
     FontFallbackRole *candidate = &primary->fallback_roles[i];
-    if (candidate->role == role && font_supports_cluster(candidate->font, text, end)) {
+    if (candidate->role == role && font_supports_cluster(candidate->font, text, end, true)) {
       selected = candidate->font;
       break;
     }
@@ -2017,6 +2079,13 @@ store_selection:
     }
   } else {
     font_cluster_cache_store(entry, text, len, selected);
+    if (!selected && len <= FONT_CLUSTER_CACHE_MAX_TEXT) {
+      if (!primary->fallback_misses)
+        primary->fallback_misses = check_alloc(SDL_calloc(FONT_CLUSTER_MISS_MAX, sizeof(*entry)));
+      FontClusterCacheEntry *miss = &primary->fallback_misses[primary->fallback_miss_index];
+      font_cluster_cache_store(miss, text, len, NULL);
+      primary->fallback_miss_index = (primary->fallback_miss_index + 1) % FONT_CLUSTER_MISS_MAX;
+    }
   }
   return selected;
 }
@@ -2043,12 +2112,14 @@ static bool font_needs_shaping(RenFont *font, unsigned int cp, bool single) {
 
 /* Both width measurement and drawing consume precisely the same selected runs. */
 static const char *font_next_run(RenFont **fonts, const char *text, const char *end,
-                                RenFont **selected, bool *shaped) {
+                                RenFont **selected, bool *shaped, const char **decomposed_end) {
   /* Preserve the ordinary editor path: scan covered ASCII without Unicode
    * classification, native lookup or per-character run construction. Leave
    * ASCII followed by non-ASCII to the grapheme path (it may have a mark).
    */
-  if ((unsigned char)*text < 0x80 && (text + 1 == end || (unsigned char)text[1] < 0x80)) {
+  bool decomposed = *decomposed_end && text < *decomposed_end;
+  if (!decomposed && (unsigned char)*text < 0x80
+      && (text + 1 == end || (unsigned char)text[1] < 0x80)) {
     RenFont *primary = fonts[0];
     const char *p = text;
     bool whitespace = is_whitespace((unsigned char)*p);
@@ -2067,13 +2138,20 @@ static const char *font_next_run(RenFont **fonts, const char *text, const char *
   }
   unsigned int cp;
   const char *scalar_end = utf8_to_codepoint(text, end, &cp);
-  const char *next = font_cluster_end(text, end);
+  const char *next = decomposed ? scalar_end : font_cluster_end(text, end);
   RenFont *font = font_select_cluster(fonts, text, next);
   *shaped = false;
-  if (!font) {
-    /* No font can cover the whole cluster. Degrade to configured characters
-     * without recursively requesting the same impossible native match.
+  if (!font && next != scalar_end) {
+    /* Try the individual characters once when no face supports the sequence.
+     * Do not repeatedly search for each unsupported suffix of the cluster.
      */
+    *decomposed_end = next;
+    decomposed = true;
+    next = scalar_end;
+    font = font_select_cluster(fonts, text, next);
+  }
+  if (!font) {
+    /* Retain the configured missing-glyph appearance for unsupported scalars. */
     font = fonts[0];
     for (int i = 0; i < FONT_FALLBACK_MAX && fonts[i]; i++) {
       font = fonts[i];
@@ -2084,6 +2162,10 @@ static const char *font_next_run(RenFont **fonts, const char *text, const char *
   }
   *selected = font;
   if (is_whitespace(cp) || (scalar_end == next && Lutf8_isdefaultignorable(cp))) return next;
+  if (decomposed) {
+    *shaped = font_needs_shaping(font, cp, true);
+    return next;
+  }
   if (!font_needs_shaping(font, cp, next == scalar_end)) {
     while (next < end) {
       const char *scalar = utf8_to_codepoint(next, end, &cp);
@@ -2131,10 +2213,11 @@ static FontTextLayout *font_text_layout(RenFont **fonts, const char *text, size_
   FontTextRun runs[FONT_LAYOUT_CACHE_MAX_BYTES / sizeof(FontTextRun)];
   size_t count = 0;
   const char *p = text;
+  const char *decomposed_end = NULL;
   while (p < text + len) {
     if ((count + 1) * sizeof(FontTextRun) + len > FONT_LAYOUT_CACHE_MAX_BYTES) return NULL;
     FontTextRun *run = &runs[count++];
-    p = font_next_run(fonts, p, text + len, &run->font, &run->shaped);
+    p = font_next_run(fonts, p, text + len, &run->font, &run->shaped, &decomposed_end);
     run->end = p - text;
   }
   SDL_free(layout->text);
@@ -2228,6 +2311,7 @@ double ren_font_group_get_width(RenFont **fonts, const char *text, size_t len, R
   hb_buffer_t *hb_buffer = NULL;
   FontTextLayout *layout = font_text_layout(fonts, text, len);
   size_t run_index = 0;
+  const char *decomposed_end = NULL;
 
   bool set_x_offset = x_offset == NULL;
   while (text < end) {
@@ -2240,7 +2324,7 @@ double ren_font_group_get_width(RenFont **fonts, const char *text, size_t len, R
       shaped = run->shaped;
       run_end = start + run->end;
     } else {
-      run_end = font_next_run(fonts, text, end, &font, &shaped);
+      run_end = font_next_run(fonts, text, end, &font, &shaped, &decomposed_end);
     }
     if (shaped && text_needs_shaping(text, run_end)) {
       if (!hb_buffer) hb_buffer = hb_buffer_create();
@@ -2507,6 +2591,7 @@ double ren_draw_text_cb_ex(
   };
 
   RenFont* last = NULL;
+  const char *decomposed_end = NULL;
   double last_pen_x = pen_x;
   bool underline = fonts[0]->style & FONT_STYLE_UNDERLINE;
   bool strikethrough = fonts[0]->style & FONT_STYLE_STRIKETHROUGH;
@@ -2521,7 +2606,7 @@ double ren_draw_text_cb_ex(
       shaped = run->shaped;
       run_end = start + run->end;
     } else {
-      run_end = font_next_run(fonts, text, end, &font, &shaped);
+      run_end = font_next_run(fonts, text, end, &font, &shaped, &decomposed_end);
     }
     if (!last) last = font;
     else if (font != last) {

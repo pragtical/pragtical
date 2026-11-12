@@ -86,6 +86,34 @@ test.describe("string utf8 wrappers", function()
 end)
 
 test.describe("utf8extra", function()
+  test.test("keeps emoji tags and other format extenders in their graphemes", function()
+    for _, suffix in ipairs { "gbeng", "gbsct", "gbwls" } do
+      local tags = { "🏴" }
+      for byte in suffix:gmatch(".") do tags[#tags + 1] = string.uchar(0xE0000 + byte:byte()) end
+      tags[#tags + 1] = string.uchar(0xE007F)
+      local flag = table.concat(tags)
+      local text, spans = "a" .. flag .. "z", {}
+      for first, last in utf8extra.grapheme_indices(text) do
+        spans[#spans + 1] = text:sub(first, last)
+      end
+      test.same(spans, { "a", flag, "z" })
+      local first, last = utf8extra.grapheme_indices(text, 2, #text - 1)()
+      test.equal(first, 2)
+      test.equal(last, #text - 1)
+    end
+    for _, case in ipairs {
+      { "a" .. string.uchar(0x200C) .. "b", { "a" .. string.uchar(0x200C), "b" } },
+      { "a" .. string.uchar(0x200B) .. "b", { "a", string.uchar(0x200B), "b" } },
+      { "a" .. string.uchar(0xE0001) .. "b", { "a", string.uchar(0xE0001), "b" } }
+    } do
+      local spans = {}
+      for first, last in utf8extra.grapheme_indices(case[1]) do
+        spans[#spans + 1] = case[1]:sub(first, last)
+      end
+      test.same(spans, case[2])
+    end
+  end)
+
   test.test("keeps extended graphemes together within the supplied byte span", function()
     for _, cluster in ipairs {
       "e\204\129", "👨‍💻", "👩🏽‍💻", "🇺🇸", "⚙️", "क्‍ष", "각", "ᅟᅡ", "\r\n"

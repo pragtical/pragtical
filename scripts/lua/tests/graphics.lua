@@ -10,6 +10,9 @@ local test = require "core.test"
 
 local temp_root
 local project_temp_root
+local font_fixtures = system.absolute_path(
+  common.dirname(debug.getinfo(1, "S").source:gsub("^@", "")) .. "/fixtures/fonts"
+) .. PATHSEP
 
 test.describe("graphics apis", function()
   test.before_each(function(context)
@@ -157,6 +160,120 @@ test.describe("graphics apis", function()
 
     local group_meta = renderer.font.get_metadata(group)
     test.type(group_meta, "table")
+  end)
+
+  test.test("renders standalone COLRv1 fills inside composites", function()
+    local font = renderer.font.load(font_fixtures .. "color.ttf", 32, {
+      system_fallback = false, antialiasing = "grayscale"
+    })
+    for _, index in ipairs { 0, 1, 2, 3, 5 } do
+      local c = canvas.new(64, 64, {0, 0, 0, 255}, true)
+      c:draw_text(font, string.uchar(0xE000 + index), 8, 8, {255, 255, 255, 255})
+      c:render()
+      local pixels, ink, colors = c:get_pixels(0, 0, 64, 64), 0, {}
+      for offset = 1, #pixels, 4 do
+        local r, g, b = pixels:byte(offset, offset + 2)
+        if r + g + b > 0 then
+          ink = ink + 1
+          colors[pixels:sub(offset, offset + 2)] = true
+        end
+      end
+      test.ok(ink > 100, "empty COLRv1 fill " .. index)
+      local count = 0
+      for _ in pairs(colors) do count = count + 1 end
+      if index ~= 0 then test.ok(count > 3, "gradient should have several colors") end
+      test.equal(pixels:sub(1, 4), string.char(0, 0, 0, 255), "fill escaped its mask")
+    end
+  end)
+
+  test.test("empty glyph bitmaps retain advances and survive font resets", function()
+    local font = renderer.font.load(font_fixtures .. "color.ttf", 32, { system_fallback = false })
+    for _, size in ipairs { 32, 24, 32 } do
+      font:set_size(size)
+      for frame = 1, 6 do
+        local c = canvas.new(64, 64, {0, 0, 0, 255}, true)
+        local text = string.uchar(0xE004)
+        test.near(font:get_width(text), size)
+        test.near(c:draw_text(font, text, 0, 0, {255, 255, 255, 255}), size)
+        c:render()
+        test.equal(c:get_pixels(0, 0, 64, 64), string.rep(string.char(0, 0, 0, 255), 64 * 64))
+      end
+    end
+  end)
+
+  test.test("automatic fallback rejects blank coverage and preserves zero-advance marks", function(context)
+    test.skip_if(PLATFORM ~= "Linux", "isolated Fontconfig fixture requires Linux")
+    local available, fc = pcall(process.start, { "fc-match", "--version" }, {
+      stdout = process.REDIRECT_DISCARD, stderr = process.REDIRECT_DISCARD
+    })
+    test.skip_if(not available or not fc, "Fontconfig tools are unavailable")
+    fc:wait(process.WAIT_INFINITE, 0.01)
+    local xml = font_fixtures:gsub("&", "&amp;"):gsub("<", "&lt;")
+    local fontconfig = context.temp_root .. PATHSEP .. "fonts.conf"
+    local f = assert(io.open(fontconfig, "w"))
+    local cache_xml = context.temp_root:gsub("&", "&amp;"):gsub("<", "&lt;")
+    f:write('<fontconfig><dir>', xml, '</dir><cachedir>', cache_xml,
+      '/cache</cachedir><alias><family>Pragtical Test Primary</family><prefer>',
+      '<family>Pragtical Test Blank</family><family>Pragtical Test Visible</family>',
+      '</prefer></alias></fontconfig>')
+    f:close()
+    local worker = context.temp_root .. PATHSEP .. "fallback.lua"
+    f = assert(io.open(worker, "w"))
+    f:write([[
+local path = os.getenv("PRAGTICAL_TEST_FONT_DIR")
+local font = renderer.font.load(path .. "primary.ttf", 24, {system_fallback = true})
+local explicit = renderer.font.group {
+  renderer.font.load(path .. "primary.ttf", 24, {system_fallback = false}),
+  renderer.font.load(path .. "visible.ttf", 24, {system_fallback = false})
+}
+local function capture(f, text)
+  local c = canvas.new(80, 64, {0, 0, 0, 255}, true)
+  c:draw_text(f, text, 8, 12, {255, 255, 255, 255})
+  c:render()
+  return c:get_pixels(0, 0, 80, 64)
+end
+for _, text in ipairs {"B", "A" .. string.uchar(0x301), string.uchar(0x301)} do
+  assert(math.abs(font:get_width(text) - explicit:get_width(text)) < 0.01,
+    string.format("width for %q: native %g, explicit %g", text, font:get_width(text), explicit:get_width(text)))
+  local expected = capture(explicit, text)
+  assert(expected ~= string.rep(string.char(0, 0, 0, 255), 80 * 64), "empty reference for " .. text)
+  assert(capture(font, text) == expected, "different pixels for " .. text)
+end
+assert(font:get_width(string.uchar(0x301)) == 0)
+assert(font:get_width(string.uchar(0x200D)) == 0)
+local components = {string.uchar(0x1F680), string.uchar(0x1F3FB), string.uchar(0x1F3FB)}
+local sequence = table.concat(components)
+local expected_width = 0
+for _, scalar in ipairs(components) do expected_width = expected_width + explicit:get_width(scalar) end
+for _, text in ipairs {sequence, "A" .. sequence, string.rep("A", 520) .. sequence} do
+  local prefix_width = (#text - #sequence) * explicit:get_width("A")
+  assert(math.abs(font:get_width(text) - expected_width - prefix_width) < 0.01,
+    "unsupported sequence must retain individual fallback glyphs")
+  assert(capture(font, text) == capture(explicit, text), "unsupported sequence pixels differ")
+end
+-- Evict selected-run entries before revisiting an unsupported sequence.
+for n = 1, 80 do font:get_width("A" .. string.rep(string.uchar(0x301), n)) end
+assert(math.abs(font:get_width(sequence) - expected_width) < 0.01)
+print("fallback fixture passed")
+]])
+    f:close()
+    local proc = process.start({ EXEFILE, "run", worker }, {
+      stdout = process.REDIRECT_PIPE, stderr = process.REDIRECT_STDOUT,
+      env = {
+        SDL_VIDEO_DRIVER = "dummy", PRAGTICAL_RENDERER = "surface", PRAGTICAL_SCALE = "1",
+        PRAGTICAL_USERDIR = context.temp_root .. PATHSEP .. "profile",
+        FONTCONFIG_FILE = fontconfig, PRAGTICAL_TEST_FONT_DIR = font_fixtures
+      }
+    })
+    local output, deadline = {}, system.get_time() + 10
+    while proc:running() and system.get_time() < deadline do
+      output[#output + 1] = proc:read_stdout(4096) or ""
+      coroutine.yield(0.01)
+    end
+    if proc:running() then proc:kill(); test.fail("font fixture subprocess timed out") end
+    output[#output + 1] = proc:read_stdout(4096) or ""
+    test.equal(proc:returncode(), 0, table.concat(output))
+    test.contains(table.concat(output), "fallback fixture passed")
   end)
 
   test.test("supports toggling font ligatures", function()
