@@ -32,7 +32,10 @@ typedef enum {
 typedef enum {
   EGlyphNone = 0,             // glyph is not loaded
   EGlyphXAdvance = (1 << 0L), // xadvance is loaded
-  EGlyphBitmap = (1 << 1L)    // bitmap is loaded
+  EGlyphBitmap = (1 << 1L),   // bitmap is loaded
+  EGlyphBitmapEmpty = (1 << 2L), // bitmap is empty or cannot be rendered
+  EGlyphInkChecked = (1 << 3L),  // visible coverage was checked
+  EGlyphHasInk = (1 << 4L)       // glyph has visible outlines, pixels or color paint
 } ERenGlyphFlags;
 
 // metrics for a loaded glyph

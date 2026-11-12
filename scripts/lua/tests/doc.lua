@@ -21,6 +21,21 @@ local function check_grapheme_bounds(doc)
 end
 
 test.describe("document grapheme positions", function()
+  test.test("tag flags remain whole while navigating and editing cached boundaries", function()
+    local flag = "🏴" .. string.uchar(0xE0067, 0xE0062, 0xE0065, 0xE006E, 0xE0067, 0xE007F)
+    local doc = Doc()
+    doc:insert(1, 1, "a" .. flag .. "z")
+    check_grapheme_bounds(doc)
+    test.same({ translate.next_char(doc, 1, 2) }, { 1, #flag + 2 })
+    test.same({ translate.previous_char(doc, 1, #flag + 2) }, { 1, 2 })
+    doc:insert(1, 2, "x")
+    check_grapheme_bounds(doc)
+    doc:set_selection(1, #flag + 3)
+    doc:delete_to(translate.previous_char)
+    test.equal(doc.lines[1], "axz\n")
+    doc:on_close()
+  end)
+
   test.test("navigation and deletion keep displayed characters intact", function()
     local clusters = { "☺️", " ", "☹️", " ", "☠️", "e\204\129", "🚀‍🚀", "🇺🇸", "1️⃣" }
     local text = table.concat(clusters)
