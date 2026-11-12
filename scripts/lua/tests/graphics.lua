@@ -599,6 +599,66 @@ test.describe("graphics apis", function()
       "polygon Pacman should not leave stale pixels at its first position")
   end)
 
+  test.test("streams clipped pixels across batches and collected sources", function()
+    local width, height = 640, 360
+    local window = renwindow.create("graphics-streaming-pixels", width, height)
+    local background = {21, 32, 43, 255}
+
+    local function gradient(frame)
+      local rows = {}
+      for y = 0, 88 do
+        local row = {}
+        for x = 0, 126 do
+          row[#row + 1] = string.char(x + frame, y + frame, 100 + frame, 255)
+        end
+        rows[#rows + 1] = table.concat(row)
+      end
+      return table.concat(rows)
+    end
+
+    for frame = 1, 4 do
+      renderer.begin_frame(window)
+      renderer.set_clip_rect(0, 0, width, height)
+      renderer.draw_rect(0, 0, width, height, background, true)
+      renderer.set_clip_rect(0, 0, 97, 61)
+      -- Clipping changes both the source offset and upload row alignment.
+      renderer.draw_pixels(gradient(frame), -17, -9, 127, 89)
+      renderer.set_clip_rect(0, 0, width, height)
+      renderer.draw_pixels(string.rep(string.char(10, 20, 30 + frame, 255), 128 * 64),
+        128, 16, 128, 64)
+      -- Interleaving another primitive flushes the earlier pixel batch.
+      renderer.draw_rect(140, 20, 10, 10, {210, 120, 50, 255}, true)
+      for i = 1, 40 do
+        renderer.draw_pixels(string.rep(string.char(i, frame, 180, 255), 9 * 5),
+          10 + (i - 1) % 20 * 15, 120 + math.floor((i - 1) / 20) * 15, 9, 5)
+      end
+      -- Lua strings may disappear before deferred backend replay starts.
+      collectgarbage("collect")
+      renderer.end_frame()
+
+      local image = renderer.to_canvas(window, 0, 0, width, height)
+      local pixels = image:get_pixels()
+      local function color_at(x, y, expected)
+        local offset = (y * width + x) * 4 + 1
+        local r, g, b, a = pixels:byte(offset, offset + 3)
+        test.equal(r, expected[1])
+        test.equal(g, expected[2])
+        test.equal(b, expected[3])
+        test.equal(a, expected[4])
+      end
+      color_at(5, 5, {22 + frame, 14 + frame, 100 + frame, 255})
+      color_at(96, 60, {113 + frame, 69 + frame, 100 + frame, 255})
+      color_at(97, 60, background)
+      color_at(5, 61, background)
+      color_at(200, 50, {10, 20, 30 + frame, 255})
+      color_at(145, 25, {210, 120, 50, 255})
+      for i = 1, 40 do
+        color_at(12 + (i - 1) % 20 * 15, 122 + math.floor((i - 1) / 20) * 15,
+          {i, frame, 180, 255})
+      end
+    end
+  end)
+
   test.test("captures moving Pacman rendered with window pixels", function(context)
     local width, height = 180, 96
     local window = renwindow.create("graphics-pacman-pixels", width, height)

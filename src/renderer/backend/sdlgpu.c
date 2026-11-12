@@ -179,6 +179,8 @@ typedef struct {
 
 typedef struct {
   SDL_Rect dst;
+  const Uint8 *bytes;
+  Uint64 source_pitch;
   Uint32 transfer_offset;
   Uint32 row_stride;
   Uint32 atlas_y;
@@ -208,7 +210,6 @@ typedef struct {
   GpuQueuedPoly *pending_polys;
   GpuPolyVertex *pending_poly_vertices;
   GpuQueuedPixels *pending_pixels;
-  Uint8 *pending_pixel_bytes;
   SDL_GPUTransferBuffer *validation_transfer;
   Uint32 validation_transfer_size;
   SDL_Rect validation_text_rect;
@@ -225,8 +226,7 @@ typedef struct {
   int pending_poly_vertex_capacity;
   int pending_pixel_count;
   int pending_pixel_capacity;
-  Uint32 pending_pixel_bytes_size;
-  Uint32 pending_pixel_bytes_capacity;
+  Uint32 pending_pixel_upload_size;
   int pending_pixels_texture_w;
   int pending_pixels_texture_h;
   Uint64 stats_frames;
@@ -2034,42 +2034,15 @@ static bool gpu_queue_window_pixels(
   const int bytes_per_pixel = 4;
   Uint32 row_size = (Uint32) dst.w * bytes_per_pixel;
   Uint32 row_stride = gpu_align_u32(row_size, GPU_TEXTURE_ROW_ALIGNMENT);
-  Uint32 transfer_offset = gpu_align_u32(data->pending_pixel_bytes_size, GPU_TEXTURE_OFFSET_ALIGNMENT);
+  Uint32 transfer_offset = gpu_align_u32(data->pending_pixel_upload_size, GPU_TEXTURE_OFFSET_ALIGNMENT);
   Uint32 upload_size = row_stride * (Uint32) dst.h;
   Uint32 required_size = transfer_offset + upload_size;
-
-  if (required_size > data->pending_pixel_bytes_capacity) {
-    Uint32 capacity = data->pending_pixel_bytes_capacity ? data->pending_pixel_bytes_capacity * 2 : 65536;
-    while (capacity < required_size)
-      capacity *= 2;
-    Uint8 *bytes_buffer = SDL_realloc(data->pending_pixel_bytes, capacity);
-    if (!bytes_buffer) {
-      fprintf(stderr, "Error allocating SDL GPU pending pixel bytes\n");
-      exit(1);
-    }
-    data->pending_pixel_bytes = bytes_buffer;
-    data->pending_pixel_bytes_capacity = capacity;
-  }
-
-  if (transfer_offset > data->pending_pixel_bytes_size) {
-    SDL_memset(
-      data->pending_pixel_bytes + data->pending_pixel_bytes_size,
-      0,
-      transfer_offset - data->pending_pixel_bytes_size
-    );
-  }
 
   const Uint64 source_pitch = (Uint64) source_rect.width * bytes_per_pixel;
   const int src_x = dst.x - source_rect.x;
   const int src_y = dst.y - source_rect.y;
   const Uint8 *src = (const Uint8 *) bytes + (Uint64) src_y * source_pitch + (Uint64) src_x * bytes_per_pixel;
-  Uint8 *out = data->pending_pixel_bytes + transfer_offset;
-  for (int y = 0; y < dst.h; y++) {
-    SDL_memcpy(out, src, row_size);
-    src += source_pitch;
-    out += row_stride;
-  }
-  data->pending_pixel_bytes_size = required_size;
+  data->pending_pixel_upload_size = required_size;
 
   if (!gpu_grow_buffer((void **) &data->pending_pixels, &data->pending_pixel_capacity,
                        data->pending_pixel_count + 1, sizeof(GpuQueuedPixels), 32)) {
@@ -2079,6 +2052,10 @@ static bool gpu_queue_window_pixels(
 
   data->pending_pixels[data->pending_pixel_count++] = (GpuQueuedPixels) {
     .dst = dst,
+    /* Replay owns these command bytes until all batches have been flushed.
+     * Copy directly into the mapped upload buffer instead of staging twice. */
+    .bytes = src,
+    .source_pitch = source_pitch,
     .transfer_offset = transfer_offset,
     .row_stride = row_stride,
     .atlas_y = (Uint32) data->pending_pixels_texture_h,
@@ -2091,19 +2068,33 @@ static bool gpu_queue_window_pixels(
 static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *cmd) {
   if (!data || data->pending_pixel_count == 0)
     return true;
-  if (!cmd || !data->frame.texture || data->pending_pixel_bytes_size == 0)
+  if (!cmd || !data->frame.texture || data->pending_pixel_upload_size == 0)
     return false;
   if (!gpu_ensure_canvas_batch_replace_pipeline(data->device))
     return false;
   if (!gpu_ensure_pixels_texture(data, data->pending_pixels_texture_w, data->pending_pixels_texture_h))
     return false;
-  if (!gpu_ensure_pixels_transfer(data, data->pending_pixel_bytes_size))
+  if (!gpu_ensure_pixels_transfer(data, data->pending_pixel_upload_size))
     return false;
 
   Uint8 *map = SDL_MapGPUTransferBuffer(data->device, data->pixels_transfer, true);
   if (!map)
     return false;
-  SDL_memcpy(map, data->pending_pixel_bytes, data->pending_pixel_bytes_size);
+  for (int i = 0; i < data->pending_pixel_count; i++) {
+    GpuQueuedPixels *pixels = &data->pending_pixels[i];
+    const Uint8 *src = pixels->bytes;
+    Uint8 *out = map + pixels->transfer_offset;
+    Uint32 row_size = (Uint32) pixels->dst.w * 4;
+    if (pixels->source_pitch == row_size && pixels->row_stride == row_size) {
+      SDL_memcpy(out, src, (size_t) row_size * pixels->dst.h);
+    } else {
+      for (int y = 0; y < pixels->dst.h; y++) {
+        SDL_memcpy(out, src, row_size);
+        src += pixels->source_pitch;
+        out += pixels->row_stride;
+      }
+    }
+  }
   SDL_UnmapGPUTransferBuffer(data->device, data->pixels_transfer);
 
   SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
@@ -2167,7 +2158,7 @@ static bool gpu_flush_queued_pixels(GpuWindowData *data, SDL_GPUCommandBuffer *c
   }
 
   data->pending_pixel_count = 0;
-  data->pending_pixel_bytes_size = 0;
+  data->pending_pixel_upload_size = 0;
   data->pending_pixels_texture_w = 0;
   data->pending_pixels_texture_h = 0;
   data->frame_synced_during_replay = true;
@@ -4774,10 +4765,7 @@ static void gpu_destroy_window(RenWindow *ren) {
     data->pending_pixels = NULL;
     data->pending_pixel_count = 0;
     data->pending_pixel_capacity = 0;
-    SDL_free(data->pending_pixel_bytes);
-    data->pending_pixel_bytes = NULL;
-    data->pending_pixel_bytes_size = 0;
-    data->pending_pixel_bytes_capacity = 0;
+    data->pending_pixel_upload_size = 0;
     data->pending_pixels_texture_w = 0;
     data->pending_pixels_texture_h = 0;
     gpu_destroy_bridge_resources(data->device, &data->frame);
@@ -4827,7 +4815,7 @@ static void gpu_begin_frame(RenCache *cache, UNUSED RenRect *rects, UNUSED int c
   data->pending_poly_count = 0;
   data->pending_poly_vertex_count = 0;
   data->pending_pixel_count = 0;
-  data->pending_pixel_bytes_size = 0;
+  data->pending_pixel_upload_size = 0;
   data->pending_pixels_texture_w = 0;
   data->pending_pixels_texture_h = 0;
   data->native_region = false;
