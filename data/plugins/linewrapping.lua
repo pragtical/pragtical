@@ -166,7 +166,7 @@ function LineWrapping.compute_line_breaks(doc, default_font, line, width, mode)
     end
     local w = get_width(font, text, xoffset)
     if xoffset + w > width then
-      for char in common.utf8_chars(text) do
+      for char in common.utf8_graphemes(text) do
         w = get_width(font, char, xoffset)
         xoffset = xoffset + w
         if xoffset > width and i > first_text_col then
@@ -513,7 +513,7 @@ function get_line_col_from_index_and_x(docview, idx, x)
   default_font:set_tab_size(indent_size)
   for _, type, text in doc.highlighter:each_token(line) do
     local font = get_font(default_font, type, indent_size)
-    for char in common.utf8_chars(text) do
+    for char in common.utf8_graphemes(text) do
       if i >= col then
         if i > row_end_col then return line, row_end_col end
         local w = get_width(font, char, xoffset)
@@ -674,6 +674,9 @@ end
 local old_get_col_x_offset = DocView.get_col_x_offset
 function DocView:get_col_x_offset(line, col, line_end)
   if not self.wrapped_settings then return old_get_col_x_offset(self, line, col) end
+  if col <= #self.doc:get_utf8_line(line) then
+    col = self.doc:get_grapheme_bounds(line, col)
+  end
   local idx, ncol, count, scol = get_line_idx_col_count(self, line, col, line_end)
   local xoffset, i = (scol ~= 1 and self.wrapped_line_offsets[line] or 0), 1
   local default_font = self:get_font()
@@ -686,7 +689,7 @@ function DocView:get_col_x_offset(line, col, line_end)
         i = scol
       end
       local font = get_font(default_font, type, indent_size)
-      for char in common.utf8_chars(text) do
+      for char in common.utf8_graphemes(text) do
         if i >= col then
           return xoffset
         end

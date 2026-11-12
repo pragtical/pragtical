@@ -4,9 +4,251 @@ local config = require "core.config"
 local core = require "core"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
+local translate = require "core.doc.translate"
 local test = require "core.test"
 
 require "plugins.language_lua"
+
+local function check_grapheme_bounds(doc)
+  for line = 1, #doc.lines do
+    local text = doc:get_utf8_line(line)
+    for first, last in utf8extra.grapheme_indices(text) do
+      for col = first, last do
+        test.same({ doc:get_grapheme_bounds(line, col) }, { first, last + 1 })
+      end
+    end
+  end
+end
+
+test.describe("document grapheme positions", function()
+  test.test("navigation and deletion keep displayed characters intact", function()
+    local clusters = { "☺️", " ", "☹️", " ", "☠️", "e\204\129", "🚀‍🚀", "🇺🇸", "1️⃣" }
+    local text = table.concat(clusters)
+    local doc = Doc()
+    doc:insert(1, 1, text .. "\nend")
+    local col = 1
+    for _, cluster in ipairs(clusters) do
+      local line, next_col = translate.next_char(doc, 1, col)
+      test.equal(line, 1)
+      test.equal(next_col, col + #cluster)
+      local previous_line, previous_col = translate.previous_char(doc, line, next_col)
+      test.equal(previous_line, 1)
+      test.equal(previous_col, col)
+      col = next_col
+    end
+    test.same({ translate.next_char(doc, 1, col) }, { 2, 1 })
+    test.same({ translate.previous_char(doc, 2, 1) }, { 1, col })
+    test.same({ translate.previous_char(doc, 1, 1) }, { 1, 1 })
+    doc:set_selection(1, col)
+    for i = #clusters, 1, -1 do
+      doc:delete_to(translate.previous_char)
+      test.equal(doc.lines[1], table.concat(clusters, "", 1, i - 1) .. "\n")
+    end
+    doc:on_close()
+  end)
+
+  test.test("cached boundaries agree with the native iterator after edits", function()
+    local doc = Doc()
+    local text = "ascii ☺️ ☹️  ☠️e\204\129x\204\129  "
+      .. string.uchar(0x600) .. "a  क्‍ष각 🇺🇸🇨🇦🇫 z\r\n"
+    doc:insert(1, 1, text)
+    check_grapheme_bounds(doc)
+    doc:insert(1, 1, "x\nchanged ")
+    check_grapheme_bounds(doc)
+    doc:remove(1, 1, 2, 3)
+    check_grapheme_bounds(doc)
+    doc:undo()
+    check_grapheme_bounds(doc)
+    doc:on_close()
+  end)
+
+  test.test("updates cached spans when edits join or split neighboring characters", function()
+    for _, case in ipairs {
+      { "☺ ☠️", 4, "️" },
+      { "ab ☺️", 2, "\204\129" },
+      { "🚀🚀 ☺️", 5, "‍" },
+      { "🚀 ☺️", 5, "🏽" },
+      { string.rep("🇺", 24) .. " ☺️", 1, "🇸" },
+      { "कष ☺️", 4, "्‍" },
+      { "ᄀᆨ ☺️", 4, "ᅡ" },
+      { "a ☺️", 1, string.uchar(0x600) },
+      { "end\r\n", 5, "x" }
+    } do
+      local doc = Doc()
+      doc:insert(1, 1, case[1])
+      doc:clear_undo_redo()
+      check_grapheme_bounds(doc)
+      local cached = doc.cache.graphemes[1]
+      doc:insert(1, case[2], case[3])
+      test.equal(doc.cache.graphemes[1], cached)
+      test.equal(cached.text, doc.lines[1])
+      check_grapheme_bounds(doc)
+      doc:remove(1, case[2], 1, case[2] + #case[3])
+      test.equal(doc.cache.graphemes[1], cached)
+      check_grapheme_bounds(doc)
+      doc:undo()
+      check_grapheme_bounds(doc)
+      doc:redo()
+      check_grapheme_bounds(doc)
+      doc:on_close()
+    end
+  end)
+
+  test.test("keeps grapheme caches through tokenization and clears them explicitly", function()
+    local doc = Doc()
+    doc:insert(1, 1, "☺️ end")
+    doc:get_grapheme_bounds(1, 1)
+    local cached = doc.cache.graphemes[1]
+    doc.cache.col_x, doc.cache.ulen = { [1] = {} }, { [1] = 4 }
+    doc.highlighter:get_line(1)
+    test.equal(doc.cache.graphemes[1], cached)
+    test.is_nil(doc.cache.col_x[1])
+    test.is_nil(doc.cache.ulen[1])
+    doc:insert(1, 1, "x")
+    doc.highlighter:get_line(1)
+    test.equal(doc.cache.graphemes[1], cached)
+    doc:clear_cache(1, 0)
+    test.is_nil(doc.cache.graphemes[1])
+    check_grapheme_bounds(doc)
+    doc.lines[1] = "☹️ changed\n"
+    doc.highlighter:get_line(1)
+    test.is_nil(doc.cache.graphemes[1])
+    check_grapheme_bounds(doc)
+    doc:reset()
+    test.is_nil(next(doc.cache.graphemes))
+    doc:on_close()
+  end)
+
+  test.test("line splits and joins preserve caches for untouched lines", function()
+    local doc = Doc()
+    doc:insert(1, 1, "☺️ one\n☹️ two\n☠️ three\n⚙️ four")
+    check_grapheme_bounds(doc)
+    local first, third, fourth = doc.cache.graphemes[1], doc.cache.graphemes[3], doc.cache.graphemes[4]
+    doc:insert(2, 7, "\nnew\n")
+    test.equal(doc.cache.graphemes[1], first)
+    test.equal(doc.cache.graphemes[5], third)
+    test.equal(doc.cache.graphemes[6], fourth)
+    for line = 2, 4 do test.is_nil(doc.cache.graphemes[line]) end
+    check_grapheme_bounds(doc)
+    doc:remove(2, 1, 5, 1)
+    test.equal(doc.cache.graphemes[1], first)
+    test.equal(doc.cache.graphemes[3], fourth)
+    test.is_nil(doc.cache.graphemes[2])
+    check_grapheme_bounds(doc)
+    doc:on_close()
+  end)
+
+  test.test("edits on cached long lines segment only the nearby text", function()
+    local doc = Doc()
+    doc:insert(1, 1, string.rep("x", 100000) .. " ☺️ " .. string.rep("中文", 20000))
+    doc:get_grapheme_bounds(1, 100002)
+    local cached = doc.cache.graphemes[1]
+    local original, walked = utf8extra.grapheme_indices, 0
+    utf8extra.grapheme_indices = function(...)
+      local iter = original(...)
+      return function()
+        local first, last = iter()
+        if first then walked = walked + last - first + 1 end
+        return first, last
+      end
+    end
+    local ok, err = pcall(function()
+      for _, col in ipairs { 2, 50000, 100020 } do
+        col = doc:get_grapheme_bounds(1, col)
+        doc:insert(1, col, "a")
+        doc.highlighter:get_line(1)
+        doc:get_grapheme_bounds(1, 100002)
+        doc:remove(1, col, 1, col + 1)
+        test.equal(doc.cache.graphemes[1], cached)
+        test.equal(cached.text, doc.lines[1])
+      end
+      test.ok(walked < 64, "unchanged text was segmented again: " .. walked .. " bytes")
+    end)
+    utf8extra.grapheme_indices = original
+    doc:on_close()
+    if not ok then error(err, 0) end
+  end)
+
+  test.test("edits to binary documents invalidate the cleaned line cache", function()
+    local doc = Doc()
+    doc:insert(1, 1, "☺️ text")
+    doc.binary, doc.clean_lines = true, {}
+    doc:get_grapheme_bounds(1, 1)
+    doc:insert(1, 1, "\255")
+    test.is_nil(doc.cache.graphemes[1])
+    check_grapheme_bounds(doc)
+    doc:on_close()
+  end)
+
+  test.test("multiple cursors keep the same cache through typing and undo", function()
+    local doc = Doc()
+    doc:insert(1, 1, "☺️ x ☹️ y")
+    doc:clear_undo_redo()
+    doc:set_selection(1, 1)
+    doc:add_selection(1, 10)
+    check_grapheme_bounds(doc)
+    local cached = doc.cache.graphemes[1]
+    doc:text_input("a")
+    test.equal(doc.cache.graphemes[1], cached)
+    check_grapheme_bounds(doc)
+    doc:undo()
+    test.equal(doc.lines[1], "☺️ x ☹️ y\n")
+    check_grapheme_bounds(doc)
+    doc:redo()
+    check_grapheme_bounds(doc)
+    doc:on_close()
+  end)
+
+  test.test("mixed edits match full native segmentation at every byte", function()
+    local pieces = { "a", " ", "\204\129", "☺", "️", "🚀", "‍", "🏽", "🇺", "🇸",
+      "क", "्", "ष", "ᄀ", "ᅡ", "ᆨ", string.uchar(0x600), "\r", "\n" }
+    local seed = 721
+    local function random(n)
+      seed = seed * 16807 % 2147483647
+      return seed % n + 1
+    end
+    local function columns(text)
+      local cols = {}
+      for col in utf8extra.codes(text) do cols[#cols + 1] = col end
+      return cols
+    end
+    local doc = Doc()
+    doc:insert(1, 1, table.concat(pieces, "") .. " ☺️")
+    doc:clear_undo_redo()
+    check_grapheme_bounds(doc)
+    for step = 1, 160 do
+      local line = random(#doc.lines)
+      local cols = columns(doc.lines[line])
+      local idx = random(#cols)
+      if random(3) == 1 then
+        local last_line = math.min(line + random(2) - 1, #doc.lines)
+        local last_cols = columns(doc.lines[last_line])
+        local last_idx = last_line == line and random(#cols - idx + 1) + idx - 1
+          or random(#last_cols)
+        doc:remove(line, cols[idx], last_line, last_cols[last_idx])
+      else
+        doc:insert(line, cols[idx], pieces[random(#pieces)])
+      end
+      check_grapheme_bounds(doc)
+      if step % 13 == 0 then
+        doc:undo()
+        check_grapheme_bounds(doc)
+        doc:redo()
+        check_grapheme_bounds(doc)
+      end
+    end
+    doc:on_close()
+  end)
+
+  test.test("ASCII navigation does not allocate a grapheme cache", function()
+    local doc = Doc()
+    doc:insert(1, 1, string.rep("a", 100000))
+    test.same({ translate.previous_char(doc, 1, 50000) }, { 1, 49999 })
+    test.same({ translate.next_char(doc, 1, 50000) }, { 1, 50001 })
+    test.is_nil(doc.cache.graphemes)
+    doc:on_close()
+  end)
+end)
 
 local function track_doc(context, doc)
   context.docs[#context.docs + 1] = doc

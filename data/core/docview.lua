@@ -49,26 +49,6 @@ function DocView:__tostring() return "DocView" end
 
 DocView.context = "session"
 
-local function utf8_previous_start(text, col)
-  col = common.clamp(col, 1, #text)
-  while col > 1 and common.is_utf8_cont(text, col) do
-    col = col - 1
-  end
-  return col
-end
-
-local function utf8_next_start(text, col)
-  if col >= #text then return #text end
-  col = utf8_previous_start(text, col)
-  return utf8extra.next(text, col) or #text
-end
-
-local function utf8_char_end(text, col)
-  col = utf8_previous_start(text, col)
-  local next_col = utf8extra.next(text, col)
-  return next_col and (next_col - 1) or #text
-end
-
 local function trim_token_to_col(text, col, max_col)
   local length = max_col - col + 1
   if length >= #text then return text end
@@ -707,6 +687,7 @@ function DocView:get_col_x_offset(line, col)
   local xoffset = 0
   local cache = self.doc.cache.col_x
   local line_len = #self.doc:get_utf8_line(line)
+  if col <= line_len then col = self.doc:get_grapheme_bounds(line, col) end
   if line_len > CACHE_LINE_LEN then
     if cache[line] and cache[line][col] then
       return cache[line][col]
@@ -749,7 +730,7 @@ function DocView:get_col_x_offset(line, col)
         end
         return xoffset
       end
-      for char in common.utf8_chars(text) do
+      for char in common.utf8_graphemes(text) do
         if column >= col then
           return xoffset
         end
@@ -784,14 +765,15 @@ function DocView:get_x_offset_col(line, x)
   -- code logic intact
   if line_len > CACHE_LINE_LEN then
     local low = 1
-    local high = utf8_previous_start(line_text, line_len)
+    local high = self.doc:get_grapheme_bounds(line, line_len)
 
     while low < high do
-      local mid = utf8_previous_start(line_text, math.floor((low + high) / 2))
+      local mid = self.doc:get_grapheme_bounds(line, math.floor((low + high) / 2))
       if mid < low then mid = low end
 
       if self:get_col_x_offset(line, mid) < x then
-        local next_col = utf8_next_start(line_text, mid)
+        local _, next_col = self.doc:get_grapheme_bounds(line, mid)
+        next_col = math.min(next_col, line_len)
         if next_col <= low then break end
         low = next_col
       else
@@ -801,7 +783,7 @@ function DocView:get_x_offset_col(line, x)
 
     if low <= 1 then return 1 end
 
-    local prev_col = utf8_previous_start(line_text, low - 1)
+    local prev_col = self.doc:get_grapheme_bounds(line, low - 1)
     local prev_x = self:get_col_x_offset(line, prev_col)
     local next_x = self:get_col_x_offset(line, low)
     if x - prev_x < next_x - x then
@@ -824,7 +806,7 @@ function DocView:get_x_offset_col(line, x)
       xoffset = xoffset + width
       i = i + #text
     else
-      for char in common.utf8_chars(text) do
+      for char in common.utf8_graphemes(text) do
         local w = font:get_width(char, {tab_offset = xoffset})
         if xoffset + w >= x then
           return (x <= xoffset + (w / 2)) and i or i + #char
@@ -1234,7 +1216,8 @@ function DocView:draw_line_text(line, x, y)
     local left_x = math.max(0, self.scroll.x - LONG_LINE_EXTRA_PIXELS)
     local right_x = self.scroll.x + visible_width + LONG_LINE_EXTRA_PIXELS
     visible_col1 = self:get_x_offset_col(line, left_x)
-    visible_col2 = utf8_char_end(line_text, self:get_x_offset_col(line, right_x))
+    local _, after = self.doc:get_grapheme_bounds(line, self:get_x_offset_col(line, right_x))
+    visible_col2 = after - 1
     tx = x + self:get_col_x_offset(line, visible_col1)
     col = visible_col1
   end
