@@ -251,6 +251,42 @@ test.describe("linewrapping widths", function()
 end)
 
 test.describe("linewrapping", function()
+  test.test("wraps and resolves mouse positions at grapheme boundaries", function()
+    local options = config.plugins.linewrapping
+    local old_mode = options.mode
+    local ok, err = pcall(function()
+      for _, mode in ipairs { "letter", "word" } do
+        options.mode = mode
+        local view = make_view("☺️☹️☠️\n")
+        local font = {
+          set_tab_size = function() end,
+          get_height = function() return 20 end,
+          get_width = function(_, text)
+            local width = 0
+            for first, last in utf8extra.grapheme_indices(text) do
+              if text:sub(first, last) ~= "\n" then width = width + 20 end
+            end
+            return width
+          end
+        }
+        view.get_font = function() return font end
+        LineWrapping.reconstruct_breaks(view, font, 20)
+        local starts = view:get_line_wraps(1)
+        test.same(starts, { 1, 7, 13 })
+        for row, col in ipairs(starts) do
+          local cluster_width = font:get_width(view.doc.lines[1]:sub(col, col + 5))
+          test.near(view:get_col_x_offset(1, col), 0)
+          test.equal(view:get_visual_line_col_from_x(row, cluster_width * 0.25), col)
+          local last = row < #starts and col or col + 6
+          test.equal(view:get_visual_line_col_from_x(row, cluster_width * 0.75), last)
+        end
+        view.doc:on_close()
+      end
+    end)
+    options.mode = old_mode
+    if not ok then error(err, 0) end
+  end)
+
   test.test("draw_line_text keeps final wrapped segment", function()
     local view = make_view("abcdef")
     local font = view:get_font()

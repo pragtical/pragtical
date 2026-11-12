@@ -24,6 +24,21 @@ function common.utf8_chars(text)
 end
 
 
+---Iterate displayed characters, keeping combining and emoji sequences together.
+---@param text string
+---@return fun(): string?
+function common.utf8_graphemes(text)
+  if not text:find("[\128-\255]") and not text:find("\r\n", 1, true) then
+    return common.utf8_chars(text)
+  end
+  local indices = utf8extra.grapheme_indices(text)
+  return function()
+    local first, last = indices()
+    if first then return text:sub(first, last) end
+  end
+end
+
+
 ---Clamps the number n between lo and hi.
 ---@param n number
 ---@param lo number

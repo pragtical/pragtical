@@ -123,7 +123,8 @@ end
 
 function Highlighter:update_notify(line, n)
   -- plugins can hook here to be notified that lines have been retokenized
-  self.doc:clear_cache(line, n)
+  -- Grapheme boundaries depend on text, not syntax tokens or their fonts.
+  self.doc:clear_cache(line, n, true)
 end
 
 

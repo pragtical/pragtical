@@ -80,6 +80,118 @@ function Doc:get_utf8_line(idx)
 end
 
 
+-- Find the first multi-codepoint span whose end is after col.
+local function grapheme_span_index(spans, col)
+  local low, high = 1, #spans / 2
+  while low <= high do
+    local mid = math.floor((low + high) / 2)
+    if spans[mid * 2] <= col then low = mid + 1 else high = mid - 1 end
+  end
+  return low * 2 - 1
+end
+
+
+local function grapheme_bounds(text, spans, col)
+  col = common.clamp(col, 1, #text)
+  while col > 1 and common.is_utf8_cont(text, col) do col = col - 1 end
+  local idx = grapheme_span_index(spans, col)
+  if spans[idx] and spans[idx] <= col then return spans[idx], spans[idx + 1] end
+  return col, utf8extra.next(text, col) or #text + 1
+end
+
+
+local function append_grapheme_span(spans, text, first, last)
+  local b = text:byte(first)
+  local size = b < 128 and 1 or b < 224 and 2 or b < 240 and 3 or 4
+  if last - first + 1 > size then
+    spans[#spans + 1], spans[#spans + 2] = first, last + 1
+  end
+end
+
+
+---Get the byte boundaries of the displayed character containing a column.
+---The end is exclusive; document positions remain byte offsets.
+---@param line integer
+---@param col integer
+---@return integer first
+---@return integer after
+function Doc:get_grapheme_bounds(line, col)
+  local text = self:get_utf8_line(line)
+  col = common.clamp(col, 1, #text)
+  while col > 1 and common.is_utf8_cont(text, col) do col = col - 1 end
+  local byte = text:byte(col)
+  if byte < 128 and (col == 1 or text:byte(col - 1) < 128)
+    and (col == #text or text:byte(col + 1) < 128)
+    and byte ~= 13 and not (byte == 10 and text:byte(col - 1) == 13)
+  then
+    return col, col + 1
+  end
+
+  self.cache.graphemes = self.cache.graphemes or {}
+  local spans = self.cache.graphemes[line]
+  if not spans or spans.text ~= text then
+    spans = { text = text }
+    -- Only retain multi-codepoint clusters. Skip ASCII runs in C rather than
+    -- walking every byte of a large source line in Lua. Two adjacent ASCII
+    -- characters give a safe restart boundary, apart from CRLF.
+    local pos = 1
+    while pos <= #text do
+      local first = text:find("[\128-\255\r]", pos)
+      if not first then break end
+      first = math.max(pos, first - 1)
+      local last = text:find("[%z\1-\127][%z\1-\127]", first)
+      while last and text:sub(last, last + 1) == "\r\n" do
+        last = text:find("[%z\1-\127][%z\1-\127]", last + 1)
+      end
+      last = last or #text
+      for start, stop in utf8extra.grapheme_indices(text, first, last) do
+        append_grapheme_span(spans, text, start, stop)
+      end
+      pos = last + 1
+    end
+    self.cache.graphemes[line] = spans
+  end
+  return grapheme_bounds(text, spans, col)
+end
+
+
+local function update_grapheme_spans(spans, text, col, old_after, new_after)
+  local first = col > 1 and grapheme_bounds(spans.text, spans, col - 1) or 1
+  local at = grapheme_span_index(spans, first)
+  local tail = grapheme_span_index(spans, old_after)
+  local delta = new_after - old_after
+  local replacement = {}
+  -- Include the preceding character: the edit can extend it. Reuse the
+  -- unchanged suffix only once both segmentations reach the same boundary.
+  for start, stop in utf8extra.grapheme_indices(text, first) do
+    append_grapheme_span(replacement, text, start, stop)
+    local after = stop + 1
+    if after >= new_after then
+      local old_col = after - delta
+      while spans[tail] and spans[tail + 1] <= old_col do tail = tail + 2 end
+      if not spans[tail] or spans[tail] >= old_col then break end
+    end
+  end
+  common.splice(spans, at, tail - at, replacement)
+  for idx = at + #replacement, #spans do spans[idx] = spans[idx] + delta end
+  spans.text = text
+  return spans
+end
+
+
+local function shift_grapheme_lines(cache, first, last, delta)
+  local shifted = {}
+  for line, spans in pairs(cache) do
+    if line < first then
+      shifted[line] = spans
+    elseif line > last then
+      shifted[line + delta] = spans
+    end
+  end
+  return shifted
+end
+
+
 function Doc:reset_syntax()
   local header = self:get_text(1, 1, self:position_offset(1, 1, 128))
   local path = self.abs_filename
@@ -656,12 +768,17 @@ local function update_clean_lines(self, line1, line2)
 end
 
 
-function Doc:clear_cache(l, n)
-  for _, cache in pairs(self.cache) do
+---Invalidate line caches, optionally retaining text-matched grapheme bounds.
+---@param l integer First line
+---@param n integer Number of additional lines
+---@param keep_graphemes? boolean Used for syntax-only updates
+function Doc:clear_cache(l, n, keep_graphemes)
+  for name, cache in pairs(self.cache) do
     local lines = l + n
     for ln=l-1, lines do
       local line = ln + 1
-      if cache[line] then
+      if cache[line] and not (keep_graphemes and name == "graphemes"
+        and cache[line].text == self:get_utf8_line(line)) then
         cache[line] = nil
       end
       if line == lines then break end
@@ -671,6 +788,9 @@ end
 
 
 function Doc:raw_insert(line, col, text, undo_stack, time)
+  local graphemes = self.cache.graphemes
+  local spans = graphemes and graphemes[line]
+  if spans and spans.text ~= self:get_utf8_line(line) then spans = nil end
   -- split text into lines and merge with line at insertion point
   local lines = split_lines(text)
   local len = #lines[#lines]
@@ -708,13 +828,25 @@ function Doc:raw_insert(line, col, text, undo_stack, time)
   end
 
   -- update highlighter and assure selection is in bounds
+  if graphemes and not same_line then
+    graphemes = shift_grapheme_lines(graphemes, line, line, #lines - 1)
+  end
   self.highlighter:insert_notify(line, #lines - 1)
   self:clear_cache(line, #lines - 1)
+  if graphemes then
+    if same_line then
+      graphemes[line] = spans and update_grapheme_spans(spans, self.lines[line], col, col, col + len)
+    end
+    self.cache.graphemes = graphemes
+  end
   if not same_line then self:sanitize_selection() end
 end
 
 
 function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
+  local graphemes = self.cache.graphemes
+  local spans = graphemes and graphemes[line1]
+  if spans and spans.text ~= self:get_utf8_line(line1) then spans = nil end
   -- push undo
   local text = self:get_text(line1, col1, line2, col2)
   push_undo(self, undo_stack, time, "insert", line1, col1, text)
@@ -781,8 +913,17 @@ function Doc:raw_remove(line1, col1, line2, col2, undo_stack, time)
   end
 
   -- update highlighter and assure selection is in bounds
+  if graphemes and not same_line then
+    graphemes = shift_grapheme_lines(graphemes, line1, line2, -line_removal)
+  end
   self.highlighter:remove_notify(line1, line_removal)
   self:clear_cache(line1, line_removal)
+  if graphemes then
+    if same_line then
+      graphemes[line1] = spans and update_grapheme_spans(spans, self.lines[line1], col1, col2, col1)
+    end
+    self.cache.graphemes = graphemes
+  end
   if not same_line then self:sanitize_selection() end
 end
 

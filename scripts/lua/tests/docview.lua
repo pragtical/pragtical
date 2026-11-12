@@ -136,6 +136,30 @@ test.describe("docview caret deadlines", function()
 end)
 
 test.describe("docview", function()
+  test.test("caret widths and mouse hits measure complete graphemes", function()
+    for _, prefix in ipairs { "", string.rep("x", 600) } do
+      local view = make_view(prefix .. "☺️ ☹️ ☠️\n")
+      local font = view:get_font()
+      local col = #prefix + 1
+      local x = font:get_width(prefix)
+      for _, cluster in ipairs { "☺️", " ", "☹️", " ", "☠️" } do
+        local after = col + #cluster
+        local width = font:get_width(cluster, { tab_offset = x })
+        test.near(view:get_col_x_offset(1, col), x)
+        test.near(view:get_col_x_offset(1, after), x + width)
+        if width > 0 then
+          test.equal(view:get_x_offset_col(1, x + width * 0.25), col)
+          test.equal(view:get_x_offset_col(1, x + width * 0.75), after)
+        end
+        if #cluster > 1 then
+          test.near(view:get_col_x_offset(1, after - 1), x)
+        end
+        col, x = after, x + width
+      end
+      view.doc:on_close()
+    end
+  end)
+
   test.test("ensure_line_visible returns the requested line by default", function()
     local view = make_view("line\n")
 
