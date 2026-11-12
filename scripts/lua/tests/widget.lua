@@ -911,6 +911,51 @@ test.describe("widget rendering", function()
     end)
   end
 
+  for _, factor in ipairs { 1, 1.25, 1.3, 2 } do
+    test.it("SelectBox paints its final option after reopening at scale " .. factor, function(context)
+      set_scale(context, factor)
+      local box = SelectBox(root_widget(context), "Choose")
+      for index = 1, 30 do box:add_option("Option " .. index, index) end
+      box:set_selected(30)
+      local popup, list = box.list_container, box.list
+      local width, height = 240 * factor, 120 * factor
+      popup:show()
+      popup:set_size(width, height)
+      popup:update()
+      list:resize_to_parent()
+      local bottom = list:get_scrollable_size() - list.size.y
+      list.scroll.y, list.scroll.to.y = bottom, bottom
+      list:update()
+
+      -- Closing collapses the viewport while retaining its scroll position.
+      popup:set_size(width, popup.border.width * 2 + 1)
+      list:resize_to_parent()
+      list:update()
+      popup:hide()
+      popup:show()
+      popup:set_size(width, height)
+      popup:update()
+
+      local painted = {}
+      local draw_row = list.draw_row
+      function list:draw_row(index, x, y, only_calc)
+        if not only_calc then painted[index] = { x, y } end
+        return draw_row(self, index, x, y, only_calc)
+      end
+      draw(popup)
+      local selected = box:get_selected() + 1
+      test.not_nil(painted[selected], "selected final option was not painted")
+      local x, y = unpack(painted[selected])
+      local middle = y + list.rows[selected].h / 2
+      test.ok(middle >= list.position.y and middle < list.position.y + list.size.y)
+      test.equal(list:get_row_at_position(x + 10, middle), selected)
+
+      local visible_rows = list.visible_rows
+      for _ = 1, 5 do list:update() end
+      test.equal(list.visible_rows, visible_rows, "settled popup rebuilt its visible rows")
+    end)
+  end
+
   test.it("reuses visible rows while scrolling within the same pixel", function(context)
     local root = root_widget(context)
     local list = ListBox(root)
