@@ -6,572 +6,772 @@ local function load_module(path, env)
   return chunk()
 end
 
-local function setup(platform, path, saved, defer_load)
-  local state = { saved = saved or {}, writes = {}, cleared = {}, threads = {}, errors = {}, warnings = {} }
+local function normalize(path) return path:gsub("\\", "/") end
+
+local function setup(platform, path, database, options, defer_load)
+  options = options or {}
+  local state = {
+    db = database or {}, writes = {}, loaded = {}, enumerated = {}, cleared = {},
+    queued = {}, errors = {}, warnings = {}, paths = {}, directories = {}, times = {}, clock = 100
+  }
+  state.fail_rename, state.fail_mkdir = options.fail_rename, options.fail_mkdir
+  if not options.migrate then
+    state.db.ws = state.db.ws or {}
+    state.db.ws[".migrated"] = true
+  end
   local methods = {}
   local root = setmetatable({ type = "leaf", views = {} }, { __index = methods })
   function methods:add_view(view) self.views[#self.views + 1] = view end
   function methods:set_active_view(view) self.active_view = view end
   function methods:consume(node)
-    for k in pairs(self) do self[k] = nil end
-    for k, v in pairs(node) do self[k] = v end
+    for key in pairs(self) do self[key] = nil end
+    for key, value in pairs(node) do self[key] = value end
   end
   function methods:update_layout() end
-  local function new_node()
-    return setmetatable({ type = "leaf", views = {} }, { __index = methods })
-  end
+  local function new_node() return setmetatable({ type = "leaf", views = {} }, { __index = methods }) end
   local View = {}
-  function View:get_state() return self.state end
+  function View:get_state()
+    return { filename = self.state.filename, selection = {table.unpack(self.state.selection or {})},
+      scroll = self.state.scroll and {x = self.state.scroll.x, y = self.state.scroll.y} }
+  end
   function View:get_module() return "core.docview" end
   function View.from_state(value)
     if state.fail_restore then error("restore failed") end
     return setmetatable({ state = value }, { __index = View })
   end
   local core = {
-    docs = {}, projects = {{ path = path }}, visited_files = {},
-    root_view = { root_node = root }, run = function() end,
+    docs = options.startup_files and {{}} or {}, projects = {{path = path}}, visited_files = {},
+    root_view = {root_node = root}, run = function() end, threads = {}, background_threads = 0,
     exit = function(quit_fn, force) if force then quit_fn() end end
   }
-  core.menu_view = { DIVIDER = {} }
-  function core.menu_view:register(path, entries, name)
-    state.menu_path, state.menu_entries, state.menu_name = path, entries, name
-  end
+  core.menu_view = {DIVIDER = {}}
+  function core.menu_view:register(_, entries) state.menu = entries[1].items end
   core.command_view = {}
-  function core.command_view:enter(label, options) state.prompt = { label = label, options = options } end
+  function core.command_view:enter(label, value) state.prompt = {label = label, options = value} end
   core.nag_view = {}
-  function core.nag_view:show(title, text, options, callback)
-    state.confirm = { title = title, text = text, options = options, callback = callback }
-  end
+  function core.nag_view:show(_, _, _, callback) state.confirm = callback end
   function core.root_view:get_primary_node() return root end
-  function core.log(...) state.log = { ... } end
+  function core.root_project() return core.projects[1] end
+  function core.set_active_view(view) core.active_view = view end
+  function core.log(...) state.log = string.format(...) end
+  function core.error(...) state.errors[#state.errors + 1] = string.format(...) end
   function core.warn(...) state.warnings[#state.warnings + 1] = string.format(...) end
   function core.try(fn, ...)
     local ok, result = pcall(fn, ...)
     if not ok then state.errors[#state.errors + 1] = result end
     return ok, result
   end
-  function core.root_project() return core.projects[1] end
-  function core.set_active_view(view) core.active_view = view end
-  function core.add_thread(fn) state.threads[#state.threads + 1] = fn end
-  function core.add_project(path)
-    assert(type(path) == "string", "project path must be a string")
-    for _, project in ipairs(core.projects) do
-      if project.path == path then return project end
-    end
-    local project = { path = path }
-    core.projects[#core.projects + 1] = project
-    return project
+  function core.add_thread(fn) state.queued[#state.queued + 1] = fn end
+  function core.add_background_thread(fn, key)
+    core.threads[key] = coroutine.create(fn)
+    core.background_threads = core.background_threads + 1
+    local ok, delay = coroutine.resume(core.threads[key]); assert(ok, delay); state.delay = delay
   end
-  function core.set_project(project)
-    core.projects = {{ path = project }}
+  function core.set_project(directory)
+    core.projects = {{path = directory}}
     core.visited_files = {}
     root.views, root.active_view, core.active_view = {}, nil, nil
     return core.projects[1]
   end
-
-  -- Model case-insensitive storage while retaining each file's original name.
-  local function actual_key(key)
-    for existing in pairs(state.saved) do
-      if existing == key or platform == "Windows" and existing:ulower() == key:ulower() then
-        return existing
-      end
+  function core.add_project(directory)
+    for _, project in ipairs(core.projects) do if project.path == directory then return project end end
+    core.projects[#core.projects + 1] = {path = directory}
+    return core.projects[#core.projects]
+  end
+  function core.remove_project(project)
+    for index, value in ipairs(core.projects) do if value == project then table.remove(core.projects, index); return end end
+  end
+  local function actual_key(source, key)
+    for candidate in pairs(source or {}) do
+      if candidate == key or platform == "Windows" and candidate:ulower() == key:ulower() then return candidate end
     end
   end
-  local storage = {}
-  function storage.keys(module)
-    test.equal(module, "ws")
-    local keys = {}
-    for key in pairs(state.saved) do keys[#keys + 1] = key end
+  local function scope(module)
+    module = normalize(module)
+    if module:match("^ws/") then state.module = module end
+    return module
+  end
+  local function split_path(filename)
+    local relative = normalize(filename):match("^/workspace%-tests/storage/(.*)$")
+    if relative then return relative:match("^(.*)/([^/]+)$") end
+  end
+  local function file_info(filename)
+    if state.paths[filename] ~= nil then return state.paths[filename] or nil end
+    local module, key = split_path(filename)
+    local source = module and state.db[module]
+    local actual = actual_key(source, key)
+    if actual then
+      local value = source[actual]
+      return {type = "file", modified = state.times[module .. "/" .. actual]
+        or type(value) == "table" and value.saved_at or 1}
+    end
+    local relative = normalize(filename):match("^/workspace%-tests/storage/(.*)$")
+    if state.directories[normalize(filename)] or relative and state.db[relative] then return {type = "dir"} end
+  end
+  local store = {}
+  function store.keys(module)
+    module = scope(module)
+    state.enumerated[#state.enumerated + 1] = module
+    local keys, included = {}, {}
+    for key in pairs(state.db[module] or {}) do keys[#keys + 1] = key; included[key] = true end
+    for directory in pairs(state.db) do
+      local key = directory:match("^" .. module .. "/([^/]+)$")
+      if key and not included[key] then keys[#keys + 1] = key; included[key] = true end
+    end
     table.sort(keys)
     return keys
   end
-  function storage.load(_, key) return state.saved[actual_key(key)] end
-  function storage.save(_, key, value)
-    if state.fail_save then return false end
-    state.writes[#state.writes + 1] = key
-    state.saved[actual_key(key) or key] = value
+  function store.load(module, key)
+    module = scope(module)
+    state.loaded[#state.loaded + 1] = {module = module, key = key}
+    if options.fail_load == key then return nil end
+    local source = state.db[module] or {}
+    return source[actual_key(source, key)]
+  end
+  function store.save(module, key, value)
+    module = scope(module)
+    if state.fail_save or state.fail_save_key == key or state.fail_recovery and key == "recovery" then return false end
+    state.db[module] = state.db[module] or {}
+    local actual = actual_key(state.db[module], key) or key
+    state.db[module][actual] = value
+    state.times[module .. "/" .. actual] = state.clock
+    state.writes[#state.writes + 1] = {module = module, key = key}
     return true
   end
-  function storage.clear(_, key)
-    state.cleared[#state.cleared + 1] = key
-    state.saved[assert(actual_key(key))] = nil
+  function store.clear(module, key)
+    module = scope(module)
+    if key then
+      if state.db[module] then state.db[module][actual_key(state.db[module], key) or key] = nil end
+    else state.db[module] = nil end
+    state.cleared[#state.cleared + 1] = {module = module, key = key}
   end
-  local command = { map = {} }
-  function command.add(predicate, commands)
-    for name, perform in pairs(commands) do command.map[name] = { predicate = predicate, perform = perform } end
+  local command = {map = {}}
+  function command.add(predicate, entries)
+    for name, fn in pairs(entries) do command.map[name] = {predicate = predicate, fn = fn} end
   end
   function command.perform(name, ...)
     local entry = command.map[name]
-    if entry and entry.predicate(...) then entry.perform(...); return true end
+    if entry and entry.predicate() then entry.fn(...); return true end
     return false
   end
-  local modules = {
-    core = core, ["core.storage"] = storage, ["core.docview"] = View,
-    ["core.command"] = command, ["core.node"] = new_node
-  }
+  local modules = {core = core, ["core.config"] = {plugins = {workspace = options}},
+    ["core.storage"] = store, ["core.docview"] = View, ["core.command"] = command, ["core.node"] = new_node}
   local env = setmetatable({
-    PLATFORM = platform, PATHSEP = platform == "Windows" and "\\" or "/",
-    system = setmetatable({ absolute_path = function(path) return path end }, { __index = system }),
+    PLATFORM = platform, PATHSEP = platform == "Windows" and "\\" or "/", USERDIR = "/workspace-tests",
+    system = setmetatable({absolute_path = function(value) return value end, get_file_info = file_info}, {__index = system}),
+    string = setmetatable({format = function(format, ...)
+      if format == "%08x%08x" and options.forced_id then return options.forced_id end
+      return string.format(format, ...)
+    end}, {__index = string}),
+    os = setmetatable({rename = function(from, to)
+      if state.fail_rename and (state.fail_rename == true or normalize(from):match("/([^/]+)$") == state.fail_rename) then
+        return nil, "rename failed"
+      end
+      local module, key = split_path(from)
+      local source = module and state.db[module]
+      local actual = actual_key(source, key)
+      if not actual then return nil, "source missing" end
+      local target, destination = split_path(to)
+      state.db[target] = state.db[target] or {}
+      if actual_key(state.db[target], destination) then return nil, "destination exists" end
+      state.db[target][destination], source[actual] = source[actual], nil
+      state.times[target .. "/" .. destination] = state.times[module .. "/" .. actual]
+      return true
+    end}, {__index = os}),
     require = function(name) return modules[name] or require(name) end
-  }, { __index = _G })
+  }, {__index = _G})
   modules["core.common"] = load_module("core/common.lua", env)
-  state.system = env.system
+  modules["core.common"].mkdirp = function(directory)
+    if state.fail_mkdir then return false, "mkdir failed" end
+    state.directories[normalize(directory)] = true
+    return true
+  end
+  state.system, state.core, state.root, state.storage, state.command = env.system, core, root, store, command
   state.workspace = load_module("plugins/workspace.lua", env)
-  state.command = command
-
+  state.config = modules["core.config"].plugins.workspace
   function state.flush()
-    local threads = state.threads
-    state.threads = {}
-    for _, fn in ipairs(threads) do fn() end
+    local pending = state.queued; state.queued = {}
+    for _, fn in ipairs(pending) do fn() end
   end
   function state.open(filename)
-    local view = View.from_state {
-      filename = filename, selection = {2, 4, 2, 4}, scroll = {x = 0, y = 30}
-    }
-    root:add_view(view)
-    root:set_active_view(view)
-    core.set_active_view(view)
+    local view = View.from_state {filename = filename, selection = {2, 4, 2, 4}, scroll = {x = 0, y = 30}}
+    root:add_view(view); root:set_active_view(view); core.set_active_view(view)
     return view
   end
-  function state.save() core.exit(function() end, true) end
-  function state.switch(project)
-    core.set_project(project)
-    state.flush()
+  function state.tick()
+    for _, cr in pairs(core.threads) do local ok, delay = coroutine.resume(cr); assert(ok, delay); state.delay = delay end
   end
-  state.core, state.root = core, root
+  function state.save() core.exit(function() end, true) end
+  function state.switch(directory) core.set_project(directory); state.flush() end
   core.run()
   if not defer_load then state.flush() end
   return state
 end
 
-local function workspace(path, filename)
-  return {
-    path = path, directories = {}, visited_files = {filename},
-    documents = {
-      type = "leaf", active_view = 1,
-      views = {{ module = "core.docview", active = true, state = {filename = filename} }}
-    }
-  }
+local function snapshot(path, filename, saved_at)
+  return {path = path, saved_at = saved_at, visited_files = {filename}, directories = {},
+    documents = {type = "leaf", active_view = 1,
+      views = {{module = "core.docview", active = true, state = {
+        filename = filename, selection = {1, 1, 1, 1}, scroll = {x = 0, y = 0}}}}}}
 end
 
-test.describe("workspace", function()
-  for _, platform in ipairs { "Windows", "Linux" } do
-    test.test(platform .. " converts relative project paths before saving added directories", function()
-      local path = platform == "Windows" and "C:\\projects\\A" or "/projects/A"
-      local relative = platform == "Windows" and "..\\B" or "../B"
-      local absolute = platform == "Windows" and "C:\\projects\\B" or "/projects/B"
-      local state = setup(platform, path)
-      state.open("first.lua")
-      state.core.add_project(relative)
-      state.system.absolute_path = function(directory)
-        test.equal(directory, relative)
-        return absolute
-      end
-      state.save()
-      test.same(state.saved["A-1"].directories, { absolute })
-      test.same(state.errors, {})
-    end)
+local function seed(platform, path)
+  local state = setup(platform, path)
+  state.open("main.lua"); state.save()
+  return state
+end
 
-    test.test(platform .. " saves and restores absolute added directories with a file from B active", function()
-      local path = platform == "Windows" and "C:\\projects\\A" or "/projects/A"
-      local second = platform == "Windows" and "C:\\libraries\\B" or "/libraries/B"
-      local third = platform == "Windows" and "D:\\libraries\\C" or "/libraries/C"
-      local state = setup(platform, path)
-      state.open("first.lua")
-      state.core.add_project(second)
-      state.core.add_project(third)
-      local filename = second .. (platform == "Windows" and "\\io.c3" or "/io.c3")
-      state.open(filename)
-      state.save()
-      test.same(state.saved["A-1"].directories, { second, third })
-      test.same(state.errors, {})
-      local restored = setup(platform, path, state.saved, true)
-      restored.system.get_file_info = function(directory)
-        if directory == second or directory == third then return { type = "dir" } end
-      end
-      restored.flush()
-      test.equal(#restored.core.projects, 3)
-      test.equal(restored.core.projects[2].path, second)
-      test.equal(restored.core.projects[3].path, third)
-      test.equal(restored.core.active_view.state.filename, filename)
-      test.same(restored.errors, {})
-      test.same(restored.warnings, {})
-    end)
+local function write_keys(state)
+  local keys = {}
+  for _, write in ipairs(state.writes) do keys[#keys + 1] = write.key end
+  return keys
+end
 
-    test.test(platform .. " skips missing directories with warnings during startup and session loading", function()
-      local path = platform == "Windows" and "C:\\projects\\A" or "/projects/A"
-      local sep = platform == "Windows" and "\\" or "/"
-      local missing = path .. sep .. "missing"
-      local file = path .. sep .. "file.txt"
-      local directory = path .. sep .. "valid"
-      for _, manual in ipairs { false, true } do
-        local previous = workspace(path, "selected.lua")
-        previous.directories = { missing, file, directory }
-        local state = setup(platform, path, manual and {} or { ["A-1"] = previous }, true)
-        state.system.get_file_info = function(filename)
-          if filename == directory then return { type = "dir" } end
-          if filename == file then return { type = "file" } end
-        end
-        state.flush()
-        if manual then
-          state.open("current.lua")
-          state.saved["A-2"] = previous
-          test.ok(state.workspace.load_session("A-2"))
-        end
-        test.equal(#state.core.projects, 2)
-        test.equal(state.core.projects[2].path, directory)
-        test.equal(#state.warnings, 2)
-        test.match(state.warnings[1], missing, nil, true)
-        test.match(state.warnings[1], "no longer exists", nil, true)
-        test.match(state.warnings[2], file, nil, true)
-        test.same(state.errors, {})
-      end
-    end)
-  end
+test.describe("workspace storage directories", function()
+  test.test("project directory names include a readable project name and a path hash", function()
+    local state = seed("Linux", "/projects/Pragtical")
+    test.match(state.module, "^ws/Pragtical%-%x+$")
+    test.equal(#state.module:match("%-(%x+)$"), 16)
+    test.equal(state.db[state.module].main.path, "/projects/Pragtical")
+  end)
 
-  test.test("project-switch restart does not save or consume the pending destination", function()
-    local first, second = "C:\\Pragtical", "D:\\pragtical"
-    local destination = workspace(second, "second.lua")
-    local state = setup("Windows", first, { ["pragtical-1"] = destination })
-    state.open("first.lua")
-    state.core.set_project(second)
-    test.same(state.writes, {"Pragtical-2"})
-    state.core.exit(function() state.core.restart_request = true end, true)
-    state.flush()
-    test.same(state.writes, {"Pragtical-2"})
-    test.same(state.cleared, {})
-    test.equal(state.saved["pragtical-1"], destination)
-    local restored = setup("Windows", second, state.saved)
+  test.test("project name prefixes preserve Unicode and avoid unsafe or oversized filenames", function()
+    local state = seed("Linux", "/projects/draft:notes?<>|*")
+    test.match(state.module, "^ws/draft_notes_____%-%x+$")
+    local name = string.rep("é", 100)
+    local unicode = seed("Linux", "/projects/" .. name)
+    test.equal(unicode.module:match("^ws/(.-)%-%x+$"), string.rep("é", 40))
+    test.ok(#unicode.module:sub(4) < 255)
+    test.equal(setup("Linux", "/projects/" .. name, unicode.db).module, unicode.module)
+  end)
+
+  test.test("uses one main and one recovery filename without a periodic coroutine by default", function()
+    local state = seed("Linux", "/projects/editor")
+    test.equal(state.config.autosave, false)
+    test.equal(state.config.autosave_interval, 10)
+    test.equal(state.core.background_threads, 0)
+    test.same(state.core.threads, {})
+    test.same(write_keys(state), {"main"})
+    test.is_nil(state.db[state.module].recovery)
+    local restarted = setup("Linux", "/projects/editor", state.db)
+    test.equal(restarted.core.active_view.state.filename, "main.lua")
+    restarted.save(); restarted.save()
+    test.same(write_keys(restarted), {"main", "main"})
+    test.equal(#restarted.workspace.get_sessions(), 1)
+  end)
+
+  test.test("different full paths have separate directories even with identical basenames", function()
+    local database = {}
+    local first = setup("Linux", "/one/editor", database)
+    first.open("one.lua"); first.save()
+    local second = setup("Linux", "/two/editor", database)
+    test.not_equal(first.module, second.module)
+    test.is_nil(second.core.active_view)
+    second.open("two.lua"); second.save()
+    first.workspace.clear_sessions()
+    test.not_nil(database[second.module].main)
+    test.equal(database[second.module].main.documents.views[1].state.filename, "two.lua")
+  end)
+
+  test.test("actual project-ID collisions are separated using the stored full path", function()
+    local database = {}
+    local first = setup("Linux", "/one/editor", database, {forced_id = "collision"})
+    first.open("first.lua"); first.save()
+    local first_module = first.module
+    local second = setup("Linux", "/two/editor", database, {forced_id = "collision"})
+    test.not_equal(second.module, first_module)
+    second.open("second.lua"); second.save()
+    local second_module = second.module
+    test.equal(database[first_module].main.path, "/one/editor")
+    test.equal(database[second_module].main.path, "/two/editor")
+    local restored = setup("Linux", "/two/editor", database, {forced_id = "collision"})
+    test.equal(restored.module, second_module)
     test.equal(restored.core.active_view.state.filename, "second.lua")
+    test.equal(database[first_module].main.documents.views[1].state.filename, "first.lua")
   end)
 
-  test.test("repeated project-switch restarts keep only two populated workspaces", function()
-    local paths = {"C:\\Pragtical", "D:\\pragtical"}
-    local saved = {
-      ["Pragtical-1"] = workspace(paths[1], "first.lua"),
-      ["pragtical-2"] = workspace(paths[2], "second.lua")
-    }
-    local current = 1
-    for _ = 1, 20 do
-      local state = setup("Windows", paths[current], saved)
-      test.equal(state.core.active_view.state.filename, current == 1 and "first.lua" or "second.lua")
-      current = 3 - current
-      state.core.set_project(paths[current])
-      state.core.exit(function() state.core.restart_request = true end, true)
-      state.flush()
-      test.equal(#state.writes, 1)
-      local count = 0
-      for _, entry in pairs(saved) do
-        count = count + 1
-        test.equal(#entry.documents.views, 1)
-      end
-      test.equal(count, 2)
-    end
-  end)
-
-  test.test("quitting or restarting before startup restoration preserves the saved workspace", function()
-    for _, flag in ipairs {"quit_request", "restart_request"} do
-      local path = "C:\\Pragtical"
-      local previous = workspace(path, "previous.lua")
-      local state = setup("Windows", path, { ["Pragtical-1"] = previous }, true)
-      state.core.exit(function() state.core[flag] = true end, true)
-      state.flush()
-      test.same(state.writes, {})
-      test.same(state.cleared, {})
-      test.equal(state.saved["Pragtical-1"], previous)
-    end
-  end)
-
-  test.test("rapid switches restore only the latest project and preserve skipped workspaces", function()
-    for _, final in ipairs {"C:\\first", "C:\\third"} do
-      local second = workspace("C:\\second", "second.lua")
-      local state = setup("Windows", "C:\\first", {
-        ["second-1"] = second, ["third-1"] = workspace("C:\\third", "third.lua")
-      })
-      state.open("first.lua")
-      state.core.set_project("C:\\second")
-      state.core.set_project(final)
-      state.flush()
-      test.same(state.writes, {"first-1"})
-      test.equal(state.saved["second-1"], second)
-      test.equal(#state.root.views, 1)
-      test.equal(state.core.active_view.state.filename,
-        final == "C:\\first" and "first.lua" or "third.lua")
-      test.same(state.errors, {})
-    end
-  end)
-
-  test.test("a cancelled restart still allows pending restoration and later saving", function()
-    local path = "C:\\Pragtical"
-    local state = setup("Windows", path, { ["Pragtical-1"] = workspace(path, "kept.lua") }, true)
-    state.core.exit(function() state.core.restart_request = true end, false)
-    state.flush()
-    test.equal(state.core.active_view.state.filename, "kept.lua")
-    state.save()
-    test.same(state.writes, {"Pragtical-1"})
-    test.equal(state.saved["Pragtical-1"].documents.views[1].state.filename, "kept.lua")
-  end)
-
-  test.test("restoration errors do not leave subsequent saving disabled", function()
-    local path = "C:\\Pragtical"
-    local state = setup("Windows", path, { ["Pragtical-1"] = workspace(path, "broken.lua") }, true)
-    state.fail_restore = true
-    state.flush()
-    test.equal(#state.errors, 1)
-    test.match(state.errors[1], "restore failed", nil, true)
-    state.fail_restore = false
-    state.open("recovered.lua")
-    state.save()
-    test.same(state.writes, {"Pragtical-1"})
-    test.equal(state.saved["Pragtical-1"].documents.views[1].state.filename, "recovered.lua")
-  end)
-
-  test.test("separate editor instances retain separate workspaces for the same project", function()
-    local path, saved = "C:\\Pragtical", {}
-    local first = setup("Windows", path, saved)
-    local second = setup("Windows", path, saved)
-    first.open("first.lua")
-    second.open("second.lua")
-    first.save()
-    second.save()
-    test.equal(saved["Pragtical-1"].documents.views[1].state.filename, "first.lua")
-    test.equal(saved["Pragtical-2"].documents.views[1].state.filename, "second.lua")
-    first = setup("Windows", path, saved)
-    second = setup("Windows", path, saved)
-    test.equal(first.core.active_view.state.filename, "first.lua")
-    test.equal(second.core.active_view.state.filename, "second.lua")
-  end)
-
-  test.test("Windows projects with differently cased basenames keep separate workspaces", function()
-    local install, project = "C:\\Program Files\\Pragtical", "D:\\Projects\\pragtical"
-    local state = setup("Windows", install)
-    state.open("installed.lua")
-    state.switch(project)
-    state.open("first.lua")
-    local active = state.open("source.lua")
-    state.core.visited_files = {"source.lua", "first.lua"}
-    state.save()
-    test.equal(state.saved["Pragtical-1"].path, install)
-    test.equal(state.saved["pragtical-2"].path, project)
-
-    local restored = setup("Windows", install, state.saved)
-    test.equal(restored.core.active_view.state.filename, "installed.lua")
-    test.equal(restored.saved["pragtical-2"].path, project)
-    restored.save()
-    restored = setup("Windows", project, restored.saved)
-    test.equal(#restored.root.views, 2)
-    test.same(restored.core.active_view.state, active.state)
-    test.equal(restored.root.active_view, restored.core.active_view)
-    test.same(restored.core.visited_files, {"source.lua", "first.lua"})
-    test.equal(restored.saved["Pragtical-1"].path, install)
-  end)
-
-  test.test("Windows restores and clears a legacy key using its original spelling", function()
-    local path = "C:\\Projects\\pragtical"
-    local state = setup("Windows", path, { ["Pragtical-1"] = workspace(path, "legacy.lua") })
-    test.equal(state.core.active_view.state.filename, "legacy.lua")
-    test.same(state.cleared, {"Pragtical-1"})
-    test.same(state.saved, {})
-    state.save()
-    test.same(state.writes, {"pragtical-1"})
-    test.equal(state.saved["pragtical-1"].path, path)
-  end)
-
-  test.test("Windows compares full paths without case or separator differences", function()
-    for _, path in ipairs {"c:\\projects\\pragtical", "c:/projects/pragtical"} do
-      local state = setup("Windows", path, {
-        ["Pragtical-1"] = workspace("C:\\Other\\Pragtical", "other.lua"),
-        ["Pragtical-2"] = workspace("C:\\Projects\\Pragtical", "target.lua")
-      })
-      test.equal(state.core.active_view.state.filename, "target.lua")
-      test.same(state.cleared, {"Pragtical-2"})
-      test.equal(state.saved["Pragtical-1"].path, "C:\\Other\\Pragtical")
-    end
-  end)
-
-  test.test("Windows recognizes Unicode case variants even when byte lengths differ", function()
-    for _, names in ipairs {
-      {"\195\137diteur", "\195\169diteur"},
-      {"\225\186\158ource", "\195\159ource"}
+  test.test("Windows normalizes case, Unicode and path separators in directory identities", function()
+    for _, paths in ipairs {
+      {"C:\\Projects\\Editor", "c:/projects/editor"},
+      {"C:\\Projects\\Éditeur", "c:/projects/éditeur"},
+      {"C:\\Projects\\ẞource", "c:/projects/ßource"}
     } do
-      local state = setup("Windows", "C:\\Projects\\" .. names[2], {
-        [names[1] .. "-1"] = workspace("C:\\Projects\\" .. names[1], "unicode.lua")
-      })
-      test.equal(state.core.active_view.state.filename, "unicode.lua")
-      test.same(state.cleared, {names[1] .. "-1"})
+      local first = seed("Windows", paths[1])
+      local second = setup("Windows", paths[2], first.db)
+      test.equal(second.module, first.module)
+      test.equal(second.core.active_view.state.filename, "main.lua")
+    end
+    local first = seed("Linux", "/Projects/Editor")
+    local second = setup("Linux", "/projects/editor", first.db)
+    test.not_equal(second.module, first.module)
+    test.is_nil(second.core.active_view)
+  end)
+
+  test.test("startup reads only fixed filenames even with thousands of unrelated sessions", function()
+    local first = seed("Linux", "/projects/editor")
+    for index = 1, 1000 do
+      first.db["ws/other" .. index] = {main = {}, ["session-Other"] = {}}
+      first.db.ws["legacy-" .. index] = {}
+    end
+    for index = 1, 1000 do first.db[first.module]["session-Snapshot" .. index] = {} end
+    local state = setup("Linux", "/projects/editor", first.db)
+    test.same(state.enumerated, {})
+    test.same(state.loaded, {
+      {module = "ws", key = ".migrated"},
+      {module = first.module, key = "main"},
+      {module = first.module, key = "recovery"}, {module = first.module, key = "main"}
+    })
+    state.loaded, state.enumerated = {}, {}
+    local sessions = state.workspace.get_sessions()
+    test.equal(#sessions, 1001)
+    test.same(state.loaded, {})
+    test.same(state.enumerated, {first.module})
+    test.equal(sessions[1].key, "main")
+    test.equal(sessions[1].name, "Main Session")
+  end)
+
+  test.test("listing, removing inactive sessions and clearing do not deserialize saved buffers", function()
+    local state = seed("Linux", "/projects/editor")
+    local key = assert(state.workspace.save_session("Before refactoring"))
+    test.equal(key, "session-Before%20refactoring")
+    test.ok(state.workspace.load_session("main"))
+    state.loaded = {}
+    local sessions = state.workspace.get_sessions()
+    test.equal(sessions[2].name, "Before refactoring")
+    test.equal(type(sessions[2].saved_at), "number")
+    test.same(state.loaded, {})
+    test.ok(state.workspace.remove_session(key))
+    test.same(state.loaded, {})
+    test.equal(state.workspace.clear_sessions(), 1)
+    test.same(state.loaded, {})
+  end)
+
+  test.test("named snapshots support Unicode and filesystem-sensitive characters", function()
+    local state = seed("Windows", "C:\\projects\\editor")
+    local name = "Étape 1 / draft: A\\B?"
+    local key = assert(state.workspace.save_session(name))
+    test.not_ok(key:find("[/\\:*?]"))
+    test.equal(state.workspace.get_sessions()[2].name, name)
+    test.ok(state.workspace.load_session(key))
+    test.not_nil(state.db[state.module][key])
+    for _, invalid in ipairs {"", "  ", "line\nbreak", string.rep("x", 300)} do
+      test.is_nil(state.workspace.save_session(invalid))
     end
   end)
 
-  test.test("Windows reserves mixed-case IDs and ignores unrelated filename suffixes", function()
-    local saved = {
-      ["MY-project-1"] = workspace("C:\\Other\\My-Project", "one.lua"),
-      ["my-PROJECT-2"] = workspace("D:\\Other\\My-Project", "two.lua"),
-      ["My-Project-extra-3"] = workspace("C:\\My-Project-extra", "extra.lua"),
-      ["My-Project-3.bak"] = workspace("C:\\Backup\\My-Project", "backup.lua")
-    }
-    local state = setup("Windows", "C:\\Projects\\My-Project", saved)
-    test.equal(#state.root.views, 0)
-    state.open("new.lua")
-    state.save()
-    test.same(state.writes, {"My-Project-3"})
-    test.equal(saved["MY-project-1"].path, "C:\\Other\\My-Project")
-    test.equal(saved["my-PROJECT-2"].path, "D:\\Other\\My-Project")
+  test.test("session operations reject traversal and do not load records from other projects", function()
+    local state = seed("Linux", "/projects/editor")
+    for _, key in ipairs {"../main", "../other/main", "session-../main", "session-", "unrelated", "recovery"} do
+      test.not_ok(state.workspace.remove_session(key))
+      if key ~= "recovery" then test.not_ok(state.workspace.load_session(key)) end
+    end
+    state.db[state.module].recovery = snapshot("/other/editor", "foreign.lua")
+    local restarted = setup("Linux", "/projects/editor", state.db)
+    test.equal(restarted.core.active_view.state.filename, "main.lua")
   end)
 
-  test.test("non-Windows filename comparisons remain case-sensitive", function()
-    local path = "/projects/pragtical"
-    local state = setup("Linux", path, { ["Pragtical-1"] = workspace(path, "upper.lua") })
-    test.equal(#state.root.views, 0)
-    state.open("lower.lua")
+  test.test("save-as and loading activate the session that subsequent saves update", function()
+    local state = seed("Linux", "/projects/editor")
+    local key = assert(state.workspace.save_session("Original"))
+    test.equal(state.db[state.module].main.active_session, key)
+    test.ok(state.workspace.get_sessions()[2].active)
+    state.core.active_view.state.filename = "new.lua"
+    test.ok(state.workspace.load_session("main"))
+    test.equal(state.core.active_view.state.filename, "main.lua")
+    test.equal(state.db[state.module][key].documents.views[1].state.filename, "new.lua")
+    test.equal(state.db[state.module].main.active_session, "main")
+    test.ok(state.workspace.get_sessions()[1].active)
+    test.ok(state.workspace.load_session(key))
+    test.equal(state.core.active_view.state.filename, "new.lua")
+    test.equal(state.db[state.module].recovery.session_key, key)
+    state.core.active_view.state.filename = "latest.lua"
     state.save()
-    test.same(state.writes, {"pragtical-1"})
-    test.equal(state.saved["Pragtical-1"].documents.views[1].state.filename, "upper.lua")
+    test.equal(state.db[state.module][key].documents.views[1].state.filename, "latest.lua")
+    test.equal(state.db[state.module].main.documents.views[1].state.filename, "main.lua")
+    test.is_nil(state.db[state.module].recovery)
+    local restarted = setup("Linux", "/projects/editor", state.db)
+    test.equal(restarted.core.active_view.state.filename, "latest.lua")
+    test.ok(restarted.workspace.get_sessions()[2].active)
+    restarted.core.active_view.state.filename = "after-restart.lua"
+    restarted.save()
+    test.is_nil(state.db[state.module].recovery)
+    test.equal(state.db[state.module][key].documents.views[1].state.filename, "after-restart.lua")
+    test.equal(state.db[state.module].main.documents.views[1].state.filename, "main.lua")
   end)
 
-  test.test("non-Windows project path comparisons remain case-sensitive", function()
-    local state = setup("Linux", "/projects/pragtical", {
-      ["pragtical-1"] = workspace("/Projects/pragtical", "other.lua")
-    })
-    test.equal(#state.root.views, 0)
-    test.same(state.cleared, {})
-    state.save()
-    test.same(state.writes, {"pragtical-2"})
+  test.test("File Sessions offers explicit save-as and filtering uses filename metadata", function()
+    local state = seed("Linux", "/projects/editor")
+    state.command.perform("workspace:save-session-as")
+    test.equal(state.prompt.label, "Save Session As")
+    test.not_ok(state.prompt.options.validate("  "))
+    state.prompt.options.submit("Alternate")
+    state.loaded = {}
+    state.command.perform("workspace:load-session")
+    test.same(state.loaded, {})
+    local prompt = state.prompt.options
+    test.equal(prompt.suggest("Alternate")[1].text, "Alternate")
+    test.ok(prompt.suggest("Alternate")[1].info:match("^Active"))
+    test.not_ok(prompt.suggest("Main")[1].info:match("^Active"))
+    test.same(state.loaded, {})
+    local menu = state.menu()
+    local entries = {}
+    for _, entry in ipairs(menu) do if entry.checked then entries[entry.id] = entry end end
+    test.ok(entries["session-Alternate"].checked())
+    test.not_ok(entries.main.checked())
+    test.same(state.loaded, {})
+    entries.main.command()
+    test.ok(entries.main.checked())
+    test.not_ok(entries["session-Alternate"].checked())
+    state.loaded = {}
+    for _ = 1, 10 do entries.main.checked(); entries["session-Alternate"].checked() end
+    test.same(state.loaded, {})
   end)
 
-  test.test("lists remaining sessions by numeric ID and full project path", function()
-    local path = "C:\\Projects\\Pragtical"
-    local state = setup("Windows", path, {
-      ["Pragtical-1"] = workspace(path, "auto.lua"),
-      ["Pragtical-10"] = workspace(path, "ten.lua"),
-      ["pragtical-2"] = workspace("c:/projects/pragtical", "two.lua"),
-      ["Pragtical-3"] = workspace("D:\\Other\\Pragtical", "other.lua"),
-      ["Pragtical-4.bak"] = workspace(path, "backup.lua")
-    })
+  test.test("Windows keeps the active checkmark when saving the same name with different casing", function()
+    local state = seed("Windows", "C:\\projects\\editor")
+    state.workspace.save_session("Draft")
+    state.core.active_view.state.filename = "updated.lua"
+    state.workspace.save_session("draft")
     local sessions = state.workspace.get_sessions()
     test.equal(#sessions, 2)
-    test.equal(sessions[1].key, "pragtical-2")
-    test.equal(sessions[2].key, "Pragtical-10")
-    test.equal(sessions[1].name, "Session 2")
-    test.equal(sessions[1].count, 1)
-    test.same(state.writes, {})
-    test.same(state.cleared, { "Pragtical-1" })
+    test.equal(sessions[2].name, "Draft")
+    test.ok(sessions[2].active)
+    test.equal(state.db[state.module][sessions[2].key].documents.views[1].state.filename, "updated.lua")
+    local restarted = setup("Windows", "C:\\projects\\editor", state.db)
+    test.equal(restarted.core.active_view.state.filename, "updated.lua")
+    test.ok(restarted.workspace.get_sessions()[2].active)
   end)
 
-  test.test("manual loading backs up the outgoing layout and consumes the selected session", function()
-    local path = "/projects/editor"
-    local state = setup("Linux", path)
-    state.open("current.lua")
-    state.saved["editor-2"] = workspace(path, "selected.lua")
-    test.ok(state.workspace.load_session("editor-2"))
-    test.equal(#state.root.views, 1)
-    test.equal(state.core.active_view.state.filename, "selected.lua")
-    test.equal(state.saved["editor-1"].documents.views[1].state.filename, "current.lua")
-    test.equal(type(state.saved["editor-1"].saved_at), "number")
-    test.is_nil(state.saved["editor-2"])
-    test.same(state.cleared, { "editor-2" })
-  end)
-
-  test.test("failed backups and failed restores preserve the selected and active sessions", function()
-    for _, failure in ipairs { "fail_save", "fail_restore" } do
-      local path = "/projects/editor"
-      local state = setup("Linux", path)
-      local active = state.open("current.lua")
-      local selected = workspace(path, "selected.lua")
-      state.saved["editor-2"] = selected
-      state[failure] = true
-      test.not_ok(state.workspace.load_session("editor-2"))
-      test.equal(state.core.active_view, active)
-      test.equal(state.root.views[1], active)
-      test.equal(state.saved["editor-2"], selected)
-      test.same(state.cleared, {})
-    end
-  end)
-
-  test.test("manual session operations reject foreign paths and traversal keys", function()
-    local path = "/projects/editor"
-    local state = setup("Linux", path, {
-      ["editor-1"] = workspace("/other/editor", "other.lua")
-    })
-    state.open("current.lua")
-    for _, key in ipairs { "editor-1", "../editor-1", "missing-2" } do
-      test.not_ok(state.workspace.load_session(key))
-      test.not_ok(state.workspace.remove_session(key))
-    end
-    test.same(state.writes, {})
-    test.same(state.cleared, {})
-  end)
-
-  test.test("clearing sessions preserves same-basename projects and the open layout", function()
-    local path = "C:\\Projects\\Editor"
-    local state = setup("Windows", path, {
-      ["Editor-1"] = workspace("D:\\Other\\editor", "other.lua")
-    })
-    local active = state.open("current.lua")
-    state.saved["Editor-2"] = workspace(path, "two.lua")
-    state.saved["editor-3"] = workspace("c:/projects/editor", "three.lua")
-    test.ok(state.workspace.remove_session("Editor-2"))
-    test.equal(state.workspace.clear_sessions(), 1)
-    test.equal(state.core.active_view, active)
-    test.not_nil(state.saved["Editor-1"])
-    test.is_nil(state.saved["Editor-2"])
-    test.is_nil(state.saved["editor-3"])
+  test.test("removing the active named session returns future saves to main", function()
+    local state = seed("Linux", "/projects/editor")
+    local key = assert(state.workspace.save_session("Alternate"))
+    state.core.active_view.state.filename = "current.lua"
+    test.ok(state.workspace.remove_session(key))
+    test.ok(state.workspace.get_sessions()[1].active)
     state.save()
-    test.equal(state.saved["Editor-2"].documents.views[1].state.filename, "current.lua")
+    test.is_nil(state.db[state.module][key])
+    test.equal(state.db[state.module].main.documents.views[1].state.filename, "current.lua")
+    test.equal(state.db[state.module].main.active_session, "main")
   end)
 
-  test.test("pickers filter a snapshot without reading storage while typing", function()
-    local path = "/projects/editor"
-    local state = setup("Linux", path)
-    state.saved["editor-2"] = workspace(path, "two.lua")
-    state.saved["editor-10"] = workspace(path, "ten.lua")
-    state.command.perform("workspace:load-session")
-    test.equal(state.prompt.label, "Load Session")
-    local options = state.prompt.options
-    test.equal(#options.suggest(""), 2)
-    local items = options.suggest("10")
-    test.equal(#items, 1)
-    test.equal(items[1].key, "editor-10")
-    test.equal(items[1].info, "1 tab")
-    test.not_ok(options.validate("", nil))
-    test.ok(options.validate("", items[1]))
-    state.core.set_project("/different/editor")
-    test.not_ok(options.validate("", items[1]))
-    options.submit("", items[1])
-    test.same(state.cleared, {})
+  test.test("failed activation leaves the old session selected and its layout visible", function()
+    local state = seed("Linux", "/projects/editor")
+    local first = assert(state.workspace.save_session("First"))
+    state.core.active_view.state.filename = "second.lua"
+    local second = assert(state.workspace.save_session("Second"))
+    state.fail_save_key = "main"
+    test.not_ok(state.workspace.load_session(first))
+    test.equal(state.core.active_view.state.filename, "second.lua")
+    test.equal(state.db[state.module].main.active_session, second)
+    test.is_nil(state.db[state.module].recovery)
+    test.is_nil(state.workspace.save_session("Third"))
+    test.equal(state.db[state.module].main.active_session, second)
+    local active = {}
+    for _, session in ipairs(state.workspace.get_sessions()) do
+      if session.active then active[#active + 1] = session.key end
+    end
+    test.same(active, {second})
+  end)
+end)
+
+test.describe("workspace recovery and lifecycle", function()
+  test.test("a damaged main record does not hide a valid recovery file", function()
+    local original = seed("Linux", "/projects/editor")
+    original.db[original.module].recovery = snapshot("/projects/editor", "recovered.lua")
+    original.db[original.module].main = {}
+    local state = setup("Linux", "/projects/editor", original.db)
+    test.equal(state.module, original.module)
+    test.equal(state.core.active_view.state.filename, "recovered.lua")
+    state.save()
+    test.equal(state.db[state.module].main.documents.views[1].state.filename, "recovered.lua")
+    test.is_nil(state.db[state.module].recovery)
   end)
 
-  test.test("removal requires confirmation and clearing rechecks the selected project", function()
-    local path = "/projects/editor"
-    local state = setup("Linux", path)
-    local selected = workspace(path, "saved.lua")
-    state.saved["editor-2"] = selected
-    state.command.perform("workspace:remove-session")
-    local options = state.prompt.options
-    options.submit("", options.suggest("")[1])
-    test.equal(state.confirm.title, "Remove Session")
-    state.confirm.callback({ text = "Cancel" })
-    test.equal(state.saved["editor-2"], selected)
+  test.test("periodic saves use the same recovery file, skip unchanged state and clear it after quit", function()
+    local state = setup("Linux", "/projects/editor", nil, {autosave = true})
+    local view = state.open("edited.lua")
+    test.equal(state.core.background_threads, 1)
+    test.equal(state.delay, 10)
+    state.tick(); state.tick()
+    test.same(write_keys(state), {"recovery"})
+    view.state.scroll.y = 75
+    state.tick()
+    test.same(write_keys(state), {"recovery", "recovery"})
+    local scope = state.module
+    test.equal(state.db[scope].recovery.documents.views[1].state.scroll.y, 75)
+    local restarted = setup("Linux", "/projects/editor", state.db)
+    test.equal(restarted.core.active_view.state.scroll.y, 75)
+    test.is_nil(restarted.prompt)
+    restarted.save()
+    test.not_nil(state.db[scope].main)
+    test.is_nil(state.db[scope].recovery)
+    test.equal(#restarted.workspace.get_sessions(), 1)
+  end)
+
+  test.test("named session checkpoints recover into the same active session after a crash", function()
+    local state = setup("Linux", "/projects/editor", nil, {autosave = true})
+    state.open("default.lua"); state.save()
+    local key = assert(state.workspace.save_session("Writing"))
+    state.core.active_view.state.filename = "unsaved.lua"
+    state.tick(); state.tick()
+    test.equal(state.db[state.module].recovery.session_key, key)
+    test.equal(state.db[state.module][key].documents.views[1].state.filename, "default.lua")
+    local restarted = setup("Linux", "/projects/editor", state.db)
+    test.equal(restarted.core.active_view.state.filename, "unsaved.lua")
+    test.ok(restarted.workspace.get_sessions()[2].active)
+    restarted.save()
+    test.equal(state.db[state.module][key].documents.views[1].state.filename, "unsaved.lua")
+    test.equal(state.db[state.module].main.documents.views[1].state.filename, "default.lua")
+    test.is_nil(state.db[state.module].recovery)
+  end)
+
+  test.test("removing inactive main preserves named recovery and clearing resets the save target", function()
+    local state = setup("Linux", "/projects/editor", nil, {autosave = true})
+    state.open("working.lua")
+    local key = assert(state.workspace.save_session("Writing"))
+    state.tick()
+    local recovery = state.db[state.module].recovery
+    test.ok(state.workspace.remove_session("main"))
+    test.equal(state.db[state.module].recovery, recovery)
+    test.ok(state.workspace.get_sessions()[1].active)
+    state.save()
+    test.equal(state.db[state.module].main.active_session, key)
+    test.equal(state.workspace.clear_sessions(), 2)
+    test.same(state.db[state.module], {})
+    state.save()
+    test.equal(#state.workspace.get_sessions(), 1)
+    test.equal(state.db[state.module].main.active_session, "main")
+    test.is_nil(state.db[state.module][key])
+  end)
+
+  test.test("missing or invalid active session pointers fall back to main", function()
+    for _, key in ipairs {"session-Missing", "../outside", "recovery"} do
+      local state = seed("Linux", "/projects/editor")
+      state.db[state.module].main.active_session = key
+      local restarted = setup("Linux", "/projects/editor", state.db)
+      test.equal(restarted.core.active_view.state.filename, "main.lua")
+      test.ok(restarted.workspace.get_sessions()[1].active)
+      restarted.save()
+      test.equal(state.db[state.module].main.active_session, "main")
+    end
+  end)
+
+  test.test("project switches retain each project's active named session", function()
+    local state = seed("Linux", "/one/project")
+    local first = assert(state.workspace.save_session("First"))
+    state.core.active_view.state.filename = "one.lua"
+    state.switch("/two/project")
+    state.open("two.lua")
+    local second = assert(state.workspace.save_session("Second"))
+    state.switch("/one/project")
+    test.equal(state.core.active_view.state.filename, "one.lua")
+    test.equal(state.workspace.get_sessions()[2].key, first)
+    test.ok(state.workspace.get_sessions()[2].active)
+    state.switch("/two/project")
+    test.equal(state.core.active_view.state.filename, "two.lua")
+    test.equal(state.workspace.get_sessions()[2].key, second)
+    test.ok(state.workspace.get_sessions()[2].active)
+  end)
+
+  test.test("disabling autosave immediately removes its coroutine and settings reschedule one timer", function()
+    local state = setup("Linux", "/projects/editor")
+    state.config.autosave = true; state.config.config_spec[1].on_apply()
+    test.equal(state.core.background_threads, 1)
+    state.config.autosave_interval = 3; state.config.config_spec[2].on_apply()
+    test.equal(state.delay, 3)
+    test.equal(state.core.background_threads, 1)
+    state.config.autosave = false; state.config.config_spec[1].on_apply()
+    test.equal(state.core.background_threads, 0)
+    test.same(state.core.threads, {})
+    state.tick(); test.same(state.writes, {})
+    state.config.autosave_interval = 0; state.config.autosave = true; state.config.config_spec[1].on_apply()
+    test.equal(state.delay, 1)
+  end)
+
+  test.test("failed final saves preserve recovery and successful retry removes it", function()
+    local state = setup("Linux", "/projects/editor", nil, {autosave = true})
+    state.open("edited.lua"); state.tick()
+    local recovered = state.db[state.module].recovery
+    state.fail_recovery = true
+    state.core.active_view.state.scroll.y = 40; state.tick()
+    test.equal(state.db[state.module].recovery, recovered)
+    state.fail_save = true; state.save()
+    test.equal(state.db[state.module].recovery, recovered)
+    state.fail_save = false; state.save()
+    test.is_nil(state.db[state.module].recovery)
+  end)
+
+  test.test("pending restore guards prevent empty project saves on quit or rapid switches", function()
+    local first = seed("Linux", "/one/project")
+    local second = seed("Linux", "/two/project")
+    first.db[second.module] = second.db[second.module]
+    local state = setup("Linux", "/one/project", first.db, nil, true)
+    state.core.exit(function() state.core.quit_request = true end, true)
+    state.flush()
+    test.same(state.writes, {})
+    test.not_nil(state.db[first.module].main)
+    state = setup("Linux", "/one/project", first.db)
+    state.core.set_project("/two/project")
+    state.core.set_project("/one/project")
+    state.flush()
+    test.same(write_keys(state), {"main"})
+    test.equal(state.core.active_view.state.filename, "main.lua")
+    test.not_nil(state.db[second.module].main)
+  end)
+
+  test.test("Windows project-switch restarts preserve both projects across repeated launches", function()
+    local first = seed("Windows", "C:\\projects\\Editor")
+    local second = seed("Windows", "D:\\projects\\editor")
+    first.db[second.module] = second.db[second.module]
+    for index = 1, 8 do
+      local from = index % 2 == 1 and "C:\\projects\\Editor" or "D:\\projects\\editor"
+      local to = index % 2 == 1 and "D:\\projects\\editor" or "C:\\projects\\Editor"
+      local state = setup("Windows", from, first.db)
+      state.core.set_project(to)
+      state.core.exit(function() state.core.restart_request = true end, true)
+      state.flush()
+      test.same(write_keys(state), {"main"})
+    end
+    test.not_nil(first.db[first.module].main)
+    test.not_nil(first.db[second.module].main)
+  end)
+
+  test.test("failed restores and cancelled quit do not disable subsequent saves", function()
+    local original = seed("Linux", "/projects/editor")
+    local state = setup("Linux", "/projects/editor", original.db, nil, true)
+    state.fail_restore = true; state.flush()
+    test.equal(#state.errors, 1)
+    state.fail_restore = false; state.open("fixed.lua")
+    state.core.exit(function() error("cancelled quit must not execute") end, false)
+    test.same(state.writes, {})
+    state.save()
+    test.equal(state.db[state.module].main.documents.views[1].state.filename, "fixed.lua")
+  end)
+
+  test.test("explicit startup files skip restoration but can still save recovery", function()
+    local original = seed("Linux", "/projects/editor")
+    local state = setup("Linux", "/projects/editor", original.db, {startup_files = true, autosave = true})
+    test.is_nil(state.core.active_view)
+    state.open("explicit.lua"); state.tick()
+    test.equal(state.db[state.module].recovery.documents.views[1].state.filename, "explicit.lua")
+  end)
+
+  test.test("additional roots are absolute and missing roots warn without blocking restore", function()
+    local state = setup("Linux", "/projects/editor")
+    state.open("main.lua"); state.core.add_project("../other")
+    state.system.absolute_path = function(path) test.equal(path, "../other"); return "/projects/other" end
+    state.save()
+    test.same(state.db[state.module].main.directories, {"/projects/other"})
+    state.db[state.module].main.directories = {"/projects/other", "/missing", "/file"}
+    local restarted = setup("Linux", "/projects/editor", state.db, nil, true)
+    restarted.paths["/projects/other"], restarted.paths["/file"] = {type = "dir"}, {type = "file"}
+    restarted.flush()
+    test.equal(#restarted.core.projects, 2)
+    test.equal(#restarted.warnings, 2)
+    test.match(restarted.warnings[1], "/missing", nil, true)
+  end)
+
+  test.test("failed manual loads preserve the active view and named snapshot", function()
+    for _, failure in ipairs {"fail_save", "fail_restore", "fail_recovery"} do
+      local state = seed("Linux", "/projects/editor")
+      local key = state.workspace.save_session("Original")
+      local original = state.core.active_view
+      state[failure] = true
+      test.not_ok(state.workspace.load_session(key))
+      test.equal(state.core.active_view, original)
+      test.not_nil(state.db[state.module][key])
+    end
+  end)
+
+  test.test("clearing recovery-only state uses the current project directory without reading buffers", function()
+    local state = setup("Linux", "/projects/editor", nil, {autosave = true})
+    state.open("main.lua"); state.tick()
+    state.loaded = {}
     state.command.perform("workspace:clear-sessions")
-    state.core.set_project("/different/editor")
-    state.confirm.callback({ text = "Clear Sessions" })
-    test.equal(state.saved["editor-2"], selected)
+    test.not_nil(state.confirm)
+    state.confirm({text = "Clear Sessions"})
+    test.is_nil(state.db[state.module].recovery)
+    test.same(state.loaded, {})
+  end)
+end)
+
+test.describe("workspace legacy migration", function()
+  test.test("converts old sessions once and preserves extra snapshots and recovery", function()
+    local path = "/projects/editor"
+    local main, older = snapshot(path, "latest.lua", 200), snapshot(path, "older.lua", 100)
+    local named, recovery = snapshot(path, "named.lua", 50), snapshot(path, "recovered.lua", 300)
+    named.name = "Before refactor"
+    local database = {ws = {["editor-1"] = older, ["editor-2"] = main, ["editor-3"] = named},
+      ["ws-temp"] = {["editor-2"] = recovery}}
+    local state = setup("Linux", path, database, {migrate = true})
+    local files = database[state.module]
+    test.equal(files.main, main)
+    test.equal(files.recovery, recovery)
+    test.equal(files["session-Before%20refactor"], named)
+    test.equal(files["session-Session%201"], older)
+    test.equal(state.core.active_view.state.filename, "recovered.lua")
+    test.equal(database.ws[".migrated"], true)
+    test.is_nil(database.ws["editor-1"])
+    test.is_nil(database["ws-temp"]["editor-2"])
+    local restarted = setup("Linux", path, database, {migrate = true})
+    test.same(restarted.enumerated, {})
+    restarted.save()
+    test.not_nil(files.main)
+    test.is_nil(files.recovery)
   end)
 
-  test.test("File Sessions builds current entries when opened", function()
+  test.test("migration separates old same-basename projects using their stored full paths", function()
+    local first, second = "C:\\projects\\Editor", "D:\\projects\\editor"
+    local database = {ws = {["Editor-1"] = snapshot(first, "one.lua"), ["editor-2"] = snapshot(second, "two.lua")}}
+    local a = setup("Windows", first, database, {migrate = true})
+    local b = setup("Windows", second, database, {migrate = true})
+    test.not_equal(a.module, b.module)
+    test.equal(a.core.active_view.state.filename, "one.lua")
+    test.equal(b.core.active_view.state.filename, "two.lua")
+    test.same(b.enumerated, {})
+  end)
+
+  test.test("migration preserves duplicate legacy names and existing scoped sessions", function()
+    local state = seed("Linux", "/projects/editor")
+    state.db.ws[".migrated"] = nil
+    local one, two = snapshot("/projects/editor", "one.lua"), snapshot("/projects/editor", "two.lua")
+    one.name, two.name = "Same", "Same"
+    state.db.ws["editor-1"], state.db.ws["editor-2"] = one, two
+    local previous = state.db[state.module].main
+    local migrated = setup("Linux", "/projects/editor", state.db, {migrate = true})
+    test.equal(state.db[state.module].main, previous)
+    test.equal(state.db[state.module]["session-Same"], one)
+    test.equal(state.db[state.module]["session-Same-2"], two)
+    test.equal(#migrated.workspace.get_sessions(), 3)
+  end)
+
+  test.test("unreadable legacy files are preserved and retried before migration is marked complete", function()
     local path = "/projects/editor"
-    local state = setup("Linux", path)
-    test.same(state.menu_path, { "file" })
-    test.equal(state.menu_name, "workspace")
-    local provider = state.menu_entries[1].items
-    test.equal(#provider(), 3)
-    state.open("current.lua")
-    state.saved["editor-2"] = workspace(path, "selected.lua")
-    local entries = provider()
-    test.equal(#entries, 5)
-    test.equal(entries[5].text, "Session 2")
-    entries[5].command()
-    test.equal(state.core.active_view.state.filename, "selected.lua")
-    test.equal(provider()[5].text, "Session 1")
+    local source = snapshot(path, "saved.lua")
+    local database = {ws = {["editor-1"] = source}}
+    setup("Linux", path, database, {migrate = true, fail_load = "editor-1"})
+    test.equal(database.ws["editor-1"], source)
+    test.is_nil(database.ws[".migrated"])
+    local retried = setup("Linux", path, database, {migrate = true})
+    test.equal(database[retried.module].main, source)
+    test.equal(database.ws[".migrated"], true)
+  end)
+
+  test.test("failed migration moves retain sources and are retried on the next startup", function()
+    for _, failure in ipairs {"fail_rename", "fail_mkdir"} do
+      local path = "/projects/editor"
+      local source = snapshot(path, "saved.lua")
+      local database = {ws = {["editor-1"] = source}}
+      local state = setup("Linux", path, database, {migrate = true, [failure] = true})
+      test.equal(database.ws["editor-1"], source)
+      test.is_nil(database.ws[".migrated"])
+      test.equal(#state.warnings, 1)
+      local restarted = setup("Linux", path, database, {migrate = true})
+      test.equal(database[restarted.module].main, source)
+      test.is_nil(database.ws["editor-1"])
+      test.equal(database.ws[".migrated"], true)
+      test.equal(restarted.core.active_view.state.filename, "saved.lua")
+    end
   end)
 end)
 
@@ -595,8 +795,11 @@ test.describe("workspace session switching", function()
     context.visited, context.transitions = core.visited_files, config.transitions
     context.command, context.nag = core.command_view, core.nag_view
     context.cwd = system.getcwd() or core.root_project().path
-    context.keys = {}
-    for _, key in ipairs(storage.keys("ws")) do context.keys[key] = true end
+    context.storage_save = storage.save
+    storage.save = function(module, key, ...)
+      if module:match("^ws[/\\]") then context.module = module end
+      return context.storage_save(module, key, ...)
+    end
     context.directory = common.normalize_path(core.temp_filename("-workspace-project"))
     test.ok(common.mkdirp(context.directory))
     context.filename = context.directory .. PATHSEP .. "example.txt"
@@ -617,9 +820,8 @@ test.describe("workspace session switching", function()
       core.nag_view.force_focus = false
       core.nag_view.overlay:hide_floating()
     end
-    for _, key in ipairs(storage.keys("ws")) do
-      if not context.keys[key] then storage.clear("ws", key) end
-    end
+    storage.save = context.storage_save
+    if context.module then storage.clear(context.module) end
     for _, doc in ipairs(core.docs) do doc:on_close() end
     core.root_view, core.docs, core.projects = context.root, context.docs, context.projects
     core.visited_files, config.transitions = context.visited, context.transitions
@@ -636,14 +838,14 @@ test.describe("workspace session switching", function()
     core.open_file(context.filename)
     core.add_project("extra")
     local key = assert(workspace_plugin.save_session())
-    test.same(storage.load("ws", key).directories, { system.absolute_path(extra) })
+    test.same(storage.load(context.module, key).directories, { system.absolute_path(extra) })
   end)
 
   test.test("switching restores splits and unsaved file and untitled buffers from its backup", function(context)
     local source = core.open_file(context.filename)
     local baseline = source.doc:get_text(1, 1, math.huge, math.huge)
     source.doc:set_selection(1, 4)
-    local original = assert(workspace_plugin.save_session())
+    local original = assert(workspace_plugin.save_session("Original"))
     source.doc:insert(1, 1, "unsaved edit: ")
     local modified = source.doc:get_text(1, 1, math.huge, math.huge)
     local untitled = core.open_doc()
@@ -655,6 +857,8 @@ test.describe("workspace session switching", function()
     test.ok(common.mkdirp(extra))
     core.add_project(extra)
 
+    local modified_session = assert(workspace_plugin.save_session("Modified"))
+
     test.ok(workspace_plugin.load_session(original))
     test.equal(core.root_view.root_node.type, "leaf")
     test.not_equal(core.active_view.doc, source.doc)
@@ -662,13 +866,13 @@ test.describe("workspace session switching", function()
     test.not_ok(core.active_view.doc:is_dirty())
     test.equal(select(2, core.active_view.doc:get_selection()), 4)
     test.equal(#core.projects, 1)
-    test.is_nil(storage.load("ws", original))
+    test.not_nil(storage.load(context.module, original))
 
     local sessions = workspace_plugin.get_sessions()
-    test.equal(#sessions, 1)
-    test.equal(sessions[1].count, 2)
-    test.same(storage.load("ws", sessions[1].key).directories, { extra })
-    test.ok(workspace_plugin.load_session(sessions[1].key))
+    test.equal(#sessions, 3)
+    test.equal(storage.load(context.module, modified_session).documents.type, "hsplit")
+    test.same(storage.load(context.module, modified_session).directories, { extra })
+    test.ok(workspace_plugin.load_session(modified_session))
     local root = core.root_view.root_node
     test.equal(root.type, "hsplit")
     test.equal(root.divider, 0.63)
@@ -710,7 +914,7 @@ test.describe("workspace session switching", function()
     test.ok(core.nag_view.visible)
     for _ = 1, 5 do core.root_view:update() end
     core.on_event("textinput", "n")
-    test.not_nil(storage.load("ws", key))
+    test.not_nil(storage.load(context.module, key))
     test.equal(core.active_view, source)
 
     test.ok(command.perform("workspace:remove-session"))
@@ -724,15 +928,15 @@ test.describe("workspace session switching", function()
         break
       end
     end
-    test.is_nil(storage.load("ws", key))
+    test.is_nil(storage.load(context.module, key))
     test.equal(core.active_view, source)
 
-    assert(workspace_plugin.save_session())
-    assert(workspace_plugin.save_session())
+    assert(workspace_plugin.save_session("First"))
+    assert(workspace_plugin.save_session("Second"))
     test.ok(command.perform("workspace:clear-sessions"))
     core.root_view:update(); core.root_view:update()
     core.on_event("textinput", "n")
-    test.equal(#workspace_plugin.get_sessions(), 2)
+    test.equal(#workspace_plugin.get_sessions(), 3)
     test.ok(command.perform("workspace:clear-sessions"))
     core.root_view:update(); core.root_view:update()
     for _, option, x, y, w, h in core.nag_view:each_option() do
