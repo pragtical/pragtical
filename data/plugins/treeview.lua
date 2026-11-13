@@ -81,13 +81,14 @@ end
 ---@field files? system.fileinfo[] Cached directory children
 ---@field symlink? boolean Whether this is a directory symlink
 
----Nodes owned by TreeView for placing its toolbar around the tree/document split.
+---Nodes owned by TreeView for editor-edge placement or a split in its private dock layout.
 ---@class plugins.treeview.toolbar_layout
 ---@field root core.rootview Root that owns these layout nodes
----@field node core.node Outer split retained across docking changes
+---@field node? core.node Editor-edge split for a vertical toolbar
 ---@field documents core.node Document branch retained when its child splits collapse
 ---@field toolbar_node core.node Leaf containing the toolbar
----@field group? core.node Intermediate split rebuilt for the current docking position
+---@field workspace core.node Stable workspace surrounded by vertical toolbars
+---@field layout? core.node TreeView's split layout when its toolbar is horizontal
 
 ---@class plugins.treeview : core.view
 ---@overload fun():plugins.treeview
@@ -100,6 +101,8 @@ end
 ---@field context_item? plugins.treeview.item Clicked target while its context menu is open
 ---@field context_command_item? plugins.treeview.item Target retained through command dispatch
 ---@field tooltip_view? core.view Floating path-tooltip companion
+---@field last_dock_side? core.node.dock_side Remembered placement when hidden
+---@field node? core.node Leaf containing the tree in its per-view layout
 local TreeView = View:extend()
 
 function TreeView:__tostring() return "TreeView" end
@@ -111,6 +114,7 @@ function TreeView:new()
   self.init_size = true
   self.scroll_width = 0
   self.target_size = config.plugins.treeview.size
+  self.size.x = self.target_size
   self.default_size = self.target_size
   self.toolbar_position = config.plugins.treeview.toolbar_position
   self.show_hidden = config.plugins.treeview.show_hidden
@@ -201,9 +205,8 @@ end
 
 
 function TreeView:get_name()
-  return nil
+  return "Treeview"
 end
-
 
 function TreeView:get_item_height()
   return style.font:get_height() + style.padding.y
@@ -771,115 +774,120 @@ function TreeView:open_doc(filename)
 end
 
 
----Apply TreeView's docking position while preserving the tree and document branches.
----Cancel gestures and hover on moved panes, then set toolbar orientation and node locks.
----@param tree plugins.treeview Owner whose toolbar layout is rebuilt, if attached
+---Replace a toolbar branch without consuming workspace or dock nodes.
+---@param root core.rootview Layout owner
+---@param old core.node Existing branch
+---@param replacement core.node Replacement branch
+local function replace_toolbar_branch(root, old, replacement)
+  local parent = old:get_parent_node(root.root_node)
+  if parent then parent[parent.a == old and "a" or "b"] = replacement
+  elseif root.root_node == old then root.root_node = replacement end
+end
+
+---Place the toolbar at an editor edge or split only TreeView's own dock layout.
+---@param tree plugins.treeview Toolbar owner
 local function update_toolbar_layout(tree)
   local docking, toolbar = tree.toolbar_layout, tree.toolbar
   if not docking then return end
-  local root, layout, group = docking.root, docking.node, docking.group
-  if
-    (
-      root.grab and (root.grab.view == toolbar or root.grab.view == tree)
-    )
-    or (
-      root.dragged_divider
-      and (
-        root.dragged_divider == layout or root.dragged_divider == group
-      )
-    )
-  then
-    root:cancel_mouse_capture()
-  end
-  if tree.contextmenu then tree.contextmenu:hide() end
-  if root.overlapping_view == toolbar or root.overlapping_view == tree then
-    root:set_hovered_view(nil)
-  end
+  local root = docking.root
+  local active, last, next_view = core.active_view, core.last_active_view, core.next_active_view
+  root:cancel_mouse_capture()
   tree:hide_tooltip()
   toolbar:on_mouse_left()
-  toolbar.scroll.x, toolbar.scroll.y = 0, 0
-  toolbar.scroll.to.x, toolbar.scroll.to.y = 0, 0
-
-  local toolbar_node = docking.toolbar_node
-  if tree.toolbar_position == "left" or tree.toolbar_position == "right" then
-    group = Node("hsplit")
-    group.a, group.b = tree.node, docking.documents
-    if tree.toolbar_position == "left" then
-      layout.a, layout.b = toolbar_node, group
-    else
-      layout.a, layout.b = group, toolbar_node
-    end
-    toolbar_node.locked = { x = true }
-    toolbar:set_orientation("vertical")
-  else
-    group = Node("vsplit")
-    if tree.toolbar_position == "top" then
-      group.a, group.b = toolbar_node, tree.node
-    else
-      group.a, group.b = tree.node, toolbar_node
-    end
-    layout.a, layout.b = group, docking.documents
-    toolbar_node.locked = { y = true }
-    toolbar:set_orientation("horizontal")
+  if docking.layout then
+    local parent = docking.toolbar_node:get_parent_node(docking.layout)
+    if parent then parent:consume(parent.a == docking.toolbar_node and parent.b or parent.a) end
+    docking.layout = nil
   end
-  docking.group = group
+  if docking.node then replace_toolbar_branch(root, docking.node, docking.workspace) end
+  docking.node = nil
+  local vertical = tree.toolbar_position == "left" or tree.toolbar_position == "right"
+  toolbar:set_orientation(vertical and "vertical" or "horizontal")
+  if vertical then
+    local node = Node("leaf", true)
+    node.views, node.active_view, node.locked = { toolbar }, toolbar, { x = true }
+    docking.toolbar_node = node
+    local layout = Node("hsplit")
+    layout.dock_structure = true
+    replace_toolbar_branch(root, docking.workspace, layout)
+    if tree.toolbar_position == "left" then layout.a, layout.b = node, docking.workspace
+    else layout.a, layout.b = docking.workspace, node end
+    docking.node = layout
+  else
+    local dock = root:get_dock_for_view(tree)
+    if dock then
+      docking.layout = dock.dock_layouts[tree]
+      docking.toolbar_node = docking.layout:get_node_for_view(tree):split(
+        tree.toolbar_position == "top" and "up" or "down", toolbar, { y = true })
+    end
+  end
+  tree.node = root.root_node:get_node_for_view(tree)
   toolbar.init_size = true
   toolbar:update()
   root.root_node:update_layout()
+  core.active_view, core.last_active_view, core.next_active_view = active, last, next_view
   core.redraw = true
 end
 
+---Keep the remembered dock and associated toolbar synchronized after a core placement change.
+---@param side? core.node.dock_side New dock, or nil when removed
+---@param previous_side? core.node.dock_side Previous dock
+function TreeView:on_dock_changed(side, previous_side)
+  self.last_dock_side = side or previous_side or self.last_dock_side
+  self.node = side and core.root_view.root_node:get_node_for_view(self) or nil
+  self.visible = side ~= nil
+  update_toolbar_layout(self)
+end
 
----Set toolbar docking and update TreeView's placement setting.
----Left and right use vertical icons; right places the toolbar beyond all document panes.
----Top and bottom use horizontal icons above or below the tree.
----May be called before attachment; changing placement preserves document and tree state.
----Settings saves this preference to disk when its position selector is used.
----@param position "left"|"bottom"|"top"|"right" Tree docking or the editor's far-right edge
+---Show and select the tree, or let its existing size animation collapse the dock.
+---@param visible boolean Requested tree visibility
+function TreeView:set_visible(visible)
+  local root = core.root_view
+  local dock = root:get_dock_for_view(self)
+  self.visible = visible
+  if visible then
+    root:add_dock_view(self, self.last_dock_side or "left")
+  elseif dock and dock.active_view == self then
+    root:clear_dock_view_input(self, true)
+  end
+end
+
+---Set toolbar placement independently of the tree's dock edge.
+---@param position "left"|"bottom"|"top"|"right" Editor edge or position inside the tree's dock
 function TreeView:set_toolbar_position(position)
-  assert(
-    position == "left"
-      or position == "bottom"
-      or position == "top"
-      or position == "right",
-    "Invalid toolbar position"
-  )
+  assert(position == "left" or position == "bottom" or position == "top" or position == "right",
+    "Invalid toolbar position")
   config.plugins.treeview.toolbar_position = position
   if self.toolbar_position == position then return end
   self.toolbar_position = position
   update_toolbar_layout(self)
 end
 
-
----Attach a toolbar to this docked tree and apply its current placement preference.
----Owns toolbar docking and effective visibility while preserving requested visibility.
----@param toolbar plugins.toolbarview Toolbar to place and orient around the tree
+---Attach a toolbar, keeping it outside the dock's selectable view collection.
+---@param toolbar plugins.toolbarview Toolbar to attach
 function TreeView:attach_toolbar(toolbar)
   local root = core.root_view
-  local layout = self.node:get_parent_node(root.root_node)
-  local group = self.node
-  self.toolbar_layout = {
-    root = root, node = layout, documents = layout.b,
-    toolbar_node = group:split("down", toolbar, { y = true })
+  root:initialize_docks()
+  local node = Node("leaf", true)
+  node.views, node.active_view = { toolbar }, toolbar
+  self.toolbar, self.toolbar_layout = toolbar, {
+    root = root, workspace = root.workspace_node, toolbar_node = node,
+    documents = root:get_document_node()
   }
-  self.node, self.toolbar = group.a, toolbar
   local tree = self
-  ---Check TreeView's docking visibility without changing the requested toolbar flag.
-  ---@return boolean visible Left and right docking stay visible when the tree is hidden
+  ---Check whether the toolbar's owning tree is selected for horizontal placement.
+  ---@return boolean visible Effective toolbar visibility
   function toolbar:is_visible()
-    return self.visible and (
-      tree.toolbar_position == "left"
-      or tree.toolbar_position == "right"
-      or tree.visible
-    )
+    local dock = root:get_dock_for_view(tree)
+    return self.visible and (self.orientation == "vertical"
+      or dock ~= nil and dock.dock_visible and dock.active_view == tree and tree.visible)
   end
   update_toolbar_layout(self)
 end
 
 -- init
 local view = TreeView()
-local node = core.root_view:get_active_node()
-view.node = node:split("left", view, {x = true}, true)
+core.root_view:add_dock_view(view, "left")
 
 -- The toolbarview plugin is special because it is plugged inside
 -- a treeview pane which is itelf provided in a plugin.
@@ -1064,7 +1072,8 @@ local previous_view = nil
 -- Register the TreeView commands and keymap
 command.add(nil, {
   ["treeview:toggle"] = function()
-    view.visible = not view.visible
+    local dock = core.root_view:get_dock_for_view(view)
+    view:set_visible(not (view.visible and dock and dock.dock_visible and dock.active_view == view))
   end,
 
   ["treeview:toggle-hidden"] = function()
@@ -1087,7 +1096,8 @@ command.add(nil, {
       if not previous_view then
         previous_view = core.root_view:get_primary_node().active_view
       end
-      core.set_active_view(view)
+      view:set_visible(true)
+      core.root_view:activate_dock_view(view)
       if not view.selected_item then
         for it, _, y in view:each_item() do
           view:set_selection(it, y)
@@ -1096,9 +1106,21 @@ command.add(nil, {
       end
 
     else
-      core.set_active_view(
-        previous_view or core.root_view:get_primary_node().active_view
-      )
+      local root = core.root_view
+      local target = previous_view or root:get_primary_node().active_view
+      if not root.root_node:get_node_for_owned_view(target)
+        and not root:get_floating_view_for_view(target)
+      then target = root:get_primary_node().active_view end
+      local dock = root:get_dock_for_view(target)
+      if dock then
+        for _, registered in ipairs(dock.views) do
+          if dock.dock_layouts[registered]:get_node_for_owned_view(target) then
+            root:activate_dock_view(registered, false)
+            break
+          end
+        end
+      end
+      core.set_active_view(target)
     end
   end
 })
@@ -1481,7 +1503,7 @@ config.plugins.treeview.config_spec = {
     type = "toggle",
     default = false,
     on_apply = function(value)
-      view.visible = not value
+      view:set_visible(not value)
     end
   },
   {
@@ -1577,7 +1599,10 @@ local entries = {{
   id = "treeview", text = "Treeview", command = "treeview:toggle",
   ---Reflect the tree's requested visibility when opening or visiting this entry.
   ---@return boolean checked Whether TreeView is shown
-  checked = function() return view.visible end
+  checked = function()
+    local dock = core.root_view:get_dock_for_view(view)
+    return view.visible and dock and dock.dock_visible and dock.active_view == view or false
+  end
 }}
 if toolbar_view then
   entries[#entries + 1] = {

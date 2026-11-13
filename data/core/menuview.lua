@@ -369,6 +369,30 @@ function MenuView:add_defaults()
         self:entry("move-right", "Move Tab Right", "root:move-tab-right")
       }),
       DIVIDER,
+      self:group("docks", "Docks", {
+        self:entry("top", "Top", "dock:toggle-top", function()
+          local dock = core.root_view:get_dock("top")
+          return dock.dock_visible and dock.size.y > 0
+        end),
+        self:entry("right", "Right", "dock:toggle-right", function()
+          local dock = core.root_view:get_dock("right")
+          return dock.dock_visible and dock.size.x > 0
+        end),
+        self:entry("bottom", "Bottom", "dock:toggle-bottom", function()
+          local dock = core.root_view:get_dock("bottom")
+          return dock.dock_visible and dock.size.y > 0
+        end),
+        self:entry("left", "Left", "dock:toggle-left", function()
+          local dock = core.root_view:get_dock("left")
+          return dock.dock_visible and dock.size.x > 0
+        end),
+        self:group("move", "Move Active Dock View", {
+          self:entry("top", "Top", "dock:move-to-top"),
+          self:entry("right", "Right", "dock:move-to-right"),
+          self:entry("bottom", "Bottom", "dock:move-to-bottom"),
+          self:entry("left", "Left", "dock:move-to-left")
+        })
+      }),
       self:entry("statusbar", "Status Bar", "status-bar:toggle", function()
         return core.status_view.visible
       end),

@@ -651,20 +651,20 @@ test.describe("commandview floating suggestions", function()
       context.tree = tree
       -- Layout tests need no project traversal or filesystem watchers.
       tree.each_item = function() return function() end end
-      tree.node = root:get_primary_node():split("left", tree, { x = true }, true)
+      root:add_dock_view(tree, "left")
+      root:set_dock_size("left", tree.target_size)
       tree:attach_toolbar(toolbar)
       tree:set_toolbar_position(toolbar_position)
       core.set_active_view(context.view)
       root:update(); root:update()
-      local layout, group, tree_node, documents, toolbar_node = tree.toolbar_layout.node,
-        tree.toolbar_layout.group, tree.node, tree.toolbar_layout.documents, tree.toolbar_layout.toolbar_node
+      local layout, tree_node, documents, toolbar_node = tree.toolbar_layout.node or tree.toolbar_layout.layout,
+        tree.node, tree.toolbar_layout.documents, tree.toolbar_layout.toolbar_node
       local divider = layout.divider
       for _, position in ipairs { "top", "center", "bottom", "top", "bottom" } do
         config.commandview_position = position
         view:enter("Pick", {})
         root:update(); root:update()
-        test.equal(tree.toolbar_layout.node, layout)
-        test.equal(tree.toolbar_layout.group, group)
+        test.equal(tree.toolbar_layout.node or tree.toolbar_layout.layout, layout)
         test.equal(tree.toolbar_layout.documents, documents)
         test.equal(tree.toolbar_layout.toolbar_node, toolbar_node)
         test.equal(root.root_node:get_node_for_view(tree), tree_node)

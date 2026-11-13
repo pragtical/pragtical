@@ -315,7 +315,7 @@ local function save_workspace()
   while id_list[id] do
     id = id + 1
   end
-  local root = get_unlocked_root(core.root_view.root_node)
+  local root = get_unlocked_root(core.root_view.document_node or core.root_view.root_node)
   if not root then return end
   local key = project_dir .. "-" .. id
   local saved = storage.save(STORAGE_MODULE, key, {
@@ -346,7 +346,7 @@ local function load_workspace()
         if workspace.visited_files then
           core.visited_files = workspace.visited_files
         end
-        local root = get_unlocked_root(core.root_view.root_node)
+        local root = get_unlocked_root(core.root_view.document_node or core.root_view.root_node)
         local active_view = load_node(root, workspace.documents)
         if active_view then
           core.set_active_view(active_view)
@@ -377,7 +377,7 @@ function workspace.load_session(key)
   if pending_project or core.restart_request or core.quit_request then return false end
   local project = core.root_project()
   local session = read_session(key, project.path)
-  local root = get_unlocked_root(core.root_view.root_node)
+  local root = get_unlocked_root(core.root_view.document_node or core.root_view.root_node)
   if not session or not root or not save_workspace() then return false end
 
   local documents, visited = core.docs, core.visited_files

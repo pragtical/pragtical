@@ -44,6 +44,9 @@ local DocView = require "core.docview"
 ---@field first_dnd_processed boolean
 ---@field first_update_done boolean
 ---@field floating_views core.view[] Shown views in drawing order
+---@field docks? table<core.node.dock_side, core.node> Stable workspace dock nodes
+---@field document_node? core.node Stable document-area branch
+---@field workspace_node? core.node Workspace containing docks and document panes
 local RootView = View:extend()
 
 function RootView:__tostring() return "RootView" end
@@ -70,6 +73,296 @@ function RootView:new()
   self.first_dnd_processed = false
   self.first_update_done = false
   self.floating_views = {}
+end
+
+---Create the four workspace docks around the document branch, before loading plugins.
+---Also supports isolated RootViews that have not installed application bars.
+function RootView:initialize_docks()
+  if self.docks then return end
+  local documents = self:get_primary_node() or self:select_next_primary_node()
+  assert(documents, "Docks require an editable document area")
+  documents.is_primary_node = true
+  local parent = documents:get_parent_node(self.root_node)
+  self.document_node, self.docks = documents, {}
+  for _, side in ipairs { "left", "right", "top", "bottom" } do
+    local dock = Node("leaf", true)
+    local horizontal = side == "left" or side == "right"
+    dock.dock_side, dock.dock_visible, dock.dock_layouts = side, false, {}
+    dock.dock_extent = horizontal and 250 or 200
+    dock.locked, dock.resizable = { [horizontal and "x" or "y"] = true }, true
+    self.docks[side] = dock
+  end
+  ---Build a protected workspace split without constructing placeholder views.
+  ---@param kind core.node.type Split direction
+  ---@param a core.node First child
+  ---@param b core.node Second child
+  ---@return core.node split Stable layout branch
+  local function split(kind, a, b)
+    local node = Node(kind)
+    node.a, node.b, node.dock_structure = a, b, true
+    return node
+  end
+  local middle = split("vsplit", self.docks.top,
+    split("vsplit", documents, self.docks.bottom))
+  self.workspace_node = split("hsplit", self.docks.left,
+    split("hsplit", middle, self.docks.right))
+  self.workspace_node.dock_workspace = true
+  if parent then
+    parent[parent.a == documents and "a" or "b"] = self.workspace_node
+  else
+    self.root_node = self.workspace_node
+  end
+  core.redraw = true
+end
+
+---Return a stable predefined dock; initializes the workspace if necessary.
+---@param side core.node.dock_side Dock edge
+---@return core.node dock Dock node, including when empty or hidden
+function RootView:get_dock(side)
+  self:initialize_docks()
+  return assert(self.docks[side], "Invalid dock side: " .. tostring(side))
+end
+
+---Return the stable document-area branch, excluding the four shared docks.
+---@return core.node documents Document splits and document-relative panels
+function RootView:get_document_node()
+  self:initialize_docks()
+  return self.document_node
+end
+
+---Find a dock containing a registered view or one of its widget descendants.
+---@param target core.view? View or nested focus target
+---@return core.node? dock Containing dock, or nil when not docked
+function RootView:get_dock_for_view(target)
+  if not target or not self.docks then return end
+  for _, dock in pairs(self.docks) do
+    for _, view in ipairs(dock.views) do
+      if dock.dock_layouts[view]:get_node_for_owned_view(target) then return dock end
+    end
+  end
+end
+
+---Cancel a departing dock view's pointer state and owned popups.
+---@param view core.view View being hidden, moved, removed, or deselected
+---@param restore_focus? boolean Return descendant keyboard focus to the document area
+function RootView:clear_dock_view_input(view, restore_focus)
+  local focused = view:owns_view(core.active_view)
+  if self.grab and view:owns_view(self.grab.view) then self:cancel_mouse_capture() end
+  if view:owns_view(self.overlapping_view) then self:set_hovered_view(nil) end
+  view:on_mouse_left()
+  local dock = self:get_dock_for_view(view)
+  local layout = dock and dock.dock_layouts[view]
+  local children = layout and layout:get_children() or { view }
+  for _, child in ipairs(children) do
+    if child:owns_view(core.next_active_view) then core.next_active_view = nil end
+    if child ~= view then
+      if self.grab and child:owns_view(self.grab.view) then self:cancel_mouse_capture() end
+      if child:owns_view(self.overlapping_view) then self:set_hovered_view(nil) end
+      focused = focused or child:owns_view(core.active_view)
+      child:on_mouse_left()
+    end
+  end
+  for _, popup in ipairs(self:floating_snapshot()) do
+    for _, child in ipairs(children) do
+      if child:owns_view(popup) then popup:hide_floating(); break end
+    end
+  end
+  if view:owns_view(core.next_active_view) then core.next_active_view = nil end
+  if restore_focus and focused then core.set_active_view(self:get_primary_node().active_view) end
+end
+
+---Show or hide an entire dock without removing its views or changing selection.
+---@param side core.node.dock_side Dock edge
+---@param visible boolean Requested visibility; empty docks still occupy no space
+function RootView:set_dock_visible(side, visible)
+  local dock = self:get_dock(side)
+  assert(type(visible) == "boolean", "Dock visibility must be a boolean")
+  if dock.dock_visible == visible then
+    if visible and dock.active_view then self:activate_dock_view(dock.active_view, false) end
+    return
+  end
+  dock.dock_visible = visible
+  if not visible and dock.active_view then self:clear_dock_view_input(dock.active_view, true) end
+  if visible and dock.active_view then self:activate_dock_view(dock.active_view, false) end
+  if self.dragged_divider then self:cancel_mouse_capture() end
+  core.redraw = true
+end
+
+---Set the selected view's requested outer dock width or height in screen pixels, including its header.
+---Each view keeps its own request across selection, hiding, movement, and viewport constraints.
+---@param side core.node.dock_side Dock edge
+---@param size number Positive finite width for side docks, or height for top/bottom
+function RootView:set_dock_size(side, size)
+  assert(type(size) == "number" and size > 0 and size < math.huge, "Dock size must be positive and finite")
+  local dock = self:get_dock(side)
+  local view = dock.active_view
+  if view then
+    local axis = dock.locked.x and "x" or "y"
+    dock:sync_dock_size(view)
+    local _, _, width, height = view:get_floating_bounds()
+    local extent = axis == "x" and width or height
+    local content_size = math.max(0, extent + size - view.dock_layout.extent)
+    if not (view.set_target_size and view:set_target_size(axis, content_size)) then
+      view.dock_size[axis] = size / SCALE
+    end
+  else
+    dock.dock_extent = size / SCALE
+  end
+  core.redraw = true
+end
+
+---Fit two opposing dock requests without allocating temporary layout tables.
+---@param a core.node First dock
+---@param b core.node Opposite dock
+---@param length number Available workspace length on their shared axis
+local function fit_dock_pair(a, b, length)
+  local av, bv = a:get_dock_request(), b:get_dock_request()
+  local available = math.max(0, length - math.min(100 * SCALE, length)
+    - (av > 0 and style.divider_size or 0) - (bv > 0 and style.divider_size or 0))
+  local factor = av + bv > 0 and math.min(1, available / (av + bv)) or 1
+  a.dock_limit, b.dock_limit = av * factor, bv * factor
+end
+
+---Limit opposing dock requests while reserving document space in a small viewport.
+---Called during workspace layout; never overwrites the requested dock thicknesses.
+---@param width number Available workspace width
+---@param height number Available workspace height
+function RootView:fit_docks(width, height)
+  fit_dock_pair(self.docks.left, self.docks.right, width)
+  fit_dock_pair(self.docks.top, self.docks.bottom, height)
+end
+
+---Options for adding or moving a dock view without stealing startup focus.
+---@class core.rootview.dock_options
+---@field activate? boolean Select the view in its dock; defaults to true
+---@field focus? boolean Focus the selected view's focus target; defaults to false
+---Register an unattached view in a dock, revealing the area without duplicating views.
+---Detach views from ordinary nodes or floating placement before registering them.
+---@param view core.view View to register
+---@param side core.node.dock_side Destination edge
+---@param options? core.rootview.dock_options Selection and keyboard focus policy
+---@return core.node dock Destination dock node
+function RootView:add_dock_view(view, side, options)
+  local dock = self:get_dock(side)
+  options = options or {}
+  local previous = self:get_dock_for_view(view)
+  assert(not previous or previous == dock, "Use move_dock_view() to change docks")
+  assert(not previous or previous:get_view_idx(view), "Detach the view from its dock layout before registering it")
+  assert(not view.parent and not view.subparent and not view.floating_visible,
+    "Detach the view from its container or floating placement before docking")
+  local node = self.root_node:get_node_for_view(view)
+  assert(not node or previous == dock, "Remove the view from its node before docking")
+  if not previous then
+    if view.floating then view:set_floating(false) end
+    table.insert(dock.views, view)
+    local layout = Node("leaf", true)
+    layout.views, layout.active_view, layout.dock_content = { view }, view, true
+    dock.dock_layouts[view] = layout
+    local _, _, width, height = view:get_floating_bounds()
+    if not view.dock_size then
+      view.dock_size = {
+        x = view.size.x > 0 and width / SCALE or (dock.locked.x and dock.dock_extent or 250),
+        y = view.size.y > 0 and height / SCALE or (dock.locked.y and dock.dock_extent or 200)
+      }
+    end
+    local axis = dock.locked.x and "x" or "y"
+    dock:update_dock_header()
+    local header = axis == "y" and dock:should_show_tabs() and dock.dock_header.height or 0
+    view.dock_layout = { axis = axis, size = view.size[axis], outer_size = axis == "x" and width or height,
+      extent = axis == "x" and width or height + header }
+  end
+  dock.dock_visible = true
+  if options.activate ~= false or not dock.active_view then
+    self:activate_dock_view(view, options.focus == true)
+  end
+  if not previous then view:on_dock_changed(side, nil) end
+  core.redraw = true
+  return dock
+end
+
+---Reveal and select a registered dock view, clearing the previous view's input state.
+---@param view core.view Registered view to select
+---@param focus? boolean Focus get_focus_target(); defaults to true
+---@return boolean selected Whether the view belongs to a dock
+function RootView:activate_dock_view(view, focus)
+  local dock = self:get_dock_for_view(view)
+  if not dock or not dock:get_view_idx(view) then return false end
+  local previous = dock.active_view
+  if previous then dock:sync_dock_size(previous) end
+  dock:sync_dock_size(view)
+  if previous and previous ~= view then
+    self:clear_dock_view_input(previous, focus == false)
+  end
+  dock.dock_visible, dock.active_view = true, view
+  if view.visible == false then
+    if view.show then view:show() else view.visible = true end
+  end
+  if focus ~= false then
+    local target = view:get_focus_target()
+    if target then core.set_active_view(target) end
+  end
+  core.redraw = true
+  return true
+end
+
+---Detach a registered dock view without closing or destroying it.
+---@param view core.view View to detach
+---@return boolean removed Whether the view was registered
+function RootView:remove_dock_view(view)
+  local dock = self:get_dock_for_view(view)
+  local idx = dock and dock:get_view_idx(view)
+  if not idx then return false end
+  local replacement = dock.active_view == view and dock:get_dock_replacement(view)
+  dock:sync_dock_size(view)
+  self:clear_dock_view_input(view, true)
+  table.remove(dock.views, idx)
+  dock.dock_layouts[view] = nil
+  if dock.active_view == view then
+    dock.active_view = replacement or dock.views[idx] or dock.views[#dock.views]
+  end
+  if #dock.views == 0 then dock.dock_visible = false end
+  view.dock_layout = nil
+  view:on_dock_changed(nil, dock.dock_side)
+  core.redraw = true
+  return true
+end
+
+---Move an existing dock view while preserving its state and current keyboard focus.
+---@param view core.view Registered view to move
+---@param side core.node.dock_side Destination edge
+---@param options? core.rootview.dock_options Selection and keyboard focus policy
+---@return core.node dock Destination dock node
+function RootView:move_dock_view(view, side, options)
+  options = options or {}
+  local destination = self:get_dock(side)
+  local source = self:get_dock_for_view(view)
+  assert(source and source:get_view_idx(view), "View is not registered in a dock")
+  if source == destination then return destination end
+  local replacement = source.active_view == view and source:get_dock_replacement(view)
+  source:sync_dock_size(view)
+  local focused = source.dock_layouts[view]:get_node_for_owned_view(core.active_view) ~= nil
+  local target = core.active_view
+  self:clear_dock_view_input(view)
+  local idx = source:get_view_idx(view)
+  table.remove(source.views, idx)
+  if source.active_view == view then
+    source.active_view = replacement or source.views[idx] or source.views[#source.views]
+  end
+  if #source.views == 0 then source.dock_visible = false end
+  table.insert(destination.views, view)
+  destination.dock_layouts[view], source.dock_layouts[view] = source.dock_layouts[view], nil
+  local axis = destination.locked.x and "x" or "y"
+  local _, _, width, height = view:get_floating_bounds()
+  view.dock_layout = { axis = axis, size = view.size[axis], outer_size = axis == "x" and width or height,
+    extent = view.dock_size[axis] * SCALE }
+  destination.dock_visible = true
+  if options.activate ~= false or focused or not destination.active_view then
+    self:activate_dock_view(view, options.focus == true)
+  end
+  view:on_dock_changed(side, source.dock_side)
+  if focused and options.focus ~= true then core.set_active_view(target) end
+  core.redraw = true
+  return destination
 end
 
 ---Register or raise a shown floating view in drawing order.
@@ -256,12 +549,33 @@ end
 ---@return boolean requested Whether the view had a placement to close
 function RootView:close_view(view, on_close)
   if not self.root_node:get_node_for_view(view) and not view.floating_visible then return false end
-  view:try_close(function()
+  local function close()
     local node = self.root_node:get_node_for_view(view)
     if node then node:remove_view(self.root_node, view)
     else view:hide_floating() end
     if on_close then on_close(view) end
-  end)
+  end
+  local dock = self:get_dock_for_view(view)
+  local layout = dock and dock.dock_layouts[view]
+  if layout then
+    local closing, guards, docs = {}, { view }, {}
+    if view:extends(DocView) then docs[view.doc] = true end
+    for _, child in ipairs(layout:get_children()) do
+      closing[child] = true
+      if child:extends(DocView) and not docs[child.doc] then
+        docs[child.doc], guards[#guards + 1] = true, child
+      end
+    end
+    ---Apply existing close guards once per document before removing the entire layout.
+    ---@param index integer Next view guard to run
+    local function confirm(index)
+      if guards[index] then guards[index]:try_close(function() confirm(index + 1) end, closing)
+      else close() end
+    end
+    confirm(1)
+  else
+    view:try_close(close)
+  end
   return true
 end
 
@@ -441,7 +755,7 @@ end
 function RootView:get_active_node_default()
   local node = self.root_node:get_node_for_view(core.active_view)
   if not node then node = self:get_primary_node() end
-  if node.locked then
+  if node.locked or self:get_dock_for_view(core.active_view) then
     local default_view = self:get_primary_node().views[1]
     assert(default_view, "internal error: cannot find original document node.")
     core.set_active_view(default_view)
@@ -455,7 +769,7 @@ end
 ---Primary node is where documents are opened by default.
 ---@return core.node node The primary node
 function RootView:get_primary_node()
-  return get_primary_node(self.root_node)
+  return get_primary_node(self.document_node or self.root_node)
 end
 
 
@@ -480,7 +794,7 @@ end
 ---Used when closing the current primary node.
 ---@return core.node node Next available unlocked node to be primary
 function RootView:select_next_primary_node()
-  return select_next_primary_node(self.root_node)
+  return select_next_primary_node(self.document_node or self.root_node)
 end
 
 
@@ -589,6 +903,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
   local div = self.root_node:get_divider_overlapping_point(x, y)
   local node = self.root_node:get_child_overlapping_point(x, y)
   if not node then return false end
+  if node.dock_side and node:on_dock_header_pressed(button, x, y) then return true end
   if div and (node and not node.active_view:scrollbar_overlaps_point(x, y)) then
     self.dragged_divider = div
     return true
@@ -603,7 +918,7 @@ function RootView:on_mouse_pressed(button, x, y, clicks)
       node:close_view(self.root_node, node.views[idx])
       return true
     else
-      if button == "left" then
+      if button == "left" and not node.dock_content then
         self.dragged_node = { node = node, idx = idx, dragging = false, drag_start_x = x, drag_start_y = y}
       end
       node:set_active_view(node.views[idx])
@@ -688,7 +1003,7 @@ function RootView:on_mouse_released(button, x, y, ...)
         local node = self.root_node:get_child_overlapping_point(self.mouse.x, self.mouse.y)
         local dragged_node = self.dragged_node.node
 
-        if node and not node.locked
+        if node and not node.locked and not self:get_dock_for_view(node.active_view)
            -- don't do anything if dragging onto own node, with only one view
            and (node ~= dragged_node or #node.views > 1) then
           local split_type = node:get_split_type(self.mouse.x, self.mouse.y)
@@ -807,6 +1122,11 @@ function RootView:on_mouse_moved(x, y, dx, dy)
   end
 
   if not self.overlapping_view then return end
+  if overlapping_node.dock_side and overlapping_node:is_in_tab_area(x, y) then
+    self:set_hovered_view(nil)
+    core.request_cursor("arrow")
+    return
+  end
 
   self.overlapping_view:on_mouse_moved(x, y, dx, dy)
   core.request_cursor(self.overlapping_view.cursor)
@@ -1137,7 +1457,7 @@ end
 function RootView:update_drag_overlay()
   if not (self.dragged_node and self.dragged_node.dragging) then return end
   local over = self.root_node:get_child_overlapping_point(self.mouse.x, self.mouse.y)
-  if over and not over.locked then
+  if over and not over.locked and not self:get_dock_for_view(over.active_view) then
     local _, _, _, tab_h = over:get_scroll_button_rect(1)
     local x, y = over.position.x, over.position.y
     local w, h = over.size.x, over.size.y

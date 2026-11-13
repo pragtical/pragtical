@@ -600,6 +600,7 @@ function core.init()
   cur_node = cur_node.b
   cur_node = cur_node:split("down", core.command_view, {y = true})
   cur_node = cur_node:split("down", core.status_view, {y = true})
+  core.root_view:initialize_docks()
 
   -- Load default commands first so plugins can override them
   command.add_defaults()

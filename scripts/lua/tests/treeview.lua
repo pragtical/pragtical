@@ -61,6 +61,9 @@ test.describe("treeview context menu", function()
     context.root, context.active, context.last, context.next = core.root_view, core.active_view, core.last_active_view, core.next_active_view
     context.transitions, context.highlight = config.transitions, config.plugins.treeview.highlight_focused_file
     context.redraw = core.redraw
+    context.animation_type, context.animation_rate = config.animation_type, config.animation_rate
+    context.fps, context.core_fps = config.fps, core.fps
+    context.tree_transition = config.disabled_transitions.treeview
     context.toolbar_position = config.plugins.treeview.toolbar_position
     context.tree = {}
     for key, value in pairs(tree) do context.tree[key] = value end
@@ -76,7 +79,8 @@ test.describe("treeview context menu", function()
     core.root_view.root_node.is_primary_node = true
     core.root_view.size.x, core.root_view.size.y = 900, 600
     core.active_view = core.root_view.root_node.active_view
-    tree.node = core.root_view.root_node:split("left", tree, { x = true }, true)
+    core.root_view:add_dock_view(tree, "left")
+    core.root_view:set_dock_size("left", tree.target_size)
     local project = core.root_project()
     context.items = {
       { name = "view.lua", filename = "data/core/view.lua", type = "file", depth = 1,
@@ -106,6 +110,9 @@ test.describe("treeview context menu", function()
     core.root_view, core.active_view, core.last_active_view, core.next_active_view = context.root, context.active, context.last, context.next
     config.transitions, config.plugins.treeview.highlight_focused_file = context.transitions, context.highlight
     core.redraw = context.redraw
+    config.animation_type, config.animation_rate = context.animation_type, context.animation_rate
+    config.fps, core.fps = context.fps, context.core_fps
+    config.disabled_transitions.treeview = context.tree_transition
     config.plugins.treeview.toolbar_position = context.toolbar_position
     common.open_in_system = context.open_in_system
     command.map["project-search:find"] = context.find
@@ -115,6 +122,40 @@ test.describe("treeview context menu", function()
   end)
 
   for _, position in ipairs { "left", "top", "bottom", "right" } do
+    for _, animation_type in ipairs { "linear", "constant" } do
+      test.test(animation_type .. " tree toggle retains its size animation with toolbar on the " .. position, function()
+        local root = core.root_view
+        tree:set_toolbar_position(position)
+        tree:attach_toolbar(ToolbarView())
+        root:update(); root:update()
+        local dock, width = root:get_dock_for_view(tree), tree.size.x
+        local layout = dock.dock_layouts[tree]
+        local target = tree.target_size
+        config.transitions, config.animation_type, config.animation_rate = true, animation_type, 1
+        config.fps, core.fps = 60, 60
+        config.disabled_transitions.treeview = false
+        test.ok(command.perform("treeview:toggle"))
+        root:update()
+        test.ok(tree.size.x > 0 and tree.size.x < width)
+        local closing = tree.size.x
+        test.ok(command.perform("treeview:toggle"))
+        root:update()
+        test.ok(tree.size.x > closing and tree.size.x <= width)
+        test.ok(command.perform("treeview:toggle"))
+        for _ = 1, 80 do root:update() end
+        test.equal(dock.size.x, 0)
+        test.equal(root:get_dock_for_view(tree), dock)
+        test.equal(dock.dock_layouts[tree], layout)
+        test.ok(command.perform("treeview:toggle"))
+        root:update()
+        test.ok(tree.size.x > 0 and tree.size.x < width)
+        for _ = 1, 80 do root:update() end
+        test.equal(tree.size.x, width)
+        test.equal(tree.target_size, target)
+        test.equal(dock.dock_layouts[tree], layout)
+      end)
+    end
+
     test.test("hovers and clicks the full tree width with the toolbar on the " .. position, function(context)
       tree:set_toolbar_position(position)
       tree:attach_toolbar(ToolbarView())
@@ -199,6 +240,18 @@ test.describe("treeview context menu", function()
       test.not_ok(core.redraw, "A settled extent must not keep requesting frames")
     end)
   end
+
+  test.test("disabled tree transitions still toggle immediately", function()
+    config.transitions, config.disabled_transitions.treeview = true, true
+    local root, width = core.root_view, tree.size.x
+    local dock = root:get_dock_for_view(tree)
+    command.perform("treeview:toggle")
+    root:update()
+    test.equal(dock.size.x, 0)
+    command.perform("dock:toggle-left")
+    root:update()
+    test.equal(tree.size.x, width)
+  end)
 
   test.test("keeps the context after right release transfers hover to the menu", function(context)
     right_click(context)
