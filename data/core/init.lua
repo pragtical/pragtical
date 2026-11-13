@@ -2111,15 +2111,12 @@ function core.run_step()
   local focus_changed = focused ~= run_has_focus
   run_has_focus = focused
   local has_events = system.has_pending_events()
-  if has_events then
-    run_next_step     = nil
-  end
+  -- Process early input without discarding a pending animation update.
+  local step_requested = focus_changed or core.redraw or has_events
   -- Only activity renews the grace period; timer wakeups do not.
   if (focus_changed and focused) or core.redraw or has_events then
     run_skip_no_focus = now + 5
-    run_next_step = nil
   end
-  if focus_changed then run_next_step = nil end
 
   -- set the run mode
   if
@@ -2140,7 +2137,7 @@ function core.run_step()
   if core.redraw then
     run_skip_no_focus = now + 5
     run_threads_mode = "all"
-    run_next_step = nil
+    step_requested = true
   end
   if core.restart_request or core.quit_request then return false end
 
@@ -2152,10 +2149,10 @@ function core.run_step()
   else
     -- listen events and perform drawing as needed
     local did_redraw = false
-    if not run_next_step or now >= math.min(run_next_step, next_update_time) then
+    if step_requested or not run_next_step or now >= math.min(run_next_step, next_update_time) then
       did_redraw    = core.step(run_next_frame_time)
       now           = system.get_time()
-      run_next_step = nil
+      if run_next_step and now >= run_next_step then run_next_step = nil end
     end
     if core.restart_request or core.quit_request then return false end
     if not did_redraw then
