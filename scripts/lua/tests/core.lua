@@ -675,6 +675,84 @@ end
 ]=])
   end)
 
+  for _, animation in ipairs { "lerp", "constant" } do
+    test.test("hover-switched menus finish opening after early mouse movement with " .. animation, function(c)
+      run_child(c, "local animation = " .. string.format("%q", animation) .. "\n" .. [=[
+local core = require "core"
+local config = require "core.config"
+local run = core.run
+config.transitions, config.show_menubar = true, true
+config.animation_type, config.animation_rate = animation, 1
+config.disabled_transitions.contextmenu = false
+core.run = function()
+  run()
+  local ok, err = xpcall(function()
+    local now = system.get_time() + 1
+    local events = {}
+    system.get_time = function() return now end
+    system.window_has_focus = function() return true end
+    system.has_pending_events = function() return #events > 0 end
+    system.poll_event = function()
+      local event = table.remove(events, 1)
+      if event then return table.unpack(event) end
+    end
+    core.threads, core.background_threads = {}, 0
+    core.fps, config.fps, core.co_max_time = 60, 60, 0.012
+    local function iterate()
+      local running, wait = core.run_step()
+      assert(running and wait >= 0, "invalid scheduler result")
+      return wait
+    end
+    local function settle()
+      for _ = 1, 200 do
+        local wait = iterate()
+        if wait == math.huge then return end
+        now = now + math.max(wait, 0.000001)
+      end
+      error("menu kept waking the editor after settling")
+    end
+    settle()
+    local labels = {}
+    local entries = core.menu_view:entries()
+    local _, y, _, height = core.menu_view:get_bounds()
+    for index, _, x, width in core.menu_view:each_label() do
+      labels[entries[index].id] = { x = x + width / 2, y = y + height / 2 }
+    end
+    local first, second = labels.file, labels.view
+    assert(first and second, "menu labels are unavailable")
+    events = {
+      { "mousemoved", first.x, first.y, 0, 0 },
+      { "mousepressed", "left", first.x, first.y, 1 },
+      { "mousereleased", "left", first.x, first.y }
+    }
+    settle()
+    local menu = core.menu_view.menu
+    assert(menu.show_context_menu and menu.height == menu.size.y)
+    events = { { "mousemoved", second.x, second.y, second.x - first.x, 0 } }
+    local wait = iterate()
+    assert(wait > 0.001 and wait < math.huge, "menu did not schedule its next frame")
+    assert(menu.height > 0 and menu.height < menu.size.y, "menu did not begin opening")
+    local started = now
+    now = now + 0.001
+    events = { { "mousemoved", second.x + 0.1, second.y, 0.1, 0 } }
+    local partial_height = menu.height
+    wait = iterate()
+    assert(menu.height == partial_height, "early mouse movement bypassed the frame limit")
+    assert(wait > 0 and wait < math.huge, "early mouse movement lost the pending menu frame")
+    now = now + wait
+    settle()
+    assert(menu.height == menu.size.y, "hover-switched menu stopped opening without input")
+    assert(now - started >= 1 / 60, "menu animation ignored the frame limit")
+    assert(iterate() == math.huge, "opened menu kept waking the editor")
+  end, debug.traceback)
+  if not ok then print(err) end
+  core.quit(true, ok and 0 or 1)
+  core.run_step = function() return false end
+end
+]=])
+    end)
+  end
+
   test.test("coroutine batches keep visualizer frames responsive after slow work", function(c)
     run_child(c, [=[
 local core = require "core"
