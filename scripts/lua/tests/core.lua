@@ -661,7 +661,8 @@ core.run = function()
       local wait = iterate()
       if progress == 5 and wait == math.huge then break end
       assert(wait < math.huge, "animation went to sleep before settling")
-      now = now + wait + 0.000001
+      -- Browser clocks can report exactly the frame deadline on successive reads.
+      now = now + wait
     end
     assert(progress == 5 and draws - previous_draws == 5, "coroutine wakeups lost an animation frame")
     assert(now - started >= 4 / 60, "animation ignored the frame limit")

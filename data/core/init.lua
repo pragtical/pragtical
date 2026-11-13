@@ -1827,7 +1827,7 @@ function core.step(next_frame_time)
   local uncapped = stats_config == "uncapped"
   local priority_event = event_received and event_received ~= "mousemoved"
   core.root_view.size.x, core.root_view.size.y = width, height
-  if uncapped or priority_event or next_frame_time < system.get_time() then
+  if uncapped or priority_event or next_frame_time <= system.get_time() then
     next_update_time = math.huge
     core.root_view:update()
   end
