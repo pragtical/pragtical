@@ -1,5 +1,170 @@
 # Changes Log
 
+## [3.15.0] - 2026-11-14
+
+### New Features
+
+* Add automatic system font fallback for missing graphemes
+  ([#712](https://github.com/pragtical/pragtical/pull/712))
+
+* Add searchable Settings and per-setting reset controls
+  ([#693](https://github.com/pragtical/pragtical/pull/693),
+  [#695](https://github.com/pragtical/pragtical/pull/695))
+
+* Keep workspace sessions on disk and add optional recovery autosave
+  ([#718](https://github.com/pragtical/pragtical/pull/718))
+
+* Add clipboard MIME data APIs and file-path paste fallback on Linux
+  ([#684](https://github.com/pragtical/pragtical/pull/684))
+
+* Add project-scoped persistent storage with data-only loading
+  ([#680](https://github.com/pragtical/pragtical/pull/680))
+
+### Enhancements
+
+* Use graphemes for caret movement, deletion and wrapping
+  ([#714](https://github.com/pragtical/pragtical/pull/714))
+
+* Reduce idle view updates and add scheduled update requests
+  ([#652](https://github.com/pragtical/pragtical/pull/652))
+
+* Optimize rendering cache damage tracking and command replay
+  ([#697](https://github.com/pragtical/pragtical/pull/697))
+
+* Optimize native tokenizer state reuse and pattern matching
+  ([#709](https://github.com/pragtical/pragtical/pull/709))
+
+* Reduce SDL GPU pixel upload copies
+  ([#713](https://github.com/pragtical/pragtical/pull/713))
+
+* Preview fonts while browsing command prompt suggestions
+  ([#674](https://github.com/pragtical/pragtical/pull/674))
+
+* Wrap at the configured column limit, with viewport wrapping still available
+  ([#699](https://github.com/pragtical/pragtical/pull/699))
+
+* Add the doc:center-cursor command
+  ([#688](https://github.com/pragtical/pragtical/pull/688))
+
+* Improve borderless window outlines, focus indication and Windows shadows
+  ([#691](https://github.com/pragtical/pragtical/pull/691))
+
+* Use Fontello icons for menus and audio controls
+  ([#678](https://github.com/pragtical/pragtical/pull/678))
+
+* Allow larger autocomplete minimum lengths
+  ([#648](https://github.com/pragtical/pragtical/pull/648))
+
+* Refine project storage validation and remove its file-size limit
+  ([7b607c16](https://github.com/pragtical/pragtical/commit/7b607c16),
+  [ac2c487c](https://github.com/pragtical/pragtical/commit/ac2c487c))
+
+### Fixes
+
+* Fix SDL GPU polygon fills and antialiased edge coverage
+  ([#650](https://github.com/pragtical/pragtical/pull/650))
+
+* Preserve startup defaults when no video display is available
+  ([#654](https://github.com/pragtical/pragtical/pull/654))
+
+* Redraw views and widgets after their first update
+  ([#655](https://github.com/pragtical/pragtical/pull/655),
+  [#685](https://github.com/pragtical/pragtical/pull/685))
+
+* Save absolute workspace directory paths and skip missing roots
+  ([#657](https://github.com/pragtical/pragtical/pull/657))
+
+* Keep canvases alive until frame completion
+  ([#658](https://github.com/pragtical/pragtical/pull/658))
+
+* Redraw after asynchronous node view closures
+  ([#659](https://github.com/pragtical/pragtical/pull/659))
+
+* Fix Lua tokenizer loops when nested syntax closes at line end
+  ([#663](https://github.com/pragtical/pragtical/pull/663))
+
+* Provide an operator fallback for character.special syntax colors
+  ([#665](https://github.com/pragtical/pragtical/pull/665))
+
+* Respect exclusive selection ends when drawing whitespace
+  ([#668](https://github.com/pragtical/pragtical/pull/668))
+
+* Detect SVG and XHTML syntax by filename extension
+  ([#669](https://github.com/pragtical/pragtical/pull/669))
+
+* Keep word-wrap indentation attached to its first word
+  ([#671](https://github.com/pragtical/pragtical/pull/671))
+
+* Fix nested dialog ownership, stacking and focus restoration
+  ([#673](https://github.com/pragtical/pragtical/pull/673))
+
+* Initialize accepted TCP connection state and return nil without a client
+  ([#677](https://github.com/pragtical/pragtical/pull/677))
+
+* Fix native resource leaks and buffer overflows
+  ([#686](https://github.com/pragtical/pragtical/pull/686))
+
+* Preserve saved fonts when options are omitted and improve hinting errors
+  ([#689](https://github.com/pragtical/pragtical/pull/689))
+
+* Keep nested Widget controls redrawing through layout changes
+  ([#700](https://github.com/pragtical/pragtical/pull/700))
+
+* Highlight Markdown link labels that span multiple lines
+  ([#706](https://github.com/pragtical/pragtical/pull/706))
+
+* Remove excess Markdown inline code background padding
+  ([#707](https://github.com/pragtical/pragtical/pull/707))
+
+* Fix wrapped-line mouse positioning and final-column selection
+  ([#708](https://github.com/pragtical/pragtical/pull/708))
+
+* Render color and tag flags correctly and avoid repeated failed font lookups
+  ([#715](https://github.com/pragtical/pragtical/pull/715))
+
+* Keep SelectBox options visible when reopening scrolled popups
+  ([#716](https://github.com/pragtical/pragtical/pull/716))
+
+* Run scheduled updates at exact frame deadlines
+  ([#719](https://github.com/pragtical/pragtical/pull/719))
+
+* Preserve pending animation updates after input without a redraw
+  ([#720](https://github.com/pragtical/pragtical/pull/720))
+
+* Clarify clipboard video MIME validation
+  ([e3027d3c](https://github.com/pragtical/pragtical/commit/e3027d3c))
+
+### Build System
+
+* Build official Windows packages with MSVC, including LTO and PGO
+  ([#701](https://github.com/pragtical/pragtical/pull/701))
+
+* Update SDL3 to v3.4.20 and retain the Wayland clipboard ownership fix
+  ([#698](https://github.com/pragtical/pragtical/pull/698))
+
+* Update Plugin Manager to v1.8.0 with installed-version tracking
+  ([#653](https://github.com/pragtical/pragtical/pull/653),
+  [#667](https://github.com/pragtical/pragtical/pull/667),
+  [#687](https://github.com/pragtical/pragtical/pull/687))
+
+* Update bundled language plugins and the plugin catalog
+  ([#666](https://github.com/pragtical/pragtical/pull/666),
+  [0e39bd9c](https://github.com/pragtical/plugins/commit/0e39bd9c))
+
+* Include a PNG .DirIcon in AppImages
+  ([#664](https://github.com/pragtical/pragtical/pull/664))
+
+* Avoid listener port reuse in loopback tests
+  ([#679](https://github.com/pragtical/pragtical/pull/679))
+
+### Other Changes
+
+* Remove the obsolete command prompt file-count status icon
+  ([#651](https://github.com/pragtical/pragtical/pull/651))
+
+* Add 0riginaln0 to the About dialog contributors
+  ([#672](https://github.com/pragtical/pragtical/pull/672))
+
 ## [3.14.0] - 2026-10-20
 
 ### New Features
@@ -3846,6 +4011,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.15.0]: https://github.com/pragtical/pragtical/releases/tag/v3.15.0
 [3.14.0]: https://github.com/pragtical/pragtical/releases/tag/v3.14.0
 [3.13.1]: https://github.com/pragtical/pragtical/releases/tag/v3.13.1
 [3.13.0]: https://github.com/pragtical/pragtical/releases/tag/v3.13.0

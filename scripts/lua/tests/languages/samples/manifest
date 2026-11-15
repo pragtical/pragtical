@@ -124,4 +124,5 @@ return {
   { path = "121_yaml.yaml", name = "YAML", files = "%.yml$|%.yaml$" },
   { path = "122_zig.zig", name = "Zig", files = "%.zig$" },
   { path = "123_json.json", name = "JSON", files = "%.json$|%.cjson$|%.jsonc$|%.ipynb$" },
+  { path = "124_erlang.erl", name = "Erlang", files = "%.erl$|%.hrl$|%.escript$|^escript$|/escript$" },
 }
