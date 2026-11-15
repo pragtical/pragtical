@@ -850,6 +850,14 @@ test.describe("settings scrolling", function()
           or name == "core" and view.core_sections or view[name]
         local scroller = find_child(pane, ListBox) or pane
         test.ok(scroller:get_scrollable_size() > scroller.size.y + 31)
+        if name == "core" then
+          test.near(pane.position.x, pane.parent.position.x, 1e-6)
+          test.near(pane.size.x, pane.parent.size.x, 1e-6)
+          local first = pane.panes[1]
+          test.near(first.tab.position.x - pane.position.x, style.padding.x, 1e-6)
+          test.near(first.tab.position.x + first.tab:get_width(),
+            pane.position.x + pane.size.x - style.padding.x, 1e-6)
+        end
         capture()
         for _, pair in ipairs { { 30.1, 30.4 }, { 30.6, 30.9 } } do
           scroller.scroll.y, scroller.scroll.to.y = pair[1], pair[1]
