@@ -1865,15 +1865,6 @@ function SettingsSections:filter(value, force)
   core.redraw = true
 end
 
----Keep section separators inside the scrolling viewport below the search field.
----@return boolean drawn
-function SettingsSections:draw()
-  core.push_clip_rect(self.position.x, self.position.y, self.size.x, self.size.y)
-  local drawn = SettingsSections.super.draw(self)
-  core.pop_clip_rect()
-  return drawn
-end
-
 ---@class settings.ui : widget
 ---@field private notebook widget.notebook
 ---@field private core widget
@@ -2810,22 +2801,11 @@ end
 ---@param top? number Top edge below a fixed search field
 local function layout_settings_section(section, top)
   local height = top and math.max(0, section.parent.size.y - top) or section:get_real_height()
-  section:set_size(
-    section.parent.size.x - style.padding.x,
-    height
-  )
-  section:set_position(style.padding.x / 2, top or 0)
+  section:set_size(section.parent.size.x, height)
+  section:set_position(0, top or 0)
 
   for _, pane in ipairs(section.panes) do
-    local width = pane.container:get_width()
-    if top then
-      -- Keep nested controls outside the section scrollbar's expanded hit area.
-      width = width - math.max(
-        style.scrollbar_size + style.contracted_scrollbar_margin,
-        style.expanded_scrollbar_size + style.expanded_scrollbar_margin
-      )
-    end
-    layout_settings_childs(pane.container.childs, width)
+    layout_settings_childs(pane.container.childs, pane.container:get_width())
   end
 end
 
