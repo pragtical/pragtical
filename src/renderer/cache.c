@@ -476,13 +476,17 @@ static int collect_dirty_rects(RenCache *rc, int width, int height) {
   return count;
 }
 
-/* Compare deterministic records, stopping once changed draws occupy a quarter
- * of the list. Clip state matters only where it changes a draw's coverage. */
+/* Compare the common prefix even when a list grows or shrinks, stopping once
+ * changed records occupy a quarter of the larger list. Clip state matters only
+ * where it changes a draw's coverage. */
 static enum CommandChanges command_changes(RenCache *rc) {
-  if (rc->previous_command_size != rc->command_buf_idx) return COMMANDS_SPARSE;
-  size_t changed = 0;
+  size_t size = rc->command_buf_idx, previous_size = rc->previous_command_size;
+  size_t common_size = size < previous_size ? size : previous_size;
+  size_t largest_size = size > previous_size ? size : previous_size;
+  size_t changed = largest_size - common_size;
+  if (changed > largest_size / 4) return COMMANDS_DENSE;
   RenRect clip = rc->screen_rect, previous_clip = clip;
-  for (size_t offset = 0; offset < rc->command_buf_idx;) {
+  for (size_t offset = 0; offset < common_size;) {
     Command *cmd = (Command*)(rc->command_buf + offset);
     Command *previous = (Command*)(rc->previous_command_buf + offset);
     if (cmd->size != previous->size || cmd->type != previous->type) return COMMANDS_SPARSE;
@@ -494,7 +498,7 @@ static enum CommandChanges command_changes(RenCache *rc) {
                 !rects_equal(intersect_rects(cmd->command[0], clip),
                              intersect_rects(previous->command[0], previous_clip)))) {
       changed += cmd->size;
-      if (changed > rc->command_buf_idx / 4) return COMMANDS_DENSE;
+      if (changed > largest_size / 4) return COMMANDS_DENSE;
     }
     offset += cmd->size;
   }

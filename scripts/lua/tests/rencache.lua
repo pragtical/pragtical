@@ -92,6 +92,54 @@ test.describe("render cache", function()
     test.equal(target:get_pixels(0, 0, 1, 1):byte(4), 0)
   end)
 
+  test.test("preserves dense replay as command lists grow and shrink", function()
+    local window = renwindow.create("Changing command count", 360, 240)
+    local count, phase = 7000, 0
+    local function scene()
+      renderer.draw_rect(0, 0, 360, 240, {20 + phase, 25, 30, 255})
+      renderer.set_clip_rect(10.25, 12.5, 320, 210)
+      for i = 1, count do
+        renderer.draw_rect(12 + i % 78 * 4, 16 + math.floor(i % 3900 / 78) * 4,
+          2, 2, phase % 2 == 0 and red or green)
+      end
+      renderer.set_clip_rect(150.5, 40.5, 70, 80)
+      renderer.draw_rect(120, 20, 150, 130, {40, 80, 220, 110})
+    end
+    for i, amount in ipairs {7000, 7100, 6900, 100, 9200} do
+      count, phase = amount, i
+      frame(window, scene)
+      local reference = renwindow.create("Command count reference", 360, 240)
+      frame(reference, scene)
+      test.ok(pixels(window) == pixels(reference), "incorrect command count transition " .. i)
+    end
+    frame(window, scene)
+    local before = pixels(window)
+    renderer.show_debug(true)
+    frame(window, scene)
+    test.ok(pixels(window) == before, "unchanged list should remain cached")
+  end)
+
+  test.test("handles changed record sizes in unequal command lists", function()
+    local window = renwindow.create("Changing record sizes", 360, 240)
+    local font = renderer.font.load(DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", 14)
+    local text, count = "a", 7000
+    local function scene()
+      renderer.draw_rect(0, 0, 360, 240, {20 + count % 50, 25, 30, 255})
+      renderer.draw_text(font, text, 8, 8, red)
+      for i = 1, count do
+        renderer.draw_rect(8 + i % 80 * 4, 40 + math.floor(i % 3200 / 80) * 4,
+          2, 2, green)
+      end
+    end
+    for i, value in ipairs {"a", string.rep("word ", 20), "short", "a"} do
+      text, count = value, 7000 + i * 3
+      frame(window, scene)
+      local reference = renwindow.create("Record size reference", 360, 240)
+      frame(reference, scene)
+      test.ok(pixels(window) == pixels(reference), "incorrect record size transition " .. i)
+    end
+  end)
+
   test.test("restores partial replay after a dense frame", function()
     local window = renwindow.create("Dense-to-sparse replay", 900, 650)
     local font = renderer.font.load(DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", 14)
