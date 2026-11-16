@@ -321,6 +321,20 @@ static int gpu_device_ref_count = 0;
 static bool gpu_backend_disabled = false;
 static bool gpu_window_device_ready = false;
 static bool gpu_device_prefer_low_power = false;
+static struct {
+  bool initialized;
+  bool direct_replay;
+  bool native_text;
+  bool native_rects;
+  bool native_canvas;
+  bool stats;
+  bool present_sync;
+  bool validate_text;
+  bool validate_probe;
+  bool full_frame;
+  size_t full_frame_command_bytes;
+  GpuPowerPreference power;
+} gpu_options;
 static SDL_GPUGraphicsPipeline *gpu_canvas_blend_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_canvas_batch_pipeline = NULL;
 static SDL_GPUGraphicsPipeline *gpu_canvas_batch_replace_pipeline = NULL;
@@ -428,41 +442,68 @@ static GpuPowerPreference gpu_power_preference(void) {
   return GPU_POWER_AUTO;
 }
 
+static size_t gpu_full_frame_command_threshold(void) {
+  const char *value = SDL_getenv("PRAGTICAL_SDLGPU_FULL_FRAME_COMMAND_BYTES");
+  if (!value || !*value)
+    return 256 * 1024;
+  char *end = NULL;
+  unsigned long long threshold = SDL_strtoull(value, &end, 10);
+  if (end == value)
+    return 256 * 1024;
+  return threshold > (unsigned long long) SIZE_MAX ? SIZE_MAX : (size_t) threshold;
+}
+
+static void gpu_init_options(void) {
+  if (gpu_options.initialized)
+    return;
+
+  /* Backend selection follows startup overrides and precedes resource creation.
+   * Keep options for the process lifetime, including device recreation. */
+  gpu_options.direct_replay = gpu_env_flag("PRAGTICAL_SDLGPU_DIRECT_REPLAY", true);
+  gpu_options.validate_text = gpu_env_flag("PRAGTICAL_SDLGPU_VALIDATE_TEXT", false);
+  gpu_options.native_text = GPU_NATIVE_TEXT_ENABLED || gpu_options.direct_replay
+    || gpu_options.validate_text || gpu_env_flag("PRAGTICAL_SDLGPU_NATIVE_TEXT", false);
+  gpu_options.native_rects = GPU_NATIVE_RECT_ENABLED || gpu_options.direct_replay
+    || gpu_env_flag("PRAGTICAL_SDLGPU_NATIVE_RECTS", false);
+  gpu_options.native_canvas = GPU_NATIVE_CANVAS_ENABLED || gpu_options.direct_replay
+    || gpu_env_flag("PRAGTICAL_SDLGPU_NATIVE_CANVAS", false);
+  gpu_options.stats = gpu_env_flag("PRAGTICAL_SDLGPU_STATS", false);
+  gpu_options.present_sync = gpu_env_flag("PRAGTICAL_SDLGPU_PRESENT_SYNC", false);
+  gpu_options.validate_probe = gpu_env_flag("PRAGTICAL_SDLGPU_VALIDATE_PROBE", true);
+  gpu_options.full_frame = gpu_env_flag("PRAGTICAL_SDLGPU_FULL_FRAME", false);
+  gpu_options.full_frame_command_bytes = gpu_full_frame_command_threshold();
+  gpu_options.power = gpu_power_preference();
+  gpu_options.initialized = true;
+}
+
 static const char *gpu_power_name(bool prefer_low_power) {
   return prefer_low_power ? "low" : "high";
 }
 
 static bool gpu_native_text_enabled(void) {
-  return GPU_NATIVE_TEXT_ENABLED
-      || gpu_env_flag("PRAGTICAL_SDLGPU_NATIVE_TEXT", false)
-      || gpu_env_flag("PRAGTICAL_SDLGPU_DIRECT_REPLAY", true)
-      || gpu_env_flag("PRAGTICAL_SDLGPU_VALIDATE_TEXT", false);
+  return gpu_options.native_text;
 }
 
 static bool gpu_native_rect_enabled(void) {
-  return GPU_NATIVE_RECT_ENABLED
-      || gpu_env_flag("PRAGTICAL_SDLGPU_NATIVE_RECTS", false)
-      || gpu_env_flag("PRAGTICAL_SDLGPU_DIRECT_REPLAY", true);
+  return gpu_options.native_rects;
 }
 
 static bool gpu_native_canvas_enabled(void) {
-  return GPU_NATIVE_CANVAS_ENABLED
-      || gpu_env_flag("PRAGTICAL_SDLGPU_NATIVE_CANVAS", false)
-      || gpu_env_flag("PRAGTICAL_SDLGPU_DIRECT_REPLAY", true);
+  return gpu_options.native_canvas;
 }
 
 static bool gpu_stats_enabled(void) {
-  return gpu_env_flag("PRAGTICAL_SDLGPU_STATS", false);
+  return gpu_options.stats;
 }
 
 static bool gpu_direct_replay_enabled(void) {
-  return gpu_env_flag("PRAGTICAL_SDLGPU_DIRECT_REPLAY", true);
+  return gpu_options.direct_replay;
 }
 
 static bool gpu_present_sync_forced(void) {
   /* Debug/rollback override: force a CPU<->GPU fence wait every present, like
      the original always-synchronous behavior. */
-  return gpu_env_flag("PRAGTICAL_SDLGPU_PRESENT_SYNC", false);
+  return gpu_options.present_sync;
 }
 
 static bool gpu_native_text_supported(SDL_GPUDevice *device) {
@@ -473,7 +514,7 @@ static bool gpu_native_text_supported(SDL_GPUDevice *device) {
 }
 
 static bool gpu_validate_text_enabled(void) {
-  return gpu_env_flag("PRAGTICAL_SDLGPU_VALIDATE_TEXT", false);
+  return gpu_options.validate_text;
 }
 
 typedef struct {
@@ -4409,7 +4450,7 @@ static bool gpu_queue_native_text_validation_download(
   if (!source_texture || !source_w || !source_h)
     return false;
 
-  if (data->validation_text_pending && gpu_env_flag("PRAGTICAL_SDLGPU_VALIDATE_PROBE", true))
+  if (data->validation_text_pending && gpu_options.validate_probe)
     gpu_draw_validation_probe(data, cmd);
 
   SDL_Rect bounds = {
@@ -4755,7 +4796,7 @@ static void gpu_log_device(SDL_GPUDevice *device, const char *prefix, bool prefe
 
 static SDL_GPUDevice *gpu_get_device(void) {
   if (!gpu_device) {
-    GpuPowerPreference preference = gpu_power_preference();
+    GpuPowerPreference preference = gpu_options.power;
     bool prefer_low_power = preference != GPU_POWER_HIGH;
     gpu_device = gpu_create_device(prefer_low_power);
     if (gpu_device)
@@ -4826,7 +4867,7 @@ static bool gpu_init_window(RenWindow *ren) {
       return false;
     }
   } else {
-    GpuPowerPreference preference = gpu_power_preference();
+    GpuPowerPreference preference = gpu_options.power;
     bool attempts[2];
     int attempt_count = 0;
     if (preference == GPU_POWER_LOW) {
@@ -5861,18 +5902,7 @@ static bool gpu_can_native_region(RenCache *rc, UNUSED RenSurface *surface, UNUS
 }
 
 static bool gpu_full_frame_regions_enabled(void) {
-  return gpu_env_flag("PRAGTICAL_SDLGPU_FULL_FRAME", false);
-}
-
-static size_t gpu_full_frame_command_threshold(void) {
-  const char *value = SDL_getenv("PRAGTICAL_SDLGPU_FULL_FRAME_COMMAND_BYTES");
-  if (!value || !*value)
-    return 256 * 1024;
-  char *end = NULL;
-  unsigned long long threshold = SDL_strtoull(value, &end, 10);
-  if (end == value)
-    return 256 * 1024;
-  return threshold > (unsigned long long) SIZE_MAX ? SIZE_MAX : (size_t) threshold;
+  return gpu_options.full_frame;
 }
 
 static bool gpu_use_full_frame_regions(RenCache *rc, bool *force) {
@@ -5882,7 +5912,7 @@ static bool gpu_use_full_frame_regions(RenCache *rc, bool *force) {
   if (*force)
     return true;
 
-  size_t threshold = gpu_full_frame_command_threshold();
+  size_t threshold = gpu_options.full_frame_command_bytes;
   return threshold > 0 && rc->command_buf_idx >= threshold;
 }
 
@@ -6183,5 +6213,6 @@ static const RenBackend sdlgpu_backend = {
 };
 
 const RenBackend *renbackend_sdlgpu(void) {
+  gpu_init_options();
   return &sdlgpu_backend;
 }

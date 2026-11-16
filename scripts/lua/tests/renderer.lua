@@ -147,3 +147,67 @@ test.describe("renderer glyph atlases", function()
     end
   end)
 end)
+
+test.describe("renderer startup options", function()
+  test.after_each(function(context)
+    if context.child and context.child:running() then
+      context.child:kill()
+      context.child:wait(process.WAIT_INFINITE, 0.01)
+    end
+    if context.root then common.rm(context.root, true) end
+  end)
+
+  test.test("keeps SDLGPU options after the first font selects the backend", function(context)
+    if require("core").window:get_renderer_info().backend ~= "sdlgpu" then
+      test.skip_now("requires the SDLGPU backend")
+    end
+    context.root = USERDIR .. "/renderer-options-" .. system.get_process_id()
+      .. "-" .. math.floor(system.get_time() * 1e6)
+    test.ok(common.mkdirp(context.root))
+    local script = context.root .. "/options.lua"
+    local file = assert(io.open(script, "w"))
+    file:write([[
+local font = renderer.font.load(DATADIR .. "/fonts/JetBrainsMono-Regular.ttf", 18)
+for _, name in ipairs {"DIRECT_REPLAY", "NATIVE_TEXT", "NATIVE_RECTS", "NATIVE_CANVAS"} do
+  assert(system.setenv("PRAGTICAL_SDLGPU_" .. name, "0"))
+end
+assert(system.setenv("PRAGTICAL_SDLGPU_POWER", "invalid-after-selection"))
+local window = renwindow.create("Cached renderer options", 320, 240)
+assert(window:get_renderer_info().backend == "sdlgpu", "unexpected renderer fallback")
+local image = canvas.new(80, 48, {20, 30, 40, 255}, false)
+image:draw_rect(0, 0, 8, 8, {200, 50, 80, 255})
+image:draw_text(font, "cached", 8, 16, {255, 255, 255, 255})
+image:render()
+renderer.begin_frame(window)
+renderer.set_clip_rect(0, 0, 320, 240)
+renderer.draw_rect(0, 0, 320, 240, {20, 30, 40, 255})
+renderer.draw_text(font, "cached", 8, 60, {255, 255, 255, 255})
+renderer.draw_canvas(image, 8, 8)
+renderer.end_frame()
+local pixels = renderer.to_canvas(window, 8, 8, 1, 1):get_pixels(0, 0, 1, 1)
+assert(pixels == string.char(200, 50, 80, 255), "cached canvas/rectangle options lost")
+print("renderer startup options preserved")
+]])
+    file:close()
+    context.child = process.start({EXEFILE, "run", script}, {
+      env = {
+        PRAGTICAL_USERDIR = context.root .. "/user",
+        PRAGTICAL_RENDERER = "sdlgpu",
+        PRAGTICAL_SDLGPU_DIRECT_REPLAY = "1",
+        PRAGTICAL_SDLGPU_VALIDATE_TEXT = "0",
+        PRAGTICAL_SDLGPU_STATS = "0"
+      },
+      stdout = process.REDIRECT_PIPE, stderr = process.REDIRECT_STDOUT
+    })
+    local output, deadline = "", system.get_time() + 30
+    while context.child:running() and system.get_time() < deadline do
+      output = output .. (context.child:read_stdout() or "")
+      coroutine.yield(0.01)
+    end
+    output = output .. (context.child:read_stdout() or "")
+    test.not_ok(context.child:running(), "renderer options test timed out: " .. output)
+    test.equal(context.child:returncode(), 0, output)
+    test.contains(output, "renderer startup options preserved")
+    test.not_ok(output:find("invalid-after-selection", 1, true), output)
+  end)
+end)
