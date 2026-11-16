@@ -85,6 +85,25 @@ static int f_renwin_set_vsync(lua_State *L) {
   return 0;
 }
 
+static int f_renwin_set_relative_mouse_mode(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  luaL_checktype(L, 2, LUA_TBOOLEAN);
+  if (!SDL_SetWindowRelativeMouseMode(
+      renwin_get_sdl_window(window_renderer), lua_toboolean(L, 2))) {
+    lua_pushnil(L);
+    lua_pushstring(L, SDL_GetError());
+    return 2;
+  }
+  lua_pushboolean(L, true);
+  return 1;
+}
+
+static int f_renwin_get_relative_mouse_mode(lua_State *L) {
+  RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
+  lua_pushboolean(L, SDL_GetWindowRelativeMouseMode(renwin_get_sdl_window(window_renderer)));
+  return 1;
+}
+
 static int f_renwin_get_renderer_info(lua_State *L) {
   RenWindow *window_renderer = *(RenWindow**)luaL_checkudata(L, 1, API_TYPE_RENWINDOW);
   const RenBackend *backend = window_renderer->cache.backend;
@@ -189,6 +208,8 @@ static const luaL_Reg renwindow_lib[] = {
   { "get_size",         f_renwin_get_size   },
   { "get_refresh_rate", f_get_refresh_rate  },
   { "set_vsync",        f_renwin_set_vsync  },
+  { "set_relative_mouse_mode", f_renwin_set_relative_mouse_mode },
+  { "get_relative_mouse_mode", f_renwin_get_relative_mouse_mode },
   { "get_renderer_info", f_renwin_get_renderer_info },
   { "get_color",        f_get_color         },
   { "_persist",         f_renwin_persist    },
