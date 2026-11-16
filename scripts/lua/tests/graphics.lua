@@ -109,7 +109,8 @@ test.describe("graphics apis", function()
   test.test("exports the documented renwindow, renderer and canvas functions", function()
     for _, name in ipairs({
       "create", "get_size", "get_refresh_rate", "get_renderer_info",
-      "set_vsync", "get_color", "_restore"
+      "set_vsync", "get_color", "set_relative_mouse_mode",
+      "get_relative_mouse_mode", "_restore"
     }) do
       test.type(renwindow[name], "function", "missing renwindow." .. name)
     end

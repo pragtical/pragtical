@@ -54,6 +54,28 @@ function renwindow.get_renderer_info(window) end
 function renwindow.set_vsync(window, enabled) end
 
 ---
+---Enable or disable relative mouse mode for this window.
+---While focused, relative mode hides the cursor, constrains it to the window,
+---and reports continuous motion through mouse events' `dx` and `dy` values,
+---even at window edges. Do not use absolute mouse coordinates in this mode.
+---Plugins must disable the mode when paused, closed, or losing focus.
+---This does not change which Lua view receives mouse events.
+---
+---@param window renwindow
+---@param enabled boolean
+---@return boolean? success True on success, nil if the video driver rejects the request.
+---@return string? error SDL error message on failure.
+function renwindow.set_relative_mouse_mode(window, enabled) end
+
+---
+---Check whether relative mouse mode is enabled for this window.
+---The mode may be enabled even while the window is not focused.
+---
+---@param window renwindow
+---@return boolean enabled
+function renwindow.get_relative_mouse_mode(window) end
+
+---
 ---Gets the window pixel color of the specified position.
 ---
 ---@param window renwindow
