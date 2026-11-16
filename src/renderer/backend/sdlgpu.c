@@ -1,6 +1,7 @@
 #include "renderer/backend/sdlgpu.h"
 #include "renderer/window.h"
 
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -64,6 +65,8 @@
 #define GPU_NATIVE_CANVAS_ENABLED false
 #define GPU_NATIVE_RECT_ENABLED false
 #define GPU_NATIVE_RECT_BATCH_SIZE 16384
+#define GPU_ATLAS_TEXTURE_POOL_SIZE 16
+#define GPU_ATLAS_TEXTURE_POOL_BYTES (16 * 1024 * 1024)
 
 typedef enum {
   GPU_TEXTURE_BATCH_BLEND,
@@ -285,16 +288,34 @@ typedef struct {
   Uint32 transfer_size;
   int texture_w;
   int texture_h;
+  unsigned int dirty_x1;
+  unsigned int dirty_y0;
+  unsigned int dirty_y1;
+  Uint32 upload_offset;
+  Uint32 upload_stride;
+  bool discard_contents;
 } GpuAtlasTexture;
 
 typedef struct {
+  SDL_GPUDevice *device;
+  SDL_GPUTexture *texture;
+  int width, height;
+} GpuAtlasTexturePoolEntry;
+
+typedef struct GpuAtlasData {
   SDL_GPUDevice *device;
   RenAtlas surface_atlas;
   GpuAtlasTexture *textures;
   size_t texture_count;
   size_t texture_capacity;
+  struct GpuAtlasData *next_dirty;
+  bool uploads_pending;
 } GpuAtlasData;
 
+static GpuAtlasData *gpu_dirty_atlases = NULL;
+static GpuAtlasTexturePoolEntry gpu_atlas_texture_pool[GPU_ATLAS_TEXTURE_POOL_SIZE];
+static int gpu_atlas_texture_pool_count = 0;
+static size_t gpu_atlas_texture_pool_bytes = 0;
 static SDL_GPUDevice *gpu_device = NULL;
 static int gpu_device_ref_count = 0;
 static bool gpu_backend_disabled = false;
@@ -1428,7 +1449,7 @@ static GpuAtlasData *gpu_atlas_data(RenAtlas *atlas) {
   return data;
 }
 
-static Uint32 gpu_atlas_upload_size(SDL_Surface *surface, GlyphMetric *metric, Uint32 *row_stride) {
+static Uint32 gpu_atlas_upload_size(GlyphMetric *metric, Uint32 *row_stride) {
   Uint32 row_size = metric->x1 * ren_glyphformat_bytes_per_pixel(EGlyphFormatColor);
   *row_stride = gpu_align_u32(row_size, GPU_TEXTURE_ROW_ALIGNMENT);
   return *row_stride * (metric->y1 - metric->y0);
@@ -1502,14 +1523,78 @@ static bool gpu_atlas_texture_ready(GpuAtlasTexture *texture) {
   return texture && texture->texture && texture->texture_w > 0 && texture->texture_h > 0;
 }
 
+static GpuAtlasTexturePoolEntry gpu_atlas_pool_remove(int index) {
+  GpuAtlasTexturePoolEntry entry = gpu_atlas_texture_pool[index];
+  gpu_atlas_texture_pool_bytes -= (size_t) entry.width * entry.height * 4;
+  gpu_atlas_texture_pool[index] = gpu_atlas_texture_pool[--gpu_atlas_texture_pool_count];
+  return entry;
+}
+
+static void gpu_atlas_pool_clear(SDL_GPUDevice *device) {
+  for (int i = gpu_atlas_texture_pool_count - 1; i >= 0; i--) {
+    if (gpu_atlas_texture_pool[i].device == device) {
+      GpuAtlasTexturePoolEntry entry = gpu_atlas_pool_remove(i);
+      SDL_ReleaseGPUTexture(device, entry.texture);
+    }
+  }
+}
+
+static void gpu_atlas_pool_release(SDL_GPUDevice *device, GpuAtlasTexture *texture) {
+  if (!texture->texture)
+    return;
+  size_t size = (size_t) texture->texture_w * texture->texture_h * 4;
+  if (size > GPU_ATLAS_TEXTURE_POOL_BYTES) {
+    SDL_ReleaseGPUTexture(device, texture->texture);
+  } else {
+    while (gpu_atlas_texture_pool_count == GPU_ATLAS_TEXTURE_POOL_SIZE ||
+           gpu_atlas_texture_pool_bytes + size > GPU_ATLAS_TEXTURE_POOL_BYTES) {
+      GpuAtlasTexturePoolEntry entry = gpu_atlas_pool_remove(0);
+      SDL_ReleaseGPUTexture(entry.device, entry.texture);
+    }
+    gpu_atlas_texture_pool[gpu_atlas_texture_pool_count++] = (GpuAtlasTexturePoolEntry) {
+      .device = device, .texture = texture->texture,
+      .width = texture->texture_w, .height = texture->texture_h,
+    };
+    gpu_atlas_texture_pool_bytes += size;
+  }
+  texture->texture = NULL;
+}
+
 static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *texture) {
   int width = texture->x1;
   int height = texture->y1 - texture->y0;
-  if (texture->texture && texture->texture_w == width && texture->texture_h == height)
+  if (texture->texture && texture->texture_w >= width && texture->texture_h >= height)
     return;
 
-  if (texture->texture)
-    SDL_ReleaseGPUTexture(device, texture->texture);
+  gpu_atlas_pool_release(device, texture);
+  int best = -1;
+  size_t best_size = SIZE_MAX;
+  for (int i = 0; i < gpu_atlas_texture_pool_count; i++) {
+    GpuAtlasTexturePoolEntry *entry = &gpu_atlas_texture_pool[i];
+    size_t size = (size_t) entry->width * entry->height;
+    if (entry->device == device && entry->width >= width && entry->height >= height && size < best_size) {
+      best = i;
+      best_size = size;
+    }
+  }
+  if (best >= 0) {
+    GpuAtlasTexturePoolEntry entry = gpu_atlas_pool_remove(best);
+    texture->texture = entry.texture;
+    texture->texture_w = entry.width;
+    texture->texture_h = entry.height;
+    texture->discard_contents = true;
+    return;
+  }
+
+  // Size classes let nearby font sizes share allocations. Logical atlas bounds
+  // and large-glyph origins remain separate from the physical texture size.
+  int allocation_w = 16, allocation_h = 16;
+  while (allocation_w < width && allocation_w <= INT_MAX / 2)
+    allocation_w *= 2;
+  while (allocation_h < height && allocation_h <= INT_MAX / 2)
+    allocation_h *= 2;
+  width = SDL_max(width, allocation_w);
+  height = SDL_max(height, allocation_h);
 
   SDL_GPUTextureCreateInfo createinfo;
   SDL_zero(createinfo);
@@ -1527,6 +1612,7 @@ static void gpu_atlas_ensure_texture(SDL_GPUDevice *device, GpuAtlasTexture *tex
 
   texture->texture_w = width;
   texture->texture_h = height;
+  texture->discard_contents = true;
 }
 
 static void gpu_atlas_ensure_transfer(SDL_GPUDevice *device, GpuAtlasTexture *texture, Uint32 size) {
@@ -1717,37 +1803,22 @@ static SDL_Surface *gpu_atlas_get_glyph_surface(RenAtlas *atlas, GlyphMetric *me
   return ren_atlas_get_glyph_surface(&data->surface_atlas, metric);
 }
 
-static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
-  GpuAtlasData *data = gpu_atlas_data(atlas);
-  SDL_Surface *surface = ren_atlas_get_glyph_surface(&data->surface_atlas, metric);
-  if (!surface)
-    return;
-
-  if (!data->device && !gpu_window_device_ready)
-    return;
-
-  if (!data->device)
-    data->device = gpu_retain_device();
-
-  GpuAtlasTexture *texture = gpu_atlas_find_texture(data, surface, metric);
-  gpu_atlas_ensure_texture(data->device, texture);
-
+static void gpu_atlas_upload(
+  GpuAtlasData *data, GpuAtlasTexture *texture, SDL_Surface *surface,
+  GlyphMetric *metric, SDL_GPUCommandBuffer *cmd
+) {
   Uint32 row_stride = 0;
-  Uint32 upload_size = gpu_atlas_upload_size(surface, metric, &row_stride);
+  Uint32 upload_size = gpu_atlas_upload_size(metric, &row_stride);
   if (upload_size == 0)
     return;
   gpu_atlas_ensure_transfer(data->device, texture, upload_size);
   SDL_GPUTransferBuffer *transfer = texture->transfer;
 
-  SDL_GPUCommandBuffer *cmd = NULL;
-  bool submit_upload = false;
-  if (gpu_active_frame_device == data->device && gpu_active_frame_command_buffer) {
-    cmd = gpu_active_frame_command_buffer;
-  } else {
+  bool submit_upload = !cmd;
+  if (submit_upload) {
     cmd = SDL_AcquireGPUCommandBuffer(data->device);
     if (!cmd)
       gpu_abort("SDL_AcquireGPUCommandBuffer failed");
-    submit_upload = true;
   }
 
   if (!SDL_LockSurface(surface))
@@ -1779,7 +1850,8 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
   destination.h = metric->y1 - metric->y0;
   destination.d = 1;
 
-  SDL_UploadToGPUTexture(copy_pass, &source, &destination, false);
+  SDL_UploadToGPUTexture(copy_pass, &source, &destination, texture->discard_contents);
+  texture->discard_contents = false;
   SDL_EndGPUCopyPass(copy_pass);
 
   if (submit_upload) {
@@ -1792,7 +1864,148 @@ static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
       }
     }
   }
+}
 
+static void gpu_atlas_unlink_dirty(GpuAtlasData *data) {
+  if (!data->uploads_pending)
+    return;
+  GpuAtlasData **link = &gpu_dirty_atlases;
+  while (*link && *link != data)
+    link = &(*link)->next_dirty;
+  if (*link)
+    *link = data->next_dirty;
+  data->next_dirty = NULL;
+  data->uploads_pending = false;
+}
+
+static GlyphMetric gpu_atlas_dirty_metric(GpuAtlasTexture *texture) {
+  return (GlyphMetric) {
+    .format = texture->format,
+    .atlas_idx = texture->atlas_idx,
+    .surface_idx = texture->surface_idx,
+    .x1 = texture->dirty_x1,
+    .y0 = texture->dirty_y0,
+    .y1 = texture->dirty_y1,
+  };
+}
+
+// Pack newly rasterized atlas regions into one mapping/copy pass before text
+// samples them. The bridge owns the staging buffer across font-size changes;
+// cycling on each flush protects copies in earlier, still-pending commands.
+static void gpu_atlas_flush_uploads(
+  SDL_GPUDevice *device, SDL_GPUCommandBuffer *cmd, GpuFrameBridge *frame
+) {
+  Uint64 upload_size = 0;
+  for (GpuAtlasData *data = gpu_dirty_atlases; data; data = data->next_dirty) {
+    if (data->device != device)
+      continue;
+    for (size_t i = 0; i < data->texture_count; i++) {
+      GpuAtlasTexture *texture = &data->textures[i];
+      if (texture->dirty_y1 == 0)
+        continue;
+      GlyphMetric metric = gpu_atlas_dirty_metric(texture);
+      Uint32 size = gpu_atlas_upload_size(&metric, &texture->upload_stride);
+      upload_size = (upload_size + GPU_TEXTURE_OFFSET_ALIGNMENT - 1)
+        / GPU_TEXTURE_OFFSET_ALIGNMENT * GPU_TEXTURE_OFFSET_ALIGNMENT;
+      if (upload_size + size > UINT32_MAX)
+        gpu_abort("SDLGPU atlas upload is too large");
+      texture->upload_offset = (Uint32) upload_size;
+      upload_size += size;
+    }
+  }
+  if (upload_size == 0)
+    return;
+
+  Uint32 capacity = gpu_grow_upload_size(frame->transfer_size, (Uint32) upload_size, 64 * 1024);
+  gpu_ensure_bridge_transfer_buffer(device, frame, capacity);
+  Uint8 *map = SDL_MapGPUTransferBuffer(device, frame->transfer, true);
+  if (!map)
+    gpu_abort("SDL_MapGPUTransferBuffer failed for glyph atlas uploads");
+  for (GpuAtlasData *data = gpu_dirty_atlases; data; data = data->next_dirty) {
+    if (data->device != device)
+      continue;
+    for (size_t i = 0; i < data->texture_count; i++) {
+      GpuAtlasTexture *texture = &data->textures[i];
+      if (texture->dirty_y1 == 0)
+        continue;
+      GlyphMetric metric = gpu_atlas_dirty_metric(texture);
+      SDL_Surface *surface = ren_atlas_get_glyph_surface(&data->surface_atlas, &metric);
+      if (!SDL_LockSurface(surface))
+        gpu_abort("SDL_LockSurface failed for glyph atlas uploads");
+      gpu_atlas_copy_glyph_to_transfer(surface, &metric,
+        map + texture->upload_offset, texture->upload_stride);
+      SDL_UnlockSurface(surface);
+    }
+  }
+  SDL_UnmapGPUTransferBuffer(device, frame->transfer);
+
+  SDL_GPUCopyPass *copy_pass = SDL_BeginGPUCopyPass(cmd);
+  GpuAtlasData **link = &gpu_dirty_atlases;
+  while (*link) {
+    GpuAtlasData *data = *link;
+    if (data->device != device) {
+      link = &data->next_dirty;
+      continue;
+    }
+    *link = data->next_dirty;
+    data->next_dirty = NULL;
+    data->uploads_pending = false;
+    for (size_t i = 0; i < data->texture_count; i++) {
+      GpuAtlasTexture *texture = &data->textures[i];
+      if (texture->dirty_y1 == 0)
+        continue;
+      SDL_GPUTextureTransferInfo source = {
+        .transfer_buffer = frame->transfer,
+        .offset = texture->upload_offset,
+        .pixels_per_row = texture->upload_stride / ren_glyphformat_bytes_per_pixel(EGlyphFormatColor),
+        .rows_per_layer = texture->dirty_y1 - texture->dirty_y0,
+      };
+      SDL_GPUTextureRegion destination = {
+        .texture = texture->texture,
+        .y = texture->dirty_y0 - texture->y0,
+        .w = texture->dirty_x1,
+        .h = texture->dirty_y1 - texture->dirty_y0,
+        .d = 1,
+      };
+      // Discard only on the first upload of a new atlas generation. Cycling
+      // then protects draws still sampling a pooled texture's old backing;
+      // subsequent partial uploads must preserve all realized glyphs.
+      SDL_UploadToGPUTexture(copy_pass, &source, &destination, texture->discard_contents);
+      texture->discard_contents = false;
+      texture->dirty_x1 = texture->dirty_y0 = texture->dirty_y1 = 0;
+    }
+  }
+  SDL_EndGPUCopyPass(copy_pass);
+}
+
+static void gpu_atlas_glyph_updated(RenAtlas *atlas, GlyphMetric *metric) {
+  GpuAtlasData *data = gpu_atlas_data(atlas);
+  SDL_Surface *surface = ren_atlas_get_glyph_surface(&data->surface_atlas, metric);
+  if (!surface)
+    return;
+  if (!data->device && !gpu_window_device_ready)
+    return;
+  if (!data->device)
+    data->device = gpu_retain_device();
+
+  GpuAtlasTexture *texture = gpu_atlas_find_texture(data, surface, metric);
+  gpu_atlas_ensure_texture(data->device, texture);
+  if (gpu_active_frame_device == data->device && gpu_active_frame_command_buffer) {
+    if (texture->dirty_y1 == 0) {
+      texture->dirty_y0 = metric->y0;
+    } else {
+      texture->dirty_y0 = SDL_min(texture->dirty_y0, metric->y0);
+    }
+    texture->dirty_x1 = SDL_max(texture->dirty_x1, metric->x1);
+    texture->dirty_y1 = SDL_max(texture->dirty_y1, metric->y1);
+    if (!data->uploads_pending) {
+      data->next_dirty = gpu_dirty_atlases;
+      gpu_dirty_atlases = data;
+      data->uploads_pending = true;
+    }
+  } else {
+    gpu_atlas_upload(data, texture, surface, metric, NULL);
+  }
   gpu_atlas_update_bytesize(atlas);
 }
 
@@ -1825,9 +2038,9 @@ static void gpu_atlas_clear(RenAtlas *atlas) {
       !gpu_flush_pending_text_barrier(gpu_active_frame_window_data))
     gpu_abort("SDLGPU native text flush before atlas clear failed");
 
+  gpu_atlas_unlink_dirty(data);
   for (size_t i = 0; i < data->texture_count; i++) {
-    if (data->textures[i].texture)
-      SDL_ReleaseGPUTexture(data->device, data->textures[i].texture);
+    gpu_atlas_pool_release(data->device, &data->textures[i]);
     if (data->textures[i].transfer)
       SDL_ReleaseGPUTransferBuffer(data->device, data->textures[i].transfer);
   }
@@ -3769,6 +3982,7 @@ static bool gpu_draw_text_batches_to_bridge(
   if (!gpu_ensure_text_batch_pipeline(device))
     return false;
 
+  gpu_atlas_flush_uploads(device, cmd, frame);
   GpuBatchRun *runs = gpu_ensure_batch_runs(frame, glyph_count);
 
   Uint32 max_instances = (Uint32) glyph_count;
@@ -4485,6 +4699,7 @@ static void gpu_release_device(void) {
   if (gpu_device_ref_count > 0)
     gpu_device_ref_count--;
   if (gpu_device_ref_count == 0 && gpu_device) {
+    gpu_atlas_pool_clear(gpu_device);
     gpu_destroy_canvas_pipeline(gpu_device);
     gpu_destroy_rect_pipeline(gpu_device);
     gpu_destroy_poly_pipeline(gpu_device);
