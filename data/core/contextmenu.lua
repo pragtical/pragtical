@@ -543,7 +543,12 @@ function ContextMenu:on_mouse_pressed(button, x, y, clicks)
         return false
       end
     end
-    return button == "right" and self:show(x, y) or false
+    if button ~= "right" or not self:show(x, y) then return false end
+    -- Preserve the clicked target, then move the popup clear of the pointer.
+    local offset = math.max(1, common.round(SCALE))
+    self.position.x, self.position.y = self.position.x + offset, self.position.y + offset
+    core.root_view:place_floating_view(self)
+    return true
   end
   if ContextMenu.super.on_mouse_pressed(self, button, x, y, clicks) then
     return true
