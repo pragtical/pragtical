@@ -90,10 +90,10 @@ close.border.width = 0
 close.padding.x = close.padding.x / 2
 close.padding.y = close.padding.y / 5
 
-local findtext = TextBox(ui, "", "search...")
+local findtext = TextBox(ui, "", "search...", { clearable = true })
 findtext:set_tooltip("Text to search")
 
-local replacetext = TextBox(ui, "", "replacement...")
+local replacetext = TextBox(ui, "", "replacement...", { clearable = true })
 replacetext:set_tooltip("Text to replace")
 
 local findprev = Button(ui, "")

@@ -163,16 +163,16 @@ function ResultsView:new(path, text, search_type, insensitive, whole_word, repla
   self.close_button.padding.y = self.close_button.padding.y / 5
   self.close_button:hide()
 
-  self.find_text = TextBox(self, text, "search...")
+  self.find_text = TextBox(self, text, "search...", { clearable = true })
   self.find_button = Button(self, "Find")
   self.find_button:set_tooltip(nil, "project-search:refresh")
 
-  self.replace_text = TextBox(self, replacement or "", "replacement...")
+  self.replace_text = TextBox(self, replacement or "", "replacement...", { clearable = true })
   self.replace_button = Button(self, "Replace")
   self.replace_button:set_tooltip(nil, "project-search:replace")
 
-  self.includes_text = TextBox(self, "", "Include: src/**.ext, *.ext")
-  self.excludes_text = TextBox(self, "", "Exclude: vendor, src/extras")
+  self.includes_text = TextBox(self, "", "Include: src/**.ext, *.ext", { clearable = true })
+  self.excludes_text = TextBox(self, "", "Exclude: vendor, src/extras", { clearable = true })
 
   self.file_picker = FilePicker(self, path)
   self.file_picker:set_mode(FilePicker.mode.DIRECTORY)
