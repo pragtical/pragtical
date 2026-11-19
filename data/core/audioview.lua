@@ -214,7 +214,7 @@ function AudioView:new()
   self.folder.button:set_tooltip("Open music directory", "audio-player:open-directory")
   self.folder.file:set_tooltip("Music directory", "audio-player:open-directory")
   self.folder.on_change = function(_, path) if path then self:scan(path) end end
-  self.filter = TextBox(self, "", "Filter tracks...")
+  self.filter = TextBox(self, "", "Filter tracks...", { clearable = true })
   self.filter.on_change = function() self.filter_due = system.get_time() + 0.15 end
   self.list = ListBox(self)
   self.list:add_column("Track", 250, false)

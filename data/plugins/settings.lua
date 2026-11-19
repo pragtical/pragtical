@@ -2107,7 +2107,8 @@ local function add_control(pane, option, context)
       filter = TextBox(
         pane,
         "",
-        option.filter_placeholder or "filter items..."
+        option.filter_placeholder or "filter items...",
+        { clearable = true }
       )
     end
     ---@type widget.widgetlist
