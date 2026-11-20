@@ -4,14 +4,6 @@ local config = require "core.config"
 local style = require "core.style"
 local View = require "core.view"
 
-local icon_colors = {
-  bg = { common.color "#21252bff" },
-  color6 = { common.color "#ffffffff" },
-  color7 = { common.color "#3771c8ff" },
-  color8 = { common.color "#87aadeff" },
-  color9 = { common.color "#ABC6EDFF" }
-};
-
 local restore_command = {
   symbol = "w", action = function() system.set_window_mode(core.window, "normal") end
 }
@@ -151,11 +143,11 @@ function TitleView:draw_window_title()
   local ox, oy = self:get_content_offset()
   local color = style.text
   local x, y = ox + style.padding.x, oy + style.padding.y
-  common.draw_text(style.icon_font, icon_colors.bg, "5", nil, x, y, 0, h)
-  common.draw_text(style.icon_font, icon_colors.color6, "6", nil, x, y, 0, h)
-  common.draw_text(style.icon_font, icon_colors.color7, "7", nil, x, y, 0, h)
-  common.draw_text(style.icon_font, icon_colors.color8, "8", nil, x, y, 0, h)
-  x = common.draw_text(style.icon_font, icon_colors.color9, "9 ", nil, x, y, 0, h)
+  common.draw_text(style.icon_font, style.background, "5", nil, x, y, 0, h)
+  common.draw_text(style.icon_font, style.text, "6", nil, x, y, 0, h)
+  common.draw_text(style.icon_font, style.caret, "7", nil, x, y, 0, h)
+  common.draw_text(style.icon_font, style.dim, "8", nil, x, y, 0, h)
+  x = common.draw_text(style.icon_font, style.text, "9 ", nil, x, y, 0, h)
   local _, _, available = self:get_menu_bounds()
   local menu_width = 0
   if core.menu_view.bounds then

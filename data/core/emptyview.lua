@@ -279,8 +279,8 @@ local function draw_text(self, x, y, calc_only)
     renderer.draw_text(icon_huge_font, "5", x, y, style.background2)
     renderer.draw_text(icon_huge_font, "6", x, y, style.text)
     renderer.draw_text(icon_huge_font, "7", x, y, style.caret)
-    renderer.draw_text(icon_huge_font, "8", x, y, common.lighten_color(style.dim, 25))
-    x = renderer.draw_text(icon_huge_font, "9", x, y, common.lighten_color(style.dim, 45))
+    renderer.draw_text(icon_huge_font, "8", x, y, style.dim)
+    x = renderer.draw_text(icon_huge_font, "9", x, y, style.text)
   else
     x, y = 0, 0
     x = style.big_font:get_width(self.title)
