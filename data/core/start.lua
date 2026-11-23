@@ -174,3 +174,14 @@ if PLATFORM == "Mac OS X" then
     end
   end
 end
+
+if not RESTARTED and system.get_file_info(USERDIR .. PATHSEP .. "transactions") then
+  local tick = coroutine.wrap(function()
+    local ok, err = require("core.transactions").run()
+    package.loaded["core.transactions"] = nil
+    if not ok then error(err, 0) end
+  end)
+  if tick() then
+    require("core").startup_transaction_tick = tick
+  end
+end
