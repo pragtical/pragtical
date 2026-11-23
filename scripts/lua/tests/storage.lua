@@ -25,6 +25,7 @@ local function setup(failure)
     }
   }
   local env = setmetatable({
+    package = { loaded = modules },
     require = function(name) return assert(modules[name]) end,
     system = { get_file_info = function()
       if failure ~= "mkdir" then return { type = "dir" } end
@@ -70,10 +71,9 @@ test.describe("storage scopes", function()
     test.ok(common.mkdirp(ctx.root))
     ctx.errors = {}
     local env = setmetatable({ USERDIR = ctx.root .. PATHSEP .. "user",
-      require = function(name)
-        if name == "core" then return { error = function(...) ctx.errors[#ctx.errors + 1] = string.format(...) end } end
-        return require(name)
-      end
+      package = { loaded = { core = {
+        error = function(...) ctx.errors[#ctx.errors + 1] = string.format(...) end
+      } } }
     }, { __index = _G, __newindex = function(_, name)
       error("storage wrote an undeclared global: " .. tostring(name))
     end })

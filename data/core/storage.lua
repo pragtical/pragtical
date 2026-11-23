@@ -1,4 +1,3 @@
-local core = require "core"
 local common = require "core.common"
 
 local function module_key_to_path(module, key, project)
@@ -97,6 +96,13 @@ end
 ---@class storage
 local storage = {}
 
+local function report_error(...)
+  local core = package.loaded.core
+  if type(core) == "table" and type(core.error) == "function" then
+    core.error(...)
+  end
+end
+
 
 ---Loads data from a persistent storage file.
 ---
@@ -116,7 +122,7 @@ function storage.load(module, key, project)
       if ok then return value end
       err = value
     end
-    core.error("error loading storage file for %s[%s]: %s", module, key, err)
+    report_error("error loading storage file for %s[%s]: %s", module, key, err)
     return nil, err
   end
   return nil
@@ -130,14 +136,15 @@ end
 ---@param value table|string|number|boolean|nil The value to store.
 ---@param project? core.project|string Project object, or an explicit storage directory.
 ---@return boolean saved Whether the file was written and closed successfully.
+---@return string? error
 function storage.save(module, key, value, project)
   local path = module_key_to_path(module, key, project)
   local dir = common.dirname(path)
   if not system.get_file_info(dir) then
     local status, err = common.mkdirp(dir)
     if not status then
-      core.error("error creating storage directory for %s at %s: %s", module, dir, err)
-      return false
+      report_error("error creating storage directory for %s at %s: %s", module, dir, err)
+      return false, err
     end
   end
   local content = "return " .. common.serialize(value, {pretty = true})
@@ -146,13 +153,13 @@ function storage.save(module, key, value, project)
     local written, write_error = f:write(content)
     local closed, close_error = f:close()
     if not written or not closed then
-      core.error("error writing storage file %s: %s", path, write_error or close_error)
-      return false
+      report_error("error writing storage file %s: %s", path, write_error or close_error)
+      return false, write_error or close_error
     end
     return true
   else
-    core.error("error opening storage file %s for writing: %s", path, err)
-    return false
+    report_error("error opening storage file %s for writing: %s", path, err)
+    return false, err
   end
 end
 

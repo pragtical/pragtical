@@ -448,6 +448,8 @@ end
 
 
 function core.init()
+  if core.startup_transaction_tick then return end
+
   -- Keep startup defaults when no display is available so plugins can select
   -- a backend, such as a terminal frontend, before creating a window.
   local ok, default_scale, default_fps = pcall(system.get_display_info)
@@ -2081,6 +2083,7 @@ local run_next_frame_time = 0
 ---via the init_code that also calls core.init().  SDL_AppIterate then drives the
 ---loop by calling core.run_step() when an event or deadline wakes it.
 function core.run()
+  if core.startup_transaction_tick then return end
   scale = require "plugins.scale"
   run_next_step       = nil
   run_skip_no_focus   = 0
@@ -2097,6 +2100,13 @@ end
 ---@return boolean  true to keep running, false to quit or restart.
 ---@return number? wait Seconds until the next iteration; infinity waits for an event.
 function core.run_step()
+  if core.startup_transaction_tick then
+    if core.startup_transaction_tick() then return true, 1 / 60 end
+    core.startup_transaction_tick = nil
+    core.init()
+    core.run()
+  end
+
   local now     = system.get_time()
   local uncapped = config.draw_stats == "uncapped"
   core.frame_start = now
