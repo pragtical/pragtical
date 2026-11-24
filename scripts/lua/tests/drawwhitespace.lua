@@ -6,6 +6,7 @@ local style = require "core.style"
 local Doc = require "core.doc"
 local DocView = require "core.docview"
 local MenuView = require "core.menuview"
+local LineWrapping = require "plugins.linewrapping"
 
 local path = debug.getinfo(1, "S").source:gsub("^@", "")
 local root = common.dirname(common.dirname(common.dirname(common.dirname(path))))
@@ -53,6 +54,7 @@ test.describe("drawwhitespace", function()
     core.menu_view = MenuView()
     c.update, c.draw_line_text = DocView.update, DocView.draw_line_text
     c.draw_text = renderer.draw_text
+    c.wrap_mode = config.plugins.linewrapping.mode
     c.docs, c.calls = {}, {}
     clear_options()
     DocView.update, DocView.draw_line_text = function() end, function() end
@@ -62,7 +64,7 @@ test.describe("drawwhitespace", function()
     options.show_leading, options.show_middle = false, false
     options.show_trailing, options.show_selected_only = true, false
     renderer.draw_text = function(font, text, x, y, color)
-      c.calls[#c.calls + 1] = { text = text, color = color, x = x }
+      c.calls[#c.calls + 1] = { text = text, color = color, x = x, y = y }
       return x + font:get_width(text)
     end
   end)
@@ -73,6 +75,7 @@ test.describe("drawwhitespace", function()
     core.menu_view = c.menu_view
     DocView.update, DocView.draw_line_text = c.update, c.draw_line_text
     renderer.draw_text = c.draw_text
+    config.plugins.linewrapping.mode = c.wrap_mode
     for _, doc in ipairs(c.docs) do doc:on_close() end
   end)
 
@@ -217,5 +220,58 @@ test.describe("drawwhitespace", function()
     local calls = draw(c, make_view(c, "   \n"))
     test.equal(#calls, 1)
     test.equal(calls[1].text, block:rep(3))
+  end)
+
+  test.test("middle markers follow their wrapped rows in word and letter mode", function(c)
+    local options = config.plugins.drawwhitespace
+    options.show_middle = true
+    for _, mode in ipairs { "word", "letter" } do
+      config.plugins.linewrapping.mode = mode
+      for _, sample in ipairs {
+        {"one two three four five\n", " ", options.substitutions[1].sub},
+        {"éé\tone\ttwo\tthree\tfour\n", "\t", options.substitutions[2].sub}
+      } do
+        local view = make_view(c, sample[1])
+        LineWrapping.reconstruct_breaks(view, view:get_font(), view:get_font():get_width("one two"))
+        test.ok(#view:get_line_wraps(1) > 1)
+        local calls, count = draw(c, view), 0
+        for col = 1, #sample[1] do
+          if sample[1]:sub(col, col) == sample[2] then
+            count = count + 1
+            local call = assert(calls[count], "missing whitespace marker")
+            test.equal(call.text, sample[3])
+            test.near(call.x, view:get_col_x_offset(1, col))
+            local row = view:visual_row_from_position(1, col)
+            test.near(call.y, (row - 1) * view:get_line_height() + view:get_line_text_y_offset())
+          end
+        end
+        test.equal(#calls, count)
+      end
+    end
+  end)
+
+  test.test("splits selected space runs at wraps without changing middle classification", function(c)
+    local options = config.plugins.drawwhitespace
+    options.show_middle, options.show_selected_only = true, true
+    options.show_middle_min = 4
+    config.plugins.linewrapping.mode = "letter"
+    local view = make_view(c, "x      y\n")
+    LineWrapping.reconstruct_breaks(view, view:get_font(), view:get_font():get_width("xxx"))
+    view.doc:set_selection(1, 2, 1, 8)
+    view:update()
+    local calls = draw(c, view)
+    local cols, marker = {}, options.substitutions[1].sub
+    for _, call in ipairs(calls) do
+      local count = #call.text / #marker
+      for i = 0, count - 1 do
+        cols[#cols + 1] = {x = call.x + i * view:get_font():get_width(marker), y = call.y}
+      end
+    end
+    test.equal(#cols, 6)
+    for i, point in ipairs(cols) do
+      test.near(point.x, view:get_col_x_offset(1, i + 1))
+      local row = view:visual_row_from_position(1, i + 1)
+      test.near(point.y, (row - 1) * view:get_line_height() + view:get_line_text_y_offset())
+    end
   end)
 end)

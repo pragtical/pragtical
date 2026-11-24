@@ -212,6 +212,7 @@ function DocView:draw_line_text(idx, x, y)
   local col1, col2
   local text, offset
   local s, e
+  local first_row
   local line_len = #self.doc.lines[idx]
   local l1, c1, l2, c2
   if
@@ -250,8 +251,6 @@ function DocView:draw_line_text(idx, x, y)
 
       local as, ae = col1 + s - 1, col1 + e
 
-      tx = self:get_col_x_offset(idx, as) + x
-
       local color = base_color
       local draw = false
 
@@ -272,20 +271,27 @@ function DocView:draw_line_text(idx, x, y)
         and get_option(substitution, "show_trailing_error") then
           marker, color = "█", style.error
         end
-        -- We need to draw tabs one at a time because they might have a
-        -- different size than the substituting character.
-        -- This also applies to any other char if we use non-monospace fonts
-        -- but we ignore this case for now.
-        if char == "\t" then
-          for i = as,ae-1 do
-            tx = self:get_col_x_offset(idx, i) + x
-            tx = renderer.draw_text(font, marker, tx, ty, color)
+        first_row = first_row or self:visual_row_from_position(idx)
+        local row = self:visual_row_from_position(idx, as)
+        local lh = self:get_line_height()
+        while as < ae do
+          -- Split marker runs at the same visual boundaries as the text.
+          local next_line, next_col = self:visual_position_from_row(row + 1)
+          local stop = next_line == idx and next_col > as and math.min(ae, next_col) or ae
+          local row_y = ty + (row - first_row) * lh
+          -- Tabs need individual positions because their widths vary.
+          if char == "\t" then
+            for i = as, stop - 1 do
+              tx = self:get_col_x_offset(idx, i) + x
+              renderer.draw_text(font, marker, tx, row_y, color)
+            end
+          else
+            tx = self:get_col_x_offset(idx, as) + x
+            renderer.draw_text(font, string.rep(marker, stop - as), tx, row_y, color)
           end
-        else
-          tx = renderer.draw_text(font, string.rep(marker, ae - as), tx, ty, color)
+          as, row = stop, row + 1
         end
-
-        end
+      end
 
       offset = e + 1
     end
