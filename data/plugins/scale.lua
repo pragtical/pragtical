@@ -57,6 +57,7 @@ function scale.set(scale)
   SCALE = scale
 
   style.divider_size                = style.divider_size                * s
+  style.outline_size                = style.outline_size                * s
   style.scrollbar_size              = style.scrollbar_size              * s
   style.expanded_scrollbar_size     = style.expanded_scrollbar_size     * s
   style.minimum_thumb_size          = style.minimum_thumb_size          * s
