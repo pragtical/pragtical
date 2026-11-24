@@ -1222,7 +1222,7 @@ function RootView:draw()
   if config.borderless and config.borderless_outline and core.window_mode == "normal" then
     local x, y = self.position.x, self.position.y
     local w, h = self.size.x, self.size.y
-    local border = math.min(style.divider_size, w / 2, h / 2)
+    local border = math.max(style.outline_size, 1)
     local color = system.window_has_focus(core.window)
       and (config.outline_focused or style.caret)
       or (config.outline_unfocused or style.dim)
