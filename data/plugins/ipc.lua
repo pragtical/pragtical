@@ -890,13 +890,19 @@ system.get_time = function()
         if path then
           local path_info = system.get_file_info(path)
           if path_info then
+            -- Forward the XDG_ACTIVATION_TOKEN to the parent instance.
+            local activation_token = os.getenv("XDG_ACTIVATION_TOKEN")
+            local options = activation_token and {
+              env = {XDG_ACTIVATION_TOKEN = activation_token}
+            }
+
             if path_info.type == "file" then
-              ipc:call_async(primary_instance, "core.open_file", nil, path)
+              ipc:call_async(primary_instance, "core.open_file", nil, path, options)
             else
               if config.plugins.ipc.dirs_instance == "add" then
-                ipc:call_async(primary_instance, "core.open_directory", nil, path)
+                ipc:call_async(primary_instance, "core.open_directory", nil, path, options)
               elseif config.plugins.ipc.dirs_instance == "change" then
-                ipc:call_async(primary_instance, "core.change_directory", nil, path)
+                ipc:call_async(primary_instance, "core.change_directory", nil, path, options)
               else
                 if #cli.unhandled_arguments > 1 then
                   system.exec(string.format("%q %q", EXEFILE, path))
@@ -927,38 +933,54 @@ end
 --------------------------------------------------------------------------------
 -- Register methods for opening files and directories.
 --------------------------------------------------------------------------------
-ipc:register_method("core.open_file", function(file)
-  if system.get_file_info(file) then
-    if system.get_window_mode(core.window) == "minimized" then
-      system.set_window_mode(core.window, "normal")
+---@class plugins.ipc.openoptions
+---@field env? table<string,string> Environment variables applied before raising the window.
+
+---@param options? plugins.ipc.openoptions
+local function raise_window(options)
+  if options and options.env then
+    for key, value in pairs(options.env) do
+      system.setenv(key, value)
     end
-    system.raise_window(core.window)
+  end
+  if system.get_window_mode(core.window) == "minimized" then
+    system.set_window_mode(core.window, "normal")
+  end
+  system.raise_window(core.window)
+end
+
+ipc:register_method("core.open_file", function(file, options)
+  if system.get_file_info(file) then
+    raise_window(options)
     core.root_view:open_doc(core.open_doc(file))
   end
-end, {{name = "file", type = "string"}})
+end, {
+  {name = "file", type = "string"},
+  {name = "options", type = "plugins.ipc.openoptions", optional = true}
+})
 
-ipc:register_method("core.open_directory", function(directory)
+ipc:register_method("core.open_directory", function(directory, options)
   if system.get_file_info(directory) then
-    if system.get_window_mode(core.window) == "minimized" then
-      system.set_window_mode(core.window, "normal")
-    end
-    system.raise_window(core.window)
+    raise_window(options)
     core.add_project(directory)
   end
-end, {{name = "directory", type = "string"}})
+end, {
+  {name = "directory", type = "string"},
+  {name = "options", type = "plugins.ipc.openoptions", optional = true}
+})
 
-ipc:register_method("core.change_directory", function(directory)
+ipc:register_method("core.change_directory", function(directory, options)
   if system.get_file_info(directory) then
-    if system.get_window_mode(core.window) == "minimized" then
-      system.set_window_mode(core.window, "normal")
-    end
-    system.raise_window(core.window)
+    raise_window(options)
     if directory == core.root_project().path then return end
     core.confirm_close_docs(core.docs, function(dirpath)
       core.open_project(dirpath)
     end, directory)
   end
-end, {{name = "directory", type = "string"}})
+end, {
+  {name = "directory", type = "string"},
+  {name = "options", type = "plugins.ipc.openoptions", optional = true}
+})
 
 --------------------------------------------------------------------------------
 -- Register file dragging signals from instance to instance
