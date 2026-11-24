@@ -609,6 +609,11 @@ static int f_set_window_bordered(lua_State *L) {
     int border = bordered ? 0 : 1;
     MARGINS margins = { border, border, border, border };
     DwmExtendFrameIntoClientArea(hwnd, &margins);
+    // Keep Windows' border and corner clipping clear of our own outline.
+    DWM_WINDOW_CORNER_PREFERENCE corners = bordered ? DWMWCP_DEFAULT : DWMWCP_DONOTROUND;
+    COLORREF border_color = bordered ? DWMWA_COLOR_DEFAULT : DWMWA_COLOR_NONE;
+    DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corners, sizeof(corners));
+    DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, &border_color, sizeof(border_color));
   }
 #else
   SDL_SetWindowBordered(win, bordered);
