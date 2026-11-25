@@ -1,5 +1,61 @@
 # Changes Log
 
+## [3.16.0] - 2026-11-24
+
+### New Features
+
+* Add startup transactions for plugin work before editor initialization
+  ([#731](https://github.com/pragtical/pragtical/pull/731))
+
+* Expose relative mouse mode to plugins, including static SDL builds
+  ([#727](https://github.com/pragtical/pragtical/pull/727))
+
+### Enhancements
+
+* Batch SDL GPU glyph uploads and reuse atlas textures when resizing fonts
+  ([#725](https://github.com/pragtical/pragtical/pull/725))
+
+* Reduce dense rendering-cache replay and SDL GPU rectangle overhead
+  ([#726](https://github.com/pragtical/pragtical/pull/726))
+
+* Add clear buttons to search, replacement, audio and custom Settings filters
+  ([#729](https://github.com/pragtical/pragtical/pull/729))
+
+* Use theme colors for the title-bar and welcome-view logos
+  ([#730](https://github.com/pragtical/pragtical/pull/730))
+
+* Give borderless outlines a separate, scalable style.outline_size
+  ([#735](https://github.com/pragtical/pragtical/pull/735))
+
+### Fixes
+
+* Keep Settings scrollbars at the pane edge without overlapping separators
+  ([#722](https://github.com/pragtical/pragtical/pull/722))
+
+* Restore pointer spacing when opening right-click context menus
+  ([#728](https://github.com/pragtical/pragtical/pull/728))
+
+* Avoid native Windows borders and rounded corners conflicting with custom outlines
+  ([#734](https://github.com/pragtical/pragtical/pull/734))
+
+* Forward Wayland activation tokens to existing windows over IPC; full activation
+  requires SDL's upstream RaiseWindow token fix
+  ([#736](https://github.com/pragtical/pragtical/pull/736))
+
+* Draw whitespace markers on the correct wrapped visual rows
+  ([#738](https://github.com/pragtical/pragtical/pull/738))
+
+### Build System
+
+* Update Plugin Manager to v2.0.0, with deferred Windows operations and download
+  progress, requiring editor mod-version 3.16.0
+  ([#733](https://github.com/pragtical/pragtical/pull/733),
+  [#732](https://github.com/pragtical/pragtical/pull/732))
+
+* Update the plugin catalog, including Freedoom, terminal, browser, media player,
+  debugger, build, LSP and SCM plugins
+  ([5c972eb4](https://github.com/pragtical/plugins/commit/5c972eb4))
+
 ## [3.15.0] - 2026-11-14
 
 ### New Features
@@ -4011,6 +4067,7 @@ A new global variable `USERDIR` is exposed to point to the user's directory.
 
 - subpixel font rendering with gamma correction
 
+[3.16.0]: https://github.com/pragtical/pragtical/releases/tag/v3.16.0
 [3.15.0]: https://github.com/pragtical/pragtical/releases/tag/v3.15.0
 [3.14.0]: https://github.com/pragtical/pragtical/releases/tag/v3.14.0
 [3.13.1]: https://github.com/pragtical/pragtical/releases/tag/v3.13.1

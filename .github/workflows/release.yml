@@ -9,7 +9,7 @@ on:
     inputs:
       version:
         description: Release Version
-        default: v3.15.0
+        default: v3.16.0
         required: true
 
 
