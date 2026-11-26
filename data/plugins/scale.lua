@@ -5,6 +5,7 @@ local command = require "core.command"
 local config = require "core.config"
 local keymap = require "core.keymap"
 local style = require "core.style"
+local DocView = require "core.docview"
 
 ---Configuration options for `scale` plugin.
 ---@class config.plugins.scale
@@ -28,8 +29,60 @@ local current_scale = SCALE
 local current_code_scale = SCALE
 local user_scale = tonumber(os.getenv("PRAGTICAL_SCALE"))
 
+local wheel_bindings = {
+  ["ctrl+wheelup"] = "scale:increase",
+  ["ctrl+wheeldown"] = "scale:decrease",
+  ["ctrl+shift+wheelup"] = "scale:increase-code",
+  ["ctrl+shift+wheeldown"] = "scale:decrease-code"
+}
+
 ---@class plugins.scale
 local scale = {}
+
+---Save scroll positions anchored to visual rows (DocView) or
+---scroll fraction (other views).
+local function save_scroll_positions()
+  local positions = {}
+  for _, view in ipairs(core.root_view.root_node:get_children()) do
+    if view:is(DocView) then
+      local lh = view:get_line_height()
+      positions[view] = {
+        row = view.scroll.y / lh, -- fractional visual row at top
+      }
+    else
+      local n = view:get_scrollable_size()
+      local hn = view:get_h_scrollable_size()
+      positions[view] = {
+        v_fraction = (n ~= math.huge and n > view.size.y)
+          and view.scroll.y / (n - view.size.y) or nil,
+        h_fraction = (hn ~= math.huge and hn > view.size.x)
+          and view.scroll.x / (hn - view.size.x) or nil,
+      }
+    end
+  end
+  return positions
+end
+
+local function restore_scroll_positions(positions)
+  for view, pos in pairs(positions) do
+    if pos.row then
+      -- anchor the same visual row to the top of the view
+      view.scroll.y = pos.row * view:get_line_height()
+      view.scroll.to.y = view.scroll.y
+    else
+      if pos.v_fraction then
+        view.scroll.y = pos.v_fraction
+          * (view:get_scrollable_size() - view.size.y)
+        view.scroll.to.y = view.scroll.y
+      end
+      if pos.h_fraction then
+        view.scroll.x = pos.h_fraction
+          * (view:get_h_scrollable_size() - view.size.x)
+        view.scroll.to.x = view.scroll.x
+      end
+    end
+  end
+end
 
 function scale.set(scale)
   if current_scale == scale then return end
@@ -37,19 +90,7 @@ function scale.set(scale)
 
   scale = common.clamp(scale, 0.2, 6)
 
-  -- save scroll positions
-  local v_scrolls = {}
-  local h_scrolls = {}
-  for _, view in ipairs(core.root_view.root_node:get_children()) do
-    local n = view:get_scrollable_size()
-    if n ~= math.huge and n > view.size.y then
-      v_scrolls[view] = view.scroll.y / (n - view.size.y)
-    end
-    local hn = view:get_h_scrollable_size()
-    if hn ~= math.huge and hn > view.size.x then
-      h_scrolls[view] = view.scroll.x / (hn - view.size.x)
-    end
-  end
+  local positions = save_scroll_positions()
 
   local s = scale / current_scale
   current_scale = scale
@@ -74,34 +115,35 @@ function scale.set(scale)
     style[name]:set_size(s * style[name]:get_size())
   end
 
-  -- restore scroll positions
-  for view, n in pairs(v_scrolls) do
-    view.scroll.y = n * (view:get_scrollable_size() - view.size.y)
-    view.scroll.to.y = view.scroll.y
-  end
-  for view, hn in pairs(h_scrolls) do
-    view.scroll.x = hn * (view:get_h_scrollable_size() - view.size.x)
-    view.scroll.to.x = view.scroll.x
-  end
+  restore_scroll_positions(positions)
 
   core.redraw = true
 end
 
-function scale.set_code(scale)
-  if current_code_scale == scale then return end
-  system.setenv("PRAGTICAL_SCALE_CODE", scale)
+function scale.set_code(value)
+  if current_code_scale == value then return end
+  system.setenv("PRAGTICAL_SCALE_CODE", value)
 
-  scale = common.clamp(scale, 0.2, 6)
+  value = common.clamp(value, 0.2, 6)
 
-  local s = scale / current_code_scale
-  current_code_scale = scale
+  local positions = save_scroll_positions()
+
+  local s = value / current_code_scale
+  current_code_scale = value
 
   style.code_font:set_size(s * style.code_font:get_size())
   for name, font in pairs(style.syntax_fonts) do
     style.syntax_fonts[name]:set_size(s * font:get_size())
   end
 
+  restore_scroll_positions(positions)
+
   core.redraw = true
+end
+
+function scale.set_all(value)
+  scale.set(value)
+  scale.set_code(value)
 end
 
 function scale.get()
@@ -162,11 +204,9 @@ config.plugins.scale.config_spec = {
     on_apply = function(enabled)
       if not first_on_apply_scale then
         if not enabled then
-          scale.set(config.plugins.scale.default_scale)
-          scale.set_code(config.plugins.scale.default_scale)
+          scale.set_all(config.plugins.scale.default_scale)
         else
-          scale.set(DEFAULT_SCALE)
-          scale.set_code(DEFAULT_SCALE)
+          scale.set_all(DEFAULT_SCALE)
         end
       end
     end
@@ -192,8 +232,7 @@ config.plugins.scale.config_spec = {
       end
       if config.plugins.scale.autodetect then return end
       if value ~= current_scale then
-        scale.set(value)
-        scale.set_code(value)
+        scale.set_all(value)
       end
     end
   },
@@ -205,17 +244,11 @@ config.plugins.scale.config_spec = {
     default = true,
     on_apply = function(enabled)
       if enabled then
-        keymap.add {
-          ["ctrl+wheelup"] = "scale:increase",
-          ["ctrl+wheeldown"] = "scale:decrease",
-          ["ctrl+shift+wheelup"] = "scale:increase-code",
-          ["ctrl+shift+wheeldown"] = "scale:decrease-code"
-        }
+        keymap.add(wheel_bindings)
       else
-        keymap.unbind("ctrl+wheelup", "scale:increase")
-        keymap.unbind("ctrl+wheeldown", "scale:decrease")
-        keymap.unbind("ctrl+shift+wheelup", "scale:increase-code")
-        keymap.unbind("ctrl+shift+wheeldown", "scale:decrease-code")
+        for key, cmd in pairs(wheel_bindings) do
+          keymap.unbind(key, cmd)
+        end
       end
     end
   }
@@ -223,15 +256,15 @@ config.plugins.scale.config_spec = {
 
 
 command.add(nil, {
-  ["scale:reset"] = function() scale.reset() end,
-  ["scale:decrease"] = function() scale.decrease() end,
-  ["scale:increase"] = function() scale.increase() end
+  ["scale:reset"] = scale.reset,
+  ["scale:decrease"] = scale.decrease,
+  ["scale:increase"] = scale.increase,
 })
 
 command.add("core.docview", {
-  ["scale:reset-code"] = function() scale.reset_code() end,
-  ["scale:decrease-code"] = function() scale.decrease_code() end,
-  ["scale:increase-code"] = function() scale.increase_code() end,
+  ["scale:reset-code"] = scale.reset_code,
+  ["scale:decrease-code"] = scale.decrease_code,
+  ["scale:increase-code"] = scale.increase_code,
 })
 
 keymap.add {
@@ -244,12 +277,7 @@ keymap.add {
 }
 
 if config.plugins.scale.use_mousewheel then
-  keymap.add {
-    ["ctrl+wheelup"] = "scale:increase",
-    ["ctrl+wheeldown"] = "scale:decrease",
-    ["ctrl+shift+wheelup"] = "scale:increase-code",
-    ["ctrl+shift+wheeldown"] = "scale:decrease-code"
-  }
+  keymap.add(wheel_bindings)
 end
 
 -- Apply previous scale on restart set on PRAGTICAL_SCALE and PRAGTICAL_SCALE_CODE.
