@@ -611,6 +611,7 @@ local commands = {
         go_to_line_doc[1] = source
         go_to_line_state, go_to_line_change_id = snapshot, change_id
       end,
+      select_text = true,
       submit = function(text, item)
         local line = item and item.line or tonumber(text)
         if not line then
