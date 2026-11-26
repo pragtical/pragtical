@@ -818,6 +818,11 @@ function CommandView:enter(label, ...)
   else
     self:update_suggestions()
   end
+
+  if self.state.select_text then
+    self.doc:set_selection(math.huge, math.huge, 1, 1)
+  end
+  
   self.gutter_text_brightness = 100
   self.label = label .. ": "
   if self.floating then
