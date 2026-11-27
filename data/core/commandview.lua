@@ -74,7 +74,7 @@ local noop = function() end
 ---@field on_select? fun(suggestion: table?) Called when the highlighted result changes; nil when results become empty. Runs during update, never during drawing
 ---@field text string Initial text to display
 ---@field draw_text? fun(item: table, font: renderer.font, color: renderer.color, x: number, y: number, w: number, h: number) Custom suggestion renderer; w excludes info, spacing and scrollbar, and output is clipped
----@field select_text boolean Whether to select initial text
+---@field select_text boolean Whether to select all initial or restored text
 ---@field show_suggestions boolean Whether to show suggestions box
 ---@field typeahead boolean Whether to enable typeahead completion
 ---@field wrap boolean Whether suggestion cycling wraps around
@@ -805,18 +805,19 @@ function CommandView:enter(label, ...)
 
   self.state = common.merge(default_state, options)
 
-  -- Retrieve text added with CommandView:set_text
-  -- and use it if options.text is not given
-  local set_text = self:get_text()
-  if options.text or options.select_text then
-    local text = options.text or set_text
-    self:set_text(text, self.state.select_text)
+  -- Keep text added with CommandView:set_text when options.text is not given.
+  if options.text then
+    self:set_text(options.text)
   end
 
   if self.state.restore_state then
     self:restore_state(self.state.restore_state)
   else
     self:update_suggestions()
+  end
+  -- Restoration may replace both the text and its saved selection.
+  if self.state.select_text then
+    self.doc:set_selection(math.huge, math.huge, 1, 1)
   end
   self.gutter_text_brightness = 100
   self.label = label .. ": "

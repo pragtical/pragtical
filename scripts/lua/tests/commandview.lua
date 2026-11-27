@@ -1090,6 +1090,30 @@ test.describe("commandview floating suggestions", function()
     test.equal(saved.text, "alpha")
   end)
 
+  test.test("select_text selects initial or restored input without changing snapshots", function()
+    local view = core.command_view
+    for _, options in ipairs {
+      {},
+      {text = ""},
+      {text = "initial"},
+      {restore_state = {text = "remembered"}},
+      {restore_state = {text = "remembered", selections = {1, 3, 1, 5}}}
+    } do
+      options.select_text = true
+      view:set_text("preset")
+      view:enter("Select", options)
+      core.root_view:update(); core.root_view:update()
+      local text = options.text or options.restore_state and options.restore_state.text or "preset"
+      test.equal(view.doc:get_text(view.doc:get_selection()), text)
+      if options.restore_state and options.restore_state.selections then
+        test.same(options.restore_state.selections, {1, 3, 1, 5})
+      end
+      view.doc:text_input("replacement")
+      test.equal(view:get_text(), "replacement")
+      view:exit()
+    end
+  end)
+
   test.test("pending numeric input is captured without an extra suggestion call", function()
     local view, calls, saved = core.command_view, 0
     local function suggest() calls = calls + 1; return {} end
@@ -1297,12 +1321,13 @@ test.describe("commandview floating suggestions", function()
     core.root_view:update(); core.root_view:update()
     test.equal(view:get_text(), saved.text)
     test.equal(view.suggestion_idx, 12)
-    test.same(view.doc.selections, saved.selections)
+    test.equal(view.doc:get_text(view.doc:get_selection()), saved.text)
     view:exit()
     doc:insert(1, 1, "changed ")
     command.perform("doc:go-to-line")
     core.root_view:update(); core.root_view:update()
     test.equal(view:get_text(), "target")
+    test.equal(view.doc:get_text(view.doc:get_selection()), "target")
     test.equal(view.suggestion_idx, 1)
     test.near(view:save_state().suggestions_offset, 0, 0.001)
     local changed = false
@@ -1327,6 +1352,14 @@ test.describe("commandview floating suggestions", function()
     test.equal(view:get_text(), "42")
     test.equal(#view.suggestions, 0)
     test.equal(view:save_state().query, "42")
+    test.equal(view.doc:get_text(view.doc:get_selection()), "42")
+    view:submit()
+    test.equal(doc:get_selection(), 42)
+    command.perform("doc:go-to-line")
+    view.doc:text_input("43")
+    test.equal(view:get_text(), "43")
+    view:submit()
+    test.equal(doc:get_selection(), 43)
   end)
 
   test.test("Go To Line replaces its remembered context for document A then B then A", function(context)
@@ -1806,7 +1839,7 @@ test.describe("commandview floating suggestions", function()
     doc:set_selection(1, 1)
     command.perform("find-replace:find")
     test.equal(view:get_text(), "needle")
-    test.same(view.doc.selections, { 1, 2, 1, 4 })
+    test.equal(view.doc:get_text(view.doc:get_selection()), "needle")
     test.equal(doc:get_selection(), 2)
     view:exit()
     doc:set_selection(3, 1, 3, 6)
@@ -1882,7 +1915,7 @@ test.describe("commandview floating suggestions", function()
     command.perform("find-replace:replace")
     test.equal(view.label, 'Replace Text "needle" With: ')
     test.equal(view:get_text(), "replacement")
-    test.same(view.doc.selections, { 1, 3, 1, 5 })
+    test.equal(view.doc:get_text(view.doc:get_selection()), "replacement")
     view:submit()
     test.equal(doc.lines[1], "replacement replacement\n")
     doc:set_selection(1, 1)
