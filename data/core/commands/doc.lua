@@ -606,6 +606,7 @@ local commands = {
     end
 
     core.command_view:enter("Go To Line", {
+      select_text = true,
       restore_state = restore,
       on_save_state = function(snapshot)
         go_to_line_doc[1] = source
